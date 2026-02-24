@@ -1,0 +1,6 @@
+Initial commit: Add React admin dashboard application
+
+- Set up Vite + React + TypeScript app
+- Add Dashboard, Categories, and Inventory pages
+- Implement responsive layout with Sidebar and Header
+- Add login panel and navigation routes
