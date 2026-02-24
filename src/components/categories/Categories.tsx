@@ -1,13 +1,9 @@
 import React, { useState } from 'react';
 import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { DataTable, ColumnDef } from '../ui/DataTable';
+import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 // Icon mapping based on category name
 const getIconForCategory = (name: string) => {

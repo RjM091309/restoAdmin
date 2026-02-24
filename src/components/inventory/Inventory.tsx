@@ -1,13 +1,9 @@
 import React, { useState } from 'react';
 import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { DataTable, ColumnDef } from '../ui/DataTable';
+import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 const inventoryData = [
   { id: 'INV001', name: 'Fresh Salmon', category: 'Seafood', stock: 15, unit: 'kg', status: 'In Stock' as const },

@@ -1,11 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '../../lib/utils';
 
 export interface ColumnDef<T> {
   header: string;
@@ -22,7 +17,7 @@ interface DataTableProps<T> {
 
 export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>) {
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
   const [perPageOpen, setPerPageOpen] = useState(false);
 
   // Pagination logic
@@ -38,7 +33,7 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
           <thead>
             <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider bg-gray-50/50">
               {columns.map((col, i) => (
-                <th key={i} className={cn("px-6 py-4", col.className)}>
+                <th key={col.header} className={cn("px-6 py-4", col.className)}>
                   {col.header}
                 </th>
               ))}
@@ -88,8 +83,8 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
             {perPageOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setPerPageOpen(false)} />
-                <div className="absolute top-full left-0 mt-1 w-full bg-white border border-gray-100 rounded-lg shadow-lg z-20 py-1 overflow-hidden">
-                  {[5, 10, 20, 50].map((num) => (
+                <div className="absolute bottom-full left-0 mb-1 w-full bg-white border border-gray-100 rounded-lg shadow-lg z-20 py-1 overflow-hidden">
+                  {[50, 100, 150, 200].map((num) => (
                     <button
                       key={num}
                       onClick={() => {

@@ -1,17 +1,17 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
   ClipboardList,
   UtensilsCrossed,
   Package,
-  LogIn,
+  Users,
+  LogOut,
+  ChevronDown,
+  ChevronRight,
+  Circle,
 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { useUser } from '../../context/UserContext';
+import { cn } from '../../lib/utils';
 
 type SidebarProps = {
   activeTab: string;
@@ -19,11 +19,14 @@ type SidebarProps = {
 };
 
 type SidebarItemProps = {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
   active?: boolean;
   badge?: number;
   onClick?: () => void;
+  children?: React.ReactNode;
+  isExpandable?: boolean;
+  isExpanded?: boolean;
 };
 
 const SidebarItem: React.FC<SidebarItemProps> = ({
@@ -32,76 +35,169 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   active,
   badge,
   onClick,
+  children,
+  isExpandable,
+  isExpanded,
 }) => (
+  <div className="w-full">
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center justify-between px-6 py-3 cursor-pointer transition-all group text-left relative',
+        active 
+          ? 'text-brand-orange bg-brand-orange/5 after:content-[" "] after:absolute after:right-0 after:top-0 after:bottom-0 after:w-1 after:bg-brand-orange after:rounded-l-full'
+          : 'text-brand-muted hover:text-brand-text hover:bg-gray-50/50',
+      )}
+    >
+      <div className="flex items-center gap-3">
+        <Icon
+          size={20}
+          className={cn(
+            active ? 'text-brand-orange' : 'group-hover:text-brand-text transition-colors'
+          )}
+        />
+        <span className={cn(
+          "font-medium text-base",
+          active ? "text-brand-orange" : "text-inherit"
+        )}>{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {badge && (
+          <span className="bg-brand-orange text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
+            {badge}
+          </span>
+        )}
+        {isExpandable && (
+          <ChevronDown
+            size={16}
+            className={cn(
+              "transition-transform duration-300",
+              isExpanded ? "rotate-0" : "-rotate-90 opacity-40"
+            )}
+          />
+        )}
+      </div>
+    </button>
+    {isExpandable && (
+      <div className={cn(
+        "overflow-hidden transition-all duration-300 ease-in-out bg-gray-50/30",
+        isExpanded ? "max-h-40 opacity-100 py-1" : "max-h-0 opacity-0"
+      )}>
+        {children}
+      </div>
+    )}
+  </div>
+);
+
+const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void }> = ({ label, active, onClick }) => (
   <button
     type="button"
     onClick={onClick}
     className={cn(
-      'w-full flex items-center justify-between px-6 py-3 cursor-pointer transition-colors group text-left',
+      'w-full flex items-center gap-3 pl-14 pr-6 py-2 cursor-pointer transition-colors group text-left',
       active
-        ? 'text-brand-orange border-r-4 border-brand-orange bg-brand-orange/5'
+        ? 'text-brand-orange'
         : 'text-brand-muted hover:text-brand-text',
     )}
   >
-    <div className="flex items-center gap-3">
-      <Icon
-        size={20}
-        className={cn(active ? 'text-brand-orange' : 'group-hover:text-brand-text')}
-      />
-      <span className="font-medium text-base">{label}</span>
-    </div>
-    {badge && (
-      <span className="bg-brand-orange text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-        {badge}
-      </span>
-    )}
+    <Circle 
+      size={6} 
+      className={cn(
+        "fill-current transition-all",
+        active ? "scale-125" : "opacity-30 group-hover:opacity-100"
+      )} 
+    />
+    <span className={cn(
+      "text-sm font-medium",
+      active ? "font-bold" : ""
+    )}>{label}</span>
   </button>
 );
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
+  const { logout } = useUser();
+  const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
+
+  useEffect(() => {
+    setUserMgmtExpanded(activeTab.startsWith('User'));
+  }, [activeTab]);
+
+  const handleUserMgmtToggle = () => {
+    setUserMgmtExpanded(!userMgmtExpanded);
+  };
+
   return (
-    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0">
-      <div className="px-8 mb-10 flex items-center gap-2">
-        <div className="w-8 h-8 bg-brand-orange rounded-lg flex items-center justify-center">
-          <UtensilsCrossed size={18} className="text-white" />
+    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+      <div className="px-8 mb-10 flex items-center gap-3">
+        <div className="w-10 h-10 bg-brand-orange rounded-xl flex items-center justify-center shadow-lg shadow-brand-orange/20">
+          <UtensilsCrossed size={22} className="text-white" />
         </div>
-        <h1 className="text-2xl font-bold tracking-tight">3CORE</h1>
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-brand-text leading-none">3CORE</h1>
+          <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1">Restaurant Pro</p>
+        </div>
       </div>
 
-      <nav className="flex-1 space-y-1">
+      <nav className="flex-1 space-y-0.5">
         <SidebarItem
           icon={LayoutDashboard}
           label="Dashboard"
           active={activeTab === 'Dashboard'}
-          onClick={() => onTabChange('Dashboard')}
+          onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); }}
         />
         <SidebarItem
           icon={ClipboardList}
           label="Orders"
           active={activeTab === 'Orders'}
-          onClick={() => onTabChange('Orders')}
+          onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); }}
         />
         <SidebarItem
           icon={UtensilsCrossed}
           label="Menu"
           active={activeTab === 'Menu'}
-          onClick={() => onTabChange('Menu')}
+          onClick={() => { onTabChange('Menu'); setUserMgmtExpanded(false); }}
         />
         <SidebarItem
           icon={Package}
           label="Inventory"
           active={activeTab === 'Inventory'}
-          onClick={() => onTabChange('Inventory')}
+          onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); }}
         />
+        <SidebarItem
+          icon={Users}
+          label="User Management"
+          active={activeTab.startsWith('User')}
+          isExpandable
+          isExpanded={userMgmtExpanded}
+          onClick={handleUserMgmtToggle}
+        >
+          <SubItem 
+            label="User Info" 
+            active={activeTab === 'User Info'} 
+            onClick={() => onTabChange('User Info')} 
+          />
+          <SubItem 
+            label="User Role" 
+            active={activeTab === 'User Role'} 
+            onClick={() => onTabChange('User Role')} 
+          />
+          <SubItem 
+            label="User Access" 
+            active={activeTab === 'User Access'} 
+            onClick={() => onTabChange('User Access')} 
+          />
+        </SidebarItem>
       </nav>
 
-      <div className="mt-auto pt-4 border-t border-gray-100">
-        <SidebarItem
-          icon={LogIn}
-          label="Login Page"
-          active={activeTab === 'Login'}
-          onClick={() => onTabChange('Login')}
-        />
+      <div className="mt-auto px-4">
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-3 px-6 py-4 text-brand-muted hover:text-red-500 hover:bg-red-50/50 rounded-2xl transition-all group border border-transparent hover:border-red-100"
+        >
+          <LogOut size={20} className="group-hover:rotate-12 transition-transform" />
+          <span className="font-bold text-base">Logout</span>
+        </button>
       </div>
     </aside>
   );

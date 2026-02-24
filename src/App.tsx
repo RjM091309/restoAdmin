@@ -24,24 +24,21 @@ import {
   LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { Sidebar } from './components/partials/Sidebar';
 import { Header } from './components/partials/Header';
 import { Footer } from './components/partials/Footer';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
+import { Users } from './components/users/Users';
+import { UserRole } from './components/users/UserRole';
+import { cn } from './lib/utils';
 
 // Panels
 import { NotificationPanel } from './components/panels/NotificationPanel';
 import { SystemSettingsPanel } from './components/panels/SystemSettingsPanel';
 import { AccountSettingsPanel } from './components/panels/AccountSettingsPanel';
 
-/** Utility for tailwind classes */
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 // --- Mock Data ---
 
@@ -149,18 +146,54 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
   );
 };
 
+import { useUser } from './context/UserContext';
+
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isLoggedIn } = useUser();
+  const location = useLocation();
+
+  if (!isLoggedIn) {
+    return <Navigate to="/" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const LoginView = () => {
   const navigate = useNavigate();
+  const { login } = useUser();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('123');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'admin' && password === '123') {
-      navigate('/dashboard');
-    } else {
-      setError('Invalid username or password');
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        login(result.data, result.tokens.accessToken);
+        navigate('/dashboard');
+      } else {
+        setError(result.error || 'Invalid username or password');
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Connection failed. Please check if the server is running.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -204,7 +237,8 @@ const LoginView = () => {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                disabled={isLoading}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
             </div>
 
@@ -215,7 +249,8 @@ const LoginView = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                disabled={isLoading}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
             </div>
 
@@ -227,8 +262,11 @@ const LoginView = () => {
               <a href="#" className="text-brand-orange font-bold hover:underline transition-all">Forgot password?</a>
             </div>
 
-            <button className="w-full bg-brand-orange text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-orange/30 hover:shadow-brand-orange/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4">
-              Sign In
+            <button 
+              disabled={isLoading}
+              className="w-full bg-brand-orange text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-orange/30 hover:shadow-brand-orange/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4 disabled:opacity-70 disabled:hover:translate-y-0"
+            >
+              {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
           </form>
 
@@ -246,6 +284,34 @@ const LoginView = () => {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isLoggedIn, login, logout } = useUser();
+
+  // Initial session check
+  useEffect(() => {
+    const checkSession = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await fetch('/api/me', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          const result = await response.json();
+          if (result.success && result.data) {
+            // User is still logged in, result.data is the user object
+            // Just refresh local state if needed
+          } else {
+            // Token invalid or expired
+            logout();
+          }
+        } catch (err) {
+          console.error('Session check failed:', err);
+        }
+      }
+    };
+    checkSession();
+  }, [logout]);
 
   // Panel States
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -257,12 +323,16 @@ export default function App() {
   const primaryPath = pathParts[0] || 'dashboard';
 
   // Create breadcrumb array
-  const breadcrumbs = pathParts.map(part =>
-    part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ')
-  );
+  const breadcrumbs = pathParts.map(part => {
+    if (part === 'users') return 'User Management';
+    if (part === 'info') return 'User Info';
+    if (part === 'role') return 'User Role';
+    if (part === 'access') return 'User Access';
+    return part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ');
+  });
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
 
-  const activeTab = breadcrumbs[0];
+  const activeTab = breadcrumbs[breadcrumbs.length - 1];
   const displayActiveTab = activeTab;
 
   const [dateRange, setDateRange] = useState({
@@ -293,12 +363,21 @@ export default function App() {
   const dynamicRevenueData = getDynamicRevenueData();
 
   const handleTabChange = (tab: string) => {
-    navigate(`/${tab.toLowerCase()}`);
+    switch (tab) {
+      case 'User Info': navigate('/users/info'); break;
+      case 'User Role': navigate('/users/role'); break;
+      case 'User Access': navigate('/users/access'); break;
+      case 'User Management': navigate('/users/info'); break;
+      default: navigate(`/${tab.toLowerCase()}`);
+    }
   };
 
   const isLoginPage = location.pathname === '/' || location.pathname === '/login';
 
   if (isLoginPage) {
+    if (isLoggedIn && location.pathname === '/') {
+      return <Navigate to="/dashboard" replace />;
+    }
     return (
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<LoginView />} />
@@ -308,87 +387,121 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-brand-bg">
-      <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} />
+    <ProtectedRoute>
+      <div className="flex h-screen overflow-hidden bg-brand-bg">
+        <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <Header
-          activeTab={displayActiveTab}
-          breadcrumbs={breadcrumbs}
-          dateRange={dateRange}
-          onDateRangeChange={setDateRange}
-          onOpenNotifications={() => setIsNotificationOpen(true)}
-          onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
-          onOpenAccountSettings={() => setIsAccountSettingsOpen(true)}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          <Header
+            activeTab={displayActiveTab}
+            breadcrumbs={breadcrumbs}
+            dateRange={dateRange}
+            onDateRangeChange={setDateRange}
+            onOpenNotifications={() => setIsNotificationOpen(true)}
+            onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
+            onOpenAccountSettings={() => setIsAccountSettingsOpen(true)}
+          />
+
+          <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar">
+            <AnimatePresence mode="wait">
+              <Routes location={location} key={location.pathname}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+                <Route path="/dashboard" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Dashboard
+                      dynamicStats={dynamicStats}
+                      dynamicRevenueData={dynamicRevenueData}
+                    />
+                  </motion.div>
+                } />
+
+                <Route path="/inventory" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Categories onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}`)} />
+                  </motion.div>
+                } />
+
+                <Route path="/users" element={<Navigate to="/users/info" replace />} />
+                <Route path="/users/info" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Users />
+                  </motion.div>
+                } />
+
+                <Route path="/users/role" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <UserRole />
+                  </motion.div>
+                } />
+
+                <Route path="/users/access" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
+                  >
+                    User Access Management is coming soon...
+                  </motion.div>
+                } />
+
+                <Route path="/inventory/:categoryName" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Inventory onBack={() => navigate('/inventory')} />
+                  </motion.div>
+                } />
+
+                <Route path="*" element={
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="flex items-center justify-center h-64 text-brand-muted"
+                  >
+                    {activeTab} content is coming soon...
+                  </motion.div>
+                } />
+              </Routes>
+            </AnimatePresence>
+          </div>
+
+          <Footer />
+        </main>
+
+        {/* Panels */}
+        <NotificationPanel
+          isOpen={isNotificationOpen}
+          onClose={() => setIsNotificationOpen(false)}
         />
-
-        <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar">
-          <AnimatePresence mode="wait">
-            <Routes location={location} key={location.pathname}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-
-              <Route path="/dashboard" element={
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <Dashboard
-                    dynamicStats={dynamicStats}
-                    dynamicRevenueData={dynamicRevenueData}
-                  />
-                </motion.div>
-              } />
-
-              <Route path="/inventory" element={
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <Categories onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}`)} />
-                </motion.div>
-              } />
-
-              <Route path="/inventory/:categoryName" element={
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <Inventory onBack={() => navigate('/inventory')} />
-                </motion.div>
-              } />
-
-              <Route path="*" element={
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex items-center justify-center h-64 text-brand-muted"
-                >
-                  {activeTab} content is coming soon...
-                </motion.div>
-              } />
-            </Routes>
-          </AnimatePresence>
-        </div>
-
-        <Footer />
-      </main>
-
-      {/* Panels */}
-      <NotificationPanel
-        isOpen={isNotificationOpen}
-        onClose={() => setIsNotificationOpen(false)}
-      />
-      <SystemSettingsPanel
-        isOpen={isSystemSettingsOpen}
-        onClose={() => setIsSystemSettingsOpen(false)}
-      />
-      <AccountSettingsPanel
-        isOpen={isAccountSettingsOpen}
-        onClose={() => setIsAccountSettingsOpen(false)}
-      />
-    </div>
+        <SystemSettingsPanel
+          isOpen={isSystemSettingsOpen}
+          onClose={() => setIsSystemSettingsOpen(false)}
+        />
+        <AccountSettingsPanel
+          isOpen={isAccountSettingsOpen}
+          onClose={() => setIsAccountSettingsOpen(false)}
+        />
+      </div>
+    </ProtectedRoute>
   );
 }

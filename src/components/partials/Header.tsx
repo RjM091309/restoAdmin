@@ -87,17 +87,21 @@ export const Header: React.FC<HeaderProps> = ({
               </React.Fragment>
             ))
           ) : (
-            activeTab
+            activeTab.startsWith('User') ? 'User Management' : activeTab
           )}
         </h2>
         <p className="text-brand-muted text-sm mt-1">
           {activeTab === 'Dashboard'
-            ? `Hello ${user.name.split(' ')[0]}, welcome back!`
+            ? `Hello ${user?.firstname || 'User'}, welcome back!`
             : activeTab === 'Inventory'
               ? 'Manage your restaurant supplies and stock.'
-              : activeTab === 'Login'
-                ? 'Access your account.'
-                : `View your ${activeTab.toLowerCase()}.`}
+              : activeTab === 'User Info'
+                ? 'View and manage individual user accounts.'
+                : activeTab === 'User Role'
+                  ? 'Configure user roles and their permissions.'
+                  : activeTab === 'User Access'
+                    ? 'Control user access levels to system features.'
+                    : `View your ${activeTab.toLowerCase()}.`}
         </p>
       </div>
 
@@ -214,11 +218,15 @@ export const Header: React.FC<HeaderProps> = ({
           className="flex items-center gap-3 pl-6 border-l border-gray-200 cursor-pointer group"
         >
           <div className="text-right">
-            <p className="text-base font-bold group-hover:text-brand-orange transition-colors">{user.name}</p>
-            <p className="text-xs text-brand-muted font-medium">{user.role}</p>
+            <p className="text-base font-bold group-hover:text-brand-orange transition-colors">
+              {user ? `${user.firstname} ${user.lastname}` : 'User'}
+            </p>
+            <p className="text-xs text-brand-muted font-medium">
+              {user?.permissions === 1 ? 'Admin' : 'Staff'}
+            </p>
           </div>
           <img
-            src={user.avatar}
+            src={user?.avatar || 'https://picsum.photos/seed/user/100/100'}
             alt="Profile"
             className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-orange/20 transition-all"
             referrerPolicy="no-referrer"
