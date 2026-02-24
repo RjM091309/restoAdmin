@@ -213,7 +213,7 @@ export const UserRole: React.FC = () => {
             
             <div className="relative p-4 space-y-4">
               <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-xl bg-brand-text group-hover:bg-brand-orange flex items-center justify-center text-white shadow-lg shadow-brand-text/10 group-hover:scale-110 transition-all duration-500">
+                <div className="w-12 h-12 rounded-xl bg-[rgb(100,116,139)] group-hover:bg-brand-orange flex items-center justify-center text-white shadow-lg shadow-brand-text/10 group-hover:scale-110 transition-all duration-500">
                   <Shield size={22} strokeWidth={2.5} />
                 </div>
 

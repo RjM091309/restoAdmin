@@ -1,4 +1,6 @@
 import React from 'react';
+import { type Branch } from '../partials/Header';
+import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
 import {
   ClipboardList,
   Package,
@@ -123,8 +125,7 @@ type RevenuePoint = {
 };
 
 type DashboardProps = {
-  dynamicStats: DashboardStats;
-  dynamicRevenueData: RevenuePoint[];
+  selectedBranch: Branch | null;
 };
 
 const StatCard = ({
@@ -247,12 +248,65 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({
-  dynamicStats,
-  dynamicRevenueData,
-}) => {
+export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
+  const [dashboardData, setDashboardData] = React.useState<{
+    dynamicStats: DashboardStats;
+    dynamicRevenueData: RevenuePoint[];
+  } | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (selectedBranch) {
+      const fetchData = async () => {
+        setLoading(true);
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/dashboard-data?branchId=${selectedBranch.id}`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          const json = await res.json();
+          if (json.success) {
+            setDashboardData(json.data);
+          }
+        } catch (error) {
+          console.error("Failed to fetch dashboard data:", error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      fetchData();
+    }
+  }, [selectedBranch]);
+
+  if (loading || !dashboardData) {
+    return (
+      <div className="flex gap-8 pt-6">
+        <div className="flex-1 space-y-8">
+          <SkeletonStatCards count={3} />
+          <div className="grid grid-cols-3 gap-6">
+            <SkeletonChart className="col-span-2" />
+            <SkeletonChart />
+          </div>
+          <div className="grid grid-cols-3 gap-6">
+            <SkeletonChart className="col-span-2" />
+            <SkeletonChart />
+          </div>
+          <SkeletonTable columns={7} rows={5} showToolbar={false} />
+        </div>
+        <div className="w-80 space-y-8">
+          <SkeletonChart />
+        </div>
+      </div>
+    );
+  }
+
+  const { dynamicStats, dynamicRevenueData } = dashboardData;
+
   return (
-    <div className="flex gap-8">
+    <div className="flex gap-8 pt-6">
       <div className="flex-1 space-y-8">
         <div className="flex gap-6">
           <StatCard

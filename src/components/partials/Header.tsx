@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Search, Bell, Settings, ChevronDown, MapPin } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -11,6 +11,11 @@ type DateRange = {
   end: string;
 };
 
+export type Branch = {
+  id: string | number;
+  name: string;
+};
+
 type HeaderProps = {
   activeTab: string;
   breadcrumbs?: string[];
@@ -19,6 +24,8 @@ type HeaderProps = {
   onOpenNotifications: () => void;
   onOpenSystemSettings: () => void;
   onOpenAccountSettings: () => void;
+  selectedBranch: Branch | null;
+  onBranchChange: (branch: Branch) => void;
 };
 
 const formatDate = (dateStr: string) => {
@@ -29,6 +36,7 @@ const formatDate = (dateStr: string) => {
     year: 'numeric',
   });
 };
+
 
 const toDate = (s: string): Date | null =>
   s ? new Date(s) : null;
@@ -48,13 +56,43 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNotifications,
   onOpenSystemSettings,
   onOpenAccountSettings,
+  selectedBranch,
+  onBranchChange,
 }) => {
   const { user } = useUser();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState('All Branches');
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
-  const branches = ['All Branches', 'Daraejung', "Kim's brother", 'Blue moon'];
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/branch', {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (res.ok) {
+          const json = await res.json();
+              const data = (json.data ?? json).map((b: any) => ({
+                id: b.IDNo,
+                name: b.BRANCH_LABEL || b.BRANCH_NAME,
+              }));
+              const allBranches = [{ id: 'all', name: 'All Branches' }, ...data];
+              setBranches(allBranches);
+              if (!selectedBranch && allBranches.length > 0) {
+                onBranchChange(allBranches[0]);
+              }
+        }
+      } catch (error) {
+        console.error("Failed to fetch branches:", error);
+      }
+    };
+
+    fetchBranches();
+  }, []);
 
   const startDate = toDate(dateRange.start);
   const endDate = toDate(dateRange.end);
@@ -72,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleClose = () => setDropdownOpen(false);
 
   return (
-    <header className="h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
+    <header className="relative z-20 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
       <div>
         <h2 className="text-3xl font-bold flex items-center gap-2">
           {breadcrumbs.length > 0 ? (
@@ -156,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2">
               <MapPin size={20} className="text-brand-muted" />
               <span className="text-sm text-brand-muted">
-                {selectedBranch}
+                {selectedBranch ? selectedBranch.name : 'Select Branch'}
               </span>
             </div>
             <ChevronDown
@@ -176,21 +214,21 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-hidden
               />
               <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
-                {branches.map((branch) => (
-                  <button
-                    key={branch}
-                    onClick={() => {
-                      setSelectedBranch(branch);
-                      setBranchDropdownOpen(false);
-                    }}
+                        {branches.map((branch) => (
+                          <button
+                            key={branch.id}
+                            onClick={() => {
+                              onBranchChange(branch);
+                              setBranchDropdownOpen(false);
+                            }}
                     className={clsx(
                       'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-orange/5 cursor-pointer',
-                      selectedBranch === branch
+                      selectedBranch?.id === branch.id
                         ? 'text-brand-muted bg-brand-orange/5'
                         : 'text-brand-text'
                     )}
                   >
-                    {branch}
+                    {branch.name}
                   </button>
                 ))}
               </div>

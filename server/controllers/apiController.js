@@ -865,6 +865,130 @@ class ApiController {
 			return res.status(500).json({ success: false, error: 'Internal server error' });
 		}
 	}
+
+	static async getDashboardData(req, res) {
+		const timestamp = new Date().toISOString();
+		const { branchId } = req.query;
+
+		try {
+			// If branchId is 'all', we don't filter by branch
+			const filterBranchId = branchId === 'all' ? null : branchId;
+
+			// Mock data generation
+			const seed = filterBranchId ? parseInt(filterBranchId, 10) : new Date().getMilliseconds();
+			const dynamicStats = {
+				orders: (48652 + (seed * 123)).toLocaleString(),
+				customers: (1248 + (seed * 5)).toLocaleString(),
+				revenue: `$${(215860 + (seed * 456)).toLocaleString()}`
+			};
+			
+			const revenueData = [
+				{ name: 'Mar', income: 8000, expense: 5000 },
+				{ name: 'Apr', income: 10000, expense: 6000 },
+				{ name: 'May', income: 9000, expense: 7000 },
+				{ name: 'Jun', income: 12000, expense: 8000 },
+				{ name: 'Jul', income: 16580, expense: 9000 },
+				{ name: 'Aug', income: 11000, expense: 7000 },
+				{ name: 'Sep', income: 14000, expense: 8500 },
+				{ name: 'Oct', income: 13000, expense: 7500 },
+			];
+
+			const dynamicRevenueData = revenueData.map((item, idx) => ({
+				...item,
+				income: Math.floor(item.income * (0.8 + (seed % 5) * 0.1) + (idx * 100)),
+				expense: Math.floor(item.expense * (0.9 + (seed % 3) * 0.05))
+			}));
+
+			res.json({
+				success: true,
+				data: {
+					dynamicStats,
+					dynamicRevenueData
+				}
+			});
+
+		} catch (error) {
+			console.error(`[${timestamp}] [DASHBOARD ERROR] - Branch: ${branchId}, Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch dashboard data'
+			});
+		}
+	}
+
+	static async getBranchPerformance(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const branches = await BranchModel.getAllActive();
+			
+			const performanceData = branches.map(branch => {
+				// Simple seeding based on branch ID for mock data variation
+				const seed = branch.IDNo;
+				const revenue = 50000 + (seed * 12345 % 25000);
+				return {
+					id: branch.IDNo,
+					name: branch.BRANCH_LABEL || branch.BRANCH_NAME,
+					totalSales: revenue,
+					totalExpenses: revenue * (0.6 + (seed * 0.01 % 0.25)), // Expenses between 60% and 85% of revenue
+					totalOrders: 800 + (seed * 543 % 400),
+					trend: (seed % 10) - 5,
+				};
+			});
+
+			const summary = performanceData.reduce((acc, branch) => {
+				acc.totalSales += branch.totalSales;
+				acc.totalExpenses += branch.totalExpenses;
+				return acc;
+			}, { totalSales: 0, totalExpenses: 0 });
+
+			summary.totalRevenue = summary.totalSales - summary.totalExpenses;
+
+			res.json({
+				success: true,
+				data: {
+					branches: performanceData,
+					summary: summary
+				}
+			});
+
+		} catch (error) {
+			console.error(`[${timestamp}] [BRANCH PERFORMANCE ERROR] Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch branch performance data'
+			});
+		}
+	}
+
+	static async getMonthlyPerformance(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+			
+			const monthlyData = months.map((month, index) => {
+				const seed = index + 1;
+				const totalSales = 200000 + (seed * 50000 % 150000) + Math.random() * 20000;
+				const totalExpenses = totalSales * (0.6 + (seed * 0.01 % 0.20)); // Expenses between 60% and 80%
+				return {
+					name: month.substring(0, 3),
+					totalSales: totalSales,
+					totalExpenses: totalExpenses,
+				};
+			});
+
+			res.json({
+				success: true,
+				data: monthlyData
+			});
+
+		} catch (error) {
+			console.error(`[${timestamp}] [MONTHLY PERFORMANCE ERROR] Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch monthly performance data'
+			});
+		}
+	}
 }
 
 module.exports = ApiController;

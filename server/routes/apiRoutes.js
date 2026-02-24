@@ -173,6 +173,22 @@ router.delete("/user-management/roles/:id", authenticateJWT, UserManagementContr
 // Response: { success: true, data: { user_id, username, firstname, lastname, permissions, branch_id, role } }
 router.get("/me", authenticateJWT, ApiController.getMe);
 
+// GET - Get dashboard data
+// URL: /api/dashboard-data
+// Headers: Authorization: Bearer <accessToken>
+// Query: ?branchId=...
+router.get("/dashboard-data", authenticateJWT, ApiController.getDashboardData);
+
+// GET - Get branch performance data for admin dashboard
+// URL: /api/admin/branch-performance
+// Headers: Authorization: Bearer <accessToken>
+router.get("/admin/branch-performance", authenticateJWT, ApiController.getBranchPerformance);
+
+// GET - Get monthly performance data for admin dashboard
+// URL: /api/admin/monthly-performance
+// Headers: Authorization: Bearer <accessToken>
+router.get("/admin/monthly-performance", authenticateJWT, ApiController.getMonthlyPerformance);
+
 // ============================================
 // EXPORT
 // ============================================

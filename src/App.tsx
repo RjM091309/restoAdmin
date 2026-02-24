@@ -23,11 +23,12 @@ import {
   ArrowDownRight,
   LogIn
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './components/partials/Sidebar';
 import { Header } from './components/partials/Header';
 import { Footer } from './components/partials/Footer';
 import { Dashboard } from './components/dashboard/Dashboard';
+import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
 import { Users } from './components/users/Users';
@@ -38,6 +39,9 @@ import { cn } from './lib/utils';
 import { NotificationPanel } from './components/panels/NotificationPanel';
 import { SystemSettingsPanel } from './components/panels/SystemSettingsPanel';
 import { AccountSettingsPanel } from './components/panels/AccountSettingsPanel';
+
+// Types
+import { type Branch } from './components/partials/Header';
 
 
 // --- Mock Data ---
@@ -318,6 +322,7 @@ export default function App() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
 
   // Parse active tab from URL path
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -341,27 +346,27 @@ export default function App() {
     end: '2026-02-23'
   });
 
-  // Dynamic data generation based on date range (simulated)
-  const getDynamicRevenueData = () => {
-    const seed = dateRange.start.length + dateRange.end.length;
-    return revenueData.map((item, idx) => ({
-      ...item,
-      income: Math.floor(item.income * (0.8 + (seed % 5) * 0.1) + (idx * 100)),
-      expense: Math.floor(item.expense * (0.9 + (seed % 3) * 0.05))
-    }));
-  };
+// Dynamic data generation based on date range (simulated)
+  // const getDynamicRevenueData = () => {
+  //   const seed = dateRange.start.length + dateRange.end.length;
+  //   return revenueData.map((item, idx) => ({
+  //     ...item,
+  //     income: Math.floor(item.income * (0.8 + (seed % 5) * 0.1) + (idx * 100)),
+  //     expense: Math.floor(item.expense * (0.9 + (seed % 3) * 0.05))
+  //   }));
+  // };
 
-  const getDynamicStats = () => {
-    const seed = dateRange.start.length + dateRange.end.length;
-    return {
-      orders: (48652 + (seed * 123)).toLocaleString(),
-      customers: (1248 + (seed * 5)).toLocaleString(),
-      revenue: `$${(215860 + (seed * 456)).toLocaleString()}`
-    };
-  };
+  // const getDynamicStats = () => {
+  //   const seed = dateRange.start.length + dateRange.end.length;
+  //   return {
+  //     orders: (48652 + (seed * 123)).toLocaleString(),
+  //     customers: (1248 + (seed * 5)).toLocaleString(),
+  //     revenue: `$${(215860 + (seed * 456)).toLocaleString()}`
+  //   };
+  // };
 
-  const dynamicStats = getDynamicStats();
-  const dynamicRevenueData = getDynamicRevenueData();
+  // const dynamicStats = getDynamicStats();
+  // const dynamicRevenueData = getDynamicRevenueData();
 
   const handleTabChange = (tab: string) => {
     switch (tab) {
@@ -405,6 +410,8 @@ export default function App() {
             onOpenNotifications={() => setIsNotificationOpen(true)}
             onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
             onOpenAccountSettings={() => setIsAccountSettingsOpen(true)}
+            selectedBranch={selectedBranch}
+            onBranchChange={setSelectedBranch}
           />
 
           <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar">
@@ -414,14 +421,18 @@ export default function App() {
 
                 <Route path="/dashboard" element={
                   <motion.div
+                    key={selectedBranch ? selectedBranch.id : 'initial'}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Dashboard
-                      dynamicStats={dynamicStats}
-                      dynamicRevenueData={dynamicRevenueData}
-                    />
+                    {selectedBranch && selectedBranch.id === 'all' ? (
+                      <AdminDashboard selectedBranch={selectedBranch} />
+                    ) : (
+                      <Dashboard
+                        selectedBranch={selectedBranch}
+                      />
+                    )}
                   </motion.div>
                 } />
 
