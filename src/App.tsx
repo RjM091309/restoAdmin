@@ -147,6 +147,7 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
 };
 
 import { useUser } from './context/UserContext';
+import { Toaster } from 'sonner';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isLoggedIn } = useUser();
@@ -379,15 +380,19 @@ export default function App() {
       return <Navigate to="/dashboard" replace />;
     }
     return (
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<LoginView />} />
-        <Route path="/login" element={<Navigate to="/" replace />} />
-      </Routes>
+      <>
+        <Toaster position="top-right" richColors />
+        <Routes location={location} key={location.pathname}>
+          <Route path="/" element={<LoginView />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
+        </Routes>
+      </>
     );
   }
 
   return (
     <ProtectedRoute>
+      <Toaster position="top-right" richColors />
       <div className="flex h-screen overflow-hidden bg-brand-bg">
         <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} />
 

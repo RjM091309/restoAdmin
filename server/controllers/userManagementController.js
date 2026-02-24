@@ -176,11 +176,8 @@ class UserManagementController {
                 }
             }
 
-            if (UserManagementController.isJsonRequest(req)) {
-                res.json({ success: true, message: 'User created successfully', data: { id: newUserId } });
-            } else {
-                res.redirect('/manageUsers');
-            }
+            // Always return JSON for API routes
+            res.json({ success: true, message: 'User created successfully', data: { id: newUserId } });
         } catch (err) {
             console.error('Error inserting user:', err);
             if (UserManagementController.isJsonRequest(req)) {
@@ -200,12 +197,14 @@ class UserManagementController {
             const id = parseInt(req.params.id);
             const {
                 txtFirstName, txtLastName, txtUserName,
-                user_role, table_id
+                txtPassword, txtPassword2,
+                user_role, table_id, branch_id
             } = req.body;
 
             const roleId = parseInt(user_role);
             let tableIdToSave = null;
             const creatorId = req.session?.user_id || req.user?.user_id;
+            const creatorPerm = parseInt(req.session?.permissions || req.user?.permissions);
 
             if (roleId === 2) {
                 if (!table_id) return res.status(400).json({ success: false, error: 'Table is required for this role.' });
@@ -217,11 +216,22 @@ class UserManagementController {
 
             await UserModel.update(id, txtFirstName, txtLastName, txtUserName, roleId, tableIdToSave, creatorId);
 
-            if (UserManagementController.isJsonRequest(req)) {
-                res.json({ success: true, message: 'User updated successfully' });
-            } else {
-                res.send('User updated successfully');
+            // Update Password if provided
+            if (txtPassword && txtPassword === txtPassword2) {
+                const hashedPassword = await argon2.hash(txtPassword);
+                await UserModel.updatePassword(id, hashedPassword);
+            } else if (txtPassword && txtPassword !== txtPassword2) {
+                return res.status(400).json({ success: false, error: 'Passwords do not match' });
             }
+
+            // Update Branch if creator is admin and branch_id is provided
+            if (creatorPerm === 1 && branch_id !== undefined) {
+                const targetBranchId = roleId === 1 ? null : (branch_id ? parseInt(branch_id) : null);
+                await UserModel.updateBranch(id, targetBranchId);
+            }
+
+            // Always return JSON for API routes
+            res.json({ success: true, message: 'User updated successfully' });
         } catch (err) {
             console.error('Error updating user:', err);
             res.status(500).send('Error updating user');

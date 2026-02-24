@@ -21,6 +21,7 @@ export default defineConfig(({mode}) => {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': { target: 'http://localhost:2000', changeOrigin: true },
+        '/branch': { target: 'http://localhost:2000', changeOrigin: true },
       },
     },
   };

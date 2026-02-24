@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Loader2, Plus, Edit2, Trash2, Shield, User as UserIcon, MoreVertical } from 'lucide-react';
 import { Modal } from '../ui/Modal';
+import { toast } from 'sonner';
+import { SkeletonPageHeader, Skeleton } from '../ui/Skeleton';
 import { cn } from '../../lib/utils';
 
 interface UserRoleRow {
@@ -92,10 +94,11 @@ export const UserRole: React.FC = () => {
 
       if (!res.ok) throw new Error('Failed to delete role');
       
+      toast.success(`Role "${roleToDelete?.role}" deleted successfully!`);
       setIsDeleteModalOpen(false);
       fetchRoles();
     } catch (e: any) {
-      alert(e.message || 'Error deleting role');
+      toast.error(e.message || 'Error deleting role');
     } finally {
       setIsSubmitting(false);
     }
@@ -124,10 +127,11 @@ export const UserRole: React.FC = () => {
 
       if (!res.ok) throw new Error(`Failed to ${editingRole ? 'update' : 'create'} role`);
 
+      toast.success(editingRole ? 'Role updated successfully!' : 'Role created successfully!');
       setIsModalOpen(false);
       fetchRoles();
     } catch (e: any) {
-      alert(e.message || 'Error saving role');
+      toast.error(e.message || 'Error saving role');
     } finally {
       setIsSubmitting(false);
     }
@@ -142,8 +146,26 @@ export const UserRole: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[500px]">
-        <Loader2 className="h-10 w-10 animate-spin text-brand-orange" />
+      <div className="space-y-8 pt-6">
+        <SkeletonPageHeader />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <Skeleton className="w-12 h-12 rounded-xl" />
+                <Skeleton className="w-20 h-8 rounded-xl" />
+              </div>
+              <div className="space-y-1">
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
+              </div>
+              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-6 w-16" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

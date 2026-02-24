@@ -1,16 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import { Search, Loader2, Shield, User as UserIcon, Plus, Edit2, Trash2 } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Search, Loader2, Shield, User as UserIcon, Plus, Edit2, Trash2, Key, MapPin, Tablet } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { cn } from '../../lib/utils';
+import { toast } from 'sonner';
+import { SkeletonPage, SkeletonStatCards, SkeletonPageHeader, SkeletonTable } from '../ui/Skeleton';
 
 interface UserRow {
   id: string;
+  firstName: string;
+  lastName: string;
   fullName: string;
   username: string;
   role: string;
+  roleId: string | number;
   branch: string;
+  branchId: string | number | null;
   tableNumber: string | number | null;
+  tableId: string | number | null;
   status: 'Active' | 'Inactive';
 }
 
@@ -21,44 +29,126 @@ export const Users: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [userToDelete, setUserToDelete] = useState<UserRow | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+
+  // Form State
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    username: '',
+    password: '',
+    confirmPassword: '',
+    roleId: '' as string | number,
+    branchId: '' as string | number | null,
+    tableId: '' as string | number | null,
+  });
+
+  // Options State
+  const [roles, setRoles] = useState<{ value: string | number, label: string }[]>([]);
+  const [branches, setBranches] = useState<{ value: string | number, label: string }[]>([]);
+  const [tables, setTables] = useState<{ value: string | number, label: string }[]>([]);
+
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/user-management/users', {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to load users (${res.status})`);
+      }
+      const json = await res.json();
+      const rawData = json.data ?? json;
+      const mappedData: UserRow[] = (Array.isArray(rawData) ? rawData : []).map((u: any) => ({
+        id: u.user_id || u.IDNo,
+        firstName: u.FIRSTNAME || '',
+        lastName: u.LASTNAME || '',
+        fullName: `${u.FIRSTNAME || ''} ${u.LASTNAME || ''}`.trim(),
+        username: u.USERNAME || '',
+        role: u.role || u.ROLE || '',
+        roleId: u.PERMISSIONS || u.ROLE_ID || '',
+        branch: u.BRANCH_LABEL || u.BRANCH_NAME || '—',
+        branchId: u.BRANCH_ID || null,
+        tableNumber: u.TABLE_NUMBER || '—',
+        tableId: u.TABLE_ID || null,
+        status: u.ACTIVE === 1 ? 'Active' : 'Inactive'
+      }));
+      setUsers(mappedData);
+      setFilteredUsers(mappedData);
+    } catch (e: any) {
+      console.error('Failed to fetch users', e);
+      setError(e.message || 'Failed to load users');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchOptions = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      const processResponse = async (res: Response, name: string) => {
+        if (!res.ok) {
+          console.error(`Failed to fetch ${name}. Status: ${res.status}`);
+          const text = await res.text();
+          console.error(`Raw error response for ${name}:`, text);
+          return null;
+        }
+
+        const text = await res.text();
+        try {
+          const json = JSON.parse(text);
+          return json.data ?? json;
+        } catch (e) {
+          console.error(`Error parsing JSON for ${name}:`, e);
+          console.error(`Raw response for ${name}:`, text);
+          return null;
+        }
+      };
+
+      const [rolesRes, branchesRes, tablesRes] = await Promise.all([
+        fetch('/api/user-management/roles', { headers }),
+        fetch('/branch', { headers }),
+        fetch('/api/tables', { headers })
+      ]);
+
+      const rolesData = await processResponse(rolesRes, 'roles');
+      if (rolesData) {
+        setRoles(rolesData.map((r: any) => ({ value: r.IDNo, label: r.ROLE })));
+      }
+
+      const branchesData = await processResponse(branchesRes, 'branches');
+      if (branchesData) {
+        setBranches(branchesData.map((b: any) => ({ value: b.IDNo, label: b.BRANCH_LABEL || b.BRANCH_NAME })));
+      }
+
+      const tablesData = await processResponse(tablesRes, 'tables');
+      if (tablesData) {
+        setTables(tablesData.map((t: any) => ({ value: t.IDNo, label: `Table ${t.TABLE_NUMBER}` })));
+      }
+
+    } catch (e) {
+      console.error('Failed to fetch options', e);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const token = localStorage.getItem('token');
-        const res = await fetch('/api/user-management/users', {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to load users (${res.status})`);
-        }
-        const json = await res.json();
-        const rawData = json.data ?? json;
-        const mappedData: UserRow[] = (Array.isArray(rawData) ? rawData : []).map((u: any) => ({
-          id: u.user_id || u.IDNo,
-          fullName: `${u.FIRSTNAME || ''} ${u.LASTNAME || ''}`.trim(),
-          username: u.USERNAME || '',
-          role: u.role || '',
-          branch: u.BRANCH_LABEL || u.BRANCH_NAME || '—',
-          tableNumber: u.TABLE_NUMBER || '—',
-          status: u.ACTIVE === 1 ? 'Active' : 'Inactive'
-        }));
-        setUsers(mappedData);
-        setFilteredUsers(mappedData);
-      } catch (e: any) {
-        console.error('Failed to fetch users', e);
-        setError(e.message || 'Failed to load users');
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchUsers();
-  }, []);
+    fetchOptions();
+  }, [fetchUsers, fetchOptions]);
 
   useEffect(() => {
     const filtered = users.filter(user =>
@@ -69,6 +159,132 @@ export const Users: React.FC = () => {
     );
     setFilteredUsers(filtered);
   }, [searchQuery, users]);
+
+  useEffect(() => {
+    if (formData.confirmPassword && formData.password !== formData.confirmPassword) {
+      setPasswordError('Passwords do not match.');
+    } else {
+      setPasswordError(null);
+    }
+  }, [formData.password, formData.confirmPassword]);
+
+  const handleOpenAddModal = () => {
+    setEditingUser(null);
+    setFormData({
+      firstName: '',
+      lastName: '',
+      username: '',
+      password: '',
+      confirmPassword: '',
+      roleId: '',
+      branchId: null,
+      tableId: null,
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (user: UserRow) => {
+    setEditingUser(user);
+    setFormData({
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      password: '',
+      confirmPassword: '',
+      roleId: user.roleId,
+      branchId: user.branchId,
+      tableId: user.tableId,
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenDeleteModal = (user: UserRow) => {
+    setUserToDelete(user);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (passwordError) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const url = editingUser 
+        ? `/api/user-management/users/${editingUser.id}`
+        : '/api/user-management/users';
+      const method = editingUser ? 'PUT' : 'POST';
+
+      const payload = {
+        txtFirstName: formData.firstName,
+        txtLastName: formData.lastName,
+        txtUserName: formData.username,
+        txtPassword: formData.password,
+        txtPassword2: formData.confirmPassword,
+        user_role: formData.roleId,
+        branch_id: formData.branchId,
+        table_id: formData.tableId,
+      };
+
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        console.error("Failed to parse server response as JSON. Raw response:", text);
+        throw new Error("Server returned an invalid response. Check console for details.");
+      }
+
+      if (!res.ok) {
+        throw new Error(json.error || `Failed to ${editingUser ? 'update' : 'create'} user`);
+      }
+
+      toast.success(editingUser ? 'User updated successfully!' : 'User created successfully!');
+      setIsModalOpen(false);
+      fetchUsers();
+    } catch (e: any) {
+      toast.error(e.message || 'Error saving user');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!userToDelete) return;
+
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/user-management/users/${userToDelete.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      if (!res.ok) throw new Error('Failed to delete user');
+      
+      toast.success(`User "${userToDelete?.fullName}" deleted successfully!`);
+      setIsDeleteModalOpen(false);
+      fetchUsers();
+    } catch (e: any) {
+      toast.error(e.message || 'Error deleting user');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const columns: ColumnDef<UserRow>[] = [
     {
@@ -107,15 +323,17 @@ export const Users: React.FC = () => {
     {
       header: 'Actions',
       className: 'text-right',
-      render: () => (
+      render: (user) => (
         <div className="flex justify-end items-center gap-2">
           <button
+            onClick={() => handleOpenEditModal(user)}
             className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 transition-colors rounded-lg"
             title="Edit User"
           >
             <Edit2 size={16} />
           </button>
           <button
+            onClick={() => handleOpenDeleteModal(user)}
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
             title="Delete User"
           >
@@ -128,8 +346,12 @@ export const Users: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[500px]">
-        <Loader2 className="h-10 w-10 animate-spin text-brand-orange" />
+      <div className="space-y-8 pt-6">
+        <SkeletonPageHeader />
+        <SkeletonStatCards />
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <SkeletonTable columns={6} rows={10} />
+        </div>
       </div>
     );
   }
@@ -158,7 +380,7 @@ export const Users: React.FC = () => {
           </div>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={handleOpenAddModal}
           className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
         >
           <Plus size={18} />
@@ -191,31 +413,197 @@ export const Users: React.FC = () => {
         keyExtractor={(item) => item.id}
       />
 
-      {/* Add New User Modal - Content will be added later */}
+      {/* Add/Edit User Modal */}
       <Modal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Add New User"
+        onClose={() => {
+          if (!isSubmitting) {
+            setIsModalOpen(false);
+            setFormData({
+              firstName: '',
+              lastName: '',
+              username: '',
+              password: '',
+              confirmPassword: '',
+              roleId: '',
+              branchId: null,
+              tableId: null,
+            });
+          }
+        }}
+        title={editingUser ? "Edit User" : "Add New User"}
         maxWidth="lg"
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
               onClick={() => setIsModalOpen(false)}
-              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              onClick={() => setIsModalOpen(false)}
-              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98]"
+              onClick={handleSubmit}
+              disabled={isSubmitting || !formData.firstName.trim() || !formData.lastName.trim() || !formData.username.trim() || !formData.roleId || (!editingUser && (!formData.password || !formData.confirmPassword)) || (!!formData.password && formData.password !== formData.confirmPassword)}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
-              Save User
+              {isSubmitting && <Loader2 size={16} className="animate-spin" />}
+              {editingUser ? "Update User" : "Save User"}
             </button>
           </div>
         }
       >
-        <div className="space-y-5">
-          <p className="text-brand-muted">User creation form will go here.</p>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">User Role</label>
+              <Select2
+                options={roles}
+                value={formData.roleId}
+                onChange={(val) => setFormData({ ...formData, roleId: val as string | number, tableId: val === 2 ? formData.tableId : null })}
+                placeholder="Select Role"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Branch</label>
+              <Select2
+                options={branches}
+                value={formData.branchId}
+                onChange={(val) => setFormData({ ...formData, branchId: val as string | number | null })}
+                placeholder="Select Branch"
+                disabled={formData.roleId === 1}
+              />
+            </div>
+
+            {Number(formData.roleId) === 2 && (
+              <div className="space-y-2 col-span-2">
+                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Assigned Table</label>
+                <Select2
+                  options={tables}
+                  value={formData.tableId}
+                  onChange={(val) => setFormData({ ...formData, tableId: val as string | number | null })}
+                  placeholder="Select Table"
+                />
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">First Name</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter first name"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Last Name</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  placeholder="Enter last name"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Username</label>
+            <div className="relative">
+              <input
+                type="text"
+                required
+                placeholder="Enter username"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                value={formData.username}
+                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                {editingUser ? "New Password (optional)" : "Password"}
+              </label>
+              <div className="relative">
+                <input
+                  type="password"
+                  required={!editingUser}
+                  placeholder="••••••••"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Confirm Password</label>
+              <div className="relative">
+                <input
+                  type="password"
+                  required={!editingUser || !!formData.password}
+                  placeholder="••••••••"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </div>
+              {passwordError && <p className="text-red-500 text-xs mt-1.5">{passwordError}</p>}
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => !isSubmitting && setIsDeleteModalOpen(false)}
+        title="Delete User"
+        maxWidth="sm"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => setIsDeleteModalOpen(false)}
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmDelete}
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+            >
+              {isSubmitting && <Loader2 size={16} className="animate-spin" />}
+              Delete User
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Trash2 size={32} />
+          </div>
+          <p className="text-center font-bold text-brand-text text-lg">Are you sure?</p>
+          <p className="text-center text-brand-muted text-sm px-4">
+            You are about to delete <span className="font-bold text-brand-text">{userToDelete?.fullName}</span>. This action will archive the user and they will no longer be able to login.
+          </p>
         </div>
       </Modal>
     </div>

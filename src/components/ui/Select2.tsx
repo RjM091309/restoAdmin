@@ -1,0 +1,102 @@
+import React from 'react';
+import Select, { components, ControlProps, SingleValueProps } from 'react-select';
+import { cn } from '../../lib/utils';
+
+interface Option {
+  value: string | number;
+  label: string;
+}
+
+interface Select2Props {
+  options: Option[];
+  value: string | number | null;
+  onChange: (value: string | number | null) => void;
+  placeholder?: string;
+  className?: string;
+  disabled?: boolean;
+  leftIcon?: React.ReactNode;
+}
+
+const Control = ({ children, ...props }: ControlProps<Option, false>) => {
+  const { leftIcon } = (props.selectProps as any);
+  return (
+    <components.Control {...props}>
+      {leftIcon && (
+        <div className="pl-4 text-gray-400 shrink-0">
+          {leftIcon}
+        </div>
+      )}
+      {children}
+    </components.Control>
+  );
+};
+
+const SingleValue = ({ children, ...props }: SingleValueProps<Option, false>) => {
+  const { leftIcon } = (props.selectProps as any);
+  return (
+    <components.SingleValue {...props}>
+      <div className={cn("flex items-center", leftIcon && "ml-1")}>
+        {children}
+      </div>
+    </components.SingleValue>
+  );
+};
+
+export const Select2: React.FC<Select2Props> = ({
+  options,
+  value,
+  onChange,
+  placeholder = 'Select an option...',
+  className,
+  disabled = false,
+  leftIcon
+}) => {
+  const selectedOption = options.find(opt => opt.value === value) || null;
+
+  return (
+    <div className={cn("w-full", className)}>
+      <Select
+        value={selectedOption}
+        onChange={(opt) => onChange(opt ? opt.value : null)}
+        options={options}
+        placeholder={placeholder}
+        isDisabled={disabled}
+        isClearable
+        isSearchable
+        // @ts-ignore - passing custom prop to components
+        leftIcon={leftIcon}
+        components={{ 
+          Control,
+          SingleValue
+        }}
+        classNames={{
+          control: () => '!min-h-[48px] !rounded-xl !border-gray-200 !bg-gray-50 !shadow-none !cursor-pointer',
+          placeholder: () => '!text-gray-400 !text-sm',
+          input: () => '!text-brand-text !text-sm',
+          singleValue: () => '!text-brand-text !text-sm',
+          menu: () => '!rounded-xl !border !border-gray-100 !shadow-xl !mt-2 !overflow-hidden',
+          option: ({ isSelected, isFocused }) => cn(
+            '!py-2.5 !px-4 !text-sm !cursor-pointer !transition-colors',
+            isSelected ? '!bg-brand-orange/10 !text-brand-orange !font-bold' : 
+            isFocused ? '!bg-brand-orange/5 !text-brand-text' : '!text-brand-text'
+          ),
+          valueContainer: () => '!px-2',
+          clearIndicator: () => '!text-gray-400 hover:!text-red-500 !p-1',
+          dropdownIndicator: () => '!text-gray-400 !p-1',
+        }}
+            menuPortalTarget={document.body}
+            styles={{
+              control: (base, state) => ({
+                ...base,
+                borderColor: state.isFocused ? 'var(--color-brand-orange)' : 'rgb(226 232 240)',
+                boxShadow: state.isFocused ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none',
+                '&:hover': {
+                  borderColor: state.isFocused ? 'var(--color-brand-orange)' : 'rgb(203 213 225)',
+                }
+              }),
+              menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+            }}
+          />
+    </div>
+  );
+};
