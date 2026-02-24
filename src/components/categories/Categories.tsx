@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { DataTable, ColumnDef } from '../ui/DataTable';
+import { Modal } from '../ui/Modal';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -39,6 +40,8 @@ interface CategoriesProps {
 }
 
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const columns: ColumnDef<typeof categoryData[0]>[] = [
     {
       header: 'Category Name',
@@ -157,7 +160,10 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
             />
           </div>
         </div>
-        <button className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all">
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+        >
           <Plus size={18} />
           New Category
         </button>
@@ -189,6 +195,61 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
         columns={columns}
         keyExtractor={(item) => item.id}
       />
+
+      {/* New Category Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Add New Category"
+        maxWidth="md"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98]"
+            >
+              Save Category
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-bold text-brand-text mb-2">Category Name</label>
+            <input 
+              type="text" 
+              placeholder="e.g. Seafood, Vegetables..."
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-brand-text mb-2">Description</label>
+            <textarea 
+              rows={3}
+              placeholder="Brief description of items in this category"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-brand-text mb-2">Icon Setup</label>
+            <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
+              <option value="beef">Beef / Meat</option>
+              <option value="fish">Fish / Seafood</option>
+              <option value="leaf">Vegetables / Produce</option>
+              <option value="droplets">Dairy</option>
+              <option value="wheat">Grains</option>
+              <option value="coffee">Beverages</option>
+              <option value="package">Default Box</option>
+            </select>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { DataTable, ColumnDef } from '../ui/DataTable';
+import { Modal } from '../ui/Modal';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -98,6 +99,8 @@ interface InventoryProps {
 }
 
 export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   return (
     <div className="space-y-8 pt-6">
       <div className="flex items-center justify-between">
@@ -121,10 +124,13 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
             placeholder="Search inventory..."
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
           />
+          </div>
         </div>
-      </div>
-      <button className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all">
-        <Plus size={18} />
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+        >
+          <Plus size={18} />
         Add New Item
       </button>
     </div>
@@ -151,11 +157,103 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
       </div>
     </div>
 
-    <DataTable
-      data={inventoryData}
-      columns={columns}
-      keyExtractor={(item) => item.id}
-    />
-  </div>
+      <DataTable
+        data={inventoryData}
+        columns={columns}
+        keyExtractor={(item) => item.id}
+      />
+
+      {/* Add New Item Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Add New Inventory Item"
+        maxWidth="lg"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98]"
+            >
+              Save Item
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-brand-text mb-2">Item Name</label>
+              <input 
+                type="text" 
+                placeholder="e.g. Fresh Salmon"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-brand-text mb-2">Item ID Code</label>
+              <input 
+                type="text" 
+                placeholder="e.g. INV017"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+              />
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-brand-text mb-2">Category</label>
+              <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
+                <option value="Seafood">Seafood</option>
+                <option value="Meat">Meat</option>
+                <option value="Vegetables">Vegetables</option>
+                <option value="Dairy">Dairy</option>
+                <option value="Grains">Grains</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-brand-text mb-2">Stock Level & Unit</label>
+              <div className="flex gap-2">
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                />
+                <select className="w-24 bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none shrink-0">
+                  <option value="kg">kg</option>
+                  <option value="g">g</option>
+                  <option value="L">L</option>
+                  <option value="pcs">pcs</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-brand-text mb-2">Status Flag</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="status" defaultChecked className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer" />
+                <span className="text-sm font-bold text-brand-text">In Stock</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="status" className="w-4 h-4 text-orange-500 focus:ring-orange-500/20 cursor-pointer" />
+                <span className="text-sm font-bold text-brand-text">Low Stock</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="status" className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer" />
+                <span className="text-sm font-bold text-brand-text">Out of Stock</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </Modal>
+    </div>
   );
 };
