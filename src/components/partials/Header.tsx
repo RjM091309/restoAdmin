@@ -4,6 +4,8 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { clsx } from 'clsx';
 
+import { useUser } from '../../context/UserContext';
+
 type DateRange = {
   start: string;
   end: string;
@@ -14,6 +16,9 @@ type HeaderProps = {
   breadcrumbs?: string[];
   dateRange: DateRange;
   onDateRangeChange: (range: DateRange) => void;
+  onOpenNotifications: () => void;
+  onOpenSystemSettings: () => void;
+  onOpenAccountSettings: () => void;
 };
 
 const formatDate = (dateStr: string) => {
@@ -40,7 +45,11 @@ export const Header: React.FC<HeaderProps> = ({
   breadcrumbs = [],
   dateRange,
   onDateRangeChange,
+  onOpenNotifications,
+  onOpenSystemSettings,
+  onOpenAccountSettings,
 }) => {
+  const { user } = useUser();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState('All Branches');
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
@@ -83,12 +92,12 @@ export const Header: React.FC<HeaderProps> = ({
         </h2>
         <p className="text-brand-muted text-sm mt-1">
           {activeTab === 'Dashboard'
-            ? 'Hello Orlando, welcome back!'
+            ? `Hello ${user.name.split(' ')[0]}, welcome back!`
             : activeTab === 'Inventory'
-            ? 'Manage your restaurant supplies and stock.'
-            : activeTab === 'Login'
-            ? 'Access your account.'
-            : `View your ${activeTab.toLowerCase()}.`}
+              ? 'Manage your restaurant supplies and stock.'
+              : activeTab === 'Login'
+                ? 'Access your account.'
+                : `View your ${activeTab.toLowerCase()}.`}
         </p>
       </div>
 
@@ -97,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative">
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all"
+              className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all cursor-pointer"
             >
               <Calendar size={20} className="text-brand-muted" />
               <span className="text-sm text-brand-muted whitespace-nowrap">
@@ -138,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative">
           <button
             onClick={() => setBranchDropdownOpen((o) => !o)}
-            className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all w-64 justify-between group"
+            className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all w-64 justify-between group cursor-pointer"
           >
             <div className="flex items-center gap-2">
               <MapPin size={20} className="text-brand-muted" />
@@ -171,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
                       setBranchDropdownOpen(false);
                     }}
                     className={clsx(
-                      'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-orange/5',
+                      'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-orange/5 cursor-pointer',
                       selectedBranch === branch
                         ? 'text-brand-muted bg-brand-orange/5'
                         : 'text-brand-text'
@@ -186,23 +195,32 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          <button className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors">
+          <button
+            onClick={onOpenNotifications}
+            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+          >
             <Bell size={20} />
           </button>
-          <button className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors">
+          <button
+            onClick={onOpenSystemSettings}
+            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+          >
             <Settings size={20} />
           </button>
         </div>
 
-        <div className="flex items-center gap-3 pl-6 border-l border-gray-200">
+        <div
+          onClick={onOpenAccountSettings}
+          className="flex items-center gap-3 pl-6 border-l border-gray-200 cursor-pointer group"
+        >
           <div className="text-right">
-            <p className="text-base font-bold">Orlando Laurentius</p>
-            <p className="text-xs text-brand-muted font-medium">Admin</p>
+            <p className="text-base font-bold group-hover:text-brand-orange transition-colors">{user.name}</p>
+            <p className="text-xs text-brand-muted font-medium">{user.role}</p>
           </div>
           <img
-            src="https://picsum.photos/seed/admin/100/100"
+            src={user.avatar}
             alt="Profile"
-            className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm"
+            className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-orange/20 transition-all"
             referrerPolicy="no-referrer"
           />
         </div>

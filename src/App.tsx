@@ -5,17 +5,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  MessageSquare, 
-  Calendar, 
-  UtensilsCrossed, 
-  Package, 
-  Star, 
-  Search, 
-  Bell, 
-  Settings, 
+import {
+  LayoutDashboard,
+  ClipboardList,
+  MessageSquare,
+  Calendar,
+  UtensilsCrossed,
+  Package,
+  Star,
+  Search,
+  Bell,
+  Settings,
   ChevronDown,
   TrendingUp,
   TrendingDown,
@@ -32,6 +32,11 @@ import { Footer } from './components/partials/Footer';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
+
+// Panels
+import { NotificationPanel } from './components/panels/NotificationPanel';
+import { SystemSettingsPanel } from './components/panels/SystemSettingsPanel';
+import { AccountSettingsPanel } from './components/panels/AccountSettingsPanel';
 
 /** Utility for tailwind classes */
 function cn(...inputs: ClassValue[]) {
@@ -77,9 +82,9 @@ const StatCard = ({ icon: Icon, label, value, trend, trendType }: { icon: any, l
 const TrendingMenuItem = ({ menu }: { menu: any, key?: any }) => (
   <div className="group cursor-pointer">
     <div className="relative mb-3 overflow-hidden rounded-2xl">
-      <img 
-        src={menu.image} 
-        alt={menu.name} 
+      <img
+        src={menu.image}
+        alt={menu.name}
         className="w-full aspect-[4/3] object-cover group-hover:scale-105 transition-transform duration-500"
         referrerPolicy="no-referrer"
       />
@@ -126,7 +131,7 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
           initial={{ y: 100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -100, opacity: 0 }}
-          transition={{ 
+          transition={{
             type: "spring",
             stiffness: 300,
             damping: 30,
@@ -162,15 +167,15 @@ const LoginView = () => {
   return (
     <div className="flex h-screen w-screen bg-brand-bg">
       {/* Background Image Side */}
-      <div 
+      <div
         className="hidden lg:block lg:w-2/3 h-full bg-cover bg-center"
         style={{ backgroundImage: `url('/login-bg.jpg')` }}
       >
       </div>
-      
+
       {/* Login Panel Side */}
       <div className="w-full lg:w-1/3 h-full bg-white flex flex-col justify-center px-12 py-10 shadow-[-10px_0_30px_rgba(0,0,0,0.1)] z-10">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
@@ -191,29 +196,29 @@ const LoginView = () => {
                 {error}
               </div>
             )}
-            
+
             <div className="space-y-1.5">
               <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Username</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
               />
             </div>
-            
+
             <div className="space-y-1.5">
               <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Password</label>
-              <input 
-                type="password" 
+              <input
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
               />
             </div>
-            
+
             <div className="flex items-center justify-between text-sm pt-2">
               <label className="flex items-center gap-2 cursor-pointer group">
                 <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-gray-300 text-brand-orange focus:ring-brand-orange/20" />
@@ -221,7 +226,7 @@ const LoginView = () => {
               </label>
               <a href="#" className="text-brand-orange font-bold hover:underline transition-all">Forgot password?</a>
             </div>
-            
+
             <button className="w-full bg-brand-orange text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-orange/30 hover:shadow-brand-orange/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4">
               Sign In
             </button>
@@ -241,13 +246,18 @@ const LoginView = () => {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
+  // Panel States
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
+  const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
+
   // Parse active tab from URL path
   const pathParts = location.pathname.split('/').filter(Boolean);
   const primaryPath = pathParts[0] || 'dashboard';
-  
+
   // Create breadcrumb array
-  const breadcrumbs = pathParts.map(part => 
+  const breadcrumbs = pathParts.map(part =>
     part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ')
   );
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
@@ -307,13 +317,16 @@ export default function App() {
           breadcrumbs={breadcrumbs}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
+          onOpenNotifications={() => setIsNotificationOpen(true)}
+          onOpenSystemSettings={() => setIsSystemSettingsOpen(true)}
+          onOpenAccountSettings={() => setIsAccountSettingsOpen(true)}
         />
 
         <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar">
           <AnimatePresence mode="wait">
             <Routes location={location} key={location.pathname}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              
+
               <Route path="/dashboard" element={
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -328,7 +341,7 @@ export default function App() {
               } />
 
               <Route path="/inventory" element={
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
@@ -338,7 +351,7 @@ export default function App() {
               } />
 
               <Route path="/inventory/:categoryName" element={
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
@@ -348,7 +361,7 @@ export default function App() {
               } />
 
               <Route path="*" element={
-                <motion.div 
+                <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="flex items-center justify-center h-64 text-brand-muted"
@@ -362,6 +375,20 @@ export default function App() {
 
         <Footer />
       </main>
+
+      {/* Panels */}
+      <NotificationPanel
+        isOpen={isNotificationOpen}
+        onClose={() => setIsNotificationOpen(false)}
+      />
+      <SystemSettingsPanel
+        isOpen={isSystemSettingsOpen}
+        onClose={() => setIsSystemSettingsOpen(false)}
+      />
+      <AccountSettingsPanel
+        isOpen={isAccountSettingsOpen}
+        onClose={() => setIsAccountSettingsOpen(false)}
+      />
     </div>
   );
 }

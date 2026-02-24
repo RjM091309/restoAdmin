@@ -4,6 +4,7 @@ import { createTheme, ThemeProvider } from '@mui/material/styles';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { BrowserRouter } from 'react-router-dom';
+import { UserProvider } from './context/UserContext.tsx';
 import App from './App.tsx';
 import './index.css';
 
@@ -29,7 +30,9 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider theme={theme}>
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <BrowserRouter>
-          <App />
+          <UserProvider>
+            <App />
+          </UserProvider>
         </BrowserRouter>
       </LocalizationProvider>
     </ThemeProvider>
