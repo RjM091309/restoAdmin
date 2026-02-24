@@ -59,7 +59,7 @@ const recentOrders = [
     amount: 30.0,
     customer: 'Dana White',
     status: 'On Process',
-    image: 'https://picsum.photos/seed/sushi/100/100',
+    image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=200&auto=format&fit=crop', // Sushi
   },
   {
     id: 'ORD1026',
@@ -69,7 +69,7 @@ const recentOrders = [
     amount: 18.0,
     customer: 'John Doe',
     status: 'Completed',
-    image: 'https://picsum.photos/seed/chicken/100/100',
+    image: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?q=80&w=200&auto=format&fit=crop', // Chicken
   },
   {
     id: 'ORD1027',
@@ -79,7 +79,7 @@ const recentOrders = [
     amount: 24.0,
     customer: 'Jane Smith',
     status: 'Pending',
-    image: 'https://picsum.photos/seed/pasta/100/100',
+    image: 'https://images.unsplash.com/photo-1612874742237-6526221588e3?q=80&w=200&auto=format&fit=crop', // Pasta
   },
 ];
 
@@ -90,7 +90,7 @@ const trendingMenus = [
     rating: 4.9,
     orders: 350,
     price: 18.0,
-    image: 'https://picsum.photos/seed/food1/400/300',
+    image: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?q=80&w=600&auto=format&fit=crop', // Grilled chicken
   },
   {
     name: 'Sunny Citrus Cake',
@@ -98,7 +98,7 @@ const trendingMenus = [
     rating: 4.8,
     orders: 400,
     price: 8.5,
-    image: 'https://picsum.photos/seed/food2/400/300',
+    image: 'https://images.unsplash.com/photo-1571115177098-24ec42ed204d?q=80&w=600&auto=format&fit=crop', // Cake
   },
   {
     name: 'Fiery Shrimp Salad',
@@ -106,7 +106,7 @@ const trendingMenus = [
     rating: 4.7,
     orders: 270,
     price: 12.0,
-    image: 'https://picsum.photos/seed/food3/400/300',
+    image: 'https://images.unsplash.com/photo-1551248429-40975aa4de74?q=80&w=600&auto=format&fit=crop', // Shrimp salad
   },
 ];
 
