@@ -167,12 +167,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Menu'); setUserMgmtExpanded(false); }}
           />
         )}
-        <SidebarItem
-          icon={Package}
-          label="Inventory"
-          active={activeTab === 'Inventory'}
-          onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); }}
-        />
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={Package}
+            label="Inventory"
+            active={activeTab === 'Inventory'}
+            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); }}
+          />
+        )}
         <SidebarItem
           icon={DollarSign}
           label="Expenses"

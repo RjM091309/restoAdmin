@@ -108,6 +108,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
   };
 
   useEffect(() => {
+    if (!selectedBranch) return;
     fetchData();
   }, [selectedBranch?.id]);
 

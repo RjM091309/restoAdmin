@@ -105,6 +105,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
   };
 
   useEffect(() => {
+    if (!selectedBranch) return;
     fetchCategories();
   }, [selectedBranch?.id]);
 

@@ -293,6 +293,16 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isLoggedIn, login, logout } = useUser();
+  const parseBranchFromSearch = (search: string): Branch | null => {
+    const params = new URLSearchParams(search);
+    const branchId = params.get('branchId');
+    if (!branchId) return null;
+    const branchName = params.get('branchName');
+    return {
+      id: branchId,
+      name: branchName || (branchId === 'all' ? 'All Branches' : `Branch ${branchId}`),
+    };
+  };
 
   // Initial session check
   useEffect(() => {
@@ -325,18 +335,14 @@ export default function App() {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
+  const [selectedBranch, setSelectedBranch] = useState<Branch | null>(() => parseBranchFromSearch(location.search));
 
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const branchId = params.get('branchId');
-    const branchName = params.get('branchName');
-    if (!branchId) return;
-
-    const resolvedName = branchName || (branchId === 'all' ? 'All Branches' : `Branch ${branchId}`);
+    const resolved = parseBranchFromSearch(location.search);
+    if (!resolved) return;
     setSelectedBranch((prev) => {
-      if (prev && String(prev.id) === branchId && prev.name === resolvedName) return prev;
-      return { id: branchId, name: resolvedName };
+      if (prev && String(prev.id) === String(resolved.id) && prev.name === resolved.name) return prev;
+      return resolved;
     });
   }, [location.search]);
 
