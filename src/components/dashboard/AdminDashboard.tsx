@@ -39,18 +39,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
   const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
+  const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
+
+  // Sync selectedBranch prop to internal state
+  useEffect(() => {
+    if (selectedBranch && selectedBranch.id !== 'all') {
+      setActiveBranchId(Number(selectedBranch.id));
+    } else {
+      setActiveBranchId(null);
+    }
+  }, [selectedBranch]);
 
   useEffect(() => {
     const fetchData = async () => {
-      setLoading(true);
       try {
         const token = localStorage.getItem('token');
+        const monthlyUrl = activeBranchId 
+          ? `/api/admin/monthly-performance?branchId=${activeBranchId}`
+          : '/api/admin/monthly-performance';
+
         // Fetch in parallel
         const [perfRes, monthlyRes] = await Promise.all([
           fetch('/api/admin/branch-performance', {
             headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           }),
-          fetch('/api/admin/monthly-performance', {
+          fetch(monthlyUrl, {
             headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           }),
         ]);
@@ -74,7 +87,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
     };
     
     fetchData();
-  }, [selectedBranch]);
+  }, [activeBranchId]);
 
   return (
     <AnimatePresence mode="wait">
@@ -138,6 +151,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
               <div className="h-96">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
+                    key={activeBranchId || 'all'}
                     data={monthlyData.map(d => ({ ...d, negativeExpenses: -d.totalExpenses }))}
                     margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
                     stackOffset="sign"
@@ -194,7 +208,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             {performanceData
               .sort((a, b) => (b.totalSales - b.totalExpenses) - (a.totalSales - a.totalExpenses))
               .map((branch) => (
-                <BranchPerformanceCard key={branch.id} branch={branch} />
+                <BranchPerformanceCard 
+                  key={branch.id} 
+                  branch={branch} 
+                  onClick={() => setActiveBranchId(prev => prev === branch.id ? null : branch.id)}
+                  isSelected={branch.id === activeBranchId}
+                />
               ))}
           </div>
         </motion.div>

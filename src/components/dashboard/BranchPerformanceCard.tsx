@@ -12,9 +12,11 @@ export type BranchPerformanceData = {
 
 type BranchPerformanceCardProps = {
   branch: BranchPerformanceData;
+  onClick?: () => void;
+  isSelected?: boolean;
 };
 
-export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ branch }) => {
+export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ branch, onClick, isSelected }) => {
   const netRevenue = branch.totalSales - branch.totalExpenses;
   const profitMargin = branch.totalSales > 0 ? (netRevenue / branch.totalSales) * 100 : 0;
   
@@ -23,7 +25,13 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
   const trendIcon = trendType === 'up' ? <TrendingUp size={14} className="mr-1" /> : <TrendingDown size={14} className="mr-1" />;
 
   return (
-    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col group hover:border-brand-orange/50 transition-all duration-300 hover:shadow-lg hover:-translate-y-1 cursor-pointer">
+    <div 
+      onClick={onClick}
+      className={cn(
+        "bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col group transition-all duration-300 hover:shadow-lg hover:-translate-y-1 cursor-pointer",
+        isSelected ? "border-brand-orange ring-1 ring-brand-orange shadow-md" : "hover:border-brand-orange/50"
+      )}
+    >
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
