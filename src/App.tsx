@@ -31,6 +31,7 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
+import { Expenses } from './components/expenses/Expenses';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Menu } from './components/menu/Menu';
@@ -509,6 +510,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Inventory onBack={() => navigate('/inventory')} />
+                  </motion.div>
+                } />
+
+                <Route path="/expenses" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Expenses />
                   </motion.div>
                 } />
 

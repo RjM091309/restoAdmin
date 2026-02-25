@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  DollarSign,
 } from 'lucide-react';
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
@@ -171,6 +172,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           label="Inventory"
           active={activeTab === 'Inventory'}
           onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); }}
+        />
+        <SidebarItem
+          icon={DollarSign}
+          label="Expenses"
+          active={activeTab === 'Expenses'}
+          onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); }}
         />
         <SidebarItem
           icon={Users}

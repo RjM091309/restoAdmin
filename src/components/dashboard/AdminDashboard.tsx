@@ -165,13 +165,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                 title="Total Sales"
                 value={`₱${summaryData.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={TrendingUp}
-                color="bg-indigo-500"
+                color="bg-[rgb(139,92,246)]"
               />
               <SummaryCard 
                 title="Total Expenses"
                 value={`₱${summaryData.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={TrendingDown}
-                color="bg-red-500"
+                color="bg-[rgb(245,158,11)]"
               />
               </div>
             )}
@@ -220,7 +220,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     <Bar 
                       dataKey="totalSales" 
                       name="Total Sales" 
-                      fill="#6366f1" 
+                      fill="rgb(139, 92, 246)" 
                       radius={[6, 6, 0, 0]}
                       barSize={32}
                       stackId="stack"
@@ -228,7 +228,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     <Bar 
                       dataKey="negativeExpenses" 
                       name="Total Expenses" 
-                      fill="#ef4444" 
+                      fill="rgb(245, 158, 11)" 
                       radius={[6, 6, 0, 0]}
                       barSize={32}
                       stackId="stack"
