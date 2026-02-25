@@ -18,6 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import {
     getOrders,
@@ -357,17 +358,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                                         className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
                                     />
                                 </div>
-                                <select
+                                <Select2
+                                    options={[
+                                        { value: 'all', label: 'All Statuses' },
+                                        { value: String(ORDER_STATUS.PENDING), label: 'Pending' },
+                                        { value: String(ORDER_STATUS.CONFIRMED), label: 'Confirmed' },
+                                        { value: String(ORDER_STATUS.SETTLED), label: 'Settled' },
+                                        { value: String(ORDER_STATUS.CANCELLED), label: 'Cancelled' },
+                                    ]}
                                     value={statusFilter}
-                                    onChange={(e) => setStatusFilter(e.target.value)}
-                                    className="bg-white border-none rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none cursor-pointer appearance-none text-brand-text"
-                                >
-                                    <option value="all">All Statuses</option>
-                                    <option value={String(ORDER_STATUS.PENDING)}>Pending</option>
-                                    <option value={String(ORDER_STATUS.CONFIRMED)}>Confirmed</option>
-                                    <option value={String(ORDER_STATUS.SETTLED)}>Settled</option>
-                                    <option value={String(ORDER_STATUS.CANCELLED)}>Cancelled</option>
-                                </select>
+                                    onChange={(v) => setStatusFilter(v ? String(v) : 'all')}
+                                    placeholder="All Statuses"
+                                    className="w-48"
+                                />
                             </div>
                             <button
                                 onClick={openNewOrder}
@@ -449,12 +452,16 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-brand-text mb-2">Order Type</label>
-                            <select value={newOrderType} onChange={(e) => setNewOrderType(e.target.value as typeof newOrderType)}
-                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
-                                <option value="DINE_IN">Dine In</option>
-                                <option value="TAKE_OUT">Take Out</option>
-                                <option value="DELIVERY">Delivery</option>
-                            </select>
+                            <Select2
+                                options={[
+                                    { value: 'DINE_IN', label: 'Dine In' },
+                                    { value: 'TAKE_OUT', label: 'Take Out' },
+                                    { value: 'DELIVERY', label: 'Delivery' },
+                                ]}
+                                value={newOrderType}
+                                onChange={(v) => setNewOrderType((v as typeof newOrderType) || 'DINE_IN')}
+                                placeholder="Select type"
+                            />
                         </div>
                     </div>
 
@@ -463,11 +470,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                         <label className="block text-sm font-bold text-brand-text mb-2">Order Items</label>
                         <div className="grid grid-cols-12 gap-3 items-end">
                             <div className="col-span-7">
-                                <select value={newOrderSelectedMenuId} onChange={(e) => setNewOrderSelectedMenuId(e.target.value)} disabled={newOrderLoadingRefs}
-                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 outline-none transition-all disabled:opacity-60 cursor-pointer appearance-none">
-                                    <option value="">{newOrderLoadingRefs ? 'Loading menu...' : 'Select an item'}</option>
-                                    {newOrderMenus.map((m) => <option key={m.id} value={m.id}>{m.name} — ₱{Number(m.price).toLocaleString()}</option>)}
-                                </select>
+                                <Select2
+                                    options={newOrderMenus.map((m) => ({ value: m.id, label: `${m.name} — ₱${Number(m.price).toLocaleString()}` }))}
+                                    value={newOrderSelectedMenuId || null}
+                                    onChange={(v) => setNewOrderSelectedMenuId(v ? String(v) : '')}
+                                    placeholder={newOrderLoadingRefs ? 'Loading menu...' : 'Select an item'}
+                                    disabled={newOrderLoadingRefs}
+                                />
                             </div>
                             <div className="col-span-2">
                                 <input type="number" min={1} value={newOrderQty} onChange={(e) => setNewOrderQty(Number(e.target.value))}

@@ -18,6 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import {
     getMenus,
@@ -328,14 +329,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <div className="grid grid-cols-2 gap-5">
                 <div>
                     <label className="block text-sm font-bold text-brand-text mb-2">Category</label>
-                    <select
-                        value={formCategory}
-                        onChange={(e) => setFormCategory(e.target.value)}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
-                    >
-                        <option value="">Uncategorized</option>
-                        {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <Select2
+                        options={[{ value: '', label: 'Uncategorized' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
+                        value={formCategory || ''}
+                        onChange={(v) => setFormCategory(v ? String(v) : '')}
+                        placeholder="Select category"
+                    />
                 </div>
                 <div>
                     <label className="block text-sm font-bold text-brand-text mb-2">Availability</label>
@@ -425,23 +424,24 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                         className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
                                     />
                                 </div>
-                                <select
+                                <Select2
+                                    options={[{ value: 'all', label: 'All Categories' }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
                                     value={selectedCategory}
-                                    onChange={(e) => setSelectedCategory(e.target.value)}
-                                    className="bg-white border-none rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none cursor-pointer appearance-none text-brand-text"
-                                >
-                                    <option value="all">All Categories</option>
-                                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                                <select
+                                    onChange={(v) => setSelectedCategory(v ? String(v) : 'all')}
+                                    placeholder="All Categories"
+                                    className="w-48"
+                                />
+                                <Select2
+                                    options={[
+                                        { value: 'all', label: 'All Status' },
+                                        { value: 'available', label: 'Available' },
+                                        { value: 'unavailable', label: 'Unavailable' },
+                                    ]}
                                     value={availFilter}
-                                    onChange={(e) => setAvailFilter(e.target.value)}
-                                    className="bg-white border-none rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none cursor-pointer appearance-none text-brand-text"
-                                >
-                                    <option value="all">All Status</option>
-                                    <option value="available">Available</option>
-                                    <option value="unavailable">Unavailable</option>
-                                </select>
+                                    onChange={(v) => setAvailFilter(v ? String(v) : 'all')}
+                                    placeholder="All Status"
+                                    className="w-44"
+                                />
                             </div>
                             <button
                                 onClick={openCreate}
