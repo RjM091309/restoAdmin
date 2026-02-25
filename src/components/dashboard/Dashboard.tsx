@@ -281,377 +281,388 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
     }
   }, [selectedBranch]);
 
-  if (loading || !dashboardData) {
-    return (
-      <div className="flex gap-8 pt-6">
-        <div className="flex-1 space-y-8">
-          <SkeletonStatCards count={3} />
-          <div className="grid grid-cols-3 gap-6">
-            <SkeletonChart className="col-span-2" />
-            <SkeletonChart />
-          </div>
-          <div className="grid grid-cols-3 gap-6">
-            <SkeletonChart className="col-span-2" />
-            <SkeletonChart />
-          </div>
-          <SkeletonTable columns={7} rows={5} showToolbar={false} />
-        </div>
-        <div className="w-80 space-y-8">
-          <SkeletonChart />
-        </div>
-      </div>
-    );
-  }
-
-  const { dynamicStats, dynamicRevenueData } = dashboardData;
-
   return (
-    <div className="flex gap-8 pt-6">
-      <div className="flex-1 space-y-8">
-        <div className="flex gap-6">
-          <StatCard
-            icon={ClipboardList}
-            label="Total Orders"
-            value={dynamicStats.orders}
-            trend="1.58%"
-            trendType="up"
-          />
-          <StatCard
-            icon={Package}
-            label="Total Customer"
-            value={dynamicStats.customers}
-            trend="0.42%"
-            trendType="down"
-          />
-          <StatCard
-            icon={TrendingUp}
-            label="Total Revenue"
-            value={dynamicStats.revenue}
-            trend="2.36%"
-            trendType="up"
-          />
-        </div>
+    <AnimatePresence mode="wait">
+      {loading || !dashboardData ? (
+        <motion.div 
+          key="skeleton"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.3 }}
+          className="flex gap-8 pt-6"
+        >
+          <div className="flex-1 space-y-8">
+            <SkeletonStatCards count={3} />
+            <div className="grid grid-cols-3 gap-6">
+              <SkeletonChart className="col-span-2" />
+              <SkeletonChart />
+            </div>
+            <div className="grid grid-cols-3 gap-6">
+              <SkeletonChart className="col-span-2" />
+              <SkeletonChart />
+            </div>
+            <SkeletonTable columns={7} rows={5} showToolbar={false} />
+          </div>
+          <div className="w-80 space-y-8">
+            <SkeletonChart />
+          </div>
+        </motion.div>
+      ) : (
+        <motion.div 
+          key="content"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="flex gap-8 pt-6"
+        >
+          <div className="flex-1 space-y-8">
+            <div className="flex gap-6">
+              <StatCard
+                icon={ClipboardList}
+                label="Total Orders"
+                value={dashboardData.dynamicStats.orders}
+                trend="1.58%"
+                trendType="up"
+              />
+              <StatCard
+                icon={Package}
+                label="Total Customer"
+                value={dashboardData.dynamicStats.customers}
+                trend="0.42%"
+                trendType="down"
+              />
+              <StatCard
+                icon={TrendingUp}
+                label="Total Revenue"
+                value={dashboardData.dynamicStats.revenue}
+                trend="2.36%"
+                trendType="up"
+              />
+            </div>
 
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h4 className="text-base text-brand-muted font-medium">Total Revenue</h4>
-                <p className="text-3xl font-bold">{dynamicStats.revenue}</p>
-              </div>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-brand-orange" />
-                    <span className="text-sm font-medium">Income</span>
+            <div className="grid grid-cols-3 gap-6">
+              <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-8">
+                  <div>
+                    <h4 className="text-base text-brand-muted font-medium">Total Revenue</h4>
+                    <p className="text-3xl font-bold">{dashboardData.dynamicStats.revenue}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-brand-text" />
-                    <span className="text-sm font-medium">Expense</span>
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-brand-orange" />
+                        <span className="text-sm font-medium">Income</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-brand-text" />
+                        <span className="text-sm font-medium">Expense</span>
+                      </div>
+                    </div>
+                    <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
+                      <option>Last 8 Months</option>
+                    </select>
                   </div>
                 </div>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <ComposedChart data={dashboardData.dynamicRevenueData}>
+                      <defs>
+                        <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#0f172a" stopOpacity={0.18} />
+                          <stop offset="100%" stopColor="#0f172a" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        dy={10}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: 'none',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                        }}
+                        labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="income"
+                        fill="url(#incomeGradient)"
+                        stroke="#4f46e5"
+                        strokeWidth={2}
+                        dot={{ r: 4, fill: '#4f46e5', strokeWidth: 0 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="expense"
+                        fill="url(#expenseGradient)"
+                        stroke="#0f172a"
+                        strokeWidth={2}
+                        dot={{ r: 4, fill: '#0f172a', strokeWidth: 0 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-6">
+                  <h4 className="text-base font-bold">Top Categories</h4>
+                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
+                    <option>This Month</option>
+                  </select>
+                </div>
+                <div className="h-48 w-full relative">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <PieChart>
+                      <Pie
+                        data={categoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {categoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-2 gap-y-3 mt-4">
+                  {categoryData.map((item) => (
+                    <div key={item.name} className="flex items-center gap-2">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span className="text-xs font-medium text-brand-muted">{item.name}</span>
+                      <span className="text-xs font-bold">{item.value}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-6">
+              <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-8">
+                  <h4 className="text-base font-bold">Orders Overview</h4>
+                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
+                    <option>This Week</option>
+                  </select>
+                </div>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <BarChart data={ordersOverviewData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        dy={10}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 12, fill: '#64748b' }}
+                      />
+                      <Tooltip
+                        cursor={{ fill: '#4f46e5', opacity: 0.1 }}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: 'none',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                        }}
+                      />
+                      <Bar
+                        dataKey="orders"
+                        fill="#c7d2fe"
+                        radius={[6, 6, 0, 0]}
+                        activeBar={<Rectangle fill="#4f46e5" />}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-8">
+                  <h4 className="text-base font-bold">Order Types</h4>
+                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
+                    <option>This Month</option>
+                  </select>
+                </div>
+                <div className="space-y-6">
+                  {[
+                    {
+                      label: 'Dine-In',
+                      value: 900,
+                      percentage: 45,
+                      icon: UtensilsCrossed,
+                      color: 'bg-indigo-100 text-indigo-600',
+                    },
+                    {
+                      label: 'Takeaway',
+                      value: 600,
+                      percentage: 30,
+                      icon: Package,
+                      color: 'bg-slate-200 text-slate-700',
+                    },
+                    {
+                      label: 'Online',
+                      value: 500,
+                      percentage: 25,
+                      icon: MessageSquare,
+                      color: 'bg-indigo-50 text-indigo-700',
+                    },
+                  ].map((type) => (
+                    <div key={type.label} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            'w-10 h-10 rounded-xl flex items-center justify-center',
+                            type.color,
+                          )}
+                        >
+                          <type.icon size={18} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold">{type.label}</p>
+                          <p className="text-xs text-brand-muted font-medium">
+                            {type.percentage}%
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-base font-bold">{type.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-8">
+                <h4 className="text-base font-bold">Recent Orders</h4>
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Search
+                      size={14}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search placeholder"
+                      className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-48 outline-none"
+                    />
+                  </div>
+                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer">
+                    <option>This Week</option>
+                  </select>
+                  <button className="text-xs font-bold bg-brand-bg px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                    See All Orders
+                  </button>
+                </div>
+              </div>
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider border-b border-gray-50">
+                    <th className="pb-4 font-bold">
+                      Order ID <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Photo <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Menu <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Qty <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Amount <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Customer <ChevronDown size={10} className="inline" />
+                    </th>
+                    <th className="pb-4 font-bold">
+                      Status <ChevronDown size={10} className="inline" />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {recentOrders.map((order) => (
+                    <tr key={order.id} className="group hover:bg-brand-bg/50 transition-colors">
+                      <td className="py-4 text-sm font-bold text-brand-muted">{order.id}</td>
+                      <td className="py-4">
+                        <img
+                          src={order.image}
+                          alt={order.menu}
+                          className="w-10 h-10 rounded-lg object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </td>
+                      <td className="py-4">
+                        <p className="text-sm font-bold">{order.menu}</p>
+                        <p className="text-xs text-brand-muted font-medium">{order.category}</p>
+                      </td>
+                      <td className="py-4 text-sm font-bold">{order.qty}</td>
+                      <td className="py-4 text-sm font-bold">${order.amount.toFixed(2)}</td>
+                      <td className="py-4 text-sm font-bold">{order.customer}</td>
+                      <td className="py-4">
+                        <span
+                          className={cn(
+                            'text-xs font-bold px-2 py-1 rounded-lg',
+                            order.status === 'On Process'
+                              ? 'bg-orange-100 text-orange-600'
+                              : order.status === 'Completed'
+                              ? 'bg-green-100 text-green-600'
+                              : 'bg-gray-100 text-gray-600',
+                          )}
+                        >
+                          {order.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="w-80 space-y-8">
+            <div className="bg-white p-6 rounded-2xl shadow-sm h-full flex flex-col">
+              <div className="flex items-center justify-between mb-6">
+                <h4 className="text-base font-bold">Trending Menus</h4>
                 <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                  <option>Last 8 Months</option>
+                  <option>This Week</option>
                 </select>
               </div>
-            </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <ComposedChart data={dynamicRevenueData}>
-                  <defs>
-                    <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#0f172a" stopOpacity={0.18} />
-                      <stop offset="100%" stopColor="#0f172a" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#64748b' }}
-                    dy={10}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#64748b' }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: 'none',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    }}
-                    labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="income"
-                    fill="url(#incomeGradient)"
-                    stroke="#4f46e5"
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: '#4f46e5', strokeWidth: 0 }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="expense"
-                    fill="url(#expenseGradient)"
-                    stroke="#0f172a"
-                    strokeWidth={2}
-                    dot={{ r: 4, fill: '#0f172a', strokeWidth: 0 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h4 className="text-base font-bold">Top Categories</h4>
-              <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                <option>This Month</option>
-              </select>
-            </div>
-            <div className="h-48 w-full relative">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {categoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-2 gap-y-3 mt-4">
-              {categoryData.map((item) => (
-                <div key={item.name} className="flex items-center gap-2">
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: item.color }}
-                  />
-                  <span className="text-xs font-medium text-brand-muted">{item.name}</span>
-                  <span className="text-xs font-bold">{item.value}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-6">
-          <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
-            <div className="flex items-center justify-between mb-8">
-              <h4 className="text-base font-bold">Orders Overview</h4>
-              <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                <option>This Week</option>
-              </select>
-            </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <BarChart data={ordersOverviewData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#64748b' }}
-                    dy={10}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#64748b' }}
-                  />
-                  <Tooltip
-                    cursor={{ fill: '#4f46e5', opacity: 0.1 }}
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: 'none',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    }}
-                  />
-                  <Bar
-                    dataKey="orders"
-                    fill="#c7d2fe"
-                    radius={[6, 6, 0, 0]}
-                    activeBar={<Rectangle fill="#4f46e5" />}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm">
-            <div className="flex items-center justify-between mb-8">
-              <h4 className="text-base font-bold">Order Types</h4>
-              <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                <option>This Month</option>
-              </select>
-            </div>
-            <div className="space-y-6">
-              {[
-                {
-                  label: 'Dine-In',
-                  value: 900,
-                  percentage: 45,
-                  icon: UtensilsCrossed,
-                  color: 'bg-indigo-100 text-indigo-600',
-                },
-                {
-                  label: 'Takeaway',
-                  value: 600,
-                  percentage: 30,
-                  icon: Package,
-                  color: 'bg-slate-200 text-slate-700',
-                },
-                {
-                  label: 'Online',
-                  value: 500,
-                  percentage: 25,
-                  icon: MessageSquare,
-                  color: 'bg-indigo-50 text-indigo-700',
-                },
-              ].map((type) => (
-                <div key={type.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={cn(
-                        'w-10 h-10 rounded-xl flex items-center justify-center',
-                        type.color,
-                      )}
-                    >
-                      <type.icon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold">{type.label}</p>
-                      <p className="text-xs text-brand-muted font-medium">
-                        {type.percentage}%
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-base font-bold">{type.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-2xl shadow-sm">
-          <div className="flex items-center justify-between mb-8">
-            <h4 className="text-base font-bold">Recent Orders</h4>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search
-                  size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
-                />
-                <input
-                  type="text"
-                  placeholder="Search placeholder"
-                  className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-48 outline-none"
-                />
+              <div className="flex-1 overflow-hidden">
+                <VerticalCarousel items={trendingMenus} />
               </div>
-              <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer">
-                <option>This Week</option>
-              </select>
-              <button className="text-xs font-bold bg-brand-bg px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                See All Orders
-              </button>
             </div>
           </div>
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider border-b border-gray-50">
-                <th className="pb-4 font-bold">
-                  Order ID <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Photo <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Menu <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Qty <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Amount <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Customer <ChevronDown size={10} className="inline" />
-                </th>
-                <th className="pb-4 font-bold">
-                  Status <ChevronDown size={10} className="inline" />
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {recentOrders.map((order) => (
-                <tr key={order.id} className="group hover:bg-brand-bg/50 transition-colors">
-                  <td className="py-4 text-sm font-bold text-brand-muted">{order.id}</td>
-                  <td className="py-4">
-                    <img
-                      src={order.image}
-                      alt={order.menu}
-                      className="w-10 h-10 rounded-lg object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  </td>
-                  <td className="py-4">
-                    <p className="text-sm font-bold">{order.menu}</p>
-                    <p className="text-xs text-brand-muted font-medium">{order.category}</p>
-                  </td>
-                  <td className="py-4 text-sm font-bold">{order.qty}</td>
-                  <td className="py-4 text-sm font-bold">${order.amount.toFixed(2)}</td>
-                  <td className="py-4 text-sm font-bold">{order.customer}</td>
-                  <td className="py-4">
-                    <span
-                      className={cn(
-                        'text-xs font-bold px-2 py-1 rounded-lg',
-                        order.status === 'On Process'
-                          ? 'bg-orange-100 text-orange-600'
-                          : order.status === 'Completed'
-                          ? 'bg-green-100 text-green-600'
-                          : 'bg-gray-100 text-gray-600',
-                      )}
-                    >
-                      {order.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="w-80 space-y-8">
-        <div className="bg-white p-6 rounded-2xl shadow-sm h-full flex flex-col">
-          <div className="flex items-center justify-between mb-6">
-            <h4 className="text-base font-bold">Trending Menus</h4>
-            <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-              <option>This Week</option>
-            </select>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <VerticalCarousel items={trendingMenus} />
-          </div>
-        </div>
-      </div>
-    </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
 

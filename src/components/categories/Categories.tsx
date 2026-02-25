@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
+import { motion, AnimatePresence } from 'framer-motion';
+import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 
 
 // Icon mapping based on category name
@@ -37,6 +39,13 @@ interface CategoriesProps {
 
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Simulate loading
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const columns: ColumnDef<typeof categoryData[0]>[] = [
     {
@@ -140,57 +149,81 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
   ];
 
   return (
-    <div className="space-y-8 pt-6">
-      {/* Top Header Actions */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="bg-white p-3 rounded-xl shadow-sm">
-            <Filter size={18} className="text-brand-muted" />
-          </div>
-          <div className="relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
-            <input
-              type="text"
-              placeholder="Search categories..."
-              className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+    <div className="pt-6">
+      <AnimatePresence mode="wait">
+        {loading ? (
+          <motion.div 
+            key="skeleton"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-8"
+          >
+            <SkeletonPageHeader />
+            <SkeletonStatCards />
+            <div className="bg-white rounded-2xl shadow-sm p-6">
+              <SkeletonTable columns={5} rows={8} />
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="content"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="space-y-8"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="bg-white p-3 rounded-xl shadow-sm">
+                  <Filter size={18} className="text-brand-muted" />
+                </div>
+                <div className="relative">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search categories..."
+                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                  />
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsModalOpen(true)}
+                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+              >
+                <Plus size={18} />
+                New Category
+              </button>
+            </div>
+
+            <div className="grid grid-cols-4 gap-6">
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Total Categories</p>
+                <h3 className="text-3xl font-bold">{categoryData.length}</h3>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
+                <h3 className="text-3xl font-bold">177</h3>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
+                <h3 className="text-3xl font-bold text-green-600">$15,290</h3>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Needs Attention</p>
+                <h3 className="text-3xl font-bold text-orange-500">2</h3>
+              </div>
+            </div>
+
+            <DataTable
+              data={categoryData}
+              columns={columns}
+              keyExtractor={(item) => item.id}
             />
-          </div>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
-        >
-          <Plus size={18} />
-          New Category
-        </button>
-      </div>
-
-      {/* Stats Summary */}
-      <div className="grid grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm">
-          <p className="text-brand-muted text-sm font-medium mb-1">Total Categories</p>
-          <h3 className="text-3xl font-bold">{categoryData.length}</h3>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm">
-          <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
-          <h3 className="text-3xl font-bold">177</h3>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm">
-          <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
-          <h3 className="text-3xl font-bold text-green-600">$15,290</h3>
-        </div>
-        <div className="bg-white p-6 rounded-2xl shadow-sm">
-          <p className="text-brand-muted text-sm font-medium mb-1">Needs Attention</p>
-          <h3 className="text-3xl font-bold text-orange-500">2</h3>
-        </div>
-      </div>
-
-      {/* Category List via DataTable component */}
-      <DataTable
-        data={categoryData}
-        columns={columns}
-        keyExtractor={(item) => item.id}
-      />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* New Category Modal */}
       <Modal

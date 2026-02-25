@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2 } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
+import { motion, AnimatePresence } from 'framer-motion';
+import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 
 
 const inventoryData = [
@@ -96,68 +98,102 @@ interface InventoryProps {
 
 export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Simulate loading
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
-    <div className="space-y-8 pt-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {onBack && (
-            <button 
-              onClick={onBack}
-              className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-orange/30 transition-all group"
-              title="Back to Categories"
-            >
-              <ArrowLeft size={18} className="text-brand-muted group-hover:text-brand-orange transition-colors" />
-            </button>
-          )}
-          <div className="bg-white p-3 rounded-xl shadow-sm">
-          <Filter size={18} className="text-brand-muted" />
-        </div>
-        <div className="relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
-          <input
-            type="text"
-            placeholder="Search inventory..."
-            className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
-          />
-          </div>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
-        >
-          <Plus size={18} />
-        Add New Item
-      </button>
-    </div>
+    <div className="pt-6">
+      <AnimatePresence mode="wait">
+        {loading ? (
+          <motion.div 
+            key="skeleton"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-8"
+          >
+            <SkeletonPageHeader />
+            <SkeletonStatCards />
+            <div className="bg-white rounded-2xl shadow-sm p-6">
+              <SkeletonTable columns={6} rows={10} />
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="content"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="space-y-8"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {onBack && (
+                  <button 
+                    onClick={onBack}
+                    className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-orange/30 transition-all group"
+                    title="Back to Categories"
+                  >
+                    <ArrowLeft size={18} className="text-brand-muted group-hover:text-brand-orange transition-colors" />
+                  </button>
+                )}
+                <div className="bg-white p-3 rounded-xl shadow-sm">
+                  <Filter size={18} className="text-brand-muted" />
+                </div>
+                <div className="relative">
+                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                  <input
+                    type="text"
+                    placeholder="Search inventory..."
+                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                  />
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsModalOpen(true)}
+                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+              >
+                <Plus size={18} />
+                Add New Item
+              </button>
+            </div>
 
-    <div className="grid grid-cols-4 gap-6">
-      <div className="bg-white p-6 rounded-2xl shadow-sm">
-        <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
-        <h3 className="text-3xl font-bold">156</h3>
-      </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm">
-        <p className="text-brand-muted text-sm font-medium mb-1">Low Stock</p>
-        <div className="flex items-center gap-2">
-          <h3 className="text-3xl font-bold text-orange-500">12</h3>
-          <AlertTriangle size={18} className="text-orange-500" />
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm">
-        <p className="text-brand-muted text-sm font-medium mb-1">Out of Stock</p>
-        <h3 className="text-3xl font-bold text-red-500">3</h3>
-      </div>
-      <div className="bg-white p-6 rounded-2xl shadow-sm">
-        <p className="text-brand-muted text-sm font-medium mb-1">Categories</p>
-        <h3 className="text-3xl font-bold">8</h3>
-      </div>
-    </div>
+            <div className="grid grid-cols-4 gap-6">
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
+                <h3 className="text-3xl font-bold">156</h3>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Low Stock</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-3xl font-bold text-orange-500">12</h3>
+                  <AlertTriangle size={18} className="text-orange-500" />
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Out of Stock</p>
+                <h3 className="text-3xl font-bold text-red-500">3</h3>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
+                <p className="text-brand-muted text-sm font-medium mb-1">Categories</p>
+                <h3 className="text-3xl font-bold">8</h3>
+              </div>
+            </div>
 
-      <DataTable
-        data={inventoryData}
-        columns={columns}
-        keyExtractor={(item) => item.id}
-      />
+            <DataTable
+              data={inventoryData}
+              columns={columns}
+              keyExtractor={(item) => item.id}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add New Item Modal */}
       <Modal
