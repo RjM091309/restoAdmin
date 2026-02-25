@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
@@ -13,6 +13,7 @@ import {
   deleteInventoryCategory,
   type InventoryCategory 
 } from '../../services/inventoryService';
+import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
 import { toast } from 'sonner';
 
 
@@ -72,6 +73,7 @@ interface CategoriesProps {
 
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selectedBranch }) => {
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,8 +90,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const data = await getInventoryCategories(String(selectedBranch?.id || ''));
-      setCategories(data);
+      const branchId = String(selectedBranch?.id || '');
+      const [categoryRows, inventoryRows] = await Promise.all([
+        getInventoryCategories(branchId),
+        getInventoryItems(branchId),
+      ]);
+      setCategories(categoryRows);
+      setInventoryItems(inventoryRows);
     } catch (error: any) {
       toast.error(error.message || 'Failed to fetch categories');
     } finally {
@@ -171,6 +178,43 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     cat.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const categoryMetrics = useMemo(() => {
+    const metrics = new Map<string, { totalItems: number; totalValue: number }>();
+    const keyForName = (value: string) => String(value || '').trim().toLowerCase();
+
+    categories.forEach((category) => {
+      metrics.set(category.id, { totalItems: 0, totalValue: 0 });
+      metrics.set(`name:${keyForName(category.name)}`, { totalItems: 0, totalValue: 0 });
+    });
+
+    inventoryItems.forEach((item) => {
+      const idKey = item.categoryId || '';
+      const nameKey = `name:${keyForName(item.categoryName || '')}`;
+      const target =
+        (idKey && metrics.get(idKey)) ||
+        metrics.get(nameKey);
+
+      if (!target) return;
+      target.totalItems += 1;
+      target.totalValue += Number(item.stockQty || 0) * Number(item.unitCost || 0);
+    });
+
+    return metrics;
+  }, [categories, inventoryItems]);
+
+  const dashboardMetrics = useMemo(() => {
+    const totalItems = inventoryItems.length;
+    const totalValue = inventoryItems.reduce(
+      (sum, item) => sum + Number(item.stockQty || 0) * Number(item.unitCost || 0),
+      0
+    );
+    const needsAttention = inventoryItems.filter((item) => Number(item.stockQty || 0) <= Number(item.reorderLevel || 0)).length;
+    return { totalItems, totalValue, needsAttention };
+  }, [inventoryItems]);
+
+  const formatValue = (value: number) =>
+    new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
+
   const columns: ColumnDef<InventoryCategory>[] = [
     {
       header: 'Category Name',
@@ -201,22 +245,34 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     {
       header: 'Total Items',
       className: 'text-center',
-      render: () => (
+      render: (category) => {
+        const metric =
+          categoryMetrics.get(category.id) ||
+          categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
+          { totalItems: 0, totalValue: 0 };
+        return (
         <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">--</span>
+          <span className="text-sm font-bold text-brand-text">{metric.totalItems}</span>
           <span className="text-xs text-brand-muted">Products</span>
         </div>
-      ),
+        );
+      },
     },
     {
       header: 'Total Value',
       className: 'text-center',
-      render: () => (
+      render: (category) => {
+        const metric =
+          categoryMetrics.get(category.id) ||
+          categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
+          { totalItems: 0, totalValue: 0 };
+        return (
         <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">--</span>
+          <span className="text-sm font-bold text-brand-text">{formatValue(metric.totalValue)}</span>
           <span className="text-xs text-brand-muted">Asset Value</span>
         </div>
-      ),
+        );
+      },
     },
     {
       header: 'Status',
@@ -329,17 +385,17 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Categories</p>
                 <h3 className="text-3xl font-bold">{categories.length}</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
-                <h3 className="text-3xl font-bold">--</h3>
+                <h3 className="text-3xl font-bold">{dashboardMetrics.totalItems}</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
-                <h3 className="text-3xl font-bold text-green-600">--</h3>
+                <h3 className="text-3xl font-bold text-green-600">{formatValue(dashboardMetrics.totalValue)}</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
+              <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">Needs Attention</p>
-                <h3 className="text-3xl font-bold text-orange-500">--</h3>
+                <h3 className="text-3xl font-bold text-orange-500">{dashboardMetrics.needsAttention}</h3>
               </div>
             </div>
 

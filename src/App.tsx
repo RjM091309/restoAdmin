@@ -327,6 +327,19 @@ export default function App() {
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const branchId = params.get('branchId');
+    const branchName = params.get('branchName');
+    if (!branchId) return;
+
+    const resolvedName = branchName || (branchId === 'all' ? 'All Branches' : `Branch ${branchId}`);
+    setSelectedBranch((prev) => {
+      if (prev && String(prev.id) === branchId && prev.name === resolvedName) return prev;
+      return { id: branchId, name: resolvedName };
+    });
+  }, [location.search]);
+
   // Parse active tab from URL path
   const pathParts = location.pathname.split('/').filter(Boolean);
   const primaryPath = pathParts[0] || 'dashboard';
@@ -372,12 +385,13 @@ export default function App() {
   // const dynamicRevenueData = getDynamicRevenueData();
 
   const handleTabChange = (tab: string) => {
+    const suffix = location.search || '';
     switch (tab) {
-      case 'User Info': navigate('/users/info'); break;
-      case 'User Role': navigate('/users/role'); break;
-      case 'User Access': navigate('/users/access'); break;
-      case 'User Management': navigate('/users/info'); break;
-      default: navigate(`/${tab.toLowerCase()}`);
+      case 'User Info': navigate(`/users/info${suffix}`); break;
+      case 'User Role': navigate(`/users/role${suffix}`); break;
+      case 'User Access': navigate(`/users/access${suffix}`); break;
+      case 'User Management': navigate(`/users/info${suffix}`); break;
+      default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };
 
@@ -469,7 +483,7 @@ export default function App() {
                   >
                     <Categories 
                       selectedBranch={selectedBranch}
-                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}`)} 
+                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}${location.search || ''}`)} 
                     />
                   </motion.div>
                 } />
@@ -512,7 +526,10 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Inventory onBack={() => navigate('/inventory')} />
+                    <Inventory
+                      selectedBranch={selectedBranch}
+                      onBack={() => navigate(`/inventory${location.search || ''}`)}
+                    />
                   </motion.div>
                 } />
 

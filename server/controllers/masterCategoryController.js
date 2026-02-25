@@ -4,10 +4,10 @@ const ApiResponse = require('../utils/apiResponse');
 class MasterCategoryController {
 	static _resolveBranchId(req) {
 		const raw =
-			req.session?.branch_id ||
 			req.query?.branch_id ||
 			req.body?.branch_id ||
 			req.body?.BRANCH_ID ||
+			req.session?.branch_id ||
 			req.user?.branch_id ||
 			null;
 		if (raw === null || raw === undefined || raw === '' || raw === 'all') return null;

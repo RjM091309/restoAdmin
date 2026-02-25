@@ -83,7 +83,11 @@ export const Header: React.FC<HeaderProps> = ({
           const allBranches = [{ id: 'all', name: 'All Branches' }, ...data];
           setBranches(allBranches);
           if (!selectedBranch && allBranches.length > 0) {
-            onBranchChange(allBranches[0]);
+            const params = new URLSearchParams(window.location.search);
+            const branchIdFromUrl = params.get('branchId');
+            if (!branchIdFromUrl) {
+              onBranchChange(allBranches[0]);
+            }
           }
         }
       } catch (error) {
@@ -92,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     fetchBranches();
-  }, []);
+  }, [onBranchChange, selectedBranch]);
 
   const startDate = toDate(dateRange.start);
   const endDate = toDate(dateRange.end);
@@ -108,6 +112,12 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleClose = () => setDropdownOpen(false);
+  const openBranchInNewTab = (branch: Branch) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('branchId', String(branch.id));
+    url.searchParams.set('branchName', branch.name);
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
@@ -222,7 +232,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     key={branch.id}
                     onClick={() => {
-                      onBranchChange(branch);
+                      openBranchInNewTab(branch);
                       setBranchDropdownOpen(false);
                     }}
                     className={clsx(
