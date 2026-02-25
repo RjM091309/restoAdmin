@@ -64,7 +64,7 @@ const revenueData = [
 
 const StatCard = ({ icon: Icon, label, value, trend, trendType }: { icon: any, label: string, value: string, trend: string, trendType: 'up' | 'down' }) => (
   <div className="bg-white p-5 rounded-2xl shadow-sm flex items-center gap-4 flex-1 min-w-[200px]">
-    <div className="w-12 h-12 rounded-xl bg-brand-orange flex items-center justify-center text-white">
+    <div className="w-12 h-12 rounded-xl bg-brand-primary flex items-center justify-center text-white">
       <Icon size={24} />
     </div>
     <div>
@@ -99,7 +99,7 @@ const TrendingMenuItem = ({ menu }: { menu: any, key?: any }) => (
     </div>
     <div className="flex items-start justify-between">
       <div>
-        <h5 className="text-base font-bold group-hover:text-brand-orange transition-colors">{menu.name}</h5>
+        <h5 className="text-base font-bold group-hover:text-brand-primary transition-colors">{menu.name}</h5>
         <p className="text-xs text-brand-muted font-medium mb-2">{menu.category}</p>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5 text-brand-muted">
@@ -112,7 +112,7 @@ const TrendingMenuItem = ({ menu }: { menu: any, key?: any }) => (
           </div>
         </div>
       </div>
-      <p className="text-xl font-bold text-brand-orange">${menu.price.toFixed(2)}</p>
+      <p className="text-xl font-bold text-brand-primary">${menu.price.toFixed(2)}</p>
     </div>
   </div>
 );
@@ -223,7 +223,7 @@ const LoginView = () => {
           className="w-full max-w-sm mx-auto"
         >
           <div className="flex flex-col items-start mb-10">
-            <div className="w-16 h-16 bg-brand-orange rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-brand-orange/30">
+            <div className="w-16 h-16 bg-brand-primary rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-brand-primary/30">
               <UtensilsCrossed size={32} className="text-white" />
             </div>
             <h2 className="text-4xl font-bold tracking-tight text-brand-text mb-2">Welcome Back</h2>
@@ -246,7 +246,7 @@ const LoginView = () => {
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
                 disabled={isLoading}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
             </div>
 
@@ -258,21 +258,21 @@ const LoginView = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 disabled={isLoading}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
             </div>
 
             <div className="flex items-center justify-between text-sm pt-2">
               <label className="flex items-center gap-2 cursor-pointer group">
-                <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-gray-300 text-brand-orange focus:ring-brand-orange/20" />
+                <input type="checkbox" defaultChecked className="w-4 h-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary/20" />
                 <span className="text-brand-muted group-hover:text-brand-text transition-colors">Remember me</span>
               </label>
-              <a href="#" className="text-brand-orange font-bold hover:underline transition-all">Forgot password?</a>
+              <a href="#" className="text-brand-primary font-bold hover:underline transition-all">Forgot password?</a>
             </div>
 
             <button
               disabled={isLoading}
-              className="w-full bg-brand-orange text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-orange/30 hover:shadow-brand-orange/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4 disabled:opacity-70 disabled:hover:translate-y-0"
+              className="w-full bg-brand-primary text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-primary/30 hover:shadow-brand-primary/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4 disabled:opacity-70 disabled:hover:translate-y-0"
             >
               {isLoading ? 'Signing In...' : 'Sign In'}
             </button>
@@ -280,7 +280,7 @@ const LoginView = () => {
 
           <div className="mt-12 pt-8 border-t border-gray-100 text-center">
             <p className="text-sm text-brand-muted">
-              Don't have an account? <a href="#" className="text-brand-orange font-bold hover:underline ml-1">Contact Support</a>
+              Don't have an account? <a href="#" className="text-brand-primary font-bold hover:underline ml-1">Contact Support</a>
             </p>
           </div>
         </motion.div>
