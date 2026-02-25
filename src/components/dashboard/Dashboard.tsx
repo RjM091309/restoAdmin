@@ -37,9 +37,9 @@ function cn(...inputs: ClassValue[]) {
 
 const categoryData = [
   { name: 'Seafood', value: 30, color: '#0f172a' },
-  { name: 'Beverages', value: 25, color: '#f97316' },
+  { name: 'Beverages', value: 25, color: '#4f46e5' },
   { name: 'Dessert', value: 25, color: '#e2e8f0' },
-  { name: 'Pasta', value: 20, color: '#fed7aa' },
+  { name: 'Pasta', value: 20, color: '#c7d2fe' },
 ];
 
 const ordersOverviewData = [
@@ -142,7 +142,7 @@ const StatCard = ({
   trendType: 'up' | 'down';
 }) => (
   <div className="bg-white p-5 rounded-2xl shadow-sm flex items-center gap-4 flex-1 min-w-[200px]">
-    <div className="w-12 h-12 rounded-xl bg-brand-orange flex items-center justify-center text-white">
+    <div className="w-12 h-12 rounded-xl bg-brand-primary flex items-center justify-center text-white">
       <Icon size={24} />
     </div>
     <div>
@@ -188,7 +188,7 @@ const TrendingMenuItem = ({
     </div>
     <div className="flex items-start justify-between">
       <div>
-        <h5 className="text-base font-bold group-hover:text-brand-orange transition-colors">
+        <h5 className="text-base font-bold group-hover:text-brand-primary transition-colors">
           {menu.name}
         </h5>
         <p className="text-xs text-brand-muted font-medium mb-2">{menu.category}</p>
@@ -203,7 +203,7 @@ const TrendingMenuItem = ({
           </div>
         </div>
       </div>
-      <p className="text-xl font-bold text-brand-orange">${menu.price.toFixed(2)}</p>
+      <p className="text-xl font-bold text-brand-primary">${menu.price.toFixed(2)}</p>
     </div>
   </div>
 );
@@ -351,7 +351,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                   <div className="flex items-center gap-6">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-orange" />
+                        <div className="w-2 h-2 rounded-full bg-brand-primary" />
                         <span className="text-sm font-medium">Income</span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -369,8 +369,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                     <ComposedChart data={dashboardData.dynamicRevenueData}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
+                          <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#0f172a" stopOpacity={0.18} />
@@ -402,9 +402,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         type="monotone"
                         dataKey="income"
                         fill="url(#incomeGradient)"
-                        stroke="#f97316"
+                        stroke="#4f46e5"
                         strokeWidth={2}
-                        dot={{ r: 4, fill: '#f97316', strokeWidth: 0 }}
+                        dot={{ r: 4, fill: '#4f46e5', strokeWidth: 0 }}
                       />
                       <Area
                         type="monotone"
@@ -485,7 +485,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         tick={{ fontSize: 12, fill: '#64748b' }}
                       />
                       <Tooltip
-                        cursor={{ fill: '#f97316', opacity: 0.1 }}
+                        cursor={{ fill: '#4f46e5', opacity: 0.1 }}
                         contentStyle={{
                           borderRadius: '12px',
                           border: 'none',
@@ -494,9 +494,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       />
                       <Bar
                         dataKey="orders"
-                        fill="#fed7aa"
+                        fill="#c7d2fe"
                         radius={[6, 6, 0, 0]}
-                        activeBar={<Rectangle fill="#f97316" />}
+                        activeBar={<Rectangle fill="#4f46e5" />}
                       />
                     </BarChart>
                   </ResponsiveContainer>
