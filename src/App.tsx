@@ -33,6 +33,7 @@ import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
+import { Menu } from './components/menu/Menu';
 import { cn } from './lib/utils';
 
 // Panels
@@ -267,7 +268,7 @@ const LoginView = () => {
               <a href="#" className="text-brand-orange font-bold hover:underline transition-all">Forgot password?</a>
             </div>
 
-            <button 
+            <button
               disabled={isLoading}
               className="w-full bg-brand-orange text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-brand-orange/30 hover:shadow-brand-orange/40 hover:-translate-y-0.5 transition-all active:scale-[0.98] mt-4 disabled:opacity-70 disabled:hover:translate-y-0"
             >
@@ -346,7 +347,7 @@ export default function App() {
     end: '2026-02-23'
   });
 
-// Dynamic data generation based on date range (simulated)
+  // Dynamic data generation based on date range (simulated)
   // const getDynamicRevenueData = () => {
   //   const seed = dateRange.start.length + dateRange.end.length;
   //   return revenueData.map((item, idx) => ({
@@ -399,7 +400,7 @@ export default function App() {
     <ProtectedRoute>
       <Toaster position="top-right" richColors />
       <div className="flex h-screen overflow-hidden bg-brand-bg">
-        <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} />
+        <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} selectedBranch={selectedBranch} />
 
         <main className="flex-1 flex flex-col overflow-hidden">
           <Header
@@ -434,6 +435,17 @@ export default function App() {
                       />
                     )}
                   </motion.div>
+                } />
+
+                <Route path="/menu" element={
+                  selectedBranch && String(selectedBranch.id) !== 'all' ? (
+                    <Menu
+                      key={selectedBranch.id}
+                      selectedBranch={selectedBranch}
+                    />
+                  ) : (
+                    <Navigate to="/dashboard" replace />
+                  )
                 } />
 
                 <Route path="/inventory" element={

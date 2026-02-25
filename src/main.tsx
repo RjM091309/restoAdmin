@@ -14,15 +14,6 @@ const theme = createTheme({
       main: '#4f46e5',
     },
   },
-  components: {
-    MuiDayCalendar: {
-      styleOverrides: {
-        weekContainer: {
-          margin: 0,
-        },
-      },
-    },
-  },
 });
 
 createRoot(document.getElementById('root')!).render(

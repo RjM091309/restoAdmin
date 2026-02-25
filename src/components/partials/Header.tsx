@@ -76,15 +76,15 @@ export const Header: React.FC<HeaderProps> = ({
         });
         if (res.ok) {
           const json = await res.json();
-              const data = (json.data ?? json).map((b: any) => ({
-                id: b.IDNo,
-                name: b.BRANCH_LABEL || b.BRANCH_NAME,
-              }));
-              const allBranches = [{ id: 'all', name: 'All Branches' }, ...data];
-              setBranches(allBranches);
-              if (!selectedBranch && allBranches.length > 0) {
-                onBranchChange(allBranches[0]);
-              }
+          const data = (json.data ?? json).map((b: any) => ({
+            id: b.IDNo,
+            name: b.BRANCH_LABEL || b.BRANCH_NAME,
+          }));
+          const allBranches = [{ id: 'all', name: 'All Branches' }, ...data];
+          setBranches(allBranches);
+          if (!selectedBranch && allBranches.length > 0) {
+            onBranchChange(allBranches[0]);
+          }
         }
       } catch (error) {
         console.error("Failed to fetch branches:", error);
@@ -131,15 +131,17 @@ export const Header: React.FC<HeaderProps> = ({
         <p className="text-brand-muted text-sm mt-1">
           {activeTab === 'Dashboard'
             ? `Hello ${user?.firstname || 'User'}, welcome back!`
-            : activeTab === 'Inventory'
-              ? 'Manage your restaurant supplies and stock.'
-              : activeTab === 'User Info'
-                ? 'View and manage individual user accounts.'
-                : activeTab === 'User Role'
-                  ? 'Configure user roles and their permissions.'
-                  : activeTab === 'User Access'
-                    ? 'Control user access levels to system features.'
-                    : `View your ${activeTab.toLowerCase()}.`}
+            : activeTab === 'Menu'
+              ? 'Manage your restaurant menu items.'
+              : activeTab === 'Inventory'
+                ? 'Manage your restaurant supplies and stock.'
+                : activeTab === 'User Info'
+                  ? 'View and manage individual user accounts.'
+                  : activeTab === 'User Role'
+                    ? 'Configure user roles and their permissions.'
+                    : activeTab === 'User Access'
+                      ? 'Control user access levels to system features.'
+                      : `View your ${activeTab.toLowerCase()}.`}
         </p>
       </div>
 
@@ -214,13 +216,13 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-hidden
               />
               <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
-                        {branches.map((branch) => (
-                          <button
-                            key={branch.id}
-                            onClick={() => {
-                              onBranchChange(branch);
-                              setBranchDropdownOpen(false);
-                            }}
+                {branches.map((branch) => (
+                  <button
+                    key={branch.id}
+                    onClick={() => {
+                      onBranchChange(branch);
+                      setBranchDropdownOpen(false);
+                    }}
                     className={clsx(
                       'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-orange/5 cursor-pointer',
                       selectedBranch?.id === branch.id

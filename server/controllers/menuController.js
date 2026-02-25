@@ -28,15 +28,17 @@ class MenuController {
 	// Get all menus
 	static async getAll(req, res) {
 		try {
-			// Prioritize session branch_id
-			const branchId = req.session?.branch_id || req.query.branch_id || req.body.branch_id || req.user?.branch_id || null;
+			// Prioritize query param so the frontend branch selector works for admin
+			const rawBranch = req.query.branch_id ?? req.body.branch_id ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
+			// If 'all' is passed, fetch menus for ALL branches (admin view)
+			const branchId = (rawBranch === 'all' || rawBranch === '') ? null : rawBranch;
 			const menus = await MenuModel.getAll(branchId);
-			
+
 			// Get target language from query parameter, cookie, or default to 'en'
 			// If user selected Korean in UI, show original Korean text (no translation)
 			// If user selected English/Japanese/Chinese, translate from Korean to that language
 			const targetLanguage = req.query.lang || req.query.language || req.cookies?.lang || 'en';
-			
+
 			// Apply translation based on target language
 			// Descriptions: ALWAYS translate to selected language (English descriptions should be translated to Korean, Japanese, Chinese, etc.)
 			// Menu names & Category names: translate only if not Korean (Korean stays in Korean)
@@ -46,14 +48,14 @@ class MenuController {
 				try {
 					const descTextsToTranslate = [];
 					const descTextMapping = [];
-					
+
 					menus.forEach(menu => {
 						if (menu.MENU_DESCRIPTION) {
 							descTextsToTranslate.push(menu.MENU_DESCRIPTION);
 							descTextMapping.push({ menu: menu });
 						}
 					});
-					
+
 					if (descTextsToTranslate.length > 0) {
 						const descTranslations = await TranslationService.translateBatch(descTextsToTranslate, targetLanguage);
 						descTranslations.forEach((translation, index) => {
@@ -65,7 +67,7 @@ class MenuController {
 				} catch (descError) {
 					console.error('[MENU CONTROLLER] Description translation error:', descError.message);
 				}
-				
+
 				// Then, translate menu names and category names
 				// If Korean is selected: translate English text to Korean, keep Korean text as is
 				// If other language is selected: translate to that language
@@ -73,7 +75,7 @@ class MenuController {
 					// Collect all texts to translate in batch
 					const textsToTranslate = [];
 					const textMapping = []; // Track which field each text belongs to
-					
+
 					menus.forEach(menu => {
 						// Menu names: always translate (auto-detect will handle Korean vs English)
 						if (menu.MENU_NAME) {
@@ -92,7 +94,7 @@ class MenuController {
 						// This will translate English to Korean when Korean is selected
 						// And translate Korean to other languages when other languages are selected
 						const translations = await TranslationService.translateBatch(textsToTranslate, targetLanguage);
-						
+
 						// Map translations back to menus
 						translations.forEach((translation, index) => {
 							const mapping = textMapping[index];
@@ -109,7 +111,7 @@ class MenuController {
 					console.error('[MENU CONTROLLER] Menu/Category name translation error:', nameError.message);
 				}
 			}
-			
+
 			return ApiResponse.success(res, menus, 'Menus retrieved successfully');
 		} catch (error) {
 			console.error('Error fetching menus:', error);
@@ -122,7 +124,7 @@ class MenuController {
 		try {
 			const { id } = req.params;
 			const menu = await MenuModel.getById(id);
-			
+
 			if (!menu) {
 				return ApiResponse.notFound(res, 'Menu');
 			}
@@ -143,14 +145,16 @@ class MenuController {
 	// Get all categories for dropdown
 	static async getCategories(req, res) {
 		try {
-			// Prioritize session branch_id for filtering categories by branch
-			const branchId = req.session?.branch_id || req.query.branch_id || req.body?.branch_id || req.user?.branch_id || null;
+			// Prioritize query param so the frontend branch selector works for admin
+			const rawBranch = req.query.branch_id ?? req.body?.branch_id ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
+			// If 'all' is passed, fetch categories for ALL branches (admin view)
+			const branchId = (rawBranch === 'all' || rawBranch === '') ? null : rawBranch;
 
 			const categories = await MenuModel.getCategories(branchId);
-			
+
 			// Get target language from query parameter, cookie, or default to 'en'
 			const targetLanguage = req.query.lang || req.query.language || req.cookies?.lang || 'en';
-			
+
 			// Apply translation for all languages (auto-detect will handle Korean vs English source)
 			// This will translate English categories to Korean/Japanese/Chinese when those languages are selected
 			// And translate Korean categories to English/Japanese/Chinese when those languages are selected
@@ -160,7 +164,7 @@ class MenuController {
 					// Collect all texts to translate
 					const textsToTranslate = [];
 					const textMapping = []; // Track which category each text belongs to
-					
+
 					categories.forEach(cat => {
 						if (cat.CATEGORY_NAME) {
 							textsToTranslate.push(cat.CATEGORY_NAME);
@@ -172,7 +176,7 @@ class MenuController {
 						// Translate in batch - auto-detect source language (handles both Korean and English)
 						// Google Translate will auto-detect if the source is Korean or English
 						const translations = await TranslationService.translateBatch(textsToTranslate, targetLanguage);
-						
+
 						// Map translations back to categories
 						translations.forEach((translation, index) => {
 							const mapping = textMapping[index];
@@ -186,7 +190,7 @@ class MenuController {
 					// Continue with original text if translation fails
 				}
 			}
-			
+
 			return ApiResponse.success(res, categories, 'Categories retrieved successfully');
 		} catch (error) {
 			console.error('Error fetching categories:', error);

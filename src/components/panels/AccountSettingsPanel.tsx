@@ -85,12 +85,16 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
   onClose,
 }) => {
   const [view, setView] = useState<'main' | 'edit-profile'>('main');
-  const { user, updateUser } = useUser();
+  const { user, updateUser, logout } = useUser();
 
   // Form State
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
-  const [phone, setPhone] = useState(user.phone);
+  const [firstname, setFirstname] = useState(user?.firstname || '');
+  const [lastname, setLastname] = useState(user?.lastname || '');
+  const [username, setUsername] = useState(user?.username || '');
+
+  const displayName = user ? `${user.firstname} ${user.lastname}` : 'User';
+  const displayRole = user?.permissions === 1 ? 'Administrator' : 'Staff';
+  const avatarSrc = user?.avatar || 'https://picsum.photos/seed/user/100/100';
 
   const handleClose = () => {
     onClose();
@@ -144,7 +148,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                     <div className="flex items-center gap-4 p-4 bg-brand-bg rounded-2xl border border-gray-100">
                       <div className="relative">
                         <img
-                          src={user.avatar}
+                          src={avatarSrc}
                           alt="Profile"
                           className="w-16 h-16 rounded-2xl object-cover border-2 border-white shadow-sm"
                           referrerPolicy="no-referrer"
@@ -152,8 +156,8 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                         <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 border-2 border-white rounded-full" />
                       </div>
                       <div>
-                        <h4 className="text-base font-bold">{user.name}</h4>
-                        <p className="text-sm text-brand-muted font-medium">{user.role}</p>
+                        <h4 className="text-base font-bold">{displayName}</h4>
+                        <p className="text-sm text-brand-muted font-medium">{displayRole}</p>
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-green-100 text-green-700 rounded-md text-[10px] font-bold uppercase tracking-wider">
                           <ShieldCheck size={10} />
                           Verified
@@ -201,8 +205,8 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                       label="Sign Out"
                       danger
                       onClick={() => {
-                        // Handle logout
-                        window.location.href = '/login';
+                        onClose();
+                        logout();
                       }}
                     />
                   </div>
@@ -231,7 +235,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                     <div className="flex flex-col items-center">
                       <div className="relative group cursor-pointer">
                         <img
-                          src={user.avatar}
+                          src={avatarSrc}
                           alt="Profile"
                           className="w-24 h-24 rounded-3xl object-cover border-4 border-white shadow-md group-hover:opacity-90 transition-opacity"
                         />
@@ -252,14 +256,14 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Full Name
+                        First Name
                       </label>
                       <div className="relative">
                         <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                         <input
                           type="text"
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
+                          value={firstname}
+                          onChange={(e) => setFirstname(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
                         />
                       </div>
@@ -267,29 +271,29 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
 
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Email Address
+                        Last Name
+                      </label>
+                      <div className="relative">
+                        <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
+                        <input
+                          type="text"
+                          value={lastname}
+                          onChange={(e) => setLastname(e.target.value)}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
+                        Username
                       </label>
                       <div className="relative">
                         <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                         <input
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Phone Number
-                      </label>
-                      <div className="relative">
-                        <Phone size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
-                        <input
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
+                          type="text"
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
                           className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
                         />
                       </div>
@@ -301,7 +305,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                       </label>
                       <input
                         type="text"
-                        value={user.role}
+                        value={displayRole}
                         disabled
                         className="w-full bg-gray-100 border border-gray-200 rounded-xl px-4 py-3.5 text-sm text-brand-muted cursor-not-allowed"
                       />
@@ -319,7 +323,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                     <button
                       className="flex-1 py-3 bg-brand-orange text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-orange/20 hover:opacity-90 transition-opacity cursor-pointer"
                       onClick={() => {
-                        updateUser({ name, email, phone });
+                        updateUser({ firstname, lastname, username });
                         setView('main');
                       }}
                     >

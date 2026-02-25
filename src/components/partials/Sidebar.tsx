@@ -12,10 +12,12 @@ import {
 } from 'lucide-react';
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
+import { type Branch } from './Header';
 
 type SidebarProps = {
   activeTab: string;
   onTabChange: (tab: string) => void;
+  selectedBranch: Branch | null;
 };
 
 type SidebarItemProps = {
@@ -45,7 +47,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
       onClick={onClick}
       className={cn(
         'w-full flex items-center justify-between px-6 py-3 cursor-pointer transition-all group text-left relative',
-        active 
+        active
           ? 'text-brand-orange bg-brand-orange/5 after:content-[" "] after:absolute after:right-0 after:top-0 after:bottom-0 after:w-1 after:bg-brand-orange after:rounded-l-full'
           : 'text-brand-muted hover:text-brand-text hover:bg-gray-50/50',
       )}
@@ -101,12 +103,12 @@ const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void 
         : 'text-brand-muted hover:text-brand-text',
     )}
   >
-    <Circle 
-      size={6} 
+    <Circle
+      size={6}
       className={cn(
         "fill-current transition-all",
         active ? "scale-125" : "opacity-30 group-hover:opacity-100"
-      )} 
+      )}
     />
     <span className={cn(
       "text-sm font-medium",
@@ -115,7 +117,9 @@ const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void 
   </button>
 );
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, selectedBranch }) => {
+  // Menu tab is only visible when a specific branch is selected (not 'all' or null)
+  const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const { logout } = useUser();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
 
@@ -146,18 +150,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
           active={activeTab === 'Dashboard'}
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); }}
         />
-        <SidebarItem
-          icon={ClipboardList}
-          label="Orders"
-          active={activeTab === 'Orders'}
-          onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); }}
-        />
-        <SidebarItem
-          icon={UtensilsCrossed}
-          label="Menu"
-          active={activeTab === 'Menu'}
-          onClick={() => { onTabChange('Menu'); setUserMgmtExpanded(false); }}
-        />
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={ClipboardList}
+            label="Orders"
+            active={activeTab === 'Orders'}
+            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={UtensilsCrossed}
+            label="Menu"
+            active={activeTab === 'Menu'}
+            onClick={() => { onTabChange('Menu'); setUserMgmtExpanded(false); }}
+          />
+        )}
         <SidebarItem
           icon={Package}
           label="Inventory"
@@ -172,20 +180,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
           isExpanded={userMgmtExpanded}
           onClick={handleUserMgmtToggle}
         >
-          <SubItem 
-            label="User Info" 
-            active={activeTab === 'User Info'} 
-            onClick={() => onTabChange('User Info')} 
+          <SubItem
+            label="User Info"
+            active={activeTab === 'User Info'}
+            onClick={() => onTabChange('User Info')}
           />
-          <SubItem 
-            label="User Role" 
-            active={activeTab === 'User Role'} 
-            onClick={() => onTabChange('User Role')} 
+          <SubItem
+            label="User Role"
+            active={activeTab === 'User Role'}
+            onClick={() => onTabChange('User Role')}
           />
-          <SubItem 
-            label="User Access" 
-            active={activeTab === 'User Access'} 
-            onClick={() => onTabChange('User Access')} 
+          <SubItem
+            label="User Access"
+            active={activeTab === 'User Access'}
+            onClick={() => onTabChange('User Access')}
           />
         </SidebarItem>
       </nav>
