@@ -1,7 +1,7 @@
-const CategoryInventoryModel = require('../models/categoryInventoryModel');
+const MasterCategoryModel = require('../models/masterCategoryModel');
 const ApiResponse = require('../utils/apiResponse');
 
-class CategoryInventoryController {
+class MasterCategoryController {
 	static _resolveBranchId(req) {
 		const raw =
 			req.session?.branch_id ||
@@ -26,8 +26,8 @@ class CategoryInventoryController {
 
 	static async getAll(req, res) {
 		try {
-			const branchId = CategoryInventoryController._resolveBranchId(req);
-			const rows = await CategoryInventoryModel.getAll(branchId);
+			const branchId = MasterCategoryController._resolveBranchId(req);
+			const rows = await MasterCategoryModel.getAll(branchId);
 			return ApiResponse.success(res, rows, 'Inventory categories retrieved successfully');
 		} catch (error) {
 			return ApiResponse.error(res, 'Failed to fetch inventory categories', 500, error.message);
@@ -37,7 +37,7 @@ class CategoryInventoryController {
 	static async getById(req, res) {
 		try {
 			const { id } = req.params;
-			const row = await CategoryInventoryModel.getById(id);
+			const row = await MasterCategoryModel.getById(id);
 			if (!row) return ApiResponse.notFound(res, 'Inventory category');
 			return ApiResponse.success(res, row, 'Inventory category retrieved successfully');
 		} catch (error) {
@@ -47,16 +47,16 @@ class CategoryInventoryController {
 
 	static async create(req, res) {
 		try {
-			const payload = CategoryInventoryController._resolvePayload(req);
+			const payload = MasterCategoryController._resolvePayload(req);
 			if (!payload.CATEGORY_NAME || String(payload.CATEGORY_NAME).trim() === '') {
 				return ApiResponse.badRequest(res, 'Category name is required');
 			}
 
-			const branchId = CategoryInventoryController._resolveBranchId(req);
+			const branchId = MasterCategoryController._resolveBranchId(req);
 			if (!branchId) return ApiResponse.badRequest(res, 'Branch ID is required');
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
-			const id = await CategoryInventoryModel.create({
+			const id = await MasterCategoryModel.create({
 				BRANCH_ID: branchId,
 				CATEGORY_NAME: payload.CATEGORY_NAME,
 				CATEGORY_TYPE: payload.CATEGORY_TYPE,
@@ -74,13 +74,13 @@ class CategoryInventoryController {
 	static async update(req, res) {
 		try {
 			const { id } = req.params;
-			const payload = CategoryInventoryController._resolvePayload(req);
+			const payload = MasterCategoryController._resolvePayload(req);
 			if (!payload.CATEGORY_NAME || String(payload.CATEGORY_NAME).trim() === '') {
 				return ApiResponse.badRequest(res, 'Category name is required');
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
-			const ok = await CategoryInventoryModel.update(id, {
+			const ok = await MasterCategoryModel.update(id, {
 				CATEGORY_NAME: payload.CATEGORY_NAME,
 				CATEGORY_TYPE: payload.CATEGORY_TYPE,
 				DESCRIPTION: payload.DESCRIPTION,
@@ -99,7 +99,7 @@ class CategoryInventoryController {
 		try {
 			const { id } = req.params;
 			const userId = req.session?.user_id || req.user?.user_id || null;
-			const ok = await CategoryInventoryModel.delete(id, userId);
+			const ok = await MasterCategoryModel.delete(id, userId);
 			if (!ok) return ApiResponse.notFound(res, 'Inventory category');
 			return ApiResponse.success(res, null, 'Inventory category deleted successfully');
 		} catch (error) {
@@ -108,4 +108,4 @@ class CategoryInventoryController {
 	}
 }
 
-module.exports = CategoryInventoryController;
+module.exports = MasterCategoryController;

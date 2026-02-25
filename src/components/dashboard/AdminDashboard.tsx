@@ -384,8 +384,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                   style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
                 >
                   <div
-                    className="px-5 py-2 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-indigo-700"
-                    style={{ gridColumn: `1 / ${selectedCount + 2}` }}
+                    className="px-5 py-2.5 text-center text-base leading-none font-black uppercase tracking-[0.12em] text-indigo-900"
+                    style={{
+                      gridColumn: `1 / ${selectedCount + 2}`,
+                      fontFamily: '"Arial Black", "Inter", "Segoe UI", sans-serif',
+                    }}
                   >
                     {row.label}
                   </div>
