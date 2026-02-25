@@ -4,6 +4,55 @@ class ExpenseModel {
 	static _schemaReady = false;
 	static _schemaPromise = null;
 
+	static async _columnExists(tableName, columnName) {
+		const [rows] = await pool.execute(
+			`
+			SELECT COUNT(*) AS total
+			FROM INFORMATION_SCHEMA.COLUMNS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = ?
+			  AND COLUMN_NAME = ?
+			`,
+			[tableName, columnName]
+		);
+		return Number(rows?.[0]?.total || 0) > 0;
+	}
+
+	static async _addColumnIfMissing(tableName, columnName, definitionSql) {
+		const exists = await ExpenseModel._columnExists(tableName, columnName);
+		if (!exists) {
+			await pool.execute(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definitionSql}`);
+		}
+	}
+
+	static async _indexExists(tableName, indexName) {
+		const [rows] = await pool.execute(
+			`
+			SELECT COUNT(*) AS total
+			FROM INFORMATION_SCHEMA.STATISTICS
+			WHERE TABLE_SCHEMA = DATABASE()
+			  AND TABLE_NAME = ?
+			  AND INDEX_NAME = ?
+			`,
+			[tableName, indexName]
+		);
+		return Number(rows?.[0]?.total || 0) > 0;
+	}
+
+	static async _addIndexIfMissing(tableName, indexName, columnSql) {
+		const exists = await ExpenseModel._indexExists(tableName, indexName);
+		if (!exists) {
+			await pool.execute(`ALTER TABLE ${tableName} ADD INDEX ${indexName} (${columnSql})`);
+		}
+	}
+
+	static async _addUniqueIndexIfMissing(tableName, indexName, columnSql) {
+		const exists = await ExpenseModel._indexExists(tableName, indexName);
+		if (!exists) {
+			await pool.execute(`ALTER TABLE ${tableName} ADD UNIQUE INDEX ${indexName} (${columnSql})`);
+		}
+	}
+
 	static async ensureSchema() {
 		if (ExpenseModel._schemaReady) return;
 		if (ExpenseModel._schemaPromise) return ExpenseModel._schemaPromise;
@@ -14,10 +63,15 @@ class ExpenseModel {
 					IDNo INT AUTO_INCREMENT PRIMARY KEY,
 					BRANCH_ID INT NOT NULL,
 					EXPENSE_DATE DATE NOT NULL,
+					CATEGORY_ID INT NULL,
 					CATEGORY VARCHAR(120) NOT NULL,
+					CATEGORY_TYPE VARCHAR(60) NOT NULL DEFAULT 'Others',
+					SUB_CATEGORY VARCHAR(120) NULL,
+					STATUS VARCHAR(20) NOT NULL DEFAULT 'Approved',
 					SOURCE_TYPE VARCHAR(80) NOT NULL DEFAULT 'manual',
 					SOURCE_REF_ID VARCHAR(120) NULL,
 					DESCRIPTION TEXT NULL,
+					VENDOR_PROVIDER VARCHAR(140) NULL,
 					AMOUNT DECIMAL(12,2) NOT NULL DEFAULT 0,
 					IS_AUTO TINYINT(1) NOT NULL DEFAULT 0,
 					ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
@@ -28,9 +82,51 @@ class ExpenseModel {
 					UNIQUE KEY uq_expense_source (SOURCE_TYPE, SOURCE_REF_ID, BRANCH_ID),
 					INDEX idx_expenses_branch_date (BRANCH_ID, EXPENSE_DATE),
 					INDEX idx_expenses_category (CATEGORY),
+					INDEX idx_expenses_category_id (CATEGORY_ID),
+					INDEX idx_expenses_category_type (CATEGORY_TYPE),
+					INDEX idx_expenses_sub_category (SUB_CATEGORY),
+					INDEX idx_expenses_status (STATUS),
 					INDEX idx_expenses_auto (IS_AUTO),
 					INDEX idx_expenses_active (ACTIVE)
 				)
+			`);
+
+			await ExpenseModel._addColumnIfMissing('expenses', 'CATEGORY_ID', 'INT NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'CATEGORY', 'VARCHAR(120) NOT NULL DEFAULT \'Other\'');
+			await ExpenseModel._addColumnIfMissing('expenses', 'CATEGORY_TYPE', `VARCHAR(60) NOT NULL DEFAULT 'Others'`);
+			await ExpenseModel._addColumnIfMissing('expenses', 'SUB_CATEGORY', 'VARCHAR(120) NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'STATUS', `VARCHAR(20) NOT NULL DEFAULT 'Approved'`);
+			await ExpenseModel._addColumnIfMissing('expenses', 'SOURCE_TYPE', `VARCHAR(80) NOT NULL DEFAULT 'manual'`);
+			await ExpenseModel._addColumnIfMissing('expenses', 'SOURCE_REF_ID', 'VARCHAR(120) NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'DESCRIPTION', 'TEXT NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'VENDOR_PROVIDER', 'VARCHAR(140) NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'AMOUNT', 'DECIMAL(12,2) NOT NULL DEFAULT 0');
+			await ExpenseModel._addColumnIfMissing('expenses', 'IS_AUTO', 'TINYINT(1) NOT NULL DEFAULT 0');
+			await ExpenseModel._addColumnIfMissing('expenses', 'ACTIVE', 'TINYINT(1) NOT NULL DEFAULT 1');
+			await ExpenseModel._addColumnIfMissing('expenses', 'ENCODED_BY', 'INT NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'ENCODED_DT', 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP');
+			await ExpenseModel._addColumnIfMissing('expenses', 'EDITED_BY', 'INT NULL');
+			await ExpenseModel._addColumnIfMissing('expenses', 'EDITED_DT', 'DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP');
+			await ExpenseModel._addUniqueIndexIfMissing('expenses', 'uq_expense_source', 'SOURCE_TYPE, SOURCE_REF_ID, BRANCH_ID');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_branch_date', 'BRANCH_ID, EXPENSE_DATE');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_category', 'CATEGORY');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_category_id', 'CATEGORY_ID');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_category_type', 'CATEGORY_TYPE');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_sub_category', 'SUB_CATEGORY');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_status', 'STATUS');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_auto', 'IS_AUTO');
+			await ExpenseModel._addIndexIfMissing('expenses', 'idx_expenses_active', 'ACTIVE');
+
+			await pool.execute(`
+				UPDATE expenses
+				SET CATEGORY_TYPE = CASE
+					WHEN CATEGORY IN ('Products', 'Materials', 'Inventory') THEN 'Inventory'
+					WHEN CATEGORY IN ('Maintenance') THEN 'Maintenance'
+					WHEN CATEGORY IN ('Utilities', 'Utilities / Bills', 'Bills') THEN 'Utilities / Bills'
+					WHEN CATEGORY IN ('Salary', 'Salaries', 'Rent', 'Salary & Rent') THEN 'Salary & Rent'
+					ELSE 'Others'
+				END
+				WHERE CATEGORY_TYPE IS NULL OR CATEGORY_TYPE = ''
 			`);
 
 			ExpenseModel._schemaReady = true;
@@ -73,6 +169,26 @@ class ExpenseModel {
 			params.push(String(filters.category));
 		}
 
+		if (filters.categoryId !== null && filters.categoryId !== undefined) {
+			where.push('e.CATEGORY_ID = ?');
+			params.push(Number(filters.categoryId));
+		}
+
+		if (filters.categoryType) {
+			where.push('e.CATEGORY_TYPE = ?');
+			params.push(String(filters.categoryType));
+		}
+
+		if (filters.subCategory) {
+			where.push('e.SUB_CATEGORY = ?');
+			params.push(String(filters.subCategory));
+		}
+
+		if (filters.status) {
+			where.push('e.STATUS = ?');
+			params.push(String(filters.status));
+		}
+
 		if (filters.sourceType) {
 			where.push('e.SOURCE_TYPE = ?');
 			params.push(String(filters.sourceType));
@@ -94,9 +210,9 @@ class ExpenseModel {
 		}
 
 		if (filters.search && String(filters.search).trim()) {
-			where.push('(e.CATEGORY LIKE ? OR e.DESCRIPTION LIKE ?)');
+			where.push('(e.CATEGORY LIKE ? OR e.SUB_CATEGORY LIKE ? OR e.DESCRIPTION LIKE ? OR e.VENDOR_PROVIDER LIKE ?)');
 			const like = `%${String(filters.search).trim()}%`;
-			params.push(like, like);
+			params.push(like, like, like, like);
 		}
 
 		return { whereSql: where.join(' AND '), params };
@@ -112,10 +228,15 @@ class ExpenseModel {
 				e.BRANCH_ID,
 				b.BRANCH_NAME,
 				e.EXPENSE_DATE,
+				e.CATEGORY_ID,
 				e.CATEGORY,
+				e.CATEGORY_TYPE,
+				e.SUB_CATEGORY,
+				e.STATUS,
 				e.SOURCE_TYPE,
 				e.SOURCE_REF_ID,
 				e.DESCRIPTION,
+				e.VENDOR_PROVIDER,
 				e.AMOUNT,
 				e.IS_AUTO,
 				e.ENCODED_BY,
@@ -142,10 +263,15 @@ class ExpenseModel {
 				IDNo,
 				BRANCH_ID,
 				EXPENSE_DATE,
+				CATEGORY_ID,
 				CATEGORY,
+				CATEGORY_TYPE,
+				SUB_CATEGORY,
+				STATUS,
 				SOURCE_TYPE,
 				SOURCE_REF_ID,
 				DESCRIPTION,
+				VENDOR_PROVIDER,
 				AMOUNT,
 				IS_AUTO,
 				ACTIVE
@@ -165,22 +291,32 @@ class ExpenseModel {
 			INSERT INTO expenses (
 				BRANCH_ID,
 				EXPENSE_DATE,
+				CATEGORY_ID,
 				CATEGORY,
+				CATEGORY_TYPE,
+				SUB_CATEGORY,
+				STATUS,
 				SOURCE_TYPE,
 				SOURCE_REF_ID,
 				DESCRIPTION,
+				VENDOR_PROVIDER,
 				AMOUNT,
 				IS_AUTO,
 				ENCODED_BY
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`,
 			[
 				Number(data.BRANCH_ID),
 				ExpenseModel._normalizeDate(data.EXPENSE_DATE),
+				data.CATEGORY_ID ? Number(data.CATEGORY_ID) : null,
 				String(data.CATEGORY || 'Other'),
+				String(data.CATEGORY_TYPE || 'Others'),
+				data.SUB_CATEGORY || null,
+				String(data.STATUS || 'Approved'),
 				String(data.SOURCE_TYPE || 'manual'),
 				data.SOURCE_REF_ID || null,
 				data.DESCRIPTION || null,
+				data.VENDOR_PROVIDER || null,
 				ExpenseModel._normalizeAmount(data.AMOUNT),
 				data.IS_AUTO ? 1 : 0,
 				data.user_id || null,
@@ -196,8 +332,13 @@ class ExpenseModel {
 			UPDATE expenses
 			SET
 				EXPENSE_DATE = ?,
+				CATEGORY_ID = ?,
 				CATEGORY = ?,
+				CATEGORY_TYPE = ?,
+				SUB_CATEGORY = ?,
+				STATUS = ?,
 				DESCRIPTION = ?,
+				VENDOR_PROVIDER = ?,
 				AMOUNT = ?,
 				EDITED_BY = ?,
 				EDITED_DT = CURRENT_TIMESTAMP
@@ -205,8 +346,13 @@ class ExpenseModel {
 			`,
 			[
 				ExpenseModel._normalizeDate(data.EXPENSE_DATE),
+				data.CATEGORY_ID ? Number(data.CATEGORY_ID) : null,
 				String(data.CATEGORY || 'Other'),
+				String(data.CATEGORY_TYPE || 'Others'),
+				data.SUB_CATEGORY || null,
+				String(data.STATUS || 'Approved'),
 				data.DESCRIPTION || null,
+				data.VENDOR_PROVIDER || null,
 				ExpenseModel._normalizeAmount(data.AMOUNT),
 				data.user_id || null,
 				Number(id),
@@ -238,19 +384,29 @@ class ExpenseModel {
 			INSERT INTO expenses (
 				BRANCH_ID,
 				EXPENSE_DATE,
+				CATEGORY_ID,
 				CATEGORY,
+				CATEGORY_TYPE,
+				SUB_CATEGORY,
+				STATUS,
 				SOURCE_TYPE,
 				SOURCE_REF_ID,
 				DESCRIPTION,
+				VENDOR_PROVIDER,
 				AMOUNT,
 				IS_AUTO,
 				ACTIVE,
 				ENCODED_BY
-			) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?)
 			ON DUPLICATE KEY UPDATE
 				EXPENSE_DATE = VALUES(EXPENSE_DATE),
+				CATEGORY_ID = VALUES(CATEGORY_ID),
 				CATEGORY = VALUES(CATEGORY),
+				CATEGORY_TYPE = VALUES(CATEGORY_TYPE),
+				SUB_CATEGORY = VALUES(SUB_CATEGORY),
+				STATUS = VALUES(STATUS),
 				DESCRIPTION = VALUES(DESCRIPTION),
+				VENDOR_PROVIDER = VALUES(VENDOR_PROVIDER),
 				AMOUNT = VALUES(AMOUNT),
 				IS_AUTO = 1,
 				ACTIVE = 1,
@@ -260,10 +416,15 @@ class ExpenseModel {
 			[
 				Number(payload.branchId),
 				ExpenseModel._normalizeDate(payload.expenseDate),
+				payload.categoryId ? Number(payload.categoryId) : null,
 				String(payload.category || 'Inventory'),
+				String(payload.categoryType || 'Inventory'),
+				payload.subCategory || null,
+				String(payload.status || 'Approved'),
 				String(payload.sourceType),
 				String(payload.sourceRefId),
 				payload.description || null,
+				payload.vendorProvider || null,
 				ExpenseModel._normalizeAmount(payload.amount),
 				payload.userId || null,
 			]
@@ -315,12 +476,14 @@ class ExpenseModel {
 			`
 			SELECT
 				e.CATEGORY,
+				e.CATEGORY_TYPE,
+				e.SUB_CATEGORY,
 				COUNT(*) AS entry_count,
 				COALESCE(SUM(e.AMOUNT), 0) AS total_amount
 			FROM expenses e
 			WHERE ${whereSql}
-			GROUP BY e.CATEGORY
-			ORDER BY total_amount DESC, e.CATEGORY ASC
+			GROUP BY e.CATEGORY_TYPE, e.CATEGORY, e.SUB_CATEGORY
+			ORDER BY total_amount DESC, e.CATEGORY_TYPE ASC, e.CATEGORY ASC
 			`,
 			params
 		);
@@ -354,9 +517,14 @@ class ExpenseModel {
 			SELECT
 				e.IDNo,
 				e.EXPENSE_DATE,
+				e.CATEGORY_ID,
 				e.CATEGORY,
+				e.CATEGORY_TYPE,
+				e.SUB_CATEGORY,
+				e.STATUS,
 				e.SOURCE_TYPE,
 				e.DESCRIPTION,
+				e.VENDOR_PROVIDER,
 				e.AMOUNT,
 				e.IS_AUTO,
 				b.BRANCH_NAME

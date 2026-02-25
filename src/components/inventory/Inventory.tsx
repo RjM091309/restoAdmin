@@ -36,8 +36,12 @@ const columns: ColumnDef<typeof inventoryData[0]>[] = [
     render: (item) => <span className="text-sm font-bold">{item.name}</span>,
   },
   {
-    header: 'Category',
-    render: (item) => <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded-lg">{item.category}</span>,
+    header: 'Reorder Stock',
+    render: (item) => (
+      <span className="text-sm font-bold text-brand-text">
+        {Math.max(5, Math.ceil(item.stock * 0.5))} {item.unit}
+      </span>
+    ),
   },
   {
     header: 'Stock Level',

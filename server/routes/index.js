@@ -12,10 +12,10 @@ module.exports = [
     require('./billingRoutes'),           // Billing routes
     // Note: branchRoutes is registered separately in app.js at /branch to avoid conflicts
     require('./categoryRoutes'),          // Category routes
+	require('./categoryInventoryRoutes'), // Inventory category routes
     require('./dashboardRoutes'),         // Dashboard routes
     require('./employeeRoutes'),          // Employee routes
 	require('./expenseRoutes'),           // Expense routes
-	require('./inventoryRoutes'),         // Inventory routes
 	require('./loyverseRoutes'),          // Loyverse sync routes
     require('./menuRoutes'),              // Menu routes
     require('./notificationRoutes'),     // Notification routes

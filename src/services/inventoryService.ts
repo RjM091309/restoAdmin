@@ -4,7 +4,9 @@ export interface InventoryCategory {
     id: string;
     branchId: string;
     name: string;
+    categoryType: string;
     description: string | null;
+    icon: string | null;
     active: boolean;
 }
 
@@ -21,7 +23,9 @@ type InventoryCategoryApiRecord = {
     IDNo: number;
     BRANCH_ID: number;
     CATEGORY_NAME: string;
+    CATEGORY_TYPE: string;
     DESCRIPTION: string | null;
+    ICON: string | null;
     ACTIVE: number | boolean;
 };
 
@@ -60,7 +64,9 @@ const mapCategoryRecord = (row: InventoryCategoryApiRecord): InventoryCategory =
     id: String(row.IDNo),
     branchId: String(row.BRANCH_ID),
     name: row.CATEGORY_NAME,
+    categoryType: row.CATEGORY_TYPE || 'Inventory',
     description: row.DESCRIPTION,
+    icon: row.ICON || null,
     active: Boolean(row.ACTIVE),
 });
 
@@ -81,7 +87,9 @@ export const getInventoryCategories = async (branchId?: string): Promise<Invento
 export type CreateInventoryCategoryPayload = {
     branchId: string;
     name: string;
+    categoryType: string;
     description: string | null;
+    icon: string | null;
 };
 
 export async function createInventoryCategory(payload: CreateInventoryCategoryPayload): Promise<number> {
@@ -92,7 +100,9 @@ export async function createInventoryCategory(payload: CreateInventoryCategoryPa
         body: JSON.stringify({
             BRANCH_ID: payload.branchId,
             CATEGORY_NAME: payload.name,
+            CATEGORY_TYPE: payload.categoryType,
             DESCRIPTION: payload.description,
+            ICON: payload.icon,
         }),
     });
     const json = (await response.json()) as ApiResponse<{ id: number }>;
@@ -104,7 +114,9 @@ export async function createInventoryCategory(payload: CreateInventoryCategoryPa
 
 export type UpdateInventoryCategoryPayload = {
     name: string;
+    categoryType: string;
     description: string | null;
+    icon: string | null;
 };
 
 export async function updateInventoryCategory(id: string, payload: UpdateInventoryCategoryPayload): Promise<void> {
@@ -114,7 +126,9 @@ export async function updateInventoryCategory(id: string, payload: UpdateInvento
         headers: authHeaders(),
         body: JSON.stringify({
             CATEGORY_NAME: payload.name,
+            CATEGORY_TYPE: payload.categoryType,
             DESCRIPTION: payload.description,
+            ICON: payload.icon,
         }),
     });
     const json = (await response.json()) as ApiResponse<null>;

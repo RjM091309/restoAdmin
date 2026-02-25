@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
 import { BranchPerformanceCard, type BranchPerformanceData } from './BranchPerformanceCard';
-import { DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 
 // Mock Data for Pie Chart
 const branchRevenueDistribution = [
@@ -63,12 +65,67 @@ type MonthlyData = {
   totalExpenses: number;
 };
 
+type DateRange = {
+  start: string;
+  end: string;
+};
+
+type ComparisonRow = {
+  id: string;
+  label: string;
+  values: number[];
+  bestMode: 'max' | 'min';
+};
+
+type ComparisonSectionRow = {
+  id: string;
+  rowType: 'section';
+  label: string;
+};
+
+type UnifiedComparisonRow = ComparisonRow | ComparisonSectionRow;
+
+const isSectionRow = (row: UnifiedComparisonRow): row is ComparisonSectionRow =>
+  (row as ComparisonSectionRow).rowType === 'section';
+
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
+const toDate = (s: string): Date | null => (s ? new Date(s) : null);
+
+const toYYYYMMDD = (d: Date): string =>
+  d.getFullYear() +
+  '-' +
+  String(d.getMonth() + 1).padStart(2, '0') +
+  '-' +
+  String(d.getDate()).padStart(2, '0');
+
+const getCurrentMonthRange = (): DateRange => {
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return {
+    start: toYYYYMMDD(firstDayOfMonth),
+    end: toYYYYMMDD(today),
+  };
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }) => {
   const [loading, setLoading] = useState(true);
   const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
+  const [compareBranchIds, setCompareBranchIds] = useState<number[]>([]);
+  const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
+  const [isComparePanelLoading, setIsComparePanelLoading] = useState(false);
+  const [isCompareDateOpen, setIsCompareDateOpen] = useState(false);
+  const [compareDateRange, setCompareDateRange] = useState<DateRange>(getCurrentMonthRange);
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
@@ -118,9 +175,226 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
     fetchData();
   }, [activeBranchId]);
 
+  useEffect(() => {
+    if (!isComparePanelOpen) {
+      setIsCompareDateOpen(false);
+      return;
+    }
+
+    setIsComparePanelLoading(true);
+    const timer = window.setTimeout(() => {
+      setIsComparePanelLoading(false);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [isComparePanelOpen]);
+
+  const handleBranchCompareToggle = (branchId: number) => {
+    setCompareBranchIds((prev) => {
+      if (prev.includes(branchId)) {
+        return prev.filter((id) => id !== branchId);
+      }
+
+      return [...prev, branchId];
+    });
+  };
+
+  const selectedCompareBranches = compareBranchIds
+    .map((id) => performanceData.find((branch) => branch.id === id))
+    .filter((branch): branch is BranchPerformanceData => Boolean(branch));
+  const canCompare = selectedCompareBranches.length >= 2;
+
+  const formatCurrency = (value: number) =>
+    `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const selectedCount = selectedCompareBranches.length;
+  const compareStartDate = toDate(compareDateRange.start);
+  const compareEndDate = toDate(compareDateRange.end);
+  const comparePickerValue: [Date | null, Date | null] = [compareStartDate, compareEndDate];
+  const comparePanelWidthClass =
+    selectedCount <= 2 ? 'w-[75vw] max-w-5xl' : selectedCount <= 4 ? 'w-[85vw] max-w-6xl' : 'w-[95vw] max-w-[1800px]';
+  const compareTitle =
+    selectedCount <= 2
+      ? selectedCompareBranches.map((branch) => branch.name).join(' vs ')
+      : `${selectedCompareBranches.slice(0, 2).map((branch) => branch.name).join(' vs ')} +${selectedCount - 2} more`;
+  const benchmarkRows: ComparisonRow[] = [
+    {
+      id: 'totalRevenue',
+      label: 'Total Revenue',
+      values: selectedCompareBranches.map((branch) => branch.totalSales - branch.totalExpenses),
+      bestMode: 'max' as const,
+    },
+    {
+      id: 'totalSales',
+      label: 'Total Sales',
+      values: selectedCompareBranches.map((branch) => branch.totalSales),
+      bestMode: 'max' as const,
+    },
+    {
+      id: 'totalExpenses',
+      label: 'Total Expenses',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses),
+      bestMode: 'min' as const,
+    },
+  ];
+
+  const expenseCategoryRows: ComparisonRow[] = [
+    {
+      id: 'exp-electricity',
+      label: 'Electricity',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.18),
+      bestMode: 'min',
+    },
+    {
+      id: 'exp-internet',
+      label: 'Internet',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.07),
+      bestMode: 'min',
+    },
+    {
+      id: 'exp-salary',
+      label: 'Salary',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.45),
+      bestMode: 'min',
+    },
+    {
+      id: 'exp-rent',
+      label: 'Rent',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.2),
+      bestMode: 'min',
+    },
+    {
+      id: 'exp-others',
+      label: 'Others',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.1),
+      bestMode: 'min',
+    },
+  ];
+
+  const inventoryCategoryRows: ComparisonRow[] = [
+    {
+      id: 'inv-ingredients',
+      label: 'Raw Ingredients',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.42),
+      bestMode: 'min',
+    },
+    {
+      id: 'inv-packaging',
+      label: 'Packaging',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.12),
+      bestMode: 'min',
+    },
+    {
+      id: 'inv-beverages',
+      label: 'Beverages',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.2),
+      bestMode: 'min',
+    },
+    {
+      id: 'inv-cleaning',
+      label: 'Cleaning Supplies',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.08),
+      bestMode: 'min',
+    },
+    {
+      id: 'inv-kitchen',
+      label: 'Kitchen Supplies',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.18),
+      bestMode: 'min',
+    },
+  ];
+
+  const unifiedComparisonRows: UnifiedComparisonRow[] = [
+    ...benchmarkRows,
+    { id: 'section-expenses', rowType: 'section', label: 'Expenses' },
+    ...expenseCategoryRows,
+    { id: 'section-inventory', rowType: 'section', label: 'Inventory' },
+    ...inventoryCategoryRows,
+  ];
+
+  const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
+    const [s, e] = update ?? [null, null];
+    setCompareDateRange({
+      start: s ? toYYYYMMDD(s) : '',
+      end: e ? toYYYYMMDD(e) : '',
+    });
+    if (s && e) setIsCompareDateOpen(false);
+  };
+
+  const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
+    <div className="min-w-[760px]">
+      <div
+        className="grid border border-slate-200 bg-slate-50 sticky top-0 z-40 shadow-sm"
+        style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
+      >
+        <div className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 border-r border-slate-200">
+          Comparison Metric
+        </div>
+        {selectedCompareBranches.map((branch) => (
+          <div key={`head-${branch.id}`} className="px-5 py-4 border-l border-slate-200">
+            <p className="text-sm font-semibold text-slate-800">{branch.name}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-b-2xl border-x border-b border-slate-200 bg-white">
+          {rows.map((row) => {
+            if (isSectionRow(row)) {
+              return (
+                <div
+                  key={row.id}
+                  className="grid border-y border-slate-200 bg-indigo-50/70"
+                  style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
+                >
+                  <div
+                    className="px-5 py-1.5 text-center text-xs font-bold uppercase tracking-[0.2em] text-brand-primary"
+                    style={{ gridColumn: `1 / ${selectedCount + 2}` }}
+                  >
+                    {row.label}
+                  </div>
+                </div>
+              );
+            }
+
+            const benchmarkValue = row.bestMode === 'max' ? Math.max(...row.values) : Math.min(...row.values);
+
+            return (
+              <div
+                key={row.id}
+                className="grid border-b border-slate-100 last:border-b-0"
+                style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
+              >
+                <div className="px-5 py-4 flex items-center text-sm font-medium text-slate-600 bg-slate-50/70">
+                  {row.label}
+                </div>
+                {row.values.map((value, index) => {
+                  const isTop = value === benchmarkValue;
+                  return (
+                    <div key={`${row.id}-${selectedCompareBranches[index].id}`} className="px-5 py-4 border-l border-slate-100">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={`text-sm font-semibold ${isTop ? 'text-emerald-600' : 'text-slate-800'}`}>
+                          {formatCurrency(value)}
+                        </span>
+                        {isTop && (
+                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                            Top
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+
   return (
-    <AnimatePresence mode="wait">
-      {loading ? (
+    <>
+      <AnimatePresence mode="wait">
+        {loading ? (
         <motion.div 
           key="skeleton"
           initial={{ opacity: 0 }}
@@ -144,7 +418,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             ))}
           </div>
         </motion.div>
-      ) : (
+        ) : (
         <motion.div 
           key="content"
           initial={{ opacity: 0, y: 20 }}
@@ -312,20 +586,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
               </div>
             </div>
           </div>
-          <div className="lg:col-span-1 space-y-6">
+          <div className="lg:col-span-1 space-y-4">
+            {selectedCompareBranches.length > 0 && (
+              <div className="sticky top-4 z-10 bg-slate-50/90 backdrop-blur-sm rounded-xl p-2">
+                <button
+                  type="button"
+                  disabled={!canCompare}
+                  onClick={() => {
+                    setIsComparePanelOpen(true);
+                  }}
+                  className="w-full rounded-xl bg-brand-primary text-white font-semibold py-2.5 px-4 transition-all duration-200 hover:bg-brand-primary/90 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                >
+                  Compare ({selectedCompareBranches.length})
+                </button>
+                <p className="mt-2 text-[11px] text-slate-500 text-center">
+                  Select at least 2 branches to compare
+                </p>
+              </div>
+            )}
             {performanceData
               .sort((a, b) => (b.totalSales - b.totalExpenses) - (a.totalSales - a.totalExpenses))
               .map((branch) => (
                 <BranchPerformanceCard 
                   key={branch.id} 
                   branch={branch} 
-                  onClick={() => setActiveBranchId(prev => prev === branch.id ? null : branch.id)}
-                  isSelected={branch.id === activeBranchId}
+                  onClick={() => handleBranchCompareToggle(branch.id)}
+                  isSelected={compareBranchIds.includes(branch.id)}
                 />
               ))}
           </div>
         </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isComparePanelOpen && canCompare && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40"
+              onClick={() => setIsComparePanelOpen(false)}
+            />
+
+            <motion.aside
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+              className={`fixed right-0 top-0 h-screen ${comparePanelWidthClass} bg-white shadow-2xl z-50 border-l border-slate-200`}
+            >
+              <div className="h-full flex flex-col">
+                <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-800">Branch Comparison</h2>
+                    <p className="text-sm text-slate-500 mt-1">
+                      {compareTitle}
+                    </p>
+                  </div>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsCompareDateOpen((open) => !open)}
+                      className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all cursor-pointer"
+                    >
+                      <Calendar size={18} className="text-brand-muted" />
+                      <span className="text-sm text-brand-muted whitespace-nowrap">
+                        {compareDateRange.start && compareDateRange.end
+                          ? `${formatDate(compareDateRange.start)} - ${formatDate(compareDateRange.end)}`
+                          : 'Date range'}
+                      </span>
+                      <ChevronDown size={16} className="text-brand-muted transition-colors" />
+                    </button>
+
+                    {isCompareDateOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-[55]"
+                          onClick={() => setIsCompareDateOpen(false)}
+                          aria-hidden
+                        />
+                        <div className="absolute top-full right-0 mt-2 z-[60]">
+                          <DatePicker
+                            inline
+                            selectsRange
+                            startDate={comparePickerValue[0]}
+                            endDate={comparePickerValue[1]}
+                            onChange={handleCompareDateRangeChange}
+                            dateFormat="MMM d, yyyy"
+                            calendarClassName="react-datepicker-material"
+                            isClearable
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="px-6 pb-6 overflow-auto custom-scrollbar space-y-4">
+                  {isComparePanelLoading ? (
+                    <div className="mt-6 space-y-4">
+                      <Skeleton className="h-12 rounded-2xl" />
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                        <Skeleton className="h-12 rounded-xl" />
+                        {Array.from({ length: 8 }).map((_, i) => (
+                          <Skeleton key={i} className="h-12 rounded-lg" />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-6 rounded-2xl border border-slate-200 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-3 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-700">Branch Comparison Board</p>
+                        <p className="text-xs text-slate-500">Top = highest value, except Expenses (lowest is best)</p>
+                      </div>
+
+                      {renderComparisonTable(unifiedComparisonRows)}
+                    </>
+                  )}
+                </div>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 };

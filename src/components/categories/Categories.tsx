@@ -31,6 +31,21 @@ const getIconForCategory = (name: string) => {
   return map[name] || Package;
 };
 
+const getIconFromKey = (icon: string | null | undefined) => {
+  const map: Record<string, any> = {
+    package: Package,
+    beef: Beef,
+    fish: Fish,
+    leaf: Leaf,
+    droplets: Droplets,
+    wheat: Wheat,
+    shell: Shell,
+    coffee: Coffee,
+    flame: Flame,
+  };
+  return map[String(icon || '').toLowerCase()] || null;
+};
+
 const categoryData = [
   { id: 'CAT001', name: 'Meat', description: 'Fresh cuts, poultry, and processed meats', items: 24, value: 4500, status: 'Healthy' as const },
   { id: 'CAT002', name: 'Seafood', description: 'Fish, shellfish, and frozen seafood', items: 15, value: 3200, status: 'Low Stock' as const },
@@ -41,6 +56,14 @@ const categoryData = [
   { id: 'CAT007', name: 'Pasta', description: 'Dried pasta, noodles, and wrappers', items: 20, value: 640, status: 'Healthy' as const },
   { id: 'CAT008', name: 'Beverages', description: 'Coffee, tea, sodas, and juices', items: 35, value: 1850, status: 'Healthy' as const },
 ];
+
+const CATEGORY_TYPE_OPTIONS = [
+  'Inventory',
+  'Maintenance',
+  'Utilities / Bills',
+  'Salary & Rent',
+  'Others',
+] as const;
 
 interface CategoriesProps {
   onCategoryClick: (category: string) => void;
@@ -57,6 +80,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    categoryType: 'Inventory',
     description: '',
     icon: 'package'
   });
@@ -87,7 +111,9 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       if (editingId) {
         await updateInventoryCategory(editingId, {
           name: formData.name,
-          description: formData.description
+          categoryType: formData.categoryType,
+          description: formData.description,
+          icon: formData.icon,
         });
         toast.success('Category updated successfully');
       } else {
@@ -98,7 +124,9 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         await createInventoryCategory({
           branchId: String(selectedBranch.id),
           name: formData.name,
-          description: formData.description
+          categoryType: formData.categoryType,
+          description: formData.description,
+          icon: formData.icon,
         });
         toast.success('Category created successfully');
       }
@@ -124,15 +152,16 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
 
   const resetForm = () => {
     setEditingId(null);
-    setFormData({ name: '', description: '', icon: 'package' });
+    setFormData({ name: '', categoryType: 'Inventory', description: '', icon: 'package' });
   };
 
   const openEdit = (category: InventoryCategory) => {
     setEditingId(category.id);
     setFormData({
       name: category.name,
+      categoryType: category.categoryType || 'Inventory',
       description: category.description || '',
-      icon: 'package' // Default for now
+      icon: category.icon || 'package',
     });
     setIsModalOpen(true);
   };
@@ -147,17 +176,18 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       header: 'Category Name',
       className: 'w-1/3',
       render: (category) => {
-        const IconComponent = getIconForCategory(category.name);
+        const IconFromKey = getIconFromKey(category.icon);
+        const IconComponent = IconFromKey || getIconForCategory(category.name);
         return (
           <div 
             className="flex items-center gap-4 cursor-pointer group"
             onClick={() => onCategoryClick(category.name)}
           >
-            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-brand-muted group-hover:bg-brand-orange group-hover:text-white transition-colors shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-brand-muted group-hover:bg-brand-primary group-hover:text-white transition-colors shrink-0">
               <IconComponent size={24} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-brand-text mb-0.5 group-hover:text-brand-orange transition-colors">
+              <h3 className="text-base font-bold text-brand-text mb-0.5 group-hover:text-brand-primary transition-colors">
                 {category.name}
               </h3>
               <p className="text-xs text-brand-muted font-medium truncate max-w-[200px] xl:max-w-[300px]">
@@ -361,6 +391,20 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-brand-text mb-2">Category Type</label>
+            <select
+              value={formData.categoryType}
+              onChange={(e) => setFormData({ ...formData, categoryType: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
+            >
+              {CATEGORY_TYPE_OPTIONS.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">Description</label>

@@ -6,25 +6,10 @@
 // ============================================
 
 const MenuModel = require('../models/menuModel');
-const InventoryModel = require('../models/inventoryModel');
 const TranslationService = require('../utils/translationService');
 const ApiResponse = require('../utils/apiResponse');
 
 class MenuController {
-	static parseMappings(rawMappings) {
-		if (!rawMappings) return null;
-		if (Array.isArray(rawMappings)) return rawMappings;
-		if (typeof rawMappings === 'string') {
-			try {
-				const parsed = JSON.parse(rawMappings);
-				return Array.isArray(parsed) ? parsed : null;
-			} catch {
-				return null;
-			}
-		}
-		return null;
-	}
-
 	// Get all menus
 	static async getAll(req, res) {
 		try {
@@ -232,15 +217,6 @@ class MenuController {
 				user_id
 			});
 
-			const mappings = MenuController.parseMappings(req.body.INVENTORY_MAPPINGS);
-			if (Array.isArray(mappings)) {
-				await InventoryModel.replaceMenuMappings(
-					Number(menuId),
-					mappings,
-					user_id
-				);
-			}
-
 			return ApiResponse.created(res, { id: menuId }, 'Menu created successfully');
 		} catch (error) {
 			console.error('Error creating menu:', error);
@@ -278,15 +254,6 @@ class MenuController {
 				IS_AVAILABLE,
 				user_id
 			});
-
-			const mappings = MenuController.parseMappings(req.body.INVENTORY_MAPPINGS);
-			if (updated && Array.isArray(mappings)) {
-				await InventoryModel.replaceMenuMappings(
-					Number(id),
-					mappings,
-					user_id
-				);
-			}
 
 			if (!updated) {
 				return ApiResponse.notFound(res, 'Menu');

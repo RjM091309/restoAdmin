@@ -30,12 +30,26 @@ function csvEscape(value) {
 }
 
 class ExpenseController {
+	static async _resolveCategoryInput(rawCategoryId, rawCategoryName, rawCategoryType) {
+		const fallbackName = String(rawCategoryName || '').trim();
+		const fallbackType = String(rawCategoryType || '').trim() || 'Others';
+		return {
+			categoryId: rawCategoryId ? Number(rawCategoryId) : null,
+			categoryName: fallbackName || 'Others',
+			categoryType: fallbackType || 'Others',
+		};
+	}
+
 	static _buildFilters(req) {
 		return {
 			branchId: resolveBranchId(req),
 			dateFrom: req.query.date_from || req.query.start_date || null,
 			dateTo: req.query.date_to || req.query.end_date || null,
 			category: req.query.category || null,
+			categoryId: req.query.category_id || null,
+			categoryType: req.query.category_type || null,
+			subCategory: req.query.sub_category || null,
+			status: req.query.status || null,
 			sourceType: req.query.source_type || null,
 			isAuto: parseBoolean(req.query.is_auto),
 			search: req.query.search || null,
@@ -63,8 +77,11 @@ class ExpenseController {
 				return ApiResponse.badRequest(res, 'Amount must be a valid non-negative number');
 			}
 
-			const category = String(req.body.CATEGORY || req.body.category || '').trim();
-			if (!category) return ApiResponse.badRequest(res, 'Category is required');
+			const resolvedCategory = await ExpenseController._resolveCategoryInput(
+				req.body.CATEGORY_ID || req.body.category_id || req.body.categoryId,
+				req.body.CATEGORY || req.body.category,
+				req.body.CATEGORY_TYPE || req.body.category_type || req.body.categoryType
+			);
 
 			const expenseDate = req.body.EXPENSE_DATE || req.body.expenseDate || req.body.expense_date;
 			if (!expenseDate) return ApiResponse.badRequest(res, 'Expense date is required');
@@ -73,10 +90,15 @@ class ExpenseController {
 			const id = await ExpenseModel.create({
 				BRANCH_ID: branchId,
 				EXPENSE_DATE: expenseDate,
-				CATEGORY: category,
+				CATEGORY_ID: resolvedCategory.categoryId,
+				CATEGORY: resolvedCategory.categoryName,
+				CATEGORY_TYPE: resolvedCategory.categoryType,
+				SUB_CATEGORY: req.body.SUB_CATEGORY || req.body.sub_category || req.body.subCategory || null,
+				STATUS: req.body.STATUS || req.body.status || 'Approved',
 				SOURCE_TYPE: 'manual',
 				SOURCE_REF_ID: null,
 				DESCRIPTION: req.body.DESCRIPTION || req.body.description || null,
+				VENDOR_PROVIDER: req.body.VENDOR_PROVIDER || req.body.vendor_provider || req.body.vendorProvider || null,
 				AMOUNT: amount,
 				IS_AUTO: false,
 				user_id: userId,
@@ -100,8 +122,11 @@ class ExpenseController {
 				return ApiResponse.badRequest(res, 'Amount must be a valid non-negative number');
 			}
 
-			const category = String(req.body.CATEGORY || req.body.category || '').trim();
-			if (!category) return ApiResponse.badRequest(res, 'Category is required');
+			const resolvedCategory = await ExpenseController._resolveCategoryInput(
+				req.body.CATEGORY_ID || req.body.category_id || req.body.categoryId || current.CATEGORY_ID,
+				req.body.CATEGORY || req.body.category || current.CATEGORY,
+				req.body.CATEGORY_TYPE || req.body.category_type || req.body.categoryType || current.CATEGORY_TYPE
+			);
 
 			const expenseDate = req.body.EXPENSE_DATE || req.body.expenseDate || req.body.expense_date;
 			if (!expenseDate) return ApiResponse.badRequest(res, 'Expense date is required');
@@ -109,8 +134,13 @@ class ExpenseController {
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const ok = await ExpenseModel.update(id, {
 				EXPENSE_DATE: expenseDate,
-				CATEGORY: category,
+				CATEGORY_ID: resolvedCategory.categoryId,
+				CATEGORY: resolvedCategory.categoryName,
+				CATEGORY_TYPE: resolvedCategory.categoryType,
+				SUB_CATEGORY: req.body.SUB_CATEGORY || req.body.sub_category || req.body.subCategory || current.SUB_CATEGORY || null,
+				STATUS: req.body.STATUS || req.body.status || current.STATUS || 'Approved',
 				DESCRIPTION: req.body.DESCRIPTION || req.body.description || null,
+				VENDOR_PROVIDER: req.body.VENDOR_PROVIDER || req.body.vendor_provider || req.body.vendorProvider || current.VENDOR_PROVIDER || null,
 				AMOUNT: amount,
 				user_id: userId,
 			});
@@ -175,8 +205,12 @@ class ExpenseController {
 				'ID',
 				'Date',
 				'Branch',
+				'Category Type',
 				'Category',
+				'Sub Category',
+				'Status',
 				'Source',
+				'Vendor/Provider',
 				'Description',
 				'Amount',
 				'Type',
@@ -188,8 +222,12 @@ class ExpenseController {
 						row.IDNo,
 						row.EXPENSE_DATE,
 						row.BRANCH_NAME || '',
+						row.CATEGORY_TYPE || '',
 						row.CATEGORY || '',
+						row.SUB_CATEGORY || '',
+						row.STATUS || '',
 						row.SOURCE_TYPE || '',
+						row.VENDOR_PROVIDER || '',
 						row.DESCRIPTION || '',
 						Number(row.AMOUNT || 0).toFixed(2),
 						row.IS_AUTO ? 'Auto' : 'Manual',
