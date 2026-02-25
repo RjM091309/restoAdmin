@@ -297,7 +297,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             className: 'text-right',
             render: (order) => (
                 <div className="flex justify-end items-center gap-2">
-                    <button onClick={() => openDetail(order)} className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 transition-colors rounded-lg" title="View Details">
+                    <button onClick={() => openDetail(order)} className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg" title="View Details">
                         <Eye size={16} />
                     </button>
                     {order.STATUS !== ORDER_STATUS.SETTLED && order.STATUS !== ORDER_STATUS.CANCELLED && (
@@ -374,7 +374,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             </div>
                             <button
                                 onClick={openNewOrder}
-                                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+                                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
                             >
                                 <Plus size={18} />
                                 New Order
@@ -484,7 +484,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             </div>
                             <div className="col-span-3">
                                 <button type="button" onClick={addNewOrderItem} disabled={newOrderLoadingRefs}
-                                    className="w-full px-3 py-3 rounded-xl bg-brand-orange text-white font-bold text-sm hover:bg-brand-orange/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1">
+                                    className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1">
                                     <Plus size={14} /> Add
                                 </button>
                             </div>

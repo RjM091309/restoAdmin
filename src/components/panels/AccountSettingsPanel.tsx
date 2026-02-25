@@ -321,7 +321,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                       Cancel
                     </button>
                     <button
-                      className="flex-1 py-3 bg-brand-orange text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-orange/20 hover:opacity-90 transition-opacity cursor-pointer"
+                      className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer"
                       onClick={() => {
                         updateUser({ firstname, lastname, username });
                         setView('main');

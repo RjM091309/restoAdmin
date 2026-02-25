@@ -5,6 +5,15 @@ import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
+import { type Branch } from '../partials/Header';
+import { 
+  getInventoryCategories, 
+  createInventoryCategory, 
+  updateInventoryCategory, 
+  deleteInventoryCategory,
+  type InventoryCategory 
+} from '../../services/inventoryService';
+import { toast } from 'sonner';
 
 
 // Icon mapping based on category name
@@ -35,19 +44,105 @@ const categoryData = [
 
 interface CategoriesProps {
   onCategoryClick: (category: string) => void;
+  selectedBranch: Branch | null;
 }
 
-export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
+export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selectedBranch }) => {
+  const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Form State
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    icon: 'package'
+  });
+
+  const fetchCategories = async () => {
+    try {
+      setLoading(true);
+      const data = await getInventoryCategories(String(selectedBranch?.id || ''));
+      setCategories(data);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to fetch categories');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => setLoading(false), 1000);
-    return () => clearTimeout(timer);
-  }, []);
+    fetchCategories();
+  }, [selectedBranch?.id]);
 
-  const columns: ColumnDef<typeof categoryData[0]>[] = [
+  const handleSave = async () => {
+    if (!formData.name.trim()) {
+      toast.error('Category name is required');
+      return;
+    }
+
+    try {
+      if (editingId) {
+        await updateInventoryCategory(editingId, {
+          name: formData.name,
+          description: formData.description
+        });
+        toast.success('Category updated successfully');
+      } else {
+        if (!selectedBranch || selectedBranch.id === 'all') {
+          toast.error('Please select a specific branch first');
+          return;
+        }
+        await createInventoryCategory({
+          branchId: String(selectedBranch.id),
+          name: formData.name,
+          description: formData.description
+        });
+        toast.success('Category created successfully');
+      }
+      setIsModalOpen(false);
+      resetForm();
+      fetchCategories();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save category');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this category?')) return;
+    
+    try {
+      await deleteInventoryCategory(id);
+      toast.success('Category deleted successfully');
+      fetchCategories();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete category');
+    }
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setFormData({ name: '', description: '', icon: 'package' });
+  };
+
+  const openEdit = (category: InventoryCategory) => {
+    setEditingId(category.id);
+    setFormData({
+      name: category.name,
+      description: category.description || '',
+      icon: 'package' // Default for now
+    });
+    setIsModalOpen(true);
+  };
+
+  const filteredCategories = categories.filter(cat => 
+    cat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    cat.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const columns: ColumnDef<InventoryCategory>[] = [
     {
       header: 'Category Name',
       className: 'w-1/3',
@@ -66,7 +161,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
                 {category.name}
               </h3>
               <p className="text-xs text-brand-muted font-medium truncate max-w-[200px] xl:max-w-[300px]">
-                {category.description}
+                {category.description || 'No description'}
               </p>
             </div>
           </div>
@@ -76,9 +171,9 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
     {
       header: 'Total Items',
       className: 'text-center',
-      render: (category) => (
+      render: () => (
         <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">{category.items}</span>
+          <span className="text-sm font-bold text-brand-text">--</span>
           <span className="text-xs text-brand-muted">Products</span>
         </div>
       ),
@@ -86,9 +181,9 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
     {
       header: 'Total Value',
       className: 'text-center',
-      render: (category) => (
+      render: () => (
         <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">${category.value.toLocaleString()}</span>
+          <span className="text-sm font-bold text-brand-text">--</span>
           <span className="text-xs text-brand-muted">Asset Value</span>
         </div>
       ),
@@ -101,19 +196,16 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
           <span
             className={cn(
               "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
-              category.status === 'Healthy'
+              category.active
                 ? "bg-green-100 text-green-600"
-                : category.status === 'Low Stock'
-                ? "bg-orange-100 text-orange-600"
                 : "bg-red-100 text-red-600"
             )}
           >
             <span className={cn(
               "w-1.5 h-1.5 rounded-full",
-              category.status === 'Healthy' ? "bg-green-500" :
-              category.status === 'Low Stock' ? "bg-orange-500" : "bg-red-500"
+              category.active ? "bg-green-500" : "bg-red-500"
             )} />
-            {category.status}
+            {category.active ? 'Active' : 'Inactive'}
           </span>
         </div>
       ),
@@ -121,13 +213,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
     {
       header: 'Actions',
       className: 'text-right',
-      render: () => (
+      render: (category) => (
         <div className="flex justify-end items-center gap-2">
           <button 
-            className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 transition-colors rounded-lg"
+            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
             onClick={(e) => {
               e.stopPropagation();
-              // Handle edit
+              openEdit(category);
             }}
             title="Edit Category"
           >
@@ -137,7 +229,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
             onClick={(e) => {
               e.stopPropagation();
-              // Handle delete
+              handleDelete(category.id);
             }}
             title="Delete Category"
           >
@@ -184,13 +276,18 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
                   <input
                     type="text"
                     placeholder="Search categories..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
                   />
                 </div>
               </div>
               <button 
-                onClick={() => setIsModalOpen(true)}
-                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+                onClick={() => {
+                  resetForm();
+                  setIsModalOpen(true);
+                }}
+                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
                 New Category
@@ -200,24 +297,24 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Categories</p>
-                <h3 className="text-3xl font-bold">{categoryData.length}</h3>
+                <h3 className="text-3xl font-bold">{categories.length}</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm">
+              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
-                <h3 className="text-3xl font-bold">177</h3>
+                <h3 className="text-3xl font-bold">--</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm">
+              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
                 <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
-                <h3 className="text-3xl font-bold text-green-600">$15,290</h3>
+                <h3 className="text-3xl font-bold text-green-600">--</h3>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm">
+              <div className="bg-white p-6 rounded-2xl shadow-sm opacity-50">
                 <p className="text-brand-muted text-sm font-medium mb-1">Needs Attention</p>
-                <h3 className="text-3xl font-bold text-orange-500">2</h3>
+                <h3 className="text-3xl font-bold text-orange-500">--</h3>
               </div>
             </div>
 
             <DataTable
-              data={categoryData}
+              data={filteredCategories}
               columns={columns}
               keyExtractor={(item) => item.id}
             />
@@ -225,25 +322,31 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
         )}
       </AnimatePresence>
 
-      {/* New Category Modal */}
+      {/* New/Edit Category Modal */}
       <Modal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Add New Category"
+        onClose={() => {
+          setIsModalOpen(false);
+          resetForm();
+        }}
+        title={editingId ? "Edit Category" : "Add New Category"}
         maxWidth="md"
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => {
+                setIsModalOpen(false);
+                resetForm();
+              }}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={() => setIsModalOpen(false)}
-              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98]"
+              onClick={handleSave}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
-              Save Category
+              {editingId ? "Update Category" : "Save Category"}
             </button>
           </div>
         }
@@ -254,7 +357,9 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
             <input 
               type="text" 
               placeholder="e.g. Seafood, Vegetables..."
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
             />
           </div>
           <div>
@@ -262,19 +367,25 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick }) => {
             <textarea 
               rows={3}
               placeholder="Brief description of items in this category"
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
             />
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">Icon Setup</label>
-            <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
+            <select 
+              value={formData.icon}
+              onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
+            >
+              <option value="package">Default Box</option>
               <option value="beef">Beef / Meat</option>
               <option value="fish">Fish / Seafood</option>
               <option value="leaf">Vegetables / Produce</option>
               <option value="droplets">Dairy</option>
               <option value="wheat">Grains</option>
               <option value="coffee">Beverages</option>
-              <option value="package">Default Box</option>
             </select>
           </div>
         </div>

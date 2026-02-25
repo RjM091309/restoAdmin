@@ -1,7 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-orange: #4f46e5;
+  --color-brand-primary: #4f46e5;
+  --color-brand-orange: #f97316;
+  --color-brand-maintenance: #dc2626;
+  --color-brand-maintenance-soft: #fef2f2;
+  --color-brand-utilities: #92400e;
+  --color-brand-utilities-soft: #fef3c7;
   --color-brand-bg: #f8fafc;
   --color-brand-card: #FFFFFF;
   --color-brand-text: #0f172a;
@@ -101,15 +106,15 @@
 .react-datepicker-material .react-datepicker__day--keyboard-selected,
 .react-datepicker-material .react-datepicker__day--range-start,
 .react-datepicker-material .react-datepicker__day--range-end {
-  background-color: rgb(79 70 229) !important;
+  background-color: rgb(249 115 22) !important;
   color: #fff !important;
   -webkit-text-fill-color: #fff !important;
   font-weight: 600 !important;
 }
 
 .react-datepicker-material .react-datepicker__day--in-range {
-  background-color: rgb(238 242 255) !important;
-  color: rgb(79 70 229) !important;
+  background-color: rgb(255 237 213) !important;
+  color: rgb(249 115 22) !important;
   border-radius: 0 !important;
 }
 
@@ -125,16 +130,16 @@
 
 .react-datepicker-material .react-datepicker__day--today {
   font-weight: 700 !important;
-  background-color: rgb(238 242 255) !important;
-  color: rgb(55 48 163) !important;
-  -webkit-text-fill-color: rgb(55 48 163) !important;
+  background-color: rgb(255 237 213) !important;
+  color: rgb(194 65 12) !important;
+  -webkit-text-fill-color: rgb(194 65 12) !important;
 }
 
 .react-datepicker-material .react-datepicker__day--today.react-datepicker__day--selected,
 .react-datepicker-material .react-datepicker__day--today.react-datepicker__day--keyboard-selected,
 .react-datepicker-material .react-datepicker__day--today.react-datepicker__day--range-start,
 .react-datepicker-material .react-datepicker__day--today.react-datepicker__day--range-end {
-  background-color: rgb(79 70 229) !important;
+  background-color: rgb(249 115 22) !important;
   color: #fff !important;
   -webkit-text-fill-color: #fff !important;
 }

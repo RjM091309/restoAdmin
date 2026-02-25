@@ -159,7 +159,7 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
             </div>
 
             <div className="p-6 border-t border-gray-100">
-              <button className="w-full py-3 bg-brand-orange text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-orange/20 hover:opacity-90 transition-opacity cursor-pointer">
+              <button className="w-full py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer">
                 Mark all as read
               </button>
             </div>

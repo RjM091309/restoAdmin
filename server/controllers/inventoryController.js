@@ -53,6 +53,7 @@ class InventoryController {
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const id = await InventoryModel.createProduct({
 				BRANCH_ID: branchId,
+				CATEGORY_ID: req.body.CATEGORY_ID || req.body.categoryId,
 				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.category,
 				PRODUCT_NAME: req.body.PRODUCT_NAME || req.body.name,
 				UNIT: req.body.UNIT || req.body.unit,
@@ -77,6 +78,7 @@ class InventoryController {
 			const { id } = req.params;
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const ok = await InventoryModel.updateProduct(id, {
+				CATEGORY_ID: req.body.CATEGORY_ID || req.body.categoryId,
 				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.category,
 				PRODUCT_NAME: req.body.PRODUCT_NAME || req.body.name,
 				UNIT: req.body.UNIT || req.body.unit,
@@ -125,6 +127,7 @@ class InventoryController {
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const id = await InventoryModel.createMaterial({
 				BRANCH_ID: branchId,
+				CATEGORY_ID: req.body.CATEGORY_ID || req.body.categoryId,
 				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.category,
 				MATERIAL_NAME: req.body.MATERIAL_NAME || req.body.name,
 				UNIT: req.body.UNIT || req.body.unit,
@@ -148,6 +151,7 @@ class InventoryController {
 			const { id } = req.params;
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const ok = await InventoryModel.updateMaterial(id, {
+				CATEGORY_ID: req.body.CATEGORY_ID || req.body.categoryId,
 				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.category,
 				MATERIAL_NAME: req.body.MATERIAL_NAME || req.body.name,
 				UNIT: req.body.UNIT || req.body.unit,
@@ -353,6 +357,61 @@ class InventoryController {
 			return ApiResponse.success(res, null, 'Stock-in deleted successfully');
 		} catch (error) {
 			return ApiResponse.error(res, 'Failed to delete stock-in record', 500, error.message);
+		}
+	}
+
+	static async getCategories(req, res) {
+		try {
+			const branchId = resolveBranchId(req);
+			const rows = await InventoryModel.getCategories(branchId);
+			return ApiResponse.success(res, rows, 'Categories retrieved successfully');
+		} catch (error) {
+			return ApiResponse.error(res, 'Failed to fetch categories', 500, error.message);
+		}
+	}
+
+	static async createCategory(req, res) {
+		try {
+			const branchId = resolveBranchId(req);
+			if (!branchId) return ApiResponse.badRequest(res, 'Branch ID is required');
+			const userId = req.session?.user_id || req.user?.user_id || null;
+			const id = await InventoryModel.createCategory({
+				BRANCH_ID: branchId,
+				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.name,
+				DESCRIPTION: req.body.DESCRIPTION || req.body.description,
+				user_id: userId,
+			});
+			return ApiResponse.created(res, { id }, 'Category created successfully');
+		} catch (error) {
+			return ApiResponse.error(res, 'Failed to create category', 500, error.message);
+		}
+	}
+
+	static async updateCategory(req, res) {
+		try {
+			const { id } = req.params;
+			const userId = req.session?.user_id || req.user?.user_id || null;
+			const ok = await InventoryModel.updateCategory(id, {
+				CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.name,
+				DESCRIPTION: req.body.DESCRIPTION || req.body.description,
+				user_id: userId,
+			});
+			if (!ok) return ApiResponse.notFound(res, 'Category');
+			return ApiResponse.success(res, null, 'Category updated successfully');
+		} catch (error) {
+			return ApiResponse.error(res, 'Failed to update category', 500, error.message);
+		}
+	}
+
+	static async deleteCategory(req, res) {
+		try {
+			const { id } = req.params;
+			const userId = req.session?.user_id || req.user?.user_id || null;
+			const ok = await InventoryModel.deleteCategory(id, userId);
+			if (!ok) return ApiResponse.notFound(res, 'Category');
+			return ApiResponse.success(res, null, 'Category deleted successfully');
+		} catch (error) {
+			return ApiResponse.error(res, 'Failed to delete category', 500, error.message);
 		}
 	}
 }

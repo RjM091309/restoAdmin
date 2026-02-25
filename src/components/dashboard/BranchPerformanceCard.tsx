@@ -29,17 +29,17 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
       onClick={onClick}
       className={cn(
         "bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col group transition-all duration-300 hover:shadow-lg hover:-translate-y-1 cursor-pointer",
-        isSelected ? "border-brand-orange ring-1 ring-brand-orange shadow-md" : "hover:border-brand-orange/50"
+        isSelected ? "border-brand-primary ring-1 ring-brand-primary shadow-md" : "hover:border-brand-primary/50"
       )}
     >
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-brand-orange/10 flex items-center justify-center text-brand-orange">
+          <div className="w-10 h-10 rounded-lg bg-brand-primary/10 flex items-center justify-center text-brand-primary">
             <MapPin size={20} />
           </div>
           <div>
-            <h3 className="text-base font-bold text-brand-text group-hover:text-brand-orange transition-colors">{branch.name}</h3>
+            <h3 className="text-base font-bold text-brand-text group-hover:text-brand-primary transition-colors">{branch.name}</h3>
             <p className="text-xs text-brand-muted">Branch overview</p>
           </div>
         </div>

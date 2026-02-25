@@ -49,7 +49,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
       className={cn(
         'w-full flex items-center justify-between px-6 py-3 cursor-pointer transition-all group text-left relative',
         active
-          ? 'text-brand-orange bg-brand-orange/5 after:content-[" "] after:absolute after:right-0 after:top-0 after:bottom-0 after:w-1 after:bg-brand-orange after:rounded-l-full'
+          ? 'text-brand-primary bg-brand-primary/5 after:content-[" "] after:absolute after:right-0 after:top-0 after:bottom-0 after:w-1 after:bg-brand-primary after:rounded-l-full'
           : 'text-brand-muted hover:text-brand-text hover:bg-gray-50/50',
       )}
     >
@@ -57,17 +57,17 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
         <Icon
           size={20}
           className={cn(
-            active ? 'text-brand-orange' : 'group-hover:text-brand-text transition-colors'
+            active ? 'text-brand-primary' : 'group-hover:text-brand-text transition-colors'
           )}
         />
         <span className={cn(
           "font-medium text-base",
-          active ? "text-brand-orange" : "text-inherit"
+          active ? "text-brand-primary" : "text-inherit"
         )}>{label}</span>
       </div>
       <div className="flex items-center gap-2">
         {badge && (
-          <span className="bg-brand-orange text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
+          <span className="bg-brand-primary text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
             {badge}
           </span>
         )}
@@ -100,7 +100,7 @@ const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void 
     className={cn(
       'w-full flex items-center gap-3 pl-14 pr-6 py-2 cursor-pointer transition-colors group text-left',
       active
-        ? 'text-brand-orange'
+        ? 'text-brand-primary'
         : 'text-brand-muted hover:text-brand-text',
     )}
   >
@@ -135,7 +135,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   return (
     <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
       <div className="px-8 mb-10 flex items-center gap-3">
-        <div className="w-10 h-10 bg-brand-orange rounded-xl flex items-center justify-center shadow-lg shadow-brand-orange/20">
+        <div className="w-10 h-10 bg-brand-primary rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20">
           <UtensilsCrossed size={22} className="text-white" />
         </div>
         <div>

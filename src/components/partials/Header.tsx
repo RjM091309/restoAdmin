@@ -152,7 +152,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="relative">
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all cursor-pointer"
+              className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all cursor-pointer"
             >
               <Calendar size={20} className="text-brand-muted" />
               <span className="text-sm text-brand-muted whitespace-nowrap">
@@ -162,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
               <ChevronDown
                 size={16}
-                className="text-brand-muted group-hover:text-brand-orange transition-colors"
+                className="text-brand-muted group-hover:text-brand-primary transition-colors"
               />
             </button>
 
@@ -193,7 +193,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative">
           <button
             onClick={() => setBranchDropdownOpen((o) => !o)}
-            className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-orange/30 transition-all w-64 justify-between group cursor-pointer"
+            className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all w-64 justify-between group cursor-pointer"
           >
             <div className="flex items-center gap-2">
               <MapPin size={20} className="text-brand-muted" />
@@ -204,8 +204,8 @@ export const Header: React.FC<HeaderProps> = ({
             <ChevronDown
               size={16}
               className={clsx(
-                'text-brand-muted group-hover:text-brand-orange transition-all duration-200',
-                branchDropdownOpen && 'rotate-180 text-brand-orange'
+                'text-brand-muted group-hover:text-brand-primary transition-all duration-200',
+                branchDropdownOpen && 'rotate-180 text-brand-primary'
               )}
             />
           </button>
@@ -226,9 +226,9 @@ export const Header: React.FC<HeaderProps> = ({
                       setBranchDropdownOpen(false);
                     }}
                     className={clsx(
-                      'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-orange/5 cursor-pointer',
+                      'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-primary/5 cursor-pointer',
                       selectedBranch?.id === branch.id
-                        ? 'text-brand-muted bg-brand-orange/5'
+                        ? 'text-brand-muted bg-brand-primary/5'
                         : 'text-brand-text'
                     )}
                   >
@@ -260,7 +260,7 @@ export const Header: React.FC<HeaderProps> = ({
           className="flex items-center gap-3 pl-6 border-l border-gray-200 cursor-pointer group"
         >
           <div className="text-right">
-            <p className="text-base font-bold group-hover:text-brand-orange transition-colors">
+            <p className="text-base font-bold group-hover:text-brand-primary transition-colors">
               {user ? `${user.firstname} ${user.lastname}` : 'User'}
             </p>
             <p className="text-xs text-brand-muted font-medium">
@@ -270,7 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
           <img
             src={user?.avatar || 'https://picsum.photos/seed/user/100/100'}
             alt="Profile"
-            className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-orange/20 transition-all"
+            className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-primary/20 transition-all"
             referrerPolicy="no-referrer"
           />
         </div>

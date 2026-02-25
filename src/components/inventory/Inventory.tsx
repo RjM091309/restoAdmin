@@ -76,7 +76,7 @@ const columns: ColumnDef<typeof inventoryData[0]>[] = [
     render: () => (
       <div className="flex justify-end items-center gap-2">
         <button 
-          className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 transition-colors rounded-lg"
+          className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
           title="Edit Item"
         >
           <Edit2 size={16} />
@@ -157,7 +157,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
               </div>
               <button 
                 onClick={() => setIsModalOpen(true)}
-                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
                 Add New Item
@@ -211,7 +211,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack }) => {
             </button>
             <button
               onClick={() => setIsModalOpen(false)}
-              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98]"
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
               Save Item
             </button>

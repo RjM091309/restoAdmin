@@ -13,9 +13,25 @@ class InventoryModel {
 
 		InventoryModel._schemaPromise = (async () => {
 			await pool.execute(`
+				CREATE TABLE IF NOT EXISTS inventory_categories (
+					IDNo INT AUTO_INCREMENT PRIMARY KEY,
+					BRANCH_ID INT NOT NULL,
+					CATEGORY_NAME VARCHAR(120) NOT NULL,
+					DESCRIPTION TEXT NULL,
+					ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
+					ENCODED_BY INT NULL,
+					ENCODED_DT DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					EDITED_BY INT NULL,
+					EDITED_DT DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+					INDEX idx_inventory_categories_branch (BRANCH_ID)
+				)
+			`);
+
+			await pool.execute(`
 				CREATE TABLE IF NOT EXISTS inventory_products (
 					IDNo INT AUTO_INCREMENT PRIMARY KEY,
 					BRANCH_ID INT NOT NULL,
+					CATEGORY_ID INT NULL,
 					CATEGORY_NAME VARCHAR(120) NULL,
 					PRODUCT_NAME VARCHAR(180) NOT NULL,
 					UNIT VARCHAR(80) NULL,
@@ -32,6 +48,7 @@ class InventoryModel {
 					EDITED_BY INT NULL,
 					EDITED_DT DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
 					INDEX idx_inventory_products_branch (BRANCH_ID),
+					INDEX idx_inventory_products_category (CATEGORY_ID),
 					INDEX idx_inventory_products_status (STATUS)
 				)
 			`);
@@ -40,6 +57,7 @@ class InventoryModel {
 				CREATE TABLE IF NOT EXISTS inventory_materials (
 					IDNo INT AUTO_INCREMENT PRIMARY KEY,
 					BRANCH_ID INT NOT NULL,
+					CATEGORY_ID INT NULL,
 					CATEGORY_NAME VARCHAR(120) NULL,
 					MATERIAL_NAME VARCHAR(180) NOT NULL,
 					UNIT VARCHAR(80) NULL,
@@ -55,9 +73,26 @@ class InventoryModel {
 					EDITED_BY INT NULL,
 					EDITED_DT DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
 					INDEX idx_inventory_materials_branch (BRANCH_ID),
+					INDEX idx_inventory_materials_category (CATEGORY_ID),
 					INDEX idx_inventory_materials_status (STATUS)
 				)
 			`);
+
+			const [prodCategoryIdRows] = await pool.execute(`
+				SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_products' AND COLUMN_NAME = 'CATEGORY_ID'
+			`);
+			if (Number(prodCategoryIdRows?.[0]?.count || 0) === 0) {
+				await pool.execute(`ALTER TABLE inventory_products ADD COLUMN CATEGORY_ID INT NULL AFTER BRANCH_ID, ADD INDEX idx_inventory_products_category (CATEGORY_ID)`);
+			}
+
+			const [matCategoryIdRows] = await pool.execute(`
+				SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+				WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'inventory_materials' AND COLUMN_NAME = 'CATEGORY_ID'
+			`);
+			if (Number(matCategoryIdRows?.[0]?.count || 0) === 0) {
+				await pool.execute(`ALTER TABLE inventory_materials ADD COLUMN CATEGORY_ID INT NULL AFTER BRANCH_ID, ADD INDEX idx_inventory_materials_category (CATEGORY_ID)`);
+			}
 
 			const [totalCostColumnRows] = await pool.execute(
 				`
@@ -269,27 +304,30 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		let query = `
 			SELECT
-				IDNo,
-				BRANCH_ID,
-				CATEGORY_NAME,
-				PRODUCT_NAME,
-				UNIT,
-				TYPE,
-				STATUS,
-				PRICE,
-				STOCK,
-				SKU,
-				BARCODE,
-				DESCRIPTION
-			FROM inventory_products
-			WHERE ACTIVE = 1
+				p.IDNo,
+				p.BRANCH_ID,
+				p.CATEGORY_ID,
+				p.CATEGORY_NAME,
+				c.CATEGORY_NAME AS CATEGORY_LABEL,
+				p.PRODUCT_NAME,
+				p.UNIT,
+				p.TYPE,
+				p.STATUS,
+				p.PRICE,
+				p.STOCK,
+				p.SKU,
+				p.BARCODE,
+				p.DESCRIPTION
+			FROM inventory_products p
+			LEFT JOIN inventory_categories c ON c.IDNo = p.CATEGORY_ID
+			WHERE p.ACTIVE = 1
 		`;
 		const params = [];
 		if (branchId !== null && branchId !== undefined) {
-			query += ` AND BRANCH_ID = ?`;
+			query += ` AND p.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		query += ` ORDER BY IDNo DESC`;
+		query += ` ORDER BY p.IDNo DESC`;
 		const [rows] = await pool.execute(query, params);
 		return rows;
 	}
@@ -298,13 +336,14 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		const query = `
 			INSERT INTO inventory_products (
-				BRANCH_ID, CATEGORY_NAME, PRODUCT_NAME, UNIT, TYPE, STATUS,
+				BRANCH_ID, CATEGORY_ID, CATEGORY_NAME, PRODUCT_NAME, UNIT, TYPE, STATUS,
 				PRICE, STOCK, SKU, BARCODE, DESCRIPTION, ENCODED_BY
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`;
 		const [result] = await pool.execute(query, [
 			data.BRANCH_ID,
+			data.CATEGORY_ID || null,
 			data.CATEGORY_NAME || null,
 			data.PRODUCT_NAME,
 			data.UNIT || null,
@@ -325,21 +364,22 @@ class InventoryModel {
 		const [rows] = await pool.execute(
 			`
 			SELECT
-				IDNo,
-				BRANCH_ID,
-				CATEGORY_NAME,
-				PRODUCT_NAME,
-				UNIT,
-				TYPE,
-				STATUS,
-				PRICE,
-				STOCK,
-				SKU,
-				BARCODE,
-				DESCRIPTION,
-				ACTIVE
-			FROM inventory_products
-			WHERE IDNo = ?
+				p.IDNo,
+				p.BRANCH_ID,
+				p.CATEGORY_ID,
+				p.CATEGORY_NAME,
+				p.PRODUCT_NAME,
+				p.UNIT,
+				p.TYPE,
+				p.STATUS,
+				p.PRICE,
+				p.STOCK,
+				p.SKU,
+				p.BARCODE,
+				p.DESCRIPTION,
+				p.ACTIVE
+			FROM inventory_products p
+			WHERE p.IDNo = ?
 			LIMIT 1
 			`,
 			[id]
@@ -351,6 +391,7 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		const query = `
 			UPDATE inventory_products SET
+				CATEGORY_ID = ?,
 				CATEGORY_NAME = ?,
 				PRODUCT_NAME = ?,
 				UNIT = ?,
@@ -366,6 +407,7 @@ class InventoryModel {
 			WHERE IDNo = ? AND ACTIVE = 1
 		`;
 		const [result] = await pool.execute(query, [
+			data.CATEGORY_ID || null,
 			data.CATEGORY_NAME || null,
 			data.PRODUCT_NAME,
 			data.UNIT || null,
@@ -395,27 +437,30 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		let query = `
 			SELECT
-				IDNo,
-				BRANCH_ID,
-				CATEGORY_NAME,
-				MATERIAL_NAME,
-				UNIT,
-				STATUS,
-				STOCK,
-				UNIT_COST,
-				TOTAL_COST,
-				SKU,
-				BARCODE,
-				DESCRIPTION
-			FROM inventory_materials
-			WHERE ACTIVE = 1
+				m.IDNo,
+				m.BRANCH_ID,
+				m.CATEGORY_ID,
+				m.CATEGORY_NAME,
+				c.CATEGORY_NAME AS CATEGORY_LABEL,
+				m.MATERIAL_NAME,
+				m.UNIT,
+				m.STATUS,
+				m.STOCK,
+				m.UNIT_COST,
+				m.TOTAL_COST,
+				m.SKU,
+				m.BARCODE,
+				m.DESCRIPTION
+			FROM inventory_materials m
+			LEFT JOIN inventory_categories c ON c.IDNo = m.CATEGORY_ID
+			WHERE m.ACTIVE = 1
 		`;
 		const params = [];
 		if (branchId !== null && branchId !== undefined) {
-			query += ` AND BRANCH_ID = ?`;
+			query += ` AND m.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		query += ` ORDER BY IDNo DESC`;
+		query += ` ORDER BY m.IDNo DESC`;
 		const [rows] = await pool.execute(query, params);
 		return rows;
 	}
@@ -424,13 +469,14 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		const query = `
 			INSERT INTO inventory_materials (
-				BRANCH_ID, CATEGORY_NAME, MATERIAL_NAME, UNIT, STATUS,
+				BRANCH_ID, CATEGORY_ID, CATEGORY_NAME, MATERIAL_NAME, UNIT, STATUS,
 				STOCK, UNIT_COST, SKU, BARCODE, DESCRIPTION, ENCODED_BY
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`;
 		const [result] = await pool.execute(query, [
 			data.BRANCH_ID,
+			data.CATEGORY_ID || null,
 			data.CATEGORY_NAME || null,
 			data.MATERIAL_NAME,
 			data.UNIT || null,
@@ -450,21 +496,22 @@ class InventoryModel {
 		const [rows] = await pool.execute(
 			`
 			SELECT
-				IDNo,
-				BRANCH_ID,
-				CATEGORY_NAME,
-				MATERIAL_NAME,
-				UNIT,
-				STATUS,
-				STOCK,
-				UNIT_COST,
-				TOTAL_COST,
-				SKU,
-				BARCODE,
-				DESCRIPTION,
-				ACTIVE
-			FROM inventory_materials
-			WHERE IDNo = ?
+				m.IDNo,
+				m.BRANCH_ID,
+				m.CATEGORY_ID,
+				m.CATEGORY_NAME,
+				m.MATERIAL_NAME,
+				m.UNIT,
+				m.STATUS,
+				m.STOCK,
+				m.UNIT_COST,
+				m.TOTAL_COST,
+				m.SKU,
+				m.BARCODE,
+				m.DESCRIPTION,
+				m.ACTIVE
+			FROM inventory_materials m
+			WHERE m.IDNo = ?
 			LIMIT 1
 			`,
 			[id]
@@ -476,6 +523,7 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		const query = `
 			UPDATE inventory_materials SET
+				CATEGORY_ID = ?,
 				CATEGORY_NAME = ?,
 				MATERIAL_NAME = ?,
 				UNIT = ?,
@@ -490,6 +538,7 @@ class InventoryModel {
 			WHERE IDNo = ? AND ACTIVE = 1
 		`;
 		const [result] = await pool.execute(query, [
+			data.CATEGORY_ID || null,
 			data.CATEGORY_NAME || null,
 			data.MATERIAL_NAME,
 			data.UNIT || null,
@@ -1297,6 +1346,59 @@ class InventoryModel {
 				INVENTORY_STOCK: Number(minStock.toFixed(3)),
 			};
 		});
+	}
+	static async getCategories(branchId = null) {
+		await InventoryModel.ensureSchema();
+		let query = `SELECT * FROM inventory_categories WHERE ACTIVE = 1`;
+		const params = [];
+		if (branchId !== null && branchId !== undefined) {
+			query += ` AND BRANCH_ID = ?`;
+			params.push(branchId);
+		}
+		query += ` ORDER BY CATEGORY_NAME ASC`;
+		const [rows] = await pool.execute(query, params);
+		return rows;
+	}
+
+	static async createCategory(data) {
+		await InventoryModel.ensureSchema();
+		const query = `
+			INSERT INTO inventory_categories (BRANCH_ID, CATEGORY_NAME, DESCRIPTION, ENCODED_BY)
+			VALUES (?, ?, ?, ?)
+		`;
+		const [result] = await pool.execute(query, [
+			data.BRANCH_ID,
+			data.CATEGORY_NAME,
+			data.DESCRIPTION || null,
+			data.user_id || null,
+		]);
+		return result.insertId;
+	}
+
+	static async updateCategory(id, data) {
+		await InventoryModel.ensureSchema();
+		const query = `
+			UPDATE inventory_categories SET
+				CATEGORY_NAME = ?,
+				DESCRIPTION = ?,
+				EDITED_BY = ?,
+				EDITED_DT = CURRENT_TIMESTAMP
+			WHERE IDNo = ? AND ACTIVE = 1
+		`;
+		const [result] = await pool.execute(query, [
+			data.CATEGORY_NAME,
+			data.DESCRIPTION || null,
+			data.user_id || null,
+			id,
+		]);
+		return result.affectedRows > 0;
+	}
+
+	static async deleteCategory(id, userId) {
+		await InventoryModel.ensureSchema();
+		const query = `UPDATE inventory_categories SET ACTIVE = 0, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ?`;
+		const [result] = await pool.execute(query, [userId || null, id]);
+		return result.affectedRows > 0;
 	}
 }
 

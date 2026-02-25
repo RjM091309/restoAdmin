@@ -467,7 +467,10 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Categories onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}`)} />
+                    <Categories 
+                      selectedBranch={selectedBranch}
+                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}`)} 
+                    />
                   </motion.div>
                 } />
 

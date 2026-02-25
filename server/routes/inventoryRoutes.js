@@ -21,4 +21,9 @@ router.put('/inventory/stock-ins/:id', authenticate, InventoryController.updateS
 router.delete('/inventory/stock-ins/:id', authenticate, InventoryController.deleteStockIn);
 router.get('/inventory/audit-trail', authenticate, InventoryController.getAuditTrail);
 
+router.get('/inventory/categories', authenticate, InventoryController.getCategories);
+router.post('/inventory/categories', authenticate, InventoryController.createCategory);
+router.put('/inventory/categories/:id', authenticate, InventoryController.updateCategory);
+router.delete('/inventory/categories/:id', authenticate, InventoryController.deleteCategory);
+
 module.exports = router;

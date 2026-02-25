@@ -93,7 +93,7 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
                         setPerPageOpen(false);
                       }}
                       className={cn(
-                        "w-full text-left px-3 py-1.5 text-sm hover:bg-brand-orange/5 transition-colors",
+                        "w-full text-left px-3 py-1.5 text-sm hover:bg-brand-primary/5 transition-colors",
                         itemsPerPage === num
                           ? "text-brand-orange font-bold bg-brand-orange/5"
                           : "text-brand-text"
@@ -130,7 +130,7 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
                   className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center font-medium transition-all",
                     currentPage === page
-                      ? "bg-brand-orange text-white shadow-md shadow-brand-orange/20"
+                      ? "bg-brand-primary text-white shadow-md shadow-brand-primary/20"
                       : "text-brand-muted hover:bg-gray-100 hover:text-brand-text"
                   )}
                 >

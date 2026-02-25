@@ -11,7 +11,7 @@ import './index.css';
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#4f46e5',
+      main: '#f97316',
     },
   },
 });

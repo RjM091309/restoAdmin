@@ -210,7 +210,7 @@ export const UserRole: React.FC = () => {
               </div>
               <button
                 onClick={handleOpenAddModal}
-                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
                 Add New Role
@@ -235,7 +235,7 @@ export const UserRole: React.FC = () => {
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-500">
                         <button 
                           onClick={() => handleOpenEditModal(role)}
-                          className="p-2.5 bg-white text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 rounded-xl transition-all shadow-sm border border-gray-50"
+                          className="p-2.5 bg-white text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-xl transition-all shadow-sm border border-gray-50"
                           title="Edit Role"
                         >
                           <Edit2 size={18} />
@@ -319,7 +319,7 @@ export const UserRole: React.FC = () => {
             <button
               onClick={handleSubmit}
               disabled={isSubmitting || !formData.role.trim()}
-              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
               {editingRole ? "Update Role" : "Save Role"}

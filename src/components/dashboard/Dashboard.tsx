@@ -37,9 +37,9 @@ function cn(...inputs: ClassValue[]) {
 
 const categoryData = [
   { name: 'Seafood', value: 30, color: '#0f172a' },
-  { name: 'Beverages', value: 25, color: '#4f46e5' },
+  { name: 'Beverages', value: 25, color: '#f97316' },
   { name: 'Dessert', value: 25, color: '#e2e8f0' },
-  { name: 'Pasta', value: 20, color: '#c7d2fe' },
+  { name: 'Pasta', value: 20, color: '#fed7aa' },
 ];
 
 const ordersOverviewData = [
@@ -369,8 +369,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                     <ComposedChart data={dashboardData.dynamicRevenueData}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
-                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0} />
+                          <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
                         </linearGradient>
                         <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#0f172a" stopOpacity={0.18} />
@@ -402,9 +402,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         type="monotone"
                         dataKey="income"
                         fill="url(#incomeGradient)"
-                        stroke="#4f46e5"
+                        stroke="#f97316"
                         strokeWidth={2}
-                        dot={{ r: 4, fill: '#4f46e5', strokeWidth: 0 }}
+                        dot={{ r: 4, fill: '#f97316', strokeWidth: 0 }}
                       />
                       <Area
                         type="monotone"
@@ -485,7 +485,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         tick={{ fontSize: 12, fill: '#64748b' }}
                       />
                       <Tooltip
-                        cursor={{ fill: '#4f46e5', opacity: 0.1 }}
+                        cursor={{ fill: '#f97316', opacity: 0.1 }}
                         contentStyle={{
                           borderRadius: '12px',
                           border: 'none',
@@ -494,9 +494,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       />
                       <Bar
                         dataKey="orders"
-                        fill="#c7d2fe"
+                        fill="#fed7aa"
                         radius={[6, 6, 0, 0]}
-                        activeBar={<Rectangle fill="#4f46e5" />}
+                        activeBar={<Rectangle fill="#f97316" />}
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -517,7 +517,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       value: 900,
                       percentage: 45,
                       icon: UtensilsCrossed,
-                      color: 'bg-indigo-100 text-indigo-600',
+                      color: 'bg-orange-100 text-orange-600',
                     },
                     {
                       label: 'Takeaway',
@@ -531,7 +531,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       value: 500,
                       percentage: 25,
                       icon: MessageSquare,
-                      color: 'bg-indigo-50 text-indigo-700',
+                      color: 'bg-orange-50 text-orange-700',
                     },
                   ].map((type) => (
                     <div key={type.label} className="flex items-center justify-between">
