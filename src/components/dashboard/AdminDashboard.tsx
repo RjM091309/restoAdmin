@@ -238,78 +238,115 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
     },
   ];
 
-  const expenseCategoryRows: ComparisonRow[] = [
+  const unifiedComparisonRows: UnifiedComparisonRow[] = [
+    ...benchmarkRows,
+    { id: 'section-inventory', rowType: 'section', label: 'Inventory' },
     {
-      id: 'exp-electricity',
-      label: 'Electricity',
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.18),
-      bestMode: 'min',
-    },
-    {
-      id: 'exp-internet',
-      label: 'Internet',
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.07),
-      bestMode: 'min',
-    },
-    {
-      id: 'exp-salary',
-      label: 'Salary',
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.45),
-      bestMode: 'min',
-    },
-    {
-      id: 'exp-rent',
-      label: 'Rent',
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.2),
-      bestMode: 'min',
-    },
-    {
-      id: 'exp-others',
-      label: 'Others',
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.1),
-      bestMode: 'min',
-    },
-  ];
-
-  const inventoryCategoryRows: ComparisonRow[] = [
-    {
-      id: 'inv-ingredients',
-      label: 'Raw Ingredients',
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.42),
-      bestMode: 'min',
-    },
-    {
-      id: 'inv-packaging',
-      label: 'Packaging',
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.12),
+      id: 'inv-fresh-produce',
+      label: 'Fresh Produce',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.2),
       bestMode: 'min',
     },
     {
       id: 'inv-beverages',
       label: 'Beverages',
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.2),
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.14),
       bestMode: 'min',
     },
     {
-      id: 'inv-cleaning',
-      label: 'Cleaning Supplies',
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.08),
+      id: 'inv-meat',
+      label: 'Meat',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.24),
       bestMode: 'min',
     },
     {
-      id: 'inv-kitchen',
-      label: 'Kitchen Supplies',
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.18),
+      id: 'inv-seafood',
+      label: 'Seafood',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.17),
       bestMode: 'min',
     },
-  ];
-
-  const unifiedComparisonRows: UnifiedComparisonRow[] = [
-    ...benchmarkRows,
-    { id: 'section-expenses', rowType: 'section', label: 'Expenses' },
-    ...expenseCategoryRows,
-    { id: 'section-inventory', rowType: 'section', label: 'Inventory' },
-    ...inventoryCategoryRows,
+    {
+      id: 'inv-dreammart',
+      label: 'DreamMart',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.15),
+      bestMode: 'min',
+    },
+    {
+      id: 'inv-rice',
+      label: 'Rice',
+      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.1),
+      bestMode: 'min',
+    },
+    { id: 'section-maintenance', rowType: 'section', label: 'Maintenance' },
+    {
+      id: 'maint-kitchen-equipment',
+      label: 'Kitchen Equipment',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
+      bestMode: 'min',
+    },
+    {
+      id: 'maint-supplies',
+      label: 'Supplies',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.035),
+      bestMode: 'min',
+    },
+    {
+      id: 'maint-repair',
+      label: 'Repair',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.025),
+      bestMode: 'min',
+    },
+    { id: 'section-utilities-bills', rowType: 'section', label: 'Utilities / Bills' },
+    {
+      id: 'util-electricty',
+      label: 'Electricty',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.17),
+      bestMode: 'min',
+    },
+    {
+      id: 'util-water',
+      label: 'Water',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
+      bestMode: 'min',
+    },
+    {
+      id: 'util-internet',
+      label: 'Internet',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.05),
+      bestMode: 'min',
+    },
+    {
+      id: 'util-gas',
+      label: 'Gas',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.04),
+      bestMode: 'min',
+    },
+    {
+      id: 'util-logistic-air-sea',
+      label: 'Logistic(Air, Sea)',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
+      bestMode: 'min',
+    },
+    { id: 'section-salary-rent', rowType: 'section', label: 'Salary & Rent' },
+    {
+      id: 'salary-rent-salary',
+      label: 'Salary',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.42),
+      bestMode: 'min',
+    },
+    {
+      id: 'salary-rent-rent',
+      label: 'Rent',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.2),
+      bestMode: 'min',
+    },
+    { id: 'section-others', rowType: 'section', label: 'Others' },
+    {
+      id: 'others',
+      label: 'Others',
+      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
+      bestMode: 'min',
+    },
   ];
 
   const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
@@ -322,32 +359,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
   };
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
-    <div className="min-w-[760px]">
+    <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
       <div
-        className="grid border border-slate-200 bg-slate-50 sticky top-0 z-40 shadow-sm"
+        className="grid sticky top-0 z-40 bg-white border-b border-brand-primary/20"
         style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
       >
-        <div className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500 border-r border-slate-200">
+        <div className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-brand-primary border-r border-brand-primary/20">
           Comparison Metric
         </div>
         {selectedCompareBranches.map((branch) => (
-          <div key={`head-${branch.id}`} className="px-5 py-4 border-l border-slate-200">
-            <p className="text-sm font-semibold text-slate-800">{branch.name}</p>
+          <div key={`head-${branch.id}`} className="px-5 py-4 border-l border-brand-primary/15">
+            <p className="text-sm font-semibold text-slate-700">{branch.name}</p>
           </div>
         ))}
       </div>
 
-      <div className="rounded-b-2xl border-x border-b border-slate-200 bg-white">
+      <div className="bg-white">
           {rows.map((row) => {
             if (isSectionRow(row)) {
               return (
                 <div
                   key={row.id}
-                  className="grid border-y border-slate-200 bg-indigo-50/70"
+                  className="grid border-y border-indigo-200 bg-indigo-500/12"
                   style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
                 >
                   <div
-                    className="px-5 py-1.5 text-center text-xs font-bold uppercase tracking-[0.2em] text-brand-primary"
+                    className="px-5 py-2 text-center text-xs font-extrabold uppercase tracking-[0.2em] text-indigo-700"
                     style={{ gridColumn: `1 / ${selectedCount + 2}` }}
                   >
                     {row.label}
@@ -361,22 +398,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             return (
               <div
                 key={row.id}
-                className="grid border-b border-slate-100 last:border-b-0"
+                className="grid border-b border-brand-primary/10 last:border-b-0 hover:bg-brand-primary/5 transition-colors duration-200"
                 style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
               >
-                <div className="px-5 py-4 flex items-center text-sm font-medium text-slate-600 bg-slate-50/70">
+                <div className="px-5 py-4 flex items-center text-sm font-semibold text-slate-700 bg-brand-primary/5 border-r border-brand-primary/10">
                   {row.label}
                 </div>
                 {row.values.map((value, index) => {
                   const isTop = value === benchmarkValue;
                   return (
-                    <div key={`${row.id}-${selectedCompareBranches[index].id}`} className="px-5 py-4 border-l border-slate-100">
+                    <div key={`${row.id}-${selectedCompareBranches[index].id}`} className="px-5 py-4 border-l border-brand-primary/10">
                       <div className="flex items-center justify-between gap-3">
-                        <span className={`text-sm font-semibold ${isTop ? 'text-emerald-600' : 'text-slate-800'}`}>
+                        <span className={`text-sm font-semibold ${isTop ? 'text-brand-primary' : 'text-slate-700'}`}>
                           {formatCurrency(value)}
                         </span>
                         {isTop && (
-                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                          <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-brand-primary/15 text-brand-primary">
                             Top
                           </span>
                         )}
@@ -588,7 +625,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
           </div>
           <div className="lg:col-span-1 space-y-4">
             {selectedCompareBranches.length > 0 && (
-              <div className="sticky top-4 z-10 bg-slate-50/90 backdrop-blur-sm rounded-xl p-2">
+              <div className="sticky top-4 z-10 bg-slate-50 rounded-xl p-2">
                 <button
                   type="button"
                   disabled={!canCompare}
@@ -635,13 +672,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-              className={`fixed right-0 top-0 h-screen ${comparePanelWidthClass} bg-white shadow-2xl z-50 border-l border-slate-200`}
+              className={`fixed right-0 top-0 h-screen ${comparePanelWidthClass} bg-white shadow-2xl z-50 border-l border-brand-primary/15`}
             >
               <div className="h-full flex flex-col">
-                <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200">
+                <div className="flex items-center justify-between px-6 py-5 border-b border-brand-primary/15 bg-white">
                   <div>
-                    <h2 className="text-xl font-bold text-slate-800">Branch Comparison</h2>
-                    <p className="text-sm text-slate-500 mt-1">
+                    <h2 className="text-xl font-bold text-brand-primary">Branch Comparison</h2>
+                    <p className="text-sm text-slate-600 mt-1">
                       {compareTitle}
                     </p>
                   </div>
@@ -649,15 +686,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     <button
                       type="button"
                       onClick={() => setIsCompareDateOpen((open) => !open)}
-                      className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all cursor-pointer"
+                      className="flex items-center gap-3 bg-brand-primary/[0.04] px-5 py-2.5 rounded-xl shadow-sm border border-brand-primary/20 hover:bg-brand-primary/10 hover:border-brand-primary/40 transition-all cursor-pointer"
                     >
-                      <Calendar size={18} className="text-brand-muted" />
-                      <span className="text-sm text-brand-muted whitespace-nowrap">
+                      <Calendar size={18} className="text-brand-primary" />
+                      <span className="text-sm text-slate-700 whitespace-nowrap">
                         {compareDateRange.start && compareDateRange.end
                           ? `${formatDate(compareDateRange.start)} - ${formatDate(compareDateRange.end)}`
                           : 'Date range'}
                       </span>
-                      <ChevronDown size={16} className="text-brand-muted transition-colors" />
+                      <ChevronDown size={16} className="text-brand-primary transition-colors" />
                     </button>
 
                     {isCompareDateOpen && (
@@ -688,7 +725,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                   {isComparePanelLoading ? (
                     <div className="mt-6 space-y-4">
                       <Skeleton className="h-12 rounded-2xl" />
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                      <div className="rounded-2xl border border-brand-primary/15 bg-white p-4 space-y-3">
                         <Skeleton className="h-12 rounded-xl" />
                         {Array.from({ length: 8 }).map((_, i) => (
                           <Skeleton key={i} className="h-12 rounded-lg" />
@@ -697,9 +734,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     </div>
                   ) : (
                     <>
-                      <div className="mt-6 rounded-2xl border border-slate-200 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-3 flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-700">Branch Comparison Board</p>
-                        <p className="text-xs text-slate-500">Top = highest value, except Expenses (lowest is best)</p>
+                      <div className="mt-6 rounded-2xl border border-brand-primary/20 bg-gradient-to-r from-brand-primary/10 to-indigo-100/70 px-4 py-3 flex items-center justify-between shadow-sm">
+                        <p className="text-sm font-semibold text-brand-primary">Branch Comparison Board</p>
+                        <p className="text-xs text-slate-600">Top = highest value, except Expenses (lowest is best)</p>
                       </div>
 
                       {renderComparisonTable(unifiedComparisonRows)}
