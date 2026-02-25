@@ -41,7 +41,7 @@ const SummaryCard = ({ title, value, icon: Icon, color }: { title: string, value
       
       {/* Floating Icon Box */}
       <div 
-        className={`z-20 w-20 h-20 absolute left-0 shadow-lg shadow-slate-200/50 rounded-2xl flex items-center justify-center ${color} text-white border-4 border-white transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3`}
+        className={`z-10 w-20 h-20 absolute left-0 shadow-lg shadow-slate-200/50 rounded-2xl flex items-center justify-center ${color} text-white border-4 border-white transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3`}
       >
         <Icon size={28} strokeWidth={2.5} />
       </div>

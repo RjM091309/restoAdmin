@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleClose = () => setDropdownOpen(false);
 
   return (
-    <header className="relative z-20 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
+    <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
       <div>
         <h2 className="text-3xl font-bold flex items-center gap-2">
           {breadcrumbs.length > 0 ? (
