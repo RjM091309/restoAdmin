@@ -1,25 +1,24 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
-    RefreshCw,
+    Filter,
     Plus,
-    Edit3,
+    Edit2,
     Trash2,
     UtensilsCrossed,
-    CheckCircle2,
-    X,
     AlertTriangle,
+    CheckCircle2,
+    XCircle,
+    X,
     AlertCircle,
     Loader2,
     ImageIcon,
-    Filter,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
-import { Select2 } from '../ui/Select2';
-import { SkeletonTransition, SkeletonPage } from '../ui/Skeleton';
+import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import {
     getMenus,
     getMenuCategories,
@@ -32,51 +31,27 @@ import {
     type CreateMenuPayload,
     type UpdateMenuPayload,
 } from '../../services/menuService';
-
-// Branch type from Header
 import { type Branch } from '../partials/Header';
 
+// ---- Props & types ----
 interface MenuProps {
     selectedBranch: Branch | null;
 }
 
-// --- SweetAlert-style dialog state ---
 type SwalState = {
     type: 'question' | 'success' | 'error' | 'warning';
     title: string;
     text: string;
     showCancel?: boolean;
     confirmText?: string;
-    cancelText?: string;
     onConfirm?: () => void | Promise<void>;
     onCancel?: () => void;
 } | null;
 
-// --- Form State ---
-interface FormState {
-    name: string;
-    description: string;
-    categoryId: string;
-    price: string;
-    isAvailable: boolean;
-    imageUrl: string;
-    branchId: string;
-}
-
-const defaultFormState = (branchId: string): FormState => ({
-    name: '',
-    description: '',
-    categoryId: '',
-    price: '',
-    isAvailable: true,
-    imageUrl: '',
-    branchId,
-});
-
 export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
 
-    // ----- Data State -----
+    // ----- Data -----
     const [menus, setMenus] = useState<MenuRecord[]>([]);
     const [categories, setCategories] = useState<MenuCategory[]>([]);
     const [loading, setLoading] = useState(true);
@@ -84,261 +59,171 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     // ----- Filters -----
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<string | number | null>(null);
-    const [availability, setAvailability] = useState<string | number | null>(null);
+    const [selectedCategory, setSelectedCategory] = useState<string>('all');
+    const [availFilter, setAvailFilter] = useState<string>('all');
 
     // ----- Modals -----
-    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [editingMenu, setEditingMenu] = useState<MenuRecord | null>(null);
-    const [formState, setFormState] = useState<FormState>(defaultFormState(branchId));
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [imagePreview, setImagePreview] = useState<string | null>(null);
-    const [submitError, setSubmitError] = useState<string | null>(null);
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [editingItem, setEditingItem] = useState<MenuRecord | null>(null);
     const [submitting, setSubmitting] = useState(false);
-
-    // ----- Delete -----
-    const [deleteTarget, setDeleteTarget] = useState<MenuRecord | null>(null);
-    const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-
-    // ----- SweetAlert -----
     const [swal, setSwal] = useState<SwalState>(null);
 
+    // ----- Form -----
+    const [formName, setFormName] = useState('');
+    const [formDesc, setFormDesc] = useState('');
+    const [formCategory, setFormCategory] = useState('');
+    const [formPrice, setFormPrice] = useState('');
+    const [formAvailable, setFormAvailable] = useState(true);
+    const [formImage, setFormImage] = useState<File | null>(null);
+    const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
+
     // ==================== Data fetching ====================
-    const refreshData = React.useCallback(async () => {
+    const refreshData = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
-            const [menuData, categoryData] = await Promise.all([
+            const [menuData, catData] = await Promise.all([
                 getMenus(branchId),
                 getMenuCategories(branchId),
             ]);
-            setMenus(menuData);
-            setCategories(categoryData);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to load menu data');
+            setMenus(Array.isArray(menuData) ? menuData : []);
+            setCategories(Array.isArray(catData) ? catData : []);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to load menu data');
             setMenus([]);
-            setCategories([]);
         } finally {
             setLoading(false);
         }
     }, [branchId]);
 
-    // Re-fetch when branch changes
     useEffect(() => {
         refreshData();
-        // Reset filters when branch changes so stale category/filters don't persist
         setSearchTerm('');
-        setSelectedCategory(null);
-        setAvailability(null);
+        setSelectedCategory('all');
+        setAvailFilter('all');
     }, [refreshData]);
-
-    useEffect(() => {
-        if (branchId !== 'all') {
-            setFormState((prev) => ({ ...prev, branchId }));
-        }
-    }, [branchId]);
 
     // ==================== Filtering ====================
     const filteredMenus = useMemo(() => {
-        const normalizedSearch = searchTerm.trim().toLowerCase();
-        return menus.filter((menu) => {
-            const matchesSearch =
-                !normalizedSearch ||
-                [menu.name, menu.description || '', menu.categoryName, menu.branchName, menu.branchCode]
-                    .join(' ')
-                    .toLowerCase()
-                    .includes(normalizedSearch);
-
-            const matchesCategory =
-                !selectedCategory || selectedCategory === 'all' || menu.categoryId === String(selectedCategory);
-
-            const menuAvailable = menu.effectiveAvailable ?? menu.isAvailable;
-            const matchesAvailability =
-                !availability ||
-                availability === 'all' ||
-                (availability === 'available' && menuAvailable) ||
-                (availability === 'unavailable' && !menuAvailable);
-
-            return matchesSearch && matchesCategory && matchesAvailability;
+        const term = searchTerm.trim().toLowerCase();
+        return menus.filter((m) => {
+            const matchSearch = !term || m.name.toLowerCase().includes(term) || (m.description && m.description.toLowerCase().includes(term)) || m.categoryName.toLowerCase().includes(term);
+            const matchCat = selectedCategory === 'all' || m.categoryId === selectedCategory;
+            const matchAvail = availFilter === 'all' || (availFilter === 'available' ? m.isAvailable : !m.isAvailable);
+            return matchSearch && matchCat && matchAvail;
         });
-    }, [menus, searchTerm, selectedCategory, availability]);
+    }, [menus, searchTerm, selectedCategory, availFilter]);
 
-    // ==================== Image preview ====================
-    useEffect(() => {
-        if (!imageFile) {
-            setImagePreview(null);
+    // ==================== Stats ====================
+    const stats = useMemo(() => ({
+        total: menus.length,
+        available: menus.filter((m) => m.isAvailable).length,
+        unavailable: menus.filter((m) => !m.isAvailable).length,
+        categories: new Set(menus.map((m) => m.categoryId).filter(Boolean)).size,
+    }), [menus]);
+
+    // ==================== Form helpers ====================
+    const resetForm = () => {
+        setFormName(''); setFormDesc(''); setFormCategory(''); setFormPrice('');
+        setFormAvailable(true); setFormImage(null); setFormImagePreview(null);
+    };
+
+    const openCreate = () => {
+        resetForm();
+        setIsCreateOpen(true);
+    };
+
+    const openEdit = (item: MenuRecord) => {
+        setFormName(item.name);
+        setFormDesc(item.description || '');
+        setFormCategory(item.categoryId || '');
+        setFormPrice(String(item.price));
+        setFormAvailable(item.isAvailable);
+        setFormImage(null);
+        setFormImagePreview(item.imageUrl ? resolveImageUrl(item.imageUrl) : null);
+        setEditingItem(item);
+    };
+
+    const closeModal = () => {
+        if (submitting) return;
+        setIsCreateOpen(false);
+        setEditingItem(null);
+        resetForm();
+    };
+
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0] || null;
+        setFormImage(file);
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = () => setFormImagePreview(reader.result as string);
+            reader.readAsDataURL(file);
+        }
+    };
+
+    // ==================== Submit create/edit ====================
+    const handleSubmit = async () => {
+        if (!formName.trim()) {
+            setSwal({ type: 'warning', title: 'Name Required', text: 'Please provide a menu item name.', onConfirm: () => setSwal(null) });
             return;
         }
-        const url = URL.createObjectURL(imageFile);
-        setImagePreview(url);
-        return () => URL.revokeObjectURL(url);
-    }, [imageFile]);
+        if (!formPrice || Number(formPrice) <= 0) {
+            setSwal({ type: 'warning', title: 'Price Required', text: 'Please provide a valid price.', onConfirm: () => setSwal(null) });
+            return;
+        }
 
-    // ==================== Form handlers ====================
-    const resetForm = () => {
-        setFormState(defaultFormState(branchId !== 'all' ? branchId : ''));
-        setImageFile(null);
-        setImagePreview(null);
-        setSubmitError(null);
-    };
-
-    const handleOpenAdd = () => {
-        resetForm();
-        setIsAddModalOpen(true);
-    };
-
-    const handleOpenEdit = (menu: MenuRecord) => {
-        setEditingMenu(menu);
-        setFormState({
-            name: menu.name,
-            description: menu.description || '',
-            categoryId: menu.categoryId || '',
-            price: menu.price ? String(menu.price) : '',
-            isAvailable: menu.isAvailable,
-            imageUrl: menu.imageUrl || '',
-            branchId: menu.branchId,
-        });
-        setImageFile(null);
-        setImagePreview(null);
-        setSubmitError(null);
-        setIsEditModalOpen(true);
-    };
-
-    const handleCloseModal = () => {
-        setIsAddModalOpen(false);
-        setIsEditModalOpen(false);
-        setEditingMenu(null);
-        resetForm();
+        setSubmitting(true);
+        try {
+            if (editingItem) {
+                const payload: UpdateMenuPayload = {
+                    categoryId: formCategory || null,
+                    name: formName.trim(),
+                    description: formDesc.trim() || null,
+                    price: Number(formPrice),
+                    isAvailable: formAvailable,
+                    existingImagePath: editingItem.imageUrl,
+                    imageFile: formImage,
+                };
+                await updateMenu(editingItem.id, payload);
+                setSwal({ type: 'success', title: 'Updated!', text: `"${formName.trim()}" has been updated.`, onConfirm: () => setSwal(null) });
+            } else {
+                const payload: CreateMenuPayload = {
+                    branchId,
+                    categoryId: formCategory || null,
+                    name: formName.trim(),
+                    description: formDesc.trim() || null,
+                    price: Number(formPrice),
+                    isAvailable: formAvailable,
+                    imageFile: formImage,
+                };
+                await createMenu(payload);
+                setSwal({ type: 'success', title: 'Created!', text: `"${formName.trim()}" has been added.`, onConfirm: () => setSwal(null) });
+            }
+            closeModal();
+            await refreshData();
+        } catch (e) {
+            setSwal({ type: 'error', title: 'Error', text: e instanceof Error ? e.message : 'Operation failed', onConfirm: () => setSwal(null) });
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     // ==================== Delete ====================
-    const confirmDelete = async () => {
-        if (!deleteTarget) return;
-        setDeleteSubmitting(true);
-        try {
-            await deleteMenu(deleteTarget.id);
-            await refreshData();
-            setDeleteTarget(null);
-            setSwal({
-                type: 'success',
-                title: 'Deleted!',
-                text: `"${deleteTarget.name}" has been deleted successfully.`,
-                onConfirm: () => setSwal(null),
-            });
-        } catch (err) {
-            setSwal({
-                type: 'error',
-                title: 'Error',
-                text: err instanceof Error ? err.message : 'Delete failed',
-                onConfirm: () => {
-                    setSwal(null);
-                    setDeleteTarget(null);
-                },
-            });
-        } finally {
-            setDeleteSubmitting(false);
-        }
-    };
-
-    const handleDelete = (menu: MenuRecord) => {
-        setDeleteTarget(menu);
+    const confirmDelete = (item: MenuRecord) => {
         setSwal({
             type: 'question',
-            title: 'Delete Menu Item',
-            text: `Are you sure you want to delete "${menu.name}"? This action cannot be undone.`,
+            title: 'Delete Menu Item?',
+            text: `Are you sure you want to delete "${item.name}"? This cannot be undone.`,
             showCancel: true,
             confirmText: 'Yes, Delete',
-            cancelText: 'Cancel',
-            onConfirm: confirmDelete,
-            onCancel: () => {
-                setSwal(null);
-                setDeleteTarget(null);
-            },
-        });
-    };
-
-    // ==================== Submit (Create / Update) ====================
-    const handleSubmit = (mode: 'add' | 'edit') => {
-        const resolvedBranchId = formState.branchId || (branchId === 'all' ? '' : branchId);
-        if (mode === 'add' && !resolvedBranchId) {
-            setSubmitError('Please select a branch.');
-            return;
-        }
-        if (!formState.name.trim()) {
-            setSubmitError('Menu name is required.');
-            return;
-        }
-
-        const menuName = formState.name.trim() || 'Untitled';
-        const actionTitle = mode === 'add' ? 'Create Menu Item' : 'Update Menu Item';
-        const actionText =
-            mode === 'add'
-                ? `Create "${menuName}"?`
-                : `Save changes to "${menuName}"?`;
-
-        setSwal({
-            type: 'question',
-            title: actionTitle,
-            text: actionText,
-            showCancel: true,
-            confirmText: 'Yes, Continue',
-            cancelText: 'Cancel',
             onConfirm: async () => {
                 setSwal(null);
-                setSubmitting(true);
-                setSubmitError(null);
-                setError(null);
                 try {
-                    if (mode === 'add') {
-                        await createMenu({
-                            branchId: resolvedBranchId!,
-                            categoryId: formState.categoryId || null,
-                            name: formState.name.trim(),
-                            description: formState.description.trim() || null,
-                            price: Number(formState.price || 0),
-                            isAvailable: formState.isAvailable,
-                            imageFile: imageFile ?? undefined,
-                        });
-                        await refreshData();
-                        setIsAddModalOpen(false);
-                        resetForm();
-                        setSwal({
-                            type: 'success',
-                            title: 'Success!',
-                            text: `"${menuName}" has been created successfully.`,
-                            onConfirm: () => setSwal(null),
-                        });
-                    } else if (editingMenu) {
-                        await updateMenu(editingMenu.id, {
-                            categoryId: formState.categoryId || null,
-                            name: formState.name.trim(),
-                            description: formState.description.trim() || null,
-                            price: Number(formState.price || 0),
-                            isAvailable: formState.isAvailable,
-                            existingImagePath: formState.imageUrl || undefined,
-                            imageFile: imageFile ?? undefined,
-                        });
-                        await refreshData();
-                        setIsEditModalOpen(false);
-                        setEditingMenu(null);
-                        resetForm();
-                        setSwal({
-                            type: 'success',
-                            title: 'Updated!',
-                            text: `"${menuName}" has been updated successfully.`,
-                            onConfirm: () => setSwal(null),
-                        });
-                    }
-                } catch (err) {
-                    setSwal({
-                        type: 'error',
-                        title: 'Error',
-                        text: err instanceof Error ? err.message : 'Request failed',
-                        onConfirm: () => setSwal(null),
-                    });
-                } finally {
-                    setSubmitting(false);
+                    await deleteMenu(item.id);
+                    await refreshData();
+                    setSwal({ type: 'success', title: 'Deleted!', text: `"${item.name}" has been removed.`, onConfirm: () => setSwal(null) });
+                } catch (e) {
+                    setSwal({ type: 'error', title: 'Error', text: e instanceof Error ? e.message : 'Delete failed', onConfirm: () => setSwal(null) });
                 }
             },
             onCancel: () => setSwal(null),
@@ -346,446 +231,298 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     };
 
     // ==================== Table columns ====================
-    const columns: ColumnDef<MenuRecord>[] = useMemo(() => {
-        const cols: ColumnDef<MenuRecord>[] = [
-            {
-                header: 'Menu Item',
-                render: (menu) => {
-                    const imgUrl = resolveImageUrl(menu.imageUrl);
-                    return (
-                        <div className="flex items-center gap-3 min-w-[200px]">
-                            <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden shrink-0 border border-gray-200/50">
-                                {imgUrl ? (
-                                    <img src={imgUrl} alt={menu.name} className="w-full h-full object-cover" />
-                                ) : (
-                                    <UtensilsCrossed size={18} className="text-gray-400" />
-                                )}
-                            </div>
-                            <div className="min-w-0">
-                                <p className="font-bold text-brand-text text-sm truncate">{menu.name}</p>
-                                <p className="text-xs text-brand-muted truncate max-w-[200px]">
-                                    {menu.description || 'No description'}
-                                </p>
-                            </div>
-                        </div>
-                    );
-                },
-            },
-            {
-                header: 'Category',
-                render: (menu) => (
-                    <span className="text-xs font-semibold text-brand-muted bg-gray-100 px-2.5 py-1 rounded-lg inline-block">
-                        {menu.categoryName}
-                    </span>
-                ),
-            },
-            {
-                header: 'Price',
-                render: (menu) => (
-                    <span className="text-sm font-bold text-brand-text">
-                        ₱{menu.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                ),
-            },
-            {
-                header: 'Stock',
-                render: (menu) => {
-                    if (!menu.inventoryTracked) {
-                        return (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-gray-100 text-gray-500">
-                                N/A
-                            </span>
-                        );
-                    }
-                    const stock = Number(menu.inventoryStock || 0);
-                    if (stock <= 0) {
-                        return (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-red-100 text-red-700">
-                                Out: {stock.toLocaleString()}
-                            </span>
-                        );
-                    }
-                    if (stock < 20) {
-                        return (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-amber-100 text-amber-700">
-                                Low: {stock.toLocaleString()}
-                            </span>
-                        );
-                    }
-                    return (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight bg-green-100 text-green-700">
-                            Stock: {stock.toLocaleString()}
-                        </span>
-                    );
-                },
-            },
-            {
-                header: 'Availability',
-                render: (menu) => {
-                    const available = menu.effectiveAvailable ?? menu.isAvailable;
-                    return (
-                        <span
-                            className={cn(
-                                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tight',
-                                available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                            )}
-                        >
-                            {available ? <CheckCircle2 size={12} /> : <X size={12} />}
-                            {available ? 'Available' : 'Unavailable'}
-                        </span>
-                    );
-                },
-            },
-        ];
-
-        // Show branch column when viewing all branches
-        if (branchId === 'all') {
-            cols.push({
-                header: 'Branch',
-                render: (menu) => (
-                    <div className="min-w-[120px]">
-                        <p className="text-xs font-bold text-brand-text">{menu.branchName || menu.branchLabel || 'Unknown'}</p>
-                        <p className="text-[10px] text-brand-muted uppercase">{menu.branchCode || 'N/A'}</p>
+    const columns: ColumnDef<MenuRecord>[] = useMemo(() => [
+        {
+            header: 'Menu Item',
+            render: (item) => (
+                <div className="flex items-center gap-3 min-w-[200px]">
+                    <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+                        {item.imageUrl ? (
+                            <img src={resolveImageUrl(item.imageUrl) || ''} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                            <UtensilsCrossed size={16} className="text-brand-muted" />
+                        )}
                     </div>
-                ),
-            });
-        }
-
-        cols.push({
+                    <div className="min-w-0">
+                        <p className="text-sm font-bold text-brand-text truncate">{item.name}</p>
+                        {item.description && <p className="text-[10px] text-brand-muted truncate max-w-[200px]">{item.description}</p>}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            header: 'Category',
+            render: (item) => (
+                <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded-lg">{item.categoryName}</span>
+            ),
+        },
+        {
+            header: 'Price',
+            render: (item) => (
+                <span className="text-sm font-bold text-brand-text">₱{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            ),
+        },
+        {
+            header: 'Status',
+            render: (item) => (
+                <span className={cn(
+                    "text-xs font-bold px-2 py-1 rounded-lg",
+                    item.isAvailable ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                )}>
+                    {item.isAvailable ? 'Available' : 'Unavailable'}
+                </span>
+            ),
+        },
+        {
             header: 'Actions',
             className: 'text-right',
-            render: (menu) => (
-                <div className="flex justify-end items-center gap-1">
+            render: (item) => (
+                <div className="flex justify-end items-center gap-2">
                     <button
-                        onClick={() => handleOpenEdit(menu)}
-                        className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/5 rounded-lg transition-all"
-                        title="Edit menu"
+                        onClick={() => openEdit(item)}
+                        className="p-2 text-brand-muted hover:text-brand-orange hover:bg-brand-orange/10 transition-colors rounded-lg"
+                        title="Edit Item"
                     >
-                        <Edit3 size={15} />
+                        <Edit2 size={16} />
                     </button>
                     <button
-                        onClick={() => handleDelete(menu)}
-                        className="p-2 text-brand-muted hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                        title="Delete menu"
+                        onClick={() => confirmDelete(item)}
+                        className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+                        title="Delete Item"
                     >
-                        <Trash2 size={15} />
+                        <Trash2 size={16} />
                     </button>
                 </div>
             ),
-        });
+        },
+    ], []);
 
-        return cols;
-    }, [branchId]);
-
-    // ==================== Category + Availability options ====================
-    const categoryOptions = useMemo(
-        () => [
-            { value: 'all', label: 'All Categories' },
-            ...categories.map((c) => ({ value: c.id, label: c.name })),
-        ],
-        [categories]
-    );
-
-    const availabilityOptions = [
-        { value: 'all', label: 'All Status' },
-        { value: 'available', label: 'Available' },
-        { value: 'unavailable', label: 'Unavailable' },
-    ];
-
-    const formCategoryOptions = useMemo(
-        () => [
-            { value: '', label: 'Uncategorized' },
-            ...categories.map((c) => ({ value: c.id, label: c.name })),
-        ],
-        [categories]
-    );
-
-    // Stats summary
-    const stats = useMemo(() => {
-        const available = filteredMenus.filter((m) => m.effectiveAvailable ?? m.isAvailable).length;
-        const unavailable = filteredMenus.length - available;
-        return { total: filteredMenus.length, available, unavailable };
-    }, [filteredMenus]);
-
-    // ==================== FORM MODAL CONTENT ====================
-
-    const formContent = (
+    // ==================== Modal form content ====================
+    const modalContent = (
         <div className="space-y-5">
-            {/* Menu Name */}
-            <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Menu Name *</label>
-                <input
-                    required
-                    type="text"
-                    value={formState.name}
-                    onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="e.g. Chicken Adobo"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:outline-none focus:border-brand-orange/50 transition-all"
-                />
-            </div>
-
-            {/* Description */}
-            <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Description</label>
-                <textarea
-                    value={formState.description}
-                    onChange={(e) => setFormState((p) => ({ ...p, description: e.target.value }))}
-                    placeholder="Brief description of the menu item..."
-                    rows={3}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:outline-none focus:border-brand-orange/50 transition-all resize-none"
-                />
-            </div>
-
-            {/* Category & Price row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Category</label>
-                    <Select2
-                        options={formCategoryOptions.map((o) => ({ value: o.value || '__NONE__', label: o.label }))}
-                        value={formState.categoryId || '__NONE__'}
-                        onChange={(v) => setFormState((p) => ({ ...p, categoryId: v === '__NONE__' ? '' : String(v ?? '') }))}
-                        placeholder="Select category"
+            <div className="grid grid-cols-2 gap-5">
+                <div>
+                    <label className="block text-sm font-bold text-brand-text mb-2">Item Name *</label>
+                    <input
+                        type="text"
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        placeholder="e.g. Chicken Adobo"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
                     />
                 </div>
-                <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Price (₱) *</label>
+                <div>
+                    <label className="block text-sm font-bold text-brand-text mb-2">Price *</label>
                     <input
-                        required
                         type="number"
+                        value={formPrice}
+                        onChange={(e) => setFormPrice(e.target.value)}
+                        placeholder="0.00"
                         min="0"
                         step="0.01"
-                        value={formState.price}
-                        onChange={(e) => setFormState((p) => ({ ...p, price: e.target.value }))}
-                        placeholder="0.00"
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:outline-none focus:border-brand-orange/50 transition-all"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
                     />
                 </div>
             </div>
 
-            {/* Availability */}
-            <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Availability</label>
-                <Select2
-                    options={[
-                        { value: 'yes', label: 'Available' },
-                        { value: 'no', label: 'Unavailable' },
-                    ]}
-                    value={formState.isAvailable ? 'yes' : 'no'}
-                    onChange={(v) => setFormState((p) => ({ ...p, isAvailable: v === 'yes' }))}
-                    placeholder="Select status"
+            <div className="grid grid-cols-2 gap-5">
+                <div>
+                    <label className="block text-sm font-bold text-brand-text mb-2">Category</label>
+                    <select
+                        value={formCategory}
+                        onChange={(e) => setFormCategory(e.target.value)}
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
+                    >
+                        <option value="">Uncategorized</option>
+                        {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-brand-text mb-2">Availability</label>
+                    <div className="flex gap-4 mt-1">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="avail" checked={formAvailable} onChange={() => setFormAvailable(true)} className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer" />
+                            <span className="text-sm font-bold text-brand-text">Available</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="avail" checked={!formAvailable} onChange={() => setFormAvailable(false)} className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer" />
+                            <span className="text-sm font-bold text-brand-text">Unavailable</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">Description</label>
+                <textarea
+                    value={formDesc}
+                    onChange={(e) => setFormDesc(e.target.value)}
+                    placeholder="Short description..."
+                    rows={2}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
                 />
             </div>
 
-            {/* Image Upload */}
-            <div className="space-y-1.5">
-                <label className="text-[11px] font-bold text-brand-muted uppercase tracking-widest">Image</label>
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">Image</label>
                 <div className="flex items-center gap-4">
-                    <div className="w-20 h-20 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shrink-0">
-                        {imagePreview ? (
-                            <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                        ) : isEditModalOpen && formState.imageUrl ? (
-                            <img src={resolveImageUrl(formState.imageUrl) || ''} alt="Current" className="w-full h-full object-cover" />
+                    <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-200 shrink-0">
+                        {formImagePreview ? (
+                            <img src={formImagePreview} alt="Preview" className="w-full h-full object-cover" />
                         ) : (
-                            <ImageIcon size={24} className="text-gray-400" />
+                            <ImageIcon size={24} className="text-brand-muted" />
                         )}
                     </div>
-                    <div className="flex-1">
-                        <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-                            className="w-full text-sm text-brand-muted file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand-orange/10 file:text-brand-orange file:text-sm file:font-bold file:cursor-pointer hover:file:bg-brand-orange/20 transition-all"
-                        />
-                        {isEditModalOpen && formState.imageUrl && !imageFile && (
-                            <p className="text-[10px] text-brand-muted mt-1">Current image will be kept if no new file is uploaded.</p>
-                        )}
+                    <div>
+                        <input type="file" accept="image/*" onChange={handleImageChange} className="text-sm text-brand-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-orange/10 file:text-brand-orange hover:file:bg-brand-orange/20 file:cursor-pointer cursor-pointer" />
+                        <p className="text-[10px] text-brand-muted mt-1">Max 5MB. JPG, PNG or WebP.</p>
                     </div>
                 </div>
             </div>
-
-            {/* Error */}
-            {submitError && (
-                <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">
-                    <AlertCircle size={16} className="shrink-0" />
-                    {submitError}
-                </div>
-            )}
-        </div>
-    );
-
-    const formFooter = (
-        <div className="flex items-center gap-3">
-            <button
-                type="button"
-                onClick={handleCloseModal}
-                disabled={submitting}
-                className="flex-1 px-4 py-3 bg-gray-100 text-brand-muted rounded-xl font-bold text-sm hover:bg-gray-200 transition-all disabled:opacity-50"
-            >
-                Cancel
-            </button>
-            <button
-                type="button"
-                onClick={() => handleSubmit(isEditModalOpen ? 'edit' : 'add')}
-                disabled={submitting}
-                className="flex-[2] px-4 py-3 bg-brand-orange text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-orange/20 hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-                {submitting ? (
-                    <>
-                        <Loader2 size={16} className="animate-spin" />
-                        Saving...
-                    </>
-                ) : isEditModalOpen ? (
-                    'Update Menu'
-                ) : (
-                    'Save Menu'
-                )}
-            </button>
         </div>
     );
 
     // ==================== RENDER ====================
-
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-        >
-            {/* Page Header */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-brand-text">Menu Management</h1>
-                    <p className="text-brand-muted text-sm mt-1">
-                        {selectedBranch
-                            ? `Manage menu items for ${selectedBranch.name}`
-                            : 'Manage your restaurant menu items'}
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={refreshData}
-                        disabled={loading}
-                        className="bg-white border border-gray-200 text-brand-muted px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 hover:bg-gray-50 hover:border-brand-orange/30 transition-all shadow-sm disabled:opacity-50"
+        <div className="pt-6">
+            <AnimatePresence mode="wait">
+                {loading ? (
+                    <motion.div
+                        key="skeleton"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="space-y-8"
                     >
-                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                        Refresh
-                    </button>
-                    <button
-                        onClick={handleOpenAdd}
-                        className="bg-brand-orange text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:opacity-90 hover:-translate-y-0.5 transition-all active:scale-[0.98]"
+                        <SkeletonPageHeader />
+                        <SkeletonStatCards />
+                        <div className="bg-white rounded-2xl shadow-sm p-6">
+                            <SkeletonTable columns={5} rows={10} />
+                        </div>
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="content"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, ease: 'easeOut' }}
+                        className="space-y-8"
                     >
-                        <Plus size={16} />
-                        Add Menu
-                    </button>
-                </div>
-            </div>
-
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-brand-orange/10 flex items-center justify-center">
-                        <UtensilsCrossed size={22} className="text-brand-orange" />
-                    </div>
-                    <div>
-                        <p className="text-brand-muted text-xs font-bold uppercase tracking-wider">Total Items</p>
-                        <p className="text-2xl font-bold text-brand-text">{stats.total}</p>
-                    </div>
-                </div>
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center">
-                        <CheckCircle2 size={22} className="text-green-600" />
-                    </div>
-                    <div>
-                        <p className="text-brand-muted text-xs font-bold uppercase tracking-wider">Available</p>
-                        <p className="text-2xl font-bold text-green-600">{stats.available}</p>
-                    </div>
-                </div>
-                <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center">
-                        <X size={22} className="text-red-600" />
-                    </div>
-                    <div>
-                        <p className="text-brand-muted text-xs font-bold uppercase tracking-wider">Unavailable</p>
-                        <p className="text-2xl font-bold text-red-600">{stats.unavailable}</p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Error Alert */}
-            {error && (
-                <div className="flex items-start gap-3 bg-red-50 border border-red-100 text-red-700 p-4 rounded-2xl">
-                    <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-                    <div className="text-sm">
-                        <p className="font-bold">Unable to load menu data</p>
-                        <p className="text-xs text-red-600 mt-0.5">{error}</p>
-                    </div>
-                </div>
-            )}
-
-            {/* Filters + Table */}
-            <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
-                {/* Search & Filters Bar */}
-                <div className="p-5 border-b border-gray-100">
-                    <div className="flex flex-col lg:flex-row gap-4 items-center">
-                        {/* Search */}
-                        <div className="relative w-full lg:w-96">
-                            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-muted" />
-                            <input
-                                type="text"
-                                placeholder="Search menu items..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-brand-orange/20 focus:bg-white focus:border-brand-orange/50 transition-all text-sm"
-                            />
+                        {/* Top bar: Filter + Search + Action */}
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-white p-3 rounded-xl shadow-sm">
+                                    <Filter size={18} className="text-brand-muted" />
+                                </div>
+                                <div className="relative">
+                                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search menu..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                                    />
+                                </div>
+                                <select
+                                    value={selectedCategory}
+                                    onChange={(e) => setSelectedCategory(e.target.value)}
+                                    className="bg-white border-none rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none cursor-pointer appearance-none text-brand-text"
+                                >
+                                    <option value="all">All Categories</option>
+                                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                                <select
+                                    value={availFilter}
+                                    onChange={(e) => setAvailFilter(e.target.value)}
+                                    className="bg-white border-none rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none cursor-pointer appearance-none text-brand-text"
+                                >
+                                    <option value="all">All Status</option>
+                                    <option value="available">Available</option>
+                                    <option value="unavailable">Unavailable</option>
+                                </select>
+                            </div>
+                            <button
+                                onClick={openCreate}
+                                className="bg-brand-orange text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-orange/20 hover:bg-brand-orange/90 transition-all"
+                            >
+                                <Plus size={18} />
+                                Add New Item
+                            </button>
                         </div>
 
-                        {/* Category Filter */}
-                        <div className="w-full lg:w-56">
-                            <Select2
-                                options={categoryOptions}
-                                value={selectedCategory}
-                                onChange={(v) => setSelectedCategory(v)}
-                                placeholder="All Categories"
-                                leftIcon={<Filter size={16} />}
-                            />
+                        {/* Error */}
+                        {error && (
+                            <div className="flex items-start gap-3 bg-red-50 border border-red-100 text-red-700 p-4 rounded-2xl">
+                                <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                                <div className="text-sm">
+                                    <p className="font-bold">Unable to load menu</p>
+                                    <p className="text-xs text-red-600 mt-0.5">{error}</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Stat Cards */}
+                        <div className="grid grid-cols-4 gap-6">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm">
+                                <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
+                                <h3 className="text-3xl font-bold">{stats.total}</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm">
+                                <p className="text-brand-muted text-sm font-medium mb-1">Available</p>
+                                <h3 className="text-3xl font-bold text-green-500">{stats.available}</h3>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm">
+                                <p className="text-brand-muted text-sm font-medium mb-1">Unavailable</p>
+                                <div className="flex items-center gap-2">
+                                    <h3 className="text-3xl font-bold text-red-500">{stats.unavailable}</h3>
+                                    {stats.unavailable > 0 && <AlertTriangle size={18} className="text-red-500" />}
+                                </div>
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm">
+                                <p className="text-brand-muted text-sm font-medium mb-1">Categories</p>
+                                <h3 className="text-3xl font-bold">{stats.categories}</h3>
+                            </div>
                         </div>
 
-                        {/* Availability Filter */}
-                        <div className="w-full lg:w-48">
-                            <Select2
-                                options={availabilityOptions}
-                                value={availability}
-                                onChange={(v) => setAvailability(v)}
-                                placeholder="All Status"
-                            />
-                        </div>
-                    </div>
-                </div>
+                        {/* Data Table */}
+                        <DataTable
+                            data={filteredMenus}
+                            columns={columns}
+                            keyExtractor={(item) => item.id}
+                        />
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
-                {/* Data Table */}
-                <SkeletonTransition
-                    loading={loading}
-                    skeleton={<SkeletonPage tableRows={8} />}
-                    className="p-6"
-                >
-                    <DataTable<MenuRecord>
-                        data={filteredMenus}
-                        columns={columns}
-                        keyExtractor={(item) => item.id}
-                    />
-                </SkeletonTransition>
-            </div>
-
-            {/* Add/Edit Modal */}
+            {/* Create / Edit Modal */}
             <Modal
-                isOpen={isAddModalOpen || isEditModalOpen}
-                onClose={handleCloseModal}
-                title={isEditModalOpen ? 'Edit Menu Item' : 'Add New Menu'}
+                isOpen={isCreateOpen || !!editingItem}
+                onClose={closeModal}
+                title={editingItem ? 'Edit Menu Item' : 'Add New Menu Item'}
                 maxWidth="lg"
-                footer={formFooter}
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            onClick={closeModal}
+                            disabled={submitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleSubmit}
+                            disabled={submitting}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-orange shadow-lg shadow-brand-orange/30 hover:bg-brand-orange/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {submitting && <Loader2 size={16} className="animate-spin" />}
+                            {editingItem ? 'Save Changes' : 'Save Item'}
+                        </button>
+                    </div>
+                }
             >
-                {formContent}
+                {modalContent}
             </Modal>
 
             {/* SweetAlert-style popup */}
@@ -802,80 +539,39 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: 10 }}
                             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                            className="bg-white rounded-2xl shadow-2xl max-w-md w-full"
+                            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
                         >
-                            <div className="p-6">
-                                {/* Icon */}
-                                <div className="flex justify-center mb-4">
-                                    {swal.type === 'question' && (
-                                        <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center">
-                                            <AlertCircle size={36} className="text-blue-500" />
-                                        </div>
-                                    )}
-                                    {swal.type === 'success' && (
-                                        <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
-                                            <CheckCircle2 size={36} className="text-green-500" />
-                                        </div>
-                                    )}
-                                    {swal.type === 'error' && (
-                                        <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
-                                            <X size={36} className="text-red-500" />
-                                        </div>
-                                    )}
-                                    {swal.type === 'warning' && (
-                                        <div className="w-16 h-16 rounded-full bg-yellow-100 flex items-center justify-center">
-                                            <AlertTriangle size={36} className="text-yellow-500" />
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Text */}
-                                <h3 className="text-2xl font-bold text-brand-text text-center mb-2">{swal.title}</h3>
-                                <p className="text-brand-muted text-center mb-6">{swal.text}</p>
-
-                                {/* Buttons */}
-                                <div className="flex justify-center gap-3">
-                                    {swal.showCancel && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                swal.onCancel?.();
-                                                setSwal(null);
-                                            }}
-                                            className="px-6 py-2.5 text-brand-muted bg-gray-100 hover:bg-gray-200 rounded-xl font-semibold transition-colors"
-                                        >
-                                            {swal.cancelText || 'Cancel'}
-                                        </button>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={async () => {
-                                            if (swal.onConfirm) await swal.onConfirm();
-                                        }}
-                                        disabled={submitting || deleteSubmitting}
-                                        className={cn(
-                                            'px-6 py-2.5 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2',
-                                            swal.type === 'error'
-                                                ? 'bg-red-500 hover:bg-red-600'
-                                                : swal.type === 'warning'
-                                                    ? 'bg-yellow-500 hover:bg-yellow-600'
-                                                    : swal.type === 'success'
-                                                        ? 'bg-green-500 hover:bg-green-600'
-                                                        : 'bg-brand-orange hover:opacity-90',
-                                            'disabled:opacity-50'
-                                        )}
-                                    >
-                                        {(submitting || deleteSubmitting) && <Loader2 size={16} className="animate-spin" />}
-                                        {swal.confirmText || 'OK'}
+                            <div className="flex justify-center mb-4">
+                                {swal.type === 'question' && <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center"><AlertCircle size={40} className="text-blue-500" /></div>}
+                                {swal.type === 'success' && <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center"><CheckCircle2 size={40} className="text-green-500" /></div>}
+                                {swal.type === 'error' && <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center"><X size={40} className="text-red-500" /></div>}
+                                {swal.type === 'warning' && <div className="w-16 h-16 rounded-full bg-yellow-100 flex items-center justify-center"><AlertTriangle size={40} className="text-yellow-500" /></div>}
+                            </div>
+                            <h3 className="text-2xl font-bold text-brand-text text-center mb-2">{swal.title}</h3>
+                            <p className="text-brand-muted text-center mb-6">{swal.text}</p>
+                            <div className="flex justify-center gap-3">
+                                {swal.showCancel && (
+                                    <button onClick={() => { swal.onCancel?.(); setSwal(null); }} className="px-6 py-2.5 bg-gray-100 text-brand-muted rounded-xl font-bold hover:bg-gray-200 transition-all">
+                                        Cancel
                                     </button>
-                                </div>
+                                )}
+                                <button
+                                    onClick={async () => { if (swal.onConfirm) await swal.onConfirm(); }}
+                                    className={cn(
+                                        'px-6 py-2.5 text-white rounded-xl font-bold transition-all',
+                                        swal.type === 'error' ? 'bg-red-500 hover:bg-red-600'
+                                            : swal.type === 'success' ? 'bg-green-500 hover:bg-green-600'
+                                                : swal.type === 'question' ? 'bg-red-500 hover:bg-red-600'
+                                                    : 'bg-brand-orange hover:opacity-90'
+                                    )}
+                                >
+                                    {swal.confirmText || 'OK'}
+                                </button>
                             </div>
                         </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>
-        </motion.div>
+        </div>
     );
 };
-
-export default Menu;

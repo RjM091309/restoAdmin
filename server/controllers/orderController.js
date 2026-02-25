@@ -18,7 +18,10 @@ class OrderController {
 
 	static async getAll(req, res) {
 		try {
-			const branchId = req.session?.branch_id || req.query.branch_id || req.body.branch_id || req.user?.branch_id || null;
+			// Prioritize query param so the frontend branch selector works for admin
+			const rawBranch = req.query.branch_id ?? req.body.branch_id ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
+			// If 'all' is passed, fetch orders for ALL branches (admin view)
+			const branchId = (rawBranch === 'all' || rawBranch === '') ? null : rawBranch;
 			const orders = await OrderModel.getAll(branchId);
 			return ApiResponse.success(res, orders, 'Orders retrieved successfully');
 		} catch (error) {
@@ -48,7 +51,7 @@ class OrderController {
 			if (!branchId) {
 				return res.status(400).json({ error: 'Branch ID is required. Please select a branch first.' });
 			}
-			
+
 			const payload = {
 				BRANCH_ID: branchId,
 				ORDER_NO: req.body.ORDER_NO,
@@ -174,7 +177,7 @@ class OrderController {
 				const items = Array.isArray(req.body.ORDER_ITEMS) ? req.body.ORDER_ITEMS : [];
 				await OrderItemsModel.replaceForOrder(id, items, req.session.user_id);
 			}
-			
+
 			const existingBilling = await BillingModel.getByOrderId(id);
 			if (existingBilling) {
 				await BillingModel.updateForOrder(id, {
@@ -255,7 +258,7 @@ class OrderController {
 			// Get order_id before updating
 			const pool = require('../config/db');
 			const [itemRows] = await pool.execute('SELECT ORDER_ID FROM order_items WHERE IDNo = ?', [id]);
-			
+
 			const updated = await OrderItemsModel.updateStatus(id, status, user_id);
 			if (!updated) {
 				return res.status(404).json({ error: 'Item not found' });
@@ -329,7 +332,7 @@ class OrderController {
 			const user_id = req.session.user_id || req.user?.user_id;
 
 			const pool = require('../config/db');
-			
+
 			// Get existing item
 			const [itemRows] = await pool.execute('SELECT * FROM order_items WHERE IDNo = ?', [id]);
 			if (itemRows.length === 0) {
@@ -409,7 +412,7 @@ class OrderController {
 				items: orderItems
 			});
 
-			return ApiResponse.success(res, { 
+			return ApiResponse.success(res, {
 				item_id: parseInt(id),
 				new_subtotal: newSubtotal,
 				new_grand_total: newGrandTotal
@@ -427,7 +430,7 @@ class OrderController {
 			const user_id = req.session.user_id || req.user?.user_id;
 
 			const pool = require('../config/db');
-			
+
 			// Get existing item
 			const [itemRows] = await pool.execute('SELECT * FROM order_items WHERE IDNo = ?', [id]);
 			if (itemRows.length === 0) {

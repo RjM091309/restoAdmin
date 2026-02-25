@@ -131,17 +131,19 @@ export const Header: React.FC<HeaderProps> = ({
         <p className="text-brand-muted text-sm mt-1">
           {activeTab === 'Dashboard'
             ? `Hello ${user?.firstname || 'User'}, welcome back!`
-            : activeTab === 'Menu'
-              ? 'Manage your restaurant menu items.'
-              : activeTab === 'Inventory'
-                ? 'Manage your restaurant supplies and stock.'
-                : activeTab === 'User Info'
-                  ? 'View and manage individual user accounts.'
-                  : activeTab === 'User Role'
-                    ? 'Configure user roles and their permissions.'
-                    : activeTab === 'User Access'
-                      ? 'Control user access levels to system features.'
-                      : `View your ${activeTab.toLowerCase()}.`}
+            : activeTab === 'Orders'
+              ? 'View and manage restaurant orders.'
+              : activeTab === 'Menu'
+                ? 'Manage your restaurant menu items.'
+                : activeTab === 'Inventory'
+                  ? 'Manage your restaurant supplies and stock.'
+                  : activeTab === 'User Info'
+                    ? 'View and manage individual user accounts.'
+                    : activeTab === 'User Role'
+                      ? 'Configure user roles and their permissions.'
+                      : activeTab === 'User Access'
+                        ? 'Control user access levels to system features.'
+                        : `View your ${activeTab.toLowerCase()}.`}
         </p>
       </div>
 

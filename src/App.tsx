@@ -34,6 +34,7 @@ import { Categories } from './components/categories/Categories';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Menu } from './components/menu/Menu';
+import { Orders } from './components/orders/Orders';
 import { cn } from './lib/utils';
 
 // Panels
@@ -435,6 +436,17 @@ export default function App() {
                       />
                     )}
                   </motion.div>
+                } />
+
+                <Route path="/orders" element={
+                  selectedBranch && String(selectedBranch.id) !== 'all' ? (
+                    <Orders
+                      key={selectedBranch.id}
+                      selectedBranch={selectedBranch}
+                    />
+                  ) : (
+                    <Navigate to="/dashboard" replace />
+                  )
                 } />
 
                 <Route path="/menu" element={
