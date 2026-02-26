@@ -130,7 +130,13 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleClose = () => setDropdownOpen(false);
-  const showDateRangePicker = activeTab === 'Dashboard' || activeTab === 'Sales Analytics';
+  const showDateRangePicker =
+    activeTab === 'Dashboard' ||
+    activeTab === 'Sales Analytics' ||
+    activeTab === 'Menu' ||
+    activeTab === 'Category' ||
+    activeTab === 'Payment type' ||
+    activeTab === 'Receipt';
   const openBranchInNewTab = (branch: Branch) => {
     const url = new URL(window.location.href);
     url.searchParams.set('branchId', String(branch.id));

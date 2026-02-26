@@ -15,9 +15,10 @@ interface DataTableProps<T> {
   data: T[];
   columns: ColumnDef<T>[];
   keyExtractor: (item: T) => string | number;
+  onRowClick?: (item: T) => void;
 }
 
-export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>) {
+export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTableProps<T>) {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [perPageOpen, setPerPageOpen] = useState(false);
@@ -43,7 +44,14 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
           </thead>
           <tbody className="divide-y divide-gray-50">
             {currentData.map((item) => (
-              <tr key={keyExtractor(item)} className="group hover:bg-brand-bg/50 transition-colors">
+              <tr
+                key={keyExtractor(item)}
+                onClick={onRowClick ? () => onRowClick(item) : undefined}
+                className={cn(
+                  "group hover:bg-brand-bg/50 transition-colors",
+                  onRowClick ? "cursor-pointer" : ""
+                )}
+              >
                 {columns.map((col, i) => (
                   <td key={i} className={cn("px-6 py-4", col.className, col.cellClassName)}>
                     {col.render

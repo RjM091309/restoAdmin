@@ -39,6 +39,8 @@ import { Orders } from './components/orders/Orders';
 import { SalesAnalytics } from './components/analytics/SalesAnalytics';
 import { MenuReport } from './components/analytics/MenuReport';
 import { CategoryReport } from './components/analytics/CategoryReport';
+import { PaymentReport } from './components/analytics/PaymentReport';
+import { ReceiptReport } from './components/analytics/ReceiptReport';
 import { cn } from './lib/utils';
 
 // Panels
@@ -48,6 +50,22 @@ import { AccountSettingsPanel } from './components/panels/AccountSettingsPanel';
 
 // Types
 import { type Branch } from './components/partials/Header';
+
+const toYYYYMMDD = (d: Date): string =>
+  d.getFullYear() +
+  '-' +
+  String(d.getMonth() + 1).padStart(2, '0') +
+  '-' +
+  String(d.getDate()).padStart(2, '0');
+
+const getDefaultDateRange = () => {
+  const today = new Date();
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return {
+    start: toYYYYMMDD(startOfMonth),
+    end: toYYYYMMDD(today),
+  };
+};
 
 
 // --- Mock Data ---
@@ -368,10 +386,7 @@ export default function App() {
   const activeTab = breadcrumbs[breadcrumbs.length - 1];
   const displayActiveTab = activeTab;
 
-  const [dateRange, setDateRange] = useState({
-    start: '2026-02-01',
-    end: '2026-02-23'
-  });
+  const [dateRange, setDateRange] = useState(getDefaultDateRange);
 
   // Dynamic data generation based on date range (simulated)
   // const getDynamicRevenueData = () => {
@@ -593,9 +608,8 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
                   >
-                    Sales Report Payment type is coming soon...
+                    <PaymentReport selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
                 <Route path="/sales-report/receipt" element={
@@ -603,9 +617,8 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
                   >
-                    Sales Report Receipt is coming soon...
+                    <ReceiptReport selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
 

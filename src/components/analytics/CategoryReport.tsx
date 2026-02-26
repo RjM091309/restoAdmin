@@ -89,7 +89,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
     {
       header: 'Category',
       accessorKey: 'category',
-      className: 'min-w-[200px]',
+      className: 'min-w-[200px] border-r border-gray-200',
       headerClassName: categoryHeaderClass,
       cellClassName: categoryBodyClass,
     },
