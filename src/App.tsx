@@ -400,6 +400,9 @@ export default function App() {
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
       case 'Sales Analytics': navigate(`/sales-analytics${suffix}`); break;
+      case 'Category': navigate(`/category${suffix}`); break;
+      case 'Payment type': navigate(`/payment-type${suffix}`); break;
+      case 'Receipt': navigate(`/receipt${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };

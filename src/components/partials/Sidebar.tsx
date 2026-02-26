@@ -86,7 +86,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
     {isExpandable && (
       <div className={cn(
         "overflow-hidden transition-all duration-300 ease-in-out bg-gray-50/30",
-        isExpanded ? "max-h-40 opacity-100 py-1" : "max-h-0 opacity-0"
+        isExpanded ? "max-h-80 opacity-100 py-1" : "max-h-0 opacity-0"
       )}>
         {children}
       </div>
@@ -124,10 +124,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const { logout } = useUser();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
+  const [salesReportExpanded, setSalesReportExpanded] = useState(false);
+  const isSalesReportActive =
+    activeTab === 'Sales Analytics' ||
+    activeTab === 'Menu' ||
+    activeTab === 'Category' ||
+    activeTab === 'Payment type' ||
+    activeTab === 'Receipt';
 
   useEffect(() => {
     setUserMgmtExpanded(activeTab.startsWith('User'));
   }, [activeTab]);
+  useEffect(() => {
+    setSalesReportExpanded(isSalesReportActive);
+  }, [isSalesReportActive]);
 
   const handleUserMgmtToggle = () => {
     setUserMgmtExpanded(!userMgmtExpanded);
@@ -150,28 +160,54 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           icon={LayoutDashboard}
           label="Dashboard"
           active={activeTab === 'Dashboard'}
-          onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); }}
+          onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+        />
+        <SidebarItem
+          icon={DollarSign}
+          label="Expenses"
+          active={activeTab === 'Expenses'}
+          onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
         <SidebarItem
           icon={BarChart3}
-          label="Sales Analytics"
-          active={activeTab === 'Sales Analytics'}
-          onClick={() => { onTabChange('Sales Analytics'); setUserMgmtExpanded(false); }}
-        />
+          label="Sales Report"
+          active={isSalesReportActive}
+          isExpandable
+          isExpanded={salesReportExpanded}
+          onClick={() => setSalesReportExpanded((prev) => !prev)}
+        >
+          <SubItem
+            label="Sales Analytics"
+            active={activeTab === 'Sales Analytics'}
+            onClick={() => onTabChange('Sales Analytics')}
+          />
+          <SubItem
+            label="Menu"
+            active={activeTab === 'Menu'}
+            onClick={() => onTabChange('Menu')}
+          />
+          <SubItem
+            label="Category"
+            active={activeTab === 'Category'}
+            onClick={() => onTabChange('Category')}
+          />
+          <SubItem
+            label="Payment type"
+            active={activeTab === 'Payment type'}
+            onClick={() => onTabChange('Payment type')}
+          />
+          <SubItem
+            label="Receipt"
+            active={activeTab === 'Receipt'}
+            onClick={() => onTabChange('Receipt')}
+          />
+        </SidebarItem>
         {isSpecificBranch && (
           <SidebarItem
             icon={ClipboardList}
             label="Orders"
             active={activeTab === 'Orders'}
-            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && (
-          <SidebarItem
-            icon={UtensilsCrossed}
-            label="Menu"
-            active={activeTab === 'Menu'}
-            onClick={() => { onTabChange('Menu'); setUserMgmtExpanded(false); }}
+            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
         {isSpecificBranch && (
@@ -179,15 +215,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             icon={Package}
             label="Inventory"
             active={activeTab === 'Inventory'}
-            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); }}
+            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
-        <SidebarItem
-          icon={DollarSign}
-          label="Expenses"
-          active={activeTab === 'Expenses'}
-          onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); }}
-        />
         <SidebarItem
           icon={Users}
           label="User Management"
