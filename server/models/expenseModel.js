@@ -77,7 +77,7 @@ class ExpenseModel {
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			WHERE e.ACTIVE = 1
+			WHERE e.ACTIVE = 1 AND mc.CATEGORY_TYPE NOT IN ('Inventory')
 		`;
 		const params = [];
 
@@ -116,7 +116,7 @@ class ExpenseModel {
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			WHERE e.IDNo = ? AND e.ACTIVE = 1
+			WHERE e.IDNo = ? AND e.ACTIVE = 1 AND mc.CATEGORY_TYPE NOT IN ('Inventory')
 			LIMIT 1
 			`,
 			[Number(id)]

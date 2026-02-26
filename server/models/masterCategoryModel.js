@@ -60,7 +60,7 @@ class MasterCategoryModel {
 				EDITED_BY,
 				EDITED_DT
 			FROM master_categories
-			WHERE ACTIVE = 1
+			WHERE ACTIVE = 1 AND CATEGORY_TYPE = 'Inventory'
 		`;
 		const params = [];
 
@@ -77,7 +77,7 @@ class MasterCategoryModel {
 	static async getById(id) {
 		await MasterCategoryModel.ensureSchema();
 		const [rows] = await pool.execute(
-			`SELECT * FROM master_categories WHERE IDNo = ? AND ACTIVE = 1`,
+			`SELECT * FROM master_categories WHERE IDNo = ? AND ACTIVE = 1 AND CATEGORY_TYPE = 'Inventory'`,
 			[id]
 		);
 		return rows[0] || null;
