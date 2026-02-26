@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Search, Bell, Settings, ChevronDown, MapPin } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
+import { Calendar, Bell, Settings, ChevronDown, MapPin, Globe, ArrowLeft, Check } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { clsx } from 'clsx';
 
 import { useUser } from '../../context/UserContext';
+import { cn } from '../../lib/utils';
 
 type DateRange = {
   start: string;
@@ -60,9 +63,24 @@ export const Header: React.FC<HeaderProps> = ({
   onBranchChange,
 }) => {
   const { user } = useUser();
+  const { t, i18n } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [isLanguagePanelOpen, setIsLanguagePanelOpen] = useState(false);
+
+  const languages = [
+    { code: 'en', name: 'English', flag: '🇺🇸' },
+    { code: 'ko', name: '한국어', flag: '🇰🇷' },
+    { code: 'ja', name: '日本語', flag: '🇯🇵' },
+    { code: 'zh', name: '中文', flag: '🇨🇳' },
+  ];
+
+  const handleLanguageChange = (code: string) => {
+    i18n.changeLanguage(code);
+    document.cookie = `lang=${code}; path=/; max-age=${60 * 60 * 24 * 365}`;
+    setIsLanguagePanelOpen(false);
+  };
 
   useEffect(() => {
     const fetchBranches = async () => {
@@ -121,6 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
+    <>
     <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
       <div>
         <h2 className="text-3xl font-bold flex items-center gap-2">
@@ -253,6 +272,12 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setIsLanguagePanelOpen(true)}
+            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+          >
+            <Globe size={20} />
+          </button>
+          <button
             onClick={onOpenNotifications}
             className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
           >
@@ -287,5 +312,61 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
     </header>
+
+    <AnimatePresence>
+      {isLanguagePanelOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsLanguagePanelOpen(false)}
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
+          />
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed top-0 right-0 h-full w-96 bg-white shadow-2xl z-[70] flex flex-col"
+          >
+            <div className="flex flex-col h-full">
+              <div className="p-6 border-b border-gray-100">
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setIsLanguagePanelOpen(false)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer"
+                  >
+                    <ArrowLeft size={20} />
+                  </button>
+                  <h3 className="text-lg font-bold">{t('topbar.select_language')}</h3>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                {languages.map((lang) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => handleLanguageChange(lang.code)}
+                    className={cn(
+                      "w-full flex items-center justify-between p-4 rounded-2xl transition-all cursor-pointer border",
+                      i18n.language === lang.code
+                        ? "bg-brand-orange/5 border-brand-orange/20 text-brand-orange"
+                        : "bg-transparent border-transparent hover:bg-gray-50 text-brand-text"
+                    )}
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className="text-2xl">{lang.flag}</span>
+                      <span className="font-bold text-sm">{lang.name}</span>
+                    </div>
+                    {i18n.language === lang.code && <Check size={18} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+    </>
   );
 };

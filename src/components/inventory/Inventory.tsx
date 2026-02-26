@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2, Package } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
@@ -60,6 +61,7 @@ const normalizeSegment = (value: string) =>
     .replace(/\s+/g, '-');
 
 export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = null }) => {
+  const { t } = useTranslation();
   const { categoryName } = useParams<{ categoryName: string }>();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRestockMode, setIsRestockMode] = useState(false);
@@ -101,7 +103,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       setItems(itemRows);
       setCategories(categoryRows);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to fetch inventory items');
+      toast.error(error.message || t('inventory_page.messages.fetch_failed'));
     } finally {
       setLoading(false);
     }
@@ -195,19 +197,19 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this item?')) return;
+    if (!window.confirm(t('inventory_page.messages.delete_confirm'))) return;
     try {
       await deleteInventoryItem(id);
-      toast.success('Inventory item deleted successfully');
+      toast.success(t('inventory_page.messages.delete_success'));
       fetchData();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete inventory item');
+      toast.error(error.message || t('inventory_page.messages.delete_failed'));
     }
   };
 
   const handleSave = async () => {
     if (!formData.itemName.trim()) {
-      toast.error('Item name is required');
+      toast.error(t('inventory_page.messages.name_required'));
       return;
     }
 
@@ -215,7 +217,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     const resolvedCategoryId = currentCategory?.id || editingItem?.categoryId || null;
     const resolvedCategoryName = currentCategory?.name || editingItem?.categoryName || null;
     if (!resolvedCategoryName) {
-      toast.error('No inventory category selected for this page');
+      toast.error(t('inventory_page.messages.no_category'));
       return;
     }
 
@@ -234,7 +236,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     if (isRestockMode) {
       const additionalQty = Number(restockQtyInput);
       if (!Number.isFinite(additionalQty) || additionalQty <= 0) {
-        toast.error('Enter a valid stock quantity to add');
+        toast.error(t('inventory_page.messages.invalid_qty'));
         return;
       }
       payload.stockQty = Number(editingItem?.stockQty || 0) + additionalQty;
@@ -243,7 +245,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       if (nextUnitCostRaw !== '') {
         const nextUnitCost = Number(nextUnitCostRaw);
         if (!Number.isFinite(nextUnitCost) || nextUnitCost < 0) {
-          toast.error('Enter a valid new unit cost');
+          toast.error(t('inventory_page.messages.invalid_cost'));
           return;
         }
         payload.unitCost = nextUnitCost;
@@ -255,35 +257,35 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     try {
       if (editingId) {
         await updateInventoryItem(editingId, payload);
-        toast.success('Inventory item updated successfully');
+        toast.success(t('inventory_page.messages.update_success'));
       } else {
         await createInventoryItem(payload);
-        toast.success('Inventory item created successfully');
+        toast.success(t('inventory_page.messages.create_success'));
       }
       setIsModalOpen(false);
       resetForm();
       fetchData();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to save inventory item');
+      toast.error(error.message || t('inventory_page.messages.save_failed'));
     }
   };
 
   const columns: ColumnDef<InventoryItem>[] = [
     {
-      header: 'Item Code',
+      header: t('inventory_page.table.item_code'),
       render: (item) => <span className="text-sm font-bold text-brand-muted">{toItemCode(item.id)}</span>,
     },
     {
-      header: 'Name',
+      header: t('inventory_page.table.name'),
       render: (item) => (
         <div>
           <span className="text-sm font-bold">{item.itemName}</span>
-          <p className="text-xs text-brand-muted">{item.categoryName || 'Uncategorized'}</p>
+          <p className="text-xs text-brand-muted">{item.categoryName || t('inventory_page.table.uncategorized')}</p>
         </div>
       ),
     },
     {
-      header: 'Stock Level',
+      header: t('inventory_page.table.stock_level'),
       render: (item) => {
         const status = computeStatus(item.stockQty, item.reorderLevel);
         const denominator = Math.max(item.reorderLevel * 2, item.stockQty, 1);
@@ -307,7 +309,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       },
     },
     {
-      header: 'Reorder Stock',
+      header: t('inventory_page.table.reorder_stock'),
       render: (item) => (
         <span className="text-sm font-bold text-brand-text">
           {item.reorderLevel} {item.unit}
@@ -315,7 +317,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       ),
     },
     {
-      header: 'Unit Cost',
+      header: t('inventory_page.table.unit_cost'),
       render: (item) => (
         <span className="text-sm font-bold text-brand-text">
           {Number(item.unitCost || 0).toLocaleString(undefined, {
@@ -326,7 +328,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       ),
     },
     {
-      header: 'Status',
+      header: t('inventory_page.table.status'),
       render: (item) => {
         const status = computeStatus(item.stockQty, item.reorderLevel);
         return (
@@ -340,33 +342,35 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   : 'bg-red-100 text-red-600'
             )}
           >
-            {status}
+            {status === 'In Stock' ? t('inventory_page.status.in_stock') : 
+             status === 'Low Stock' ? t('inventory_page.status.low_stock') : 
+             t('inventory_page.status.out_of_stock')}
           </span>
         );
       },
     },
     {
-      header: 'Actions',
+      header: t('inventory_page.table.actions'),
       className: 'text-right',
       render: (item) => (
         <div className="flex justify-end items-center gap-2">
           <button
             className="p-2 text-brand-muted hover:text-emerald-600 hover:bg-emerald-50 transition-colors rounded-lg"
-            title="Restock Item"
+            title={t('inventory_page.modal.restock_title')}
             onClick={() => openRestock(item)}
           >
             <Package size={16} />
           </button>
           <button
             className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            title="Edit Item"
+            title={t('inventory_page.modal.edit_title')}
             onClick={() => openEdit(item)}
           >
             <Edit2 size={16} />
           </button>
           <button
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title="Delete Item"
+            title={t('inventory_page.messages.delete_confirm')}
             onClick={() => handleDelete(item.id)}
           >
             <Trash2 size={16} />
@@ -409,7 +413,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   <button 
                     onClick={onBack}
                     className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-orange/30 transition-all group"
-                    title="Back to Categories"
+                    title={t('inventory_page.back_to_categories')}
                   >
                     <ArrowLeft size={18} className="text-brand-muted group-hover:text-brand-orange transition-colors" />
                   </button>
@@ -421,7 +425,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                   <input
                     type="text"
-                    placeholder="Search inventory..."
+                    placeholder={t('inventory_page.search_placeholder')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
@@ -436,28 +440,28 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
-                Add New Item
+                {t('inventory_page.new_item')}
               </button>
             </div>
 
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_items')}</p>
                 <h3 className="text-3xl font-bold">{stats.total}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Low Stock</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.low_stock')}</p>
                 <div className="flex items-center gap-2">
                   <h3 className="text-3xl font-bold text-orange-500">{stats.low}</h3>
                   <AlertTriangle size={18} className="text-orange-500" />
                 </div>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Out of Stock</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.out_of_stock')}</p>
                 <h3 className="text-3xl font-bold text-red-500">{stats.out}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_value')}</p>
                 <h3 className="text-3xl font-bold">
                   ₱{stats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
@@ -480,7 +484,13 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
           setIsModalOpen(false);
           resetForm();
         }}
-        title={isRestockMode ? 'Restock Item' : editingId ? 'Edit Inventory Item' : 'Add New Inventory Item'}
+        title={
+          isRestockMode 
+            ? t('inventory_page.modal.restock_title') 
+            : editingId 
+              ? t('inventory_page.modal.edit_title') 
+              : t('inventory_page.modal.add_title')
+        }
         maxWidth="3xl"
         footer={
           <div className="flex items-center justify-end gap-2 sm:gap-3">
@@ -491,13 +501,17 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               }}
               className="px-4 sm:px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t('inventory_page.modal.cancel')}
             </button>
             <button
               onClick={handleSave}
               className="px-5 sm:px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
-              {isRestockMode ? 'Save Restock' : editingId ? 'Update Item' : 'Save Item'}
+              {isRestockMode 
+                ? t('inventory_page.modal.save_restock') 
+                : editingId 
+                  ? t('inventory_page.modal.update_item') 
+                  : t('inventory_page.modal.save_item')}
             </button>
           </div>
         }
@@ -505,39 +519,46 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
         {isRestockMode ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
             <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">Add Stock Quantity</label>
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.add_stock_qty')}</label>
               <input
                 type="number"
-                placeholder="Enter quantity to add"
+                placeholder={t('inventory_page.modal.add_stock_placeholder')}
                 value={restockQtyInput}
                 onChange={(e) => setRestockQtyInput(e.target.value)}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
               />
-              <p className="mt-2 text-xs text-brand-muted">Current stock: {formData.stockQty} {formData.unit}</p>
+              <p className="mt-2 text-xs text-brand-muted">
+                {t('inventory_page.modal.current_stock', { qty: formData.stockQty, unit: formData.unit })}
+              </p>
             </div>
             <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">New Unit Cost (Optional)</label>
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.new_unit_cost')}</label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
-                placeholder="Leave blank to keep current cost"
+                placeholder={t('inventory_page.modal.new_unit_cost_placeholder')}
                 value={restockUnitCostInput}
                 onChange={(e) => setRestockUnitCostInput(e.target.value)}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
               />
               <p className="mt-2 text-xs text-brand-muted">
-                Current cost: {Number(formData.unitCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {t('inventory_page.modal.current_cost', { 
+                  cost: Number(formData.unitCost || 0).toLocaleString(undefined, { 
+                    minimumFractionDigits: 2, 
+                    maximumFractionDigits: 2 
+                  }) 
+                })}
               </p>
             </div>
           </div>
         ) : (
           <div className="space-y-7">
             <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">Item Name</label>
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.item_name')}</label>
               <input
                 type="text"
-                placeholder="e.g. Fresh Salmon"
+                placeholder={t('inventory_page.modal.item_name_placeholder')}
                 value={formData.itemName}
                 onChange={(e) => setFormData((prev) => ({ ...prev, itemName: e.target.value }))}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
@@ -546,11 +567,11 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
               <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">Stock Level & Unit</label>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.stock_level_unit')}</label>
                 <div className="flex gap-2">
                   <input
                     type="number"
-                    placeholder="0"
+                    placeholder={t('inventory_page.modal.stock_placeholder')}
                     value={formData.stockQty}
                     onChange={(e) =>
                       setFormData((prev) => ({
@@ -574,12 +595,12 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">Unit Cost</label>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.unit_cost')}</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  placeholder="0.00"
+                  placeholder={t('inventory_page.modal.unit_cost_placeholder')}
                   value={formData.unitCost}
                   onChange={(e) =>
                     setFormData((prev) => ({
@@ -591,10 +612,10 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 />
               </div>
               <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">Reorder Level</label>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.reorder_level')}</label>
                 <input
                   type="number"
-                  placeholder="e.g. 5"
+                  placeholder={t('inventory_page.modal.reorder_level_placeholder')}
                   value={formData.reorderLevel}
                   onChange={(e) =>
                     setFormData((prev) => ({
@@ -608,7 +629,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">Status Flag</label>
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.status_flag')}</label>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                 <label className={cn(
                   "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
@@ -621,7 +642,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                     onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'In Stock' }))}
                     className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer"
                   />
-                  <span className="text-sm font-bold text-brand-text">In Stock</span>
+                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.in_stock')}</span>
                 </label>
                 <label className={cn(
                   "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
@@ -634,7 +655,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                     onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'Low Stock' }))}
                     className="w-4 h-4 text-orange-500 focus:ring-orange-500/20 cursor-pointer"
                   />
-                  <span className="text-sm font-bold text-brand-text">Low Stock</span>
+                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.low_stock')}</span>
                 </label>
                 <label className={cn(
                   "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
@@ -647,7 +668,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                     onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'Out of Stock' }))}
                     className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer"
                   />
-                  <span className="text-sm font-bold text-brand-text">Out of Stock</span>
+                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.out_of_stock')}</span>
                 </label>
               </div>
             </div>

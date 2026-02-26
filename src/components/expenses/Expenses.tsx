@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Plus, Filter, DollarSign, Calendar, FileText, TrendingUp, TrendingDown, Edit2, Trash2, Tag, X } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
@@ -247,12 +248,253 @@ const utilitiesColumns: ColumnDef<typeof utilitiesSampleData[0]>[] = [
 ];
 
 export const Expenses: React.FC = () => {
+  const { t } = useTranslation();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [displayedData, setDisplayedData] = useState<any[]>([]);
   const [displayedColumns, setDisplayedColumns] = useState<ColumnDef<any>[]>([]);
   const [activeParentCategory, setActiveParentCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+
+  const categoryKeyMap: Record<string, string> = {
+    Inventory: 'inventory',
+    Utilities: 'utilities',
+    Rent: 'rent',
+    Salaries: 'salaries',
+    Marketing: 'marketing',
+    Maintenance: 'maintenance',
+    Supplies: 'supplies',
+  };
+
+  const branchKeyMap: Record<string, string> = {
+    'Main Branch': 'main',
+    Downtown: 'downtown',
+    'All Branches': 'all',
+  };
+
+  const subCategoryKeyMap: Record<string, Record<string, string>> = {
+    Inventory: {
+      'All Data': 'all_data',
+      'Fresh produce restock': 'fresh_produce_restock',
+      'Beverage supply': 'beverage_supply',
+      'Meat Products': 'meat_products',
+    },
+    Maintenance: {
+      'All Data': 'all_data',
+      'Kitchen equipment repair': 'kitchen_equipment_repair',
+      Plumbing: 'plumbing',
+    },
+    Utilities: {
+      'All Data': 'all_data',
+      Electricty: 'electricity',
+      Water: 'water',
+      Internet: 'internet',
+      Salaries: 'salaries',
+    },
+  };
+
+  const getCategoryLabel = (category: string) => {
+    const categoryKey = categoryKeyMap[category];
+    return categoryKey ? t(`expenses_page.categories.${categoryKey}`) : category;
+  };
+
+  const getBranchLabel = (branch: string) => {
+    const branchKey = branchKeyMap[branch];
+    return branchKey ? t(`expenses_page.branches.${branchKey}`) : branch;
+  };
+
+  const getSubCategoryLabel = (parentCategory: string, subCategory: string) => {
+    const subCategoryKey = subCategoryKeyMap[parentCategory]?.[subCategory];
+    return subCategoryKey ? t(`expenses_page.subcategories.${subCategoryKey}`) : subCategory;
+  };
+
+  // Columns for expense data
+  const columns: ColumnDef<typeof expenseData[0]>[] = [
+    {
+      header: t('expenses_page.table.date'),
+      className: 'w-[18%] text-left',
+      render: (expense) => (
+        <div className="flex items-center gap-2 text-brand-text font-medium">
+            <Calendar size={16} className="text-brand-muted" />
+            {expense.date}
+          </div>
+      ),
+    },
+    {
+      header: t('expenses_page.table.description'),
+      className: 'w-[42%] text-left',
+      render: (expense) => (
+        <div>
+            <h3 className="text-base font-bold text-brand-text mb-0.5">
+              {expense.description}
+            </h3>
+            <div className="flex items-center gap-2 text-xs text-brand-muted">
+               <span className="flex items-center gap-1">
+                  <Tag size={12} />
+                  {getCategoryLabel(expense.category)}
+               </span>
+               <span>•</span>
+               <span>{getBranchLabel(expense.branch)}</span>
+            </div>
+          </div>
+      ),
+    },
+    {
+      header: t('expenses_page.table.amount'),
+      className: 'w-[14%] text-left',
+      render: (expense) => (
+        <span className="text-base font-bold text-brand-text">
+            ₱{expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </span>
+      ),
+    },
+    {
+      header: t('expenses_page.table.status'),
+      className: 'w-[14%] text-left',
+      render: (expense) => (
+        <div className="flex justify-start">
+            <span
+              className={cn(
+                "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
+                expense.status === 'Approved'
+                  ? "bg-green-100 text-green-600"
+                  : expense.status === 'Pending'
+                  ? "bg-orange-100 text-orange-600"
+                  : "bg-red-100 text-red-600"
+              )}
+            >
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                expense.status === 'Approved' ? "bg-green-500" :
+                expense.status === 'Pending' ? "bg-orange-500" : "bg-red-500"
+              )} />
+              {expense.status === 'Approved' ? t('expenses_page.table.status_approved') :
+               expense.status === 'Pending' ? t('expenses_page.table.status_pending') :
+               t('expenses_page.table.status_review')}
+            </span>
+          </div>
+      ),
+    },
+    {
+      header: t('expenses_page.table.actions'),
+      className: 'w-[12%] text-left',
+      render: () => (
+        <div className="flex justify-start items-center gap-2">
+            <button 
+              className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Handle edit
+              }}
+              title={t('expenses_page.table.edit_title')}
+            >
+              <Edit2 size={16} />
+            </button>
+            <button 
+              className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Handle delete
+              }}
+              title={t('expenses_page.table.delete_title')}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+      ),
+    },
+  ];
+
+
+  // Columns for inventory sample data
+  const inventoryColumns: ColumnDef<typeof inventorySampleData[0]>[] = [
+    {
+      header: t('expenses_page.inventory_table.id'),
+      className: 'w-[120px] text-left',
+      render: (item) => <span className="font-medium text-brand-text">{item.id}</span>,
+    },
+    {
+      header: t('expenses_page.inventory_table.item_name'),
+      className: 'flex-1 text-left min-w-[250px]',
+      render: (item) => <span className="text-brand-text">{item.name}</span>,
+    },
+    {
+      header: t('expenses_page.inventory_table.quantity'),
+      className: 'text-right w-[150px]',
+      render: (item) => <span className="text-brand-text">{item.quantity} {item.unit}</span>,
+    },
+    {
+      header: t('expenses_page.inventory_table.unit_price'),
+      className: 'text-right w-[160px]',
+      render: (item) => <span className="text-brand-text">₱{item.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>,
+    },
+    {
+      header: t('expenses_page.inventory_table.supplier'),
+      className: 'w-[180px] text-left',
+      render: (item) => <span className="text-brand-text">{item.supplier}</span>,
+    },
+  ];
+
+  const maintenanceColumns: ColumnDef<typeof maintenanceSampleData[0]>[] = [
+    {
+      header: t('expenses_page.maintenance_table.id'),
+      className: 'w-[120px] text-left',
+      render: (item) => <span className="font-medium text-brand-text">{item.id}</span>,
+    },
+    {
+      header: t('expenses_page.maintenance_table.item'),
+      className: 'w-[180px] text-left',
+      render: (item) => <span className="text-brand-text">{item.item}</span>,
+    },
+    {
+      header: t('expenses_page.maintenance_table.description'),
+      className: 'flex-1 text-left min-w-[250px]',
+      render: (item) => <span className="text-brand-text">{item.description}</span>,
+    },
+    {
+      header: t('expenses_page.maintenance_table.cost'),
+      className: 'text-right w-[150px]',
+      render: (item) => <span className="text-brand-text">₱{item.cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>,
+    },
+    {
+      header: t('expenses_page.maintenance_table.date'),
+      className: 'w-[140px] text-left',
+      render: (item) => <span className="text-brand-text">{item.date}</span>,
+    },
+    {
+      header: t('expenses_page.maintenance_table.technician'),
+      className: 'w-[180px] text-left',
+      render: (item) => <span className="text-brand-text">{item.technician}</span>,
+    },
+  ];
+
+  const utilitiesColumns: ColumnDef<typeof utilitiesSampleData[0]>[] = [
+    {
+      header: t('expenses_page.utilities_table.id'),
+      className: 'w-[120px] text-left',
+      render: (item) => <span className="font-medium text-brand-text">{item.id}</span>,
+    },
+    {
+      header: t('expenses_page.utilities_table.type'),
+      className: 'flex-1 text-left min-w-[200px]',
+      render: (item) => <span className="text-brand-text">{item.type}</span>,
+    },
+    {
+      header: t('expenses_page.utilities_table.bill_amount'),
+      className: 'text-right w-[160px]',
+      render: (item) => <span className="text-brand-text">₱{item.bill_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>,
+    },
+    {
+      header: t('expenses_page.utilities_table.due_date'),
+      className: 'w-[150px] text-left',
+      render: (item) => <span className="text-brand-text">{item.due_date}</span>,
+    },
+    {
+      header: t('expenses_page.utilities_table.provider'),
+      className: 'w-[180px] text-left',
+      render: (item) => <span className="text-brand-text">{item.provider}</span>,
+    },
+  ];
 
   const subCategoryConfig: { [key: string]: { [key: string]: { data: any[]; columns: ColumnDef<any>[]; } | null } } = {
     Inventory: {
@@ -342,7 +584,7 @@ export const Expenses: React.FC = () => {
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                   <input
                     type="text"
-                    placeholder="Search expenses..."
+                    placeholder={t('expenses_page.search_placeholder')}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                   />
                 </div>
@@ -352,34 +594,34 @@ export const Expenses: React.FC = () => {
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
-                New Expense
+                {t('expenses_page.new_expense')}
               </button>
             </div>
 
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Expenses</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.total_expenses')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱11,761.50</h3>
               </div>
               <div
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-primary/20 transition-all"
                 onClick={() => {setActiveParentCategory('Inventory'); setSelectedSubCategory('All Data');}}
               >
-                <p className="text-brand-muted text-sm font-medium mb-1">Inventory</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.inventory')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱2,140.25</h3>
               </div>
               <div
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-maintenance/30 transition-all"
                 onClick={() => {setActiveParentCategory('Maintenance'); setSelectedSubCategory('All Data');}}
               >
-                <p className="text-brand-muted text-sm font-medium mb-1">Maintenance</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.maintenance')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱320.00</h3>
               </div>
               <div 
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-utilities/30 transition-all"
                 onClick={() => {setActiveParentCategory('Utilities'); setSelectedSubCategory('All Data');}}
               >
-                <p className="text-brand-muted text-sm font-medium mb-1">Utilities</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.utilities')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱450.50</h3>
               </div>
             </div>
@@ -412,13 +654,13 @@ export const Expenses: React.FC = () => {
                           : "bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20"
                       )}
                     >
-                      {subCat}
+                      {getSubCategoryLabel(activeParentCategory, subCat)}
                     </button>
                   ))}
                   <button
                     onClick={() => {setActiveParentCategory(null); setSelectedSubCategory(null);}}
                     className="ml-auto p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-                    title="Clear Filter"
+                    title={t('expenses_page.clear_filter')}
                   >
                     <X size={16} />
                   </button>
@@ -438,7 +680,7 @@ export const Expenses: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Add New Expense"
+        title={t('expenses_page.add_new_expense')}
         maxWidth="md"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -446,13 +688,13 @@ export const Expenses: React.FC = () => {
               onClick={() => setIsModalOpen(false)}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t('expenses_page.cancel')}
             </button>
             <button
               onClick={() => setIsModalOpen(false)}
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
-              Save Expense
+              {t('expenses_page.save_expense')}
             </button>
           </div>
         }
@@ -460,52 +702,52 @@ export const Expenses: React.FC = () => {
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">Date</label>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_date')}</label>
                 <input 
                 type="date" 
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                 />
             </div>
             <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">Amount</label>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_amount')}</label>
                 <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₱</span>
                     <input 
                     type="number" 
-                    placeholder="0.00"
+                    placeholder={t('expenses_page.form_amount_placeholder')}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                     />
                 </div>
             </div>
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Category</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_category')}</label>
             <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
-              <option value="">Select Category</option>
-              <option value="inventory">Inventory</option>
-              <option value="utilities">Utilities</option>
-              <option value="rent">Rent</option>
-              <option value="salaries">Salaries</option>
-              <option value="marketing">Marketing</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="supplies">Supplies</option>
-              <option value="other">Other</option>
+              <option value="">{t('expenses_page.form_category_placeholder')}</option>
+              <option value="inventory">{t('expenses_page.categories.inventory')}</option>
+              <option value="utilities">{t('expenses_page.categories.utilities')}</option>
+              <option value="rent">{t('expenses_page.categories.rent')}</option>
+              <option value="salaries">{t('expenses_page.categories.salaries')}</option>
+              <option value="marketing">{t('expenses_page.categories.marketing')}</option>
+              <option value="maintenance">{t('expenses_page.categories.maintenance')}</option>
+              <option value="supplies">{t('expenses_page.categories.supplies')}</option>
+              <option value="other">{t('expenses_page.categories.other')}</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Description</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_description')}</label>
             <textarea 
               rows={3}
-              placeholder="Details about the expense..."
+              placeholder={t('expenses_page.form_description_placeholder')}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 resize-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Branch</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_branch')}</label>
             <select className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all text-brand-text cursor-pointer appearance-none">
-              <option value="main">Main Branch</option>
-              <option value="downtown">Downtown</option>
-              <option value="all">All Branches</option>
+              <option value="main">{t('expenses_page.branches.main')}</option>
+              <option value="downtown">{t('expenses_page.branches.downtown')}</option>
+              <option value="all">{t('expenses_page.branches.all')}</option>
             </select>
           </div>
         </div>

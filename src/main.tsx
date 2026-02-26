@@ -5,6 +5,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { BrowserRouter } from 'react-router-dom';
 import { UserProvider } from './context/UserContext.tsx';
+import './i18n';
 import App from './App.tsx';
 import './index.css';
 
