@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
 import { BranchPerformanceCard, type BranchPerformanceData } from './BranchPerformanceCard';
@@ -116,6 +117,7 @@ const getCurrentMonthRange = (): DateRange => {
 };
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
@@ -220,19 +222,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
   const benchmarkRows: ComparisonRow[] = [
     {
       id: 'totalRevenue',
-      label: 'Total Revenue',
+      label: t('admin_dashboard.total_revenue'),
       values: selectedCompareBranches.map((branch) => branch.totalSales - branch.totalExpenses),
       bestMode: 'max' as const,
     },
     {
       id: 'totalSales',
-      label: 'Total Sales',
+      label: t('admin_dashboard.total_sales'),
       values: selectedCompareBranches.map((branch) => branch.totalSales),
       bestMode: 'max' as const,
     },
     {
       id: 'totalExpenses',
-      label: 'Total Expenses',
+      label: t('admin_dashboard.total_expenses'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses),
       bestMode: 'min' as const,
     },
@@ -240,110 +242,110 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
 
   const unifiedComparisonRows: UnifiedComparisonRow[] = [
     ...benchmarkRows,
-    { id: 'section-inventory', rowType: 'section', label: 'Inventory' },
+    { id: 'section-inventory', rowType: 'section', label: t('admin_dashboard.sections.inventory') },
     {
-      id: 'inv-fresh-produce',
-      label: 'Fresh Produce',
+      id: 'fresh Produce',
+      label: t('admin_dashboard.sections.fresh_produce'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.2),
       bestMode: 'min',
     },
     {
       id: 'inv-beverages',
-      label: 'Beverages',
+      label: t('admin_dashboard.sections.beverages'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.14),
       bestMode: 'min',
     },
     {
       id: 'inv-meat',
-      label: 'Meat',
+      label: t('admin_dashboard.sections.meat'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.24),
       bestMode: 'min',
     },
     {
       id: 'inv-seafood',
-      label: 'Seafood',
+      label: t('admin_dashboard.sections.seafood'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.17),
       bestMode: 'min',
     },
     {
       id: 'inv-dreammart',
-      label: 'DreamMart',
+      label: t('admin_dashboard.sections.dreammart'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.15),
       bestMode: 'min',
     },
     {
       id: 'inv-rice',
-      label: 'Rice',
+      label: t('admin_dashboard.sections.rice'),
       values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.1),
       bestMode: 'min',
     },
-    { id: 'section-maintenance', rowType: 'section', label: 'Maintenance' },
+    { id: 'section-maintenance', rowType: 'section', label: t('admin_dashboard.sections.maintenance') },
     {
       id: 'maint-kitchen-equipment',
-      label: 'Kitchen Equipment',
+      label: t('admin_dashboard.sections.kitchen_equipment'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
       bestMode: 'min',
     },
     {
       id: 'maint-supplies',
-      label: 'Supplies',
+      label: t('admin_dashboard.sections.supplies'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.035),
       bestMode: 'min',
     },
     {
       id: 'maint-repair',
-      label: 'Repair',
+      label: t('admin_dashboard.sections.repair'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.025),
       bestMode: 'min',
     },
-    { id: 'section-utilities-bills', rowType: 'section', label: 'Utilities / Bills' },
+    { id: 'section-utilities-bills', rowType: 'section', label: t('admin_dashboard.sections.utilities_bills') },
     {
       id: 'util-electricty',
-      label: 'Electricty',
+      label: t('admin_dashboard.sections.electricity'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.17),
       bestMode: 'min',
     },
     {
       id: 'util-water',
-      label: 'Water',
+      label: t('admin_dashboard.sections.water'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
       bestMode: 'min',
     },
     {
       id: 'util-internet',
-      label: 'Internet',
+      label: t('admin_dashboard.sections.internet'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.05),
       bestMode: 'min',
     },
     {
       id: 'util-gas',
-      label: 'Gas',
+      label: t('admin_dashboard.sections.gas'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.04),
       bestMode: 'min',
     },
     {
       id: 'util-logistic-air-sea',
-      label: 'Logistic(Air, Sea)',
+      label: t('admin_dashboard.sections.logistic_air_sea'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
       bestMode: 'min',
     },
-    { id: 'section-salary-rent', rowType: 'section', label: 'Salary & Rent' },
+    { id: 'section-salary-rent', rowType: 'section', label: t('admin_dashboard.sections.salary_rent') },
     {
       id: 'salary-rent-salary',
-      label: 'Salary',
+      label: t('admin_dashboard.sections.salary'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.42),
       bestMode: 'min',
     },
     {
       id: 'salary-rent-rent',
-      label: 'Rent',
+      label: t('admin_dashboard.sections.rent'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.2),
       bestMode: 'min',
     },
-    { id: 'section-others', rowType: 'section', label: 'Others' },
+    { id: 'section-others', rowType: 'section', label: t('admin_dashboard.sections.others') },
     {
       id: 'others',
-      label: 'Others',
+      label: t('admin_dashboard.sections.others'),
       values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
       bestMode: 'min',
     },
@@ -365,7 +367,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
         style={{ gridTemplateColumns: `220px repeat(${selectedCount}, minmax(180px, 1fr))` }}
       >
         <div className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-brand-primary border-r border-brand-primary/20">
-          Comparison Metric
+          {t('admin_dashboard.comparison_metric')}
         </div>
         {selectedCompareBranches.map((branch) => (
           <div key={`head-${branch.id}`} className="px-5 py-4 border-l border-brand-primary/15">
@@ -417,7 +419,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                         </span>
                         {isTop && (
                           <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-brand-primary/15 text-brand-primary">
-                            Top
+                            {t('admin_dashboard.top')}
                           </span>
                         )}
                       </div>
@@ -470,19 +472,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             {summaryData && (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
               <SummaryCard 
-                title="Total Revenue"
+                title={t('admin_dashboard.total_revenue')}
                 value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={DollarSign}
                 color="bg-green-500"
               />
               <SummaryCard 
-                title="Total Sales"
+                title={t('admin_dashboard.total_sales')}
                 value={`₱${summaryData.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={TrendingUp}
                 color="bg-[rgb(139,92,246)]"
               />
               <SummaryCard 
-                title="Total Expenses"
+                title={t('admin_dashboard.total_expenses')}
                 value={`₱${summaryData.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={TrendingDown}
                 color="bg-[rgb(245,158,11)]"
@@ -491,7 +493,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             )}
             
             <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">Overall Performance Trend (12 Months)</h3>
+              <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.performance_trend')}</h3>
               <div className="h-96">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -515,8 +517,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     <Tooltip 
                       formatter={(value, name) => {
                         const originalValue = `₱${Math.abs(Number(value)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-                        if (name === 'totalSales') return [originalValue, 'Total Sales'];
-                        if (name === 'negativeExpenses') return [originalValue, 'Total Expenses'];
+                        if (name === 'totalSales') return [originalValue, t('admin_dashboard.total_sales')];
+                        if (name === 'negativeExpenses') return [originalValue, t('admin_dashboard.total_expenses')];
                         return [originalValue, name];
                       }}
                       cursor={{ fill: 'transparent' }}
@@ -529,11 +531,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     <Legend 
                       iconType="circle" 
                       wrapperStyle={{ paddingTop: '20px' }} 
-                      formatter={(value) => <span className="ml-2 mr-8 text-sm font-medium text-slate-600">{value}</span>}
+                      formatter={(value) => <span className="ml-2 mr-8 text-sm font-medium text-slate-600">
+                        {value === 'totalSales' ? t('admin_dashboard.total_sales') : 
+                         value === 'negativeExpenses' ? t('admin_dashboard.total_expenses') : value}
+                      </span>}
                     />
                     <Bar 
                       dataKey="totalSales" 
-                      name="Total Sales" 
+                      name="totalSales" 
                       fill="rgb(139, 92, 246)" 
                       radius={[6, 6, 0, 0]}
                       barSize={32}
@@ -541,7 +546,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                     />
                     <Bar 
                       dataKey="negativeExpenses" 
-                      name="Total Expenses" 
+                      name="negativeExpenses" 
                       fill="rgb(245, 158, 11)" 
                       radius={[6, 6, 0, 0]}
                       barSize={32}
@@ -555,7 +560,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Pie Chart: Revenue Distribution */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
-                <h3 className="text-lg font-bold text-slate-800 mb-4">Revenue Distribution</h3>
+                <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.revenue_distribution')}</h3>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -589,7 +594,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
 
               {/* Horizontal Bar Chart: Top Selling Products */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
-                <h3 className="text-lg font-bold text-slate-800 mb-4">Top Selling Products</h3>
+                <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.top_selling_products')}</h3>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
@@ -637,10 +642,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                   }}
                   className="w-full rounded-xl bg-brand-primary text-white font-semibold py-2.5 px-4 transition-all duration-200 hover:bg-brand-primary/90 disabled:bg-slate-300 disabled:cursor-not-allowed"
                 >
-                  Compare ({selectedCompareBranches.length})
+                  {t('admin_dashboard.compare')} ({selectedCompareBranches.length})
                 </button>
                 <p className="mt-2 text-[11px] text-slate-500 text-center">
-                  Select at least 2 branches to compare
+                  {t('admin_dashboard.select_branches_to_compare')}
                 </p>
               </div>
             )}
@@ -680,7 +685,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
               <div className="h-full flex flex-col">
                 <div className="flex items-center justify-between px-6 py-5 border-b border-brand-primary/15 bg-white">
                   <div>
-                    <h2 className="text-xl font-bold text-brand-primary">Branch Comparison</h2>
+                    <h2 className="text-xl font-bold text-brand-primary">{t('admin_dashboard.branch_comparison')}</h2>
                     <p className="text-sm text-slate-600 mt-1">
                       {compareTitle}
                     </p>
@@ -695,7 +700,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                       <span className="text-sm text-slate-700 whitespace-nowrap">
                         {compareDateRange.start && compareDateRange.end
                           ? `${formatDate(compareDateRange.start)} - ${formatDate(compareDateRange.end)}`
-                          : 'Date range'}
+                          : t('admin_dashboard.date_range')}
                       </span>
                       <ChevronDown size={16} className="text-brand-primary transition-colors" />
                     </button>
@@ -738,8 +743,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                   ) : (
                     <>
                       <div className="mt-6 rounded-2xl border border-brand-primary/20 bg-gradient-to-r from-brand-primary/10 to-indigo-100/70 px-4 py-3 flex items-center justify-between shadow-sm">
-                        <p className="text-sm font-semibold text-brand-primary">Branch Comparison Board</p>
-                        <p className="text-xs text-slate-600">Top = highest value, except Expenses (lowest is best)</p>
+                        <p className="text-sm font-semibold text-brand-primary">{t('admin_dashboard.comparison_board')}</p>
+                        <p className="text-xs text-slate-600">{t('admin_dashboard.comparison_note')}</p>
                       </div>
 
                       {renderComparisonTable(unifiedComparisonRows)}

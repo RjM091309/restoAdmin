@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
@@ -72,6 +73,7 @@ interface CategoriesProps {
 }
 
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selectedBranch }) => {
+  const { t } = useTranslation();
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -98,7 +100,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       setCategories(categoryRows);
       setInventoryItems(inventoryRows);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to fetch categories');
+      toast.error(error.message || t('categories.messages.fetch_failed'));
     } finally {
       setLoading(false);
     }
@@ -111,7 +113,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
 
   const handleSave = async () => {
     if (!formData.name.trim()) {
-      toast.error('Category name is required');
+      toast.error(t('categories.messages.name_required'));
       return;
     }
 
@@ -123,10 +125,10 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           description: formData.description,
           icon: formData.icon,
         });
-        toast.success('Category updated successfully');
+        toast.success(t('categories.messages.update_success'));
       } else {
         if (!selectedBranch || selectedBranch.id === 'all') {
-          toast.error('Please select a specific branch first');
+          toast.error(t('categories.messages.select_branch'));
           return;
         }
         await createInventoryCategory({
@@ -136,25 +138,25 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           description: formData.description,
           icon: formData.icon,
         });
-        toast.success('Category created successfully');
+        toast.success(t('categories.messages.create_success'));
       }
       setIsModalOpen(false);
       resetForm();
       fetchCategories();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to save category');
+      toast.error(error.message || t('categories.messages.save_failed'));
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this category?')) return;
+    if (!window.confirm(t('categories.delete_confirm'))) return;
     
     try {
       await deleteInventoryCategory(id);
-      toast.success('Category deleted successfully');
+      toast.success(t('categories.messages.delete_success'));
       fetchCategories();
     } catch (error: any) {
-      toast.error(error.message || 'Failed to delete category');
+      toast.error(error.message || t('categories.messages.delete_failed'));
     }
   };
 
@@ -218,7 +220,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
 
   const columns: ColumnDef<InventoryCategory>[] = [
     {
-      header: 'Category Name',
+      header: t('categories.category_name'),
       className: 'w-1/3',
       render: (category) => {
         const IconFromKey = getIconFromKey(category.icon);
@@ -236,7 +238,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
                 {category.name}
               </h3>
               <p className="text-xs text-brand-muted font-medium truncate max-w-[200px] xl:max-w-[300px]">
-                {category.description || 'No description'}
+                {category.description || t('categories.no_description')}
               </p>
             </div>
           </div>
@@ -244,7 +246,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       },
     },
     {
-      header: 'Total Items',
+      header: t('categories.total_items'),
       className: 'text-center',
       render: (category) => {
         const metric =
@@ -254,13 +256,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         return (
         <div className="flex flex-col items-center justify-center">
           <span className="text-sm font-bold text-brand-text">{metric.totalItems}</span>
-          <span className="text-xs text-brand-muted">Products</span>
+          <span className="text-xs text-brand-muted">{t('categories.products')}</span>
         </div>
         );
       },
     },
     {
-      header: 'Total Value',
+      header: t('categories.total_value'),
       className: 'text-center',
       render: (category) => {
         const metric =
@@ -270,13 +272,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         return (
         <div className="flex flex-col items-center justify-center">
           <span className="text-sm font-bold text-brand-text">{formatValue(metric.totalValue)}</span>
-          <span className="text-xs text-brand-muted">Asset Value</span>
+          <span className="text-xs text-brand-muted">{t('categories.asset_value')}</span>
         </div>
         );
       },
     },
     {
-      header: 'Status',
+      header: t('categories.status'),
       className: 'text-center',
       render: (category) => (
         <div className="flex justify-center">
@@ -292,13 +294,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
               "w-1.5 h-1.5 rounded-full",
               category.active ? "bg-green-500" : "bg-red-500"
             )} />
-            {category.active ? 'Active' : 'Inactive'}
+            {category.active ? t('categories.active') : t('categories.inactive')}
           </span>
         </div>
       ),
     },
     {
-      header: 'Actions',
+      header: t('categories.actions'),
       className: 'text-right',
       render: (category) => (
         <div className="flex justify-end items-center gap-2">
@@ -308,7 +310,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
               e.stopPropagation();
               openEdit(category);
             }}
-            title="Edit Category"
+            title={t('categories.edit_category')}
           >
             <Edit2 size={16} />
           </button>
@@ -318,7 +320,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
               e.stopPropagation();
               handleDelete(category.id);
             }}
-            title="Delete Category"
+            title={t('categories.delete_category')}
           >
             <Trash2 size={16} />
           </button>
@@ -362,7 +364,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                   <input
                     type="text"
-                    placeholder="Search categories..."
+                    placeholder={t('categories.search_placeholder')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
@@ -377,25 +379,25 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
-                New Category
+                {t('categories.new_category')}
               </button>
             </div>
 
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Categories</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('categories.total_categories')}</p>
                 <h3 className="text-3xl font-bold">{categories.length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Items</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('categories.total_items')}</p>
                 <h3 className="text-3xl font-bold">{dashboardMetrics.totalItems}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Value</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('categories.total_value')}</p>
                 <h3 className="text-3xl font-bold text-green-600">{formatValue(dashboardMetrics.totalValue)}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Needs Attention</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('categories.needs_attention')}</p>
                 <h3 className="text-3xl font-bold text-orange-500">{dashboardMetrics.needsAttention}</h3>
               </div>
             </div>
@@ -416,7 +418,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           setIsModalOpen(false);
           resetForm();
         }}
-        title={editingId ? "Edit Category" : "Add New Category"}
+        title={editingId ? t('categories.edit_category') : t('categories.add_new_category')}
         maxWidth="md"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -427,30 +429,30 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
               }}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
             >
-              Cancel
+              {t('categories.cancel')}
             </button>
             <button
               onClick={handleSave}
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
-              {editingId ? "Update Category" : "Save Category"}
+              {editingId ? t('categories.update_category') : t('categories.save_category')}
             </button>
           </div>
         }
       >
         <div className="space-y-5">
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Category Name</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_name')}</label>
             <input 
               type="text" 
-              placeholder="e.g. Seafood, Vegetables..."
+              placeholder={t('categories.form_name_placeholder')}
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Category Type</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_type')}</label>
             <select
               value={formData.categoryType}
               onChange={(e) => setFormData({ ...formData, categoryType: e.target.value })}
@@ -458,35 +460,39 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
             >
               {CATEGORY_TYPE_OPTIONS.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {type === 'Inventory' ? t('categories.types.inventory') :
+                   type === 'Maintenance' ? t('categories.types.maintenance') :
+                   type === 'Utilities / Bills' ? t('categories.types.utilities_bills') :
+                   type === 'Salary & Rent' ? t('categories.types.salary_rent') :
+                   t('categories.types.others')}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Description</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_description')}</label>
             <textarea 
               rows={3}
-              placeholder="Brief description of items in this category"
+              placeholder={t('categories.form_description_placeholder')}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">Icon Setup</label>
+            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_icon')}</label>
             <select 
               value={formData.icon}
               onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
             >
-              <option value="package">Default Box</option>
-              <option value="beef">Beef / Meat</option>
-              <option value="fish">Fish / Seafood</option>
-              <option value="leaf">Vegetables / Produce</option>
-              <option value="droplets">Dairy</option>
-              <option value="wheat">Grains</option>
-              <option value="coffee">Beverages</option>
+              <option value="package">{t('categories.icons.default_box')}</option>
+              <option value="beef">{t('categories.icons.beef_meat')}</option>
+              <option value="fish">{t('categories.icons.fish_seafood')}</option>
+              <option value="leaf">{t('categories.icons.vegetables_produce')}</option>
+              <option value="droplets">{t('categories.icons.dairy')}</option>
+              <option value="wheat">{t('categories.icons.grains')}</option>
+              <option value="coffee">{t('categories.icons.beverages')}</option>
             </select>
           </div>
         </div>

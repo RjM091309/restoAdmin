@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { TrendingUp, TrendingDown, MapPin } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -17,6 +18,7 @@ type BranchPerformanceCardProps = {
 };
 
 export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ branch, onClick, isSelected }) => {
+  const { t } = useTranslation();
   const netRevenue = branch.totalSales - branch.totalExpenses;
   const profitMargin = branch.totalSales > 0 ? (netRevenue / branch.totalSales) * 100 : 0;
   
@@ -40,7 +42,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
           </div>
           <div>
             <h3 className="text-base font-bold text-brand-text group-hover:text-brand-primary transition-colors">{branch.name}</h3>
-            <p className="text-xs text-brand-muted">Branch overview</p>
+            <p className="text-xs text-brand-muted">{t('admin_dashboard.branch_overview')}</p>
           </div>
         </div>
         <div className={cn("flex items-center text-xs font-bold", trendColor)}>
@@ -51,7 +53,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
       
       {/* Main Metric */}
       <div className="my-5 text-center">
-        <p className="text-xs text-brand-muted font-medium">Net Revenue</p>
+        <p className="text-xs text-brand-muted font-medium">{t('admin_dashboard.net_revenue')}</p>
         <p className="text-3xl font-bold text-brand-text">₱{netRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
       </div>
       
@@ -62,7 +64,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
             <TrendingUp size={14} />
           </div>
           <div>
-            <p className="text-xs text-brand-muted">Total Sales</p>
+            <p className="text-xs text-brand-muted">{t('admin_dashboard.total_sales')}</p>
             <p className="font-bold text-xs">₱{branch.totalSales.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
           </div>
         </div>
@@ -71,7 +73,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({ br
             <TrendingDown size={14} />
           </div>
           <div>
-            <p className="text-xs text-brand-muted">Total Expenses</p>
+            <p className="text-xs text-brand-muted">{t('admin_dashboard.total_expenses')}</p>
             <p className="font-bold text-xs">₱{branch.totalExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}</p>
           </div>
         </div>

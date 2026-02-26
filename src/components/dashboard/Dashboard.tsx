@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
 import {
@@ -249,6 +250,7 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
+  const { t } = useTranslation();
   const [dashboardData, setDashboardData] = React.useState<{
     dynamicStats: DashboardStats;
     dynamicRevenueData: RevenuePoint[];
@@ -280,6 +282,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
       fetchData();
     }
   }, [selectedBranch]);
+
+  const orderTypes = [
+    {
+      label: t('dashboard.dine_in'),
+      value: 900,
+      percentage: 45,
+      icon: UtensilsCrossed,
+      color: 'bg-orange-100 text-orange-600',
+    },
+    {
+      label: t('dashboard.takeaway'),
+      value: 600,
+      percentage: 30,
+      icon: Package,
+      color: 'bg-slate-200 text-slate-700',
+    },
+    {
+      label: t('dashboard.online'),
+      value: 500,
+      percentage: 25,
+      icon: MessageSquare,
+      color: 'bg-orange-50 text-orange-700',
+    },
+  ];
 
   return (
     <AnimatePresence mode="wait">
@@ -320,21 +346,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
             <div className="flex gap-6">
               <StatCard
                 icon={ClipboardList}
-                label="Total Orders"
+                label={t('dashboard.total_orders')}
                 value={dashboardData.dynamicStats.orders}
                 trend="1.58%"
                 trendType="up"
               />
               <StatCard
                 icon={Package}
-                label="Total Customer"
+                label={t('dashboard.total_customer')}
                 value={dashboardData.dynamicStats.customers}
                 trend="0.42%"
                 trendType="down"
               />
               <StatCard
                 icon={TrendingUp}
-                label="Total Revenue"
+                label={t('dashboard.total_revenue')}
                 value={dashboardData.dynamicStats.revenue}
                 trend="2.36%"
                 trendType="up"
@@ -345,22 +371,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
               <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-8">
                   <div>
-                    <h4 className="text-base text-brand-muted font-medium">Total Revenue</h4>
+                    <h4 className="text-base text-brand-muted font-medium">{t('dashboard.total_revenue')}</h4>
                     <p className="text-3xl font-bold">{dashboardData.dynamicStats.revenue}</p>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-brand-primary" />
-                        <span className="text-sm font-medium">Income</span>
+                        <span className="text-sm font-medium">{t('dashboard.income')}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-brand-text" />
-                        <span className="text-sm font-medium">Expense</span>
+                        <span className="text-sm font-medium">{t('dashboard.expense')}</span>
                       </div>
                     </div>
                     <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                      <option>Last 8 Months</option>
+                      <option>{t('dashboard.last_8_months')}</option>
                     </select>
                   </div>
                 </div>
@@ -401,6 +427,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       <Area
                         type="monotone"
                         dataKey="income"
+                        name={t('dashboard.income')}
                         fill="url(#incomeGradient)"
                         stroke="#4f46e5"
                         strokeWidth={2}
@@ -409,6 +436,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       <Area
                         type="monotone"
                         dataKey="expense"
+                        name={t('dashboard.expense')}
                         fill="url(#expenseGradient)"
                         stroke="#0f172a"
                         strokeWidth={2}
@@ -421,9 +449,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
 
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-6">
-                  <h4 className="text-base font-bold">Top Categories</h4>
+                  <h4 className="text-base font-bold">{t('dashboard.top_categories')}</h4>
                   <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>This Month</option>
+                    <option>{t('dashboard.this_month')}</option>
                   </select>
                 </div>
                 <div className="h-48 w-full relative">
@@ -463,9 +491,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
             <div className="grid grid-cols-3 gap-6">
               <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-8">
-                  <h4 className="text-base font-bold">Orders Overview</h4>
+                  <h4 className="text-base font-bold">{t('dashboard.orders_overview')}</h4>
                   <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>This Week</option>
+                    <option>{t('dashboard.this_week')}</option>
                   </select>
                 </div>
                 <div className="h-64 w-full">
@@ -494,6 +522,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       />
                       <Bar
                         dataKey="orders"
+                        name={t('dashboard.total_orders')}
                         fill="#c7d2fe"
                         radius={[6, 6, 0, 0]}
                         activeBar={<Rectangle fill="#4f46e5" />}
@@ -505,35 +534,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
 
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-8">
-                  <h4 className="text-base font-bold">Order Types</h4>
+                  <h4 className="text-base font-bold">{t('dashboard.order_types')}</h4>
                   <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>This Month</option>
+                    <option>{t('dashboard.this_month')}</option>
                   </select>
                 </div>
                 <div className="space-y-6">
-                  {[
-                    {
-                      label: 'Dine-In',
-                      value: 900,
-                      percentage: 45,
-                      icon: UtensilsCrossed,
-                      color: 'bg-orange-100 text-orange-600',
-                    },
-                    {
-                      label: 'Takeaway',
-                      value: 600,
-                      percentage: 30,
-                      icon: Package,
-                      color: 'bg-slate-200 text-slate-700',
-                    },
-                    {
-                      label: 'Online',
-                      value: 500,
-                      percentage: 25,
-                      icon: MessageSquare,
-                      color: 'bg-orange-50 text-orange-700',
-                    },
-                  ].map((type) => (
+                  {orderTypes.map((type) => (
                     <div key={type.label} className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div
@@ -560,7 +567,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
 
             <div className="bg-white p-6 rounded-2xl shadow-sm">
               <div className="flex items-center justify-between mb-8">
-                <h4 className="text-base font-bold">Recent Orders</h4>
+                <h4 className="text-base font-bold">{t('dashboard.recent_orders')}</h4>
                 <div className="flex items-center gap-4">
                   <div className="relative">
                     <Search
@@ -569,15 +576,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                     />
                     <input
                       type="text"
-                      placeholder="Search placeholder"
+                      placeholder={t('dashboard.search_placeholder')}
                       className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-48 outline-none"
                     />
                   </div>
                   <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer">
-                    <option>This Week</option>
+                    <option>{t('dashboard.this_week')}</option>
                   </select>
                   <button className="text-xs font-bold bg-brand-bg px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                    See All Orders
+                    {t('dashboard.see_all_orders')}
                   </button>
                 </div>
               </div>
@@ -585,25 +592,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                 <thead>
                   <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider border-b border-gray-50">
                     <th className="pb-4 font-bold">
-                      Order ID <ChevronDown size={10} className="inline" />
+                      {t('dashboard.order_id')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Photo <ChevronDown size={10} className="inline" />
+                      {t('dashboard.photo')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Menu <ChevronDown size={10} className="inline" />
+                      {t('dashboard.menu')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Qty <ChevronDown size={10} className="inline" />
+                      {t('dashboard.qty')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Amount <ChevronDown size={10} className="inline" />
+                      {t('dashboard.amount')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Customer <ChevronDown size={10} className="inline" />
+                      {t('dashboard.customer')} <ChevronDown size={10} className="inline" />
                     </th>
                     <th className="pb-4 font-bold">
-                      Status <ChevronDown size={10} className="inline" />
+                      {t('dashboard.status')} <ChevronDown size={10} className="inline" />
                     </th>
                   </tr>
                 </thead>
@@ -637,7 +644,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                               : 'bg-gray-100 text-gray-600',
                           )}
                         >
-                          {order.status}
+                          {order.status === 'On Process' ? t('dashboard.on_process') :
+                           order.status === 'Completed' ? t('dashboard.completed') :
+                           t('dashboard.pending')}
                         </span>
                       </td>
                     </tr>
@@ -650,9 +659,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
           <div className="w-80 space-y-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm h-full flex flex-col">
               <div className="flex items-center justify-between mb-6">
-                <h4 className="text-base font-bold">Trending Menus</h4>
+                <h4 className="text-base font-bold">{t('dashboard.trending_menus')}</h4>
                 <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                  <option>This Week</option>
+                  <option>{t('dashboard.this_week')}</option>
                 </select>
               </div>
               <div className="flex-1 overflow-hidden">
