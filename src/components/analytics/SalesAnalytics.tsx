@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { BarChart3, Flame } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Flame, ChevronDown } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
   ResponsiveContainer,
@@ -38,6 +38,62 @@ type TopMenuItem = {
 };
 
 type MetricKey = 'totalSales' | 'refund' | 'discount' | 'netSales' | 'grossProfit';
+type ChartType = 'bar chart' | 'line graph';
+type ViewMode = 'glance' | 'week';
+
+type InlineDropdownProps<T extends string> = {
+  value: T;
+  options: readonly T[];
+  onChange: (value: T) => void;
+};
+
+function InlineDropdown<T extends string>({ value, options, onChange }: InlineDropdownProps<T>) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocumentClick);
+    return () => document.removeEventListener('mousedown', onDocumentClick);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex items-center gap-1.5 border-b border-gray-200 px-2 py-1 text-sm text-brand-muted hover:text-brand-text transition-colors"
+      >
+        <span>{value}</span>
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 min-w-[130px] overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg z-20">
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option}
+              onClick={() => {
+                onChange(option);
+                setOpen(false);
+              }}
+              className={`w-full px-3 py-2 text-left text-sm transition-colors ${
+                option === value ? 'bg-brand-primary text-white' : 'text-brand-text hover:bg-gray-50'
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const MOCK_BRANCH_SALES: BranchSales[] = [
   { id: '1', name: 'Daraejung', totalSales: 286450, orders: 1240, avgSales: 9548.33, growth: 8.4 },
@@ -168,11 +224,13 @@ const MOCK_TOP_MENU_BRANCH: Record<string, TopMenuItem[]> = {
 
 const money = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
 
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
   const [activeMetric, setActiveMetric] = useState<MetricKey>('totalSales');
-  const [chartType, setChartType] = useState<'bar chart' | 'line graph'>('bar chart');
+  const [chartType, setChartType] = useState<ChartType>('bar chart');
+  const [viewMode, setViewMode] = useState<ViewMode>('glance');
 
   const selectedData = useMemo(() => {
     if (isAllBranch) return null;
@@ -250,14 +308,14 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       },
       {
         key: 'refund' as const,
-        label: 'refund',
+        label: 'Refund',
         value: money(baseSales * 0.00024),
         delta: `+${money(baseSales * 0.00019)} (+367.86%)`,
         positive: false,
       },
       {
         key: 'discount' as const,
-        label: 'discount',
+        label: 'Discount',
         value: money(baseSales * 0.00269),
         delta: `-${money(baseSales * 0.0005)} (-15.76%)`,
         positive: true,
@@ -280,6 +338,25 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     [baseSales]
   );
   const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || 'Total sales';
+  const tooltipProps = {
+    formatter: (value: number) => money(Number(value)),
+    cursor: false as const,
+    contentStyle: {
+      backgroundColor: '#ffffff',
+      border: 'none',
+      borderRadius: '10px',
+      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)',
+    },
+    labelStyle: {
+      color: '#0f172a',
+      fontWeight: 700,
+      marginBottom: '4px',
+    },
+    itemStyle: {
+      color: '#334155',
+      fontWeight: 600,
+    },
+  };
 
   return (
     <div className="pt-6 space-y-8">
@@ -290,9 +367,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               type="button"
               key={item.label}
               onClick={() => setActiveMetric(item.key)}
-              className={`p-5 text-left transition-colors hover:bg-gray-50 ${
-                activeMetric === item.key ? 'border-b-2 border-b-green-500' : 'border-b-2 border-b-transparent'
-              }`}
+              className="p-5 text-left transition-colors hover:bg-gray-50 border-b-2 border-b-transparent"
+              style={activeMetric === item.key ? { borderBottomColor: CHART_THEME_COLOR } : undefined}
             >
               <p className="text-brand-muted text-sm font-medium mb-1">{item.label}</p>
               <h3 className="text-4xl/none md:text-[2rem] font-bold text-brand-text mb-2">{item.value}</h3>
@@ -307,17 +383,16 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               <h4 className="text-lg font-bold text-brand-text">{activeMetricLabel}</h4>
             </div>
             <div className="flex items-center gap-3">
-              <select
-                className="bg-transparent border-b border-gray-200 px-2 py-1 text-sm text-brand-muted outline-none"
+              <InlineDropdown
                 value={chartType}
-                onChange={(e) => setChartType(e.target.value as 'bar chart' | 'line graph')}
-              >
-                <option>line graph</option>
-                <option>bar chart</option>
-              </select>
-              <select className="bg-transparent border-b border-gray-200 px-2 py-1 text-sm text-brand-muted outline-none">
-                <option>glance</option>
-              </select>
+                options={['line graph', 'bar chart'] as const}
+                onChange={(value) => setChartType(value)}
+              />
+              <InlineDropdown
+                value={viewMode}
+                options={['glance', 'week'] as const}
+                onChange={(value) => setViewMode(value)}
+              />
             </div>
           </div>
           <div className="h-72">
@@ -342,8 +417,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                     axisLine={false}
                     tickLine={false}
                   />
-                  <Tooltip formatter={(value: number) => money(Number(value))} />
-                  <Bar dataKey={activeMetric} fill="#8BC34A" barSize={22} />
+                  <Tooltip {...tooltipProps} />
+                  <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={22} />
                 </BarChart>
               ) : (
                 <AreaChart data={trendData}>
@@ -365,13 +440,13 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                     axisLine={false}
                     tickLine={false}
                   />
-                  <Tooltip formatter={(value: number) => money(Number(value))} />
+                  <Tooltip {...tooltipProps} />
                   <Area
                     type="linear"
                     dataKey={activeMetric}
-                    stroke="#8BC34A"
+                    stroke={CHART_THEME_COLOR}
                     strokeWidth={2}
-                    fill="#8BC34A"
+                    fill={CHART_THEME_COLOR}
                     fillOpacity={0.2}
                     dot={true}
                     activeDot={true}

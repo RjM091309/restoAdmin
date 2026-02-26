@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @theme {
@@ -11,7 +12,7 @@
   --color-brand-card: #FFFFFF;
   --color-brand-text: #0f172a;
   --color-brand-muted: #64748b;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Noto Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -180,4 +181,12 @@
 
 .skeleton-fade-out {
   opacity: 0;
+}
+
+/* Hide default focus outline on Recharts SVG surface */
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible {
+  outline: none !important;
 }
