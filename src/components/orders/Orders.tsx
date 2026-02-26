@@ -95,7 +95,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             case ORDER_STATUS.CONFIRMED: return t('orders.confirmed');
             case ORDER_STATUS.SETTLED: return t('orders.settled');
             case ORDER_STATUS.CANCELLED: return t('orders.cancelled');
-            default: return 'Unknown';
+            default: return t('orders.unknown');
         }
     };
 
@@ -416,7 +416,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                                     <input
                                         type="text"
-                                        placeholder={t('orders.pagination.search_placeholder')}
+                                        placeholder={t('orders.search_placeholder')}
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
                                         className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
@@ -511,7 +511,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                     <div className="grid grid-cols-2 gap-5">
                         <div>
                             <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_no_label')}</label>
-                            <input type="text" value={newOrderNo} onChange={(e) => setNewOrderNo(e.target.value)} placeholder="e.g. ORD-20260225-101530"
+                            <input type="text" value={newOrderNo} onChange={(e) => setNewOrderNo(e.target.value)} placeholder={t('orders.order_no_placeholder')}
                                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400" />
                         </div>
                         <div>

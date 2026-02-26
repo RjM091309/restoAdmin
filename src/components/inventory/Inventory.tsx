@@ -60,6 +60,13 @@ const normalizeSegment = (value: string) =>
     .toLowerCase()
     .replace(/\s+/g, '-');
 
+const getUnitKey = (u: string) => {
+  const s = String(u || 'kg').toLowerCase();
+  if (s === 'l') return 'L';
+  if (s === 'ml') return 'mL';
+  return s;
+};
+
 export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = null }) => {
   const { t } = useTranslation();
   const { categoryName } = useParams<{ categoryName: string }>();
@@ -293,7 +300,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
         return (
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold">
-              {item.stockQty} {item.unit}
+              {item.stockQty} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
             </span>
             <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div
@@ -312,7 +319,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       header: t('inventory_page.table.reorder_stock'),
       render: (item) => (
         <span className="text-sm font-bold text-brand-text">
-          {item.reorderLevel} {item.unit}
+          {item.reorderLevel} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
         </span>
       ),
     },
@@ -370,7 +377,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
           </button>
           <button
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title={t('inventory_page.messages.delete_confirm')}
+            title={t('inventory_page.table.delete_title')}
             onClick={() => handleDelete(item.id)}
           >
             <Trash2 size={16} />
@@ -463,7 +470,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_value')}</p>
                 <h3 className="text-3xl font-bold">
-                  ₱{stats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {t('inventory_page.currency_symbol')}{stats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
               </div>
             </div>
@@ -588,7 +595,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   >
                     {UNIT_OPTIONS.map((unit) => (
                       <option key={unit} value={unit}>
-                        {unit}
+                        {t(`inventory_page.units.${unit}`)}
                       </option>
                     ))}
                   </select>

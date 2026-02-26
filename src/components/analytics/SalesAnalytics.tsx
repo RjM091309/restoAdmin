@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
@@ -46,6 +47,7 @@ type InlineDropdownProps<T extends string> = {
   value: T;
   options: readonly T[];
   onChange: (value: T) => void;
+  formatOption?: (value: T) => string;
 };
 
 // API data types
@@ -79,7 +81,7 @@ function authHeaders(): HeadersInit {
   };
 }
 
-function InlineDropdown<T extends string>({ value, options, onChange }: InlineDropdownProps<T>) {
+function InlineDropdown<T extends string>({ value, options, onChange, formatOption }: InlineDropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -101,7 +103,7 @@ function InlineDropdown<T extends string>({ value, options, onChange }: InlineDr
         onClick={() => setOpen((prev) => !prev)}
         className="flex items-center gap-1.5 border-b border-gray-200 px-2 py-1 text-sm text-brand-muted hover:text-brand-text transition-colors"
       >
-        <span>{value}</span>
+        <span>{formatOption ? formatOption(value) : value}</span>
         <ChevronDown size={14} />
       </button>
       {open && (
@@ -117,7 +119,7 @@ function InlineDropdown<T extends string>({ value, options, onChange }: InlineDr
               className={`w-full px-3 py-2 text-left text-sm transition-colors ${option === value ? 'bg-brand-primary text-white' : 'text-brand-text hover:bg-gray-50'
                 }`}
             >
-              {option}
+              {formatOption ? formatOption(option) : option}
             </button>
           ))}
         </div>
@@ -241,6 +243,7 @@ const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'
 
 
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
+  const { t } = useTranslation();
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
   const [activeMetric, setActiveMetric] = useState<MetricKey>('totalSales');
   const [chartType, setChartType] = useState<ChartType>('bar chart');
@@ -373,10 +376,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         });
         setBranchSalesData(withMock);
       } else {
-        setBranchSalesError(json.message || 'Failed to load');
+        setBranchSalesError(json.message || t('sales_analytics.failed_to_load'));
       }
     } catch {
-      setBranchSalesError('Network error');
+      setBranchSalesError(t('sales_analytics.network_error'));
     } finally {
       setBranchSalesLoading(false);
     }
@@ -560,15 +563,15 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const baseSales = isAllBranch ? allSummary.totalSales : selectedData?.totalSales || 0;
   const topStatItems = useMemo(
     () => [
-      { key: 'totalSales' as const, label: 'Total sales', value: money(baseSales), delta: `+${money(baseSales * 0.0615)} (+6.57%)`, positive: true },
-      { key: 'refund' as const, label: 'Refund', value: money(baseSales * 0.00024), delta: `+${money(baseSales * 0.00019)} (+367.86%)`, positive: false },
-      { key: 'discount' as const, label: 'Discount', value: money(baseSales * 0.00269), delta: `-${money(baseSales * 0.0005)} (-15.76%)`, positive: true },
-      { key: 'netSales' as const, label: 'Net sales', value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
-      { key: 'grossProfit' as const, label: 'Gross profit', value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
+      { key: 'totalSales' as const, label: t('sales_analytics.total_sales'), value: money(baseSales), delta: `+${money(baseSales * 0.0615)} (+6.57%)`, positive: true },
+      { key: 'refund' as const, label: t('sales_analytics.refund'), value: money(baseSales * 0.00024), delta: `+${money(baseSales * 0.00019)} (+367.86%)`, positive: false },
+      { key: 'discount' as const, label: t('sales_analytics.discount'), value: money(baseSales * 0.00269), delta: `-${money(baseSales * 0.0005)} (-15.76%)`, positive: true },
+      { key: 'netSales' as const, label: t('sales_analytics.net_sales'), value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
+      { key: 'grossProfit' as const, label: t('sales_analytics.gross_profit'), value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
     ],
-    [baseSales]
+    [baseSales, t]
   );
-  const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || 'Total sales';
+  const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || t('sales_analytics.total_sales');
   const tooltipProps = {
     formatter: (value: number) => money(Number(value)),
     cursor: false as const,
@@ -611,8 +614,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               <h4 className="text-lg font-normal text-brand-text">{activeMetricLabel}</h4>
             </div>
             <div className="flex items-center gap-3">
-              <InlineDropdown value={chartType} options={['line graph', 'bar chart'] as const} onChange={(v) => setChartType(v)} />
-              <InlineDropdown value={viewMode} options={['glance', 'week'] as const} onChange={(v) => setViewMode(v)} />
+              <InlineDropdown value={chartType} options={['line graph', 'bar chart'] as const} formatOption={(v) => t(`sales_analytics.${v.replace(' ', '_')}`)} onChange={(v) => setChartType(v)} />
+              <InlineDropdown value={viewMode} options={['glance', 'week'] as const} formatOption={(v) => t(`sales_analytics.${v}`)} onChange={(v) => setViewMode(v)} />
             </div>
           </div>
           <div className="h-72">
@@ -644,8 +647,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         <div className="grid grid-cols-1 items-stretch xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
           <div className="px-5 py-4 border-b xl:border-b-0 xl:border-r border-gray-100">
             <div className="flex items-center justify-between text-sm font-normal text-brand-text mb-3.5">
-              <span>Top 5 Products</span>
-              <span className="text-brand-muted">Net sales</span>
+              <span>{t('sales_analytics.top_5_products')}</span>
+              <span className="text-brand-muted">{t('sales_analytics.net_sales')}</span>
             </div>
             <div className="overflow-hidden rounded-xl">
               <table className="w-full table-auto">
@@ -671,11 +674,11 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <div className="px-5 py-4">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-lg font-normal text-brand-text">
-                {activeProduct ? `${activeProduct.name} sales trend` : 'Sales graph by product'}
+                {activeProduct ? `${activeProduct.name} ${t('sales_analytics.sales_trend')}` : t('sales_analytics.sales_graph_by_product')}
               </h4>
               <div className="flex items-center gap-3">
-                <InlineDropdown value={productChartType} options={['bar chart'] as const} onChange={(v) => setProductChartType(v)} />
-                <InlineDropdown value={productViewMode} options={['glance', 'week'] as const} onChange={(v) => setProductViewMode(v)} />
+                <InlineDropdown value={productChartType} options={['bar chart'] as const} formatOption={(v) => t(`sales_analytics.${v.replace(' ', '_')}`)} onChange={(v) => setProductChartType(v)} />
+                <InlineDropdown value={productViewMode} options={['glance', 'week'] as const} formatOption={(v) => t(`sales_analytics.${v}`)} onChange={(v) => setProductViewMode(v)} />
               </div>
             </div>
             <div className="h-60">
@@ -702,7 +705,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <Store size={18} className="text-brand-muted" />
-              <h4 className="text-base font-semibold text-brand-text">Total Sales per Branch</h4>
+              <h4 className="text-base font-semibold text-brand-text">{t('sales_analytics.total_sales_per_branch')}</h4>
             </div>
           </div>
           <div className="flex-1 px-5 py-4">
@@ -714,12 +717,12 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <AlertCircle size={32} className="text-red-400 mb-2" />
                 <p className="text-sm text-red-500 font-medium">{branchSalesError}</p>
-                <button onClick={fetchBranchSales} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">Retry</button>
+                <button onClick={fetchBranchSales} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
               </div>
             ) : branchSalesData.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Store size={36} className="text-gray-300 mb-2" />
-                <p className="text-sm text-brand-muted font-medium">No branch sales data available</p>
+                <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_branch_sales_data')}</p>
               </div>
             ) : (
               <>
@@ -744,10 +747,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100 bg-gray-50">
-                        <th className="px-3 py-2">Branch</th>
-                        <th className="px-3 py-2 text-right">Total Sales</th>
-                        <th className="px-3 py-2 text-right">Orders</th>
-                        <th className="px-3 py-2 text-right">Avg/Order</th>
+                        <th className="px-3 py-2">{t('sales_analytics.branch')}</th>
+                        <th className="px-3 py-2 text-right">{t('sales_analytics.total_sales')}</th>
+                        <th className="px-3 py-2 text-right">{t('sales_analytics.orders')}</th>
+                        <th className="px-3 py-2 text-right">{t('sales_analytics.avg_order')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -778,9 +781,9 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <TrendingDown size={18} className="text-brand-muted" />
-              <h4 className="text-base font-semibold text-brand-text">Top 5 Least Selling Products</h4>
+              <h4 className="text-base font-semibold text-brand-text">{t('sales_analytics.top_least_selling_products')}</h4>
             </div>
-            <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded uppercase tracking-wider">Low Sales</span>
+            <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded uppercase tracking-wider">{t('sales_analytics.low_sales')}</span>
           </div>
           <div className="flex-1 px-5 py-4">
             {leastSellingLoading ? (
@@ -791,12 +794,12 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <AlertCircle size={32} className="text-red-400 mb-2" />
                 <p className="text-sm text-red-500 font-medium">{leastSellingError}</p>
-                <button onClick={fetchLeastSelling} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">Retry</button>
+                <button onClick={fetchLeastSelling} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
               </div>
             ) : leastSellingData.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <TrendingDown size={36} className="text-gray-300 mb-2" />
-                <p className="text-sm text-brand-muted font-medium">No data available</p>
+                <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_data_available')}</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -814,20 +817,20 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[10px] text-brand-muted font-medium">{item.category}</span>
                           <span className="text-[10px] text-brand-muted">·</span>
-                          <span className="text-[10px] text-brand-muted font-medium">{money(item.MENU_PRICE)}/unit</span>
+                          <span className="text-[10px] text-brand-muted font-medium">{money(item.MENU_PRICE)}/{t('sales_analytics.unit')}</span>
                         </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <span className="text-sm font-semibold text-brand-text">{item.total_quantity} sold</span>
+                      <span className="text-sm font-semibold text-brand-text">{item.total_quantity} {t('sales_analytics.sold')}</span>
                       <p className="text-[10px] text-brand-muted font-medium mt-0.5">
-                        {money(item.total_revenue)} revenue
+                        {money(item.total_revenue)} {t('sales_analytics.revenue')}
                       </p>
                     </div>
                   </div>
                 ))}
                 <p className="text-[10px] text-brand-muted text-center pt-1 font-medium">
-                  Products with the fewest orders. Consider reviewing pricing or promotions.
+                  {t('sales_analytics.least_selling_hint')}
                 </p>
               </div>
             )}
@@ -839,7 +842,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
           <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
-            EXPORT
+            {t('sales_analytics.export')}
           </button>
           <button type="button" className="text-brand-muted hover:text-brand-text transition-colors">
             <LayoutGrid size={18} />
@@ -849,13 +852,13 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <table className="w-full min-w-[920px]">
             <thead>
               <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100">
-                <th className="px-5 py-3">Date</th>
-                <th className="px-5 py-3">Total sales</th>
-                <th className="px-5 py-3">Refund</th>
-                <th className="px-5 py-3">Discount</th>
-                <th className="px-5 py-3">Net sales</th>
-                <th className="px-5 py-3">Product unit price</th>
-                <th className="px-5 py-3">Gross profit</th>
+                <th className="px-5 py-3">{t('sales_analytics.date')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.total_sales')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.refund')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.discount')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.net_sales')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.product_unit_price')}</th>
+                <th className="px-5 py-3">{t('sales_analytics.gross_profit')}</th>
               </tr>
             </thead>
             <tbody>
@@ -883,10 +886,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
             </button>
           </div>
           <div className="text-sm text-brand-muted">
-            Page: <span className="font-semibold text-brand-text">{safeTablePage + 1}</span> / {totalTablePages}
+            {t('sales_analytics.page')} <span className="font-semibold text-brand-text">{safeTablePage + 1}</span> / {totalTablePages}
           </div>
           <div className="text-sm text-brand-muted">
-            Page Line Count: <span className="font-semibold text-brand-text">{TABLE_PAGE_SIZE}</span>
+            {t('sales_analytics.page_line_count')} <span className="font-semibold text-brand-text">{TABLE_PAGE_SIZE}</span>
           </div>
         </div>
       </div>

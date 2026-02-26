@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -21,9 +22,6 @@ type PaymentReportRow = {
   netAmount: number;
 };
 
-const money = (value: number) =>
-  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 const MOCK_PAYMENT_REPORT_BASE: Omit<PaymentReportRow, 'id'>[] = [
   { paymentMethod: 'Gcash', paymentTransaction: 247, paymentAmount: 841544, refundTransaction: 0, refundAmount: 0, netAmount: 841544 },
   { paymentMethod: 'Debt', paymentTransaction: 3, paymentAmount: 17120, refundTransaction: 0, refundAmount: 0, netAmount: 17120 },
@@ -31,7 +29,12 @@ const MOCK_PAYMENT_REPORT_BASE: Omit<PaymentReportRow, 'id'>[] = [
 ];
 
 export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, dateRange }) => {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
+
+  const money = (value: number) =>
+    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   const headerTextClass = 'text-[13px] font-medium whitespace-nowrap bg-white';
   const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';
   const methodHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
@@ -78,7 +81,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
       ...computedRows,
       {
         id: `${String(selectedBranch?.id || 'all')}-total`,
-        paymentMethod: 'Total',
+        paymentMethod: 'total',
         paymentTransaction: total.paymentTransaction,
         paymentAmount: total.paymentAmount,
         refundTransaction: total.refundTransaction,
@@ -96,19 +99,19 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
 
   const columns: ColumnDef<PaymentReportRow>[] = [
     {
-      header: 'payment method',
+      header: t('payment_report.columns.payment_method'),
       accessorKey: 'paymentMethod',
       className: 'min-w-[220px] border-r border-gray-200',
       headerClassName: methodHeaderClass,
       cellClassName: methodBodyClass,
       render: (item) => (
         <span className={item.paymentMethod.toLowerCase() === 'total' ? 'font-bold' : ''}>
-          {item.paymentMethod}
+          {item.paymentMethod.toLowerCase() === 'total' ? t('payment_report.total') : item.paymentMethod}
         </span>
       ),
     },
     {
-      header: 'Payment Transaction',
+      header: t('payment_report.columns.payment_transaction'),
       className: 'min-w-[170px] text-right',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
@@ -119,7 +122,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
       ),
     },
     {
-      header: 'Payment amount',
+      header: t('payment_report.columns.payment_amount'),
       className: 'min-w-[170px] text-right',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
@@ -130,7 +133,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
       ),
     },
     {
-      header: 'refund transaction',
+      header: t('payment_report.columns.refund_transaction'),
       className: 'min-w-[170px] text-right',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
@@ -141,7 +144,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
       ),
     },
     {
-      header: 'Refund amount',
+      header: t('payment_report.columns.refund_amount'),
       className: 'min-w-[150px] text-right',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
@@ -152,7 +155,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
       ),
     },
     {
-      header: 'net amount',
+      header: t('payment_report.columns.net_amount'),
       className: 'min-w-[150px] text-right',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
@@ -173,12 +176,12 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search payment method..."
+            placeholder={t('payment_report.search_placeholder')}
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
         <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
-          EXPORT
+          {t('payment_report.export')}
         </button>
       </div>
       <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />

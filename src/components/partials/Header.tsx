@@ -31,9 +31,17 @@ type HeaderProps = {
   onBranchChange: (branch: Branch) => void;
 };
 
-const formatDate = (dateStr: string) => {
+const localeForLanguage = (lng: string) => {
+  const base = String(lng || 'en').split('-')[0];
+  if (base === 'ja') return 'ja-JP';
+  if (base === 'ko') return 'ko-KR';
+  if (base === 'zh') return 'zh-CN';
+  return 'en-US';
+};
+
+const formatDate = (dateStr: string, lng: string) => {
   const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString(localeForLanguage(lng), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -68,6 +76,58 @@ export const Header: React.FC<HeaderProps> = ({
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [isLanguagePanelOpen, setIsLanguagePanelOpen] = useState(false);
+
+  const labelForTab = (tab: string) => {
+    const keyByTab: Record<string, string> = {
+      Dashboard: 'sidebar.dashboard',
+      Expenses: 'sidebar.expenses',
+      'Sales Report': 'sidebar.sales_report',
+      'Sales Analytics': 'sidebar.sales_analytics',
+      Menu: 'sidebar.menu',
+      Category: 'sidebar.category',
+      'Payment type': 'sidebar.payment_type',
+      Receipt: 'sidebar.receipt',
+      Orders: 'sidebar.orders',
+      Inventory: 'sidebar.inventory',
+      'User Info': 'sidebar.user_info',
+      'User Role': 'sidebar.user_role',
+      'User Access': 'sidebar.user_access',
+      'User Management': 'header.user_management',
+    };
+
+    if (tab.startsWith('User')) return t('header.user_management');
+    const k = keyByTab[tab];
+    return k ? t(k) : tab;
+  };
+
+  const subtitleForTab = (tab: string) => {
+    if (tab === 'Dashboard') {
+      return t('header.subtitle_dashboard', { name: user?.firstname || t('header.user') });
+    }
+
+    const keyByTab: Record<string, string> = {
+      Orders: 'header.subtitle_orders',
+      Menu: 'header.subtitle_menu',
+      Inventory: 'header.subtitle_inventory',
+      'User Info': 'header.subtitle_user_info',
+      'User Role': 'header.subtitle_user_role',
+      'User Access': 'header.subtitle_user_access',
+      Expenses: 'header.subtitle_expenses',
+      'Sales Report': 'header.subtitle_sales_report',
+      'Sales Analytics': 'header.subtitle_sales_analytics',
+      Category: 'header.subtitle_category',
+      'Payment type': 'header.subtitle_payment_type',
+      Receipt: 'header.subtitle_receipt',
+      'User Management': 'header.subtitle_user_management',
+    };
+
+    if (tab.startsWith('User')) {
+      return t('header.subtitle_user_management');
+    }
+
+    const key = keyByTab[tab];
+    return key ? t(key) : t('header.subtitle_default', { tab: labelForTab(tab) });
+  };
 
   const languages = [
     { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -159,7 +219,7 @@ export const Header: React.FC<HeaderProps> = ({
               breadcrumbs.map((crumb, idx) => (
                 <React.Fragment key={idx}>
                   <span className={idx === breadcrumbs.length - 1 ? "text-brand-text" : "text-brand-muted"}>
-                    {crumb}
+                    {labelForTab(crumb)}
                   </span>
                   {idx < breadcrumbs.length - 1 && (
                     <span className="text-brand-muted text-xl mx-1">/</span>
@@ -167,25 +227,11 @@ export const Header: React.FC<HeaderProps> = ({
                 </React.Fragment>
               ))
             ) : (
-              activeTab.startsWith('User') ? t('header.user_management') : activeTab
+              labelForTab(activeTab)
             )}
           </h2>
           <p className="text-brand-muted text-sm mt-1">
-            {activeTab === 'Dashboard'
-              ? t('header.subtitle_dashboard', { name: user?.firstname || t('header.user') })
-              : activeTab === 'Orders'
-                ? t('header.subtitle_orders')
-                : activeTab === 'Menu'
-                  ? t('header.subtitle_menu')
-                  : activeTab === 'Inventory'
-                    ? t('header.subtitle_inventory')
-                    : activeTab === 'User Info'
-                      ? t('header.subtitle_user_info')
-                      : activeTab === 'User Role'
-                        ? t('header.subtitle_user_role')
-                        : activeTab === 'User Access'
-                          ? t('header.subtitle_user_access')
-                          : t('header.subtitle_default', { tab: activeTab.toLowerCase() })}
+            {subtitleForTab(activeTab)}
           </p>
         </div>
 
@@ -199,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <Calendar size={20} className="text-brand-muted" />
                 <span className="text-sm text-brand-muted whitespace-nowrap">
                   {dateRange.start && dateRange.end
-                    ? `${formatDate(dateRange.start)} - ${formatDate(dateRange.end)}`
+                    ? `${formatDate(dateRange.start, i18n.language)} - ${formatDate(dateRange.end, i18n.language)}`
                     : t('header.date_range')}
                 </span>
                 <ChevronDown

@@ -10,7 +10,8 @@
 		"delete": "删除",
 		"search": "搜索",
 		"loading": "加载中...",
-		"select_placeholder": "请选择一个选项..."
+		"select_placeholder": "请选择一个选项...",
+		"currency_symbol": "₱"
 	},
 	"dashboard": {
 		"total_orders": "总订单",
@@ -265,11 +266,19 @@
 		"search_placeholder": "搜索库存...",
 		"new_item": "添加新物品",
 		"back_to_categories": "返回类别",
+		"currency_symbol": "₱",
 		"stats": {
 			"total_items": "总物品数",
 			"low_stock": "库存不足",
 			"out_of_stock": "缺货",
 			"total_value": "总资产价值"
+		},
+		"units": {
+			"kg": "kg",
+			"g": "g",
+			"L": "L",
+			"mL": "mL",
+			"pcs": "个"
 		},
 		"table": {
 			"item_code": "物品代码",
@@ -279,7 +288,8 @@
 			"reorder_stock": "再订购库存",
 			"unit_cost": "单价",
 			"status": "状态",
-			"actions": "操作"
+			"actions": "操作",
+			"delete_title": "删除"
 		},
 		"status": {
 			"in_stock": "有货",
@@ -382,7 +392,91 @@
 		"growth": "增长率",
 		"branch": "分店",
 		"top_menu": "热门菜单",
-		"sold": "已售"
+		"sold": "已售",
+		"total_sales_per_branch": "各分店总销售额",
+		"no_branch_sales_data": "无分店销售数据",
+		"avg_order": "平均/订单",
+		"top_least_selling_products": "销量最少的5款产品",
+		"low_sales": "低销量",
+		"no_data_available": "无数据",
+		"revenue": "收入",
+		"least_selling_hint": "订单数最少的产品。考虑调整价格或进行促销。",
+		"top_5_products": "前5名产品",
+		"sales_trend": "销售趋势",
+		"sales_graph_by_product": "按产品分类的销售图表",
+		"export": "导出",
+		"date": "日期",
+		"product_unit_price": "产品单价",
+		"page": "页码:",
+		"page_line_count": "每页行数:",
+		"retry": "重试",
+		"failed_to_load": "加载失败",
+		"network_error": "网络错误",
+		"unit": "单位"
+	},
+	"category_report": {
+		"search_placeholder": "搜索类别...",
+		"export": "导出",
+		"columns": {
+			"category": "类别",
+			"sales_quantity": "销售数量",
+			"total_sales": "总销售额",
+			"refund_quantity": "退款数量",
+			"refund_amount": "退款金额",
+			"discounts": "折扣",
+			"net_sales": "净销售额",
+			"unit_cost": "单价",
+			"total_revenue": "总收入"
+		}
+	},
+	"menu_report": {
+		"search_placeholder": "搜索商品或类别...",
+		"export": "导出",
+		"columns": {
+			"goods": "商品",
+			"category": "类别",
+			"sales_quantity": "销售数量",
+			"total_sales": "总销售额",
+			"refund_quantity": "退款数量",
+			"refund_amount": "退款金额",
+			"discounts": "折扣",
+			"net_sales": "净销售额",
+			"unit_cost": "单价",
+			"total_revenue": "总收入"
+		}
+	},
+	"payment_report": {
+		"search_placeholder": "搜索支付方式...",
+		"export": "导出",
+		"total": "合计",
+		"columns": {
+			"payment_method": "支付方式",
+			"payment_transaction": "支付笔数",
+			"payment_amount": "支付金额",
+			"refund_transaction": "退款笔数",
+			"refund_amount": "退款金额",
+			"net_amount": "净额"
+		}
+	},
+	"receipt_report": {
+		"search_placeholder": "搜索收据编号...",
+		"export": "导出",
+		"filter_all_receipts": "全部收据",
+		"filter_sale": "销售",
+		"filter_refund_amount": "退款金额",
+		"type_sale": "销售",
+		"type_refund": "退款",
+		"detail_aggregate": "合计",
+		"detail_staff": "员工",
+		"detail_pos": "POS",
+		"columns": {
+			"receipt_number": "收据编号",
+			"date": "日期",
+			"employee": "员工",
+			"customer": "客户",
+			"type": "类型",
+			"total": "合计"
+		}
 	},
 	"notifications": {
 		"title": "通知",
@@ -1015,6 +1109,9 @@
 		"save_additional_order": "保存追加订单",
 		"add": "添加",
 		"n_a": "不适用",
+		"search_placeholder": "搜索订单...",
+		"order_no_placeholder": "例如：ORD-20260225-101530",
+		"unknown": "未知",
 		"pagination": {
 			"showing": "显示",
 			"to": "到",
@@ -1136,7 +1233,9 @@
 			"delete_confirm_btn": "是的，删除",
 			"deleted_title": "已删除！",
 			"deleted_msg": "\"{{name}}\" 已移除。",
-			"error_title": "错误"
+			"error_title": "错误",
+			"operation_failed": "操作失败",
+			"delete_failed": "删除失败"
 		}
 	},
 	"category": {
@@ -1387,6 +1486,13 @@
 	"header": {
 		"user_management": "用户管理",
 		"subtitle_dashboard": "您好 {{name}}，欢迎回来！",
+		"subtitle_expenses": "跟踪并管理支出。",
+		"subtitle_sales_report": "查看销售报告与业绩表现。",
+		"subtitle_sales_analytics": "查看销售分析与趋势。",
+		"subtitle_category": "按类别查看业绩表现。",
+		"subtitle_payment_type": "按支付类型查看分析。",
+		"subtitle_receipt": "查看并导出收据报告。",
+		"subtitle_user_management": "管理用户与访问设置。",
 		"subtitle_orders": "查看和管理餐厅订单。",
 		"subtitle_menu": "管理餐厅菜单项目。",
 		"subtitle_inventory": "管理餐厅用品和库存。",

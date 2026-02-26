@@ -10,7 +10,8 @@
 		"delete": "Delete",
 		"search": "Search",
 		"loading": "Loading...",
-		"select_placeholder": "Select an option..."
+		"select_placeholder": "Select an option...",
+		"currency_symbol": "₱"
 	},
 	"expenses_page": {
 		"search_placeholder": "Search expenses...",
@@ -97,11 +98,19 @@
 		"search_placeholder": "Search inventory...",
 		"new_item": "Add New Item",
 		"back_to_categories": "Back to Categories",
+		"currency_symbol": "₱",
 		"stats": {
 			"total_items": "Total Items",
 			"low_stock": "Low Stock",
 			"out_of_stock": "Out of Stock",
 			"total_value": "Total Value"
+		},
+		"units": {
+			"kg": "kg",
+			"g": "g",
+			"L": "L",
+			"mL": "mL",
+			"pcs": "pcs"
 		},
 		"table": {
 			"item_code": "Item Code",
@@ -111,7 +120,8 @@
 			"reorder_stock": "Reorder Stock",
 			"unit_cost": "Unit Cost",
 			"status": "Status",
-			"actions": "Actions"
+			"actions": "Actions",
+			"delete_title": "Delete"
 		},
 		"status": {
 			"in_stock": "In Stock",
@@ -380,7 +390,91 @@
 		"growth": "Growth",
 		"branch": "Branch",
 		"top_menu": "Top Menu",
-		"sold": "sold"
+		"sold": "sold",
+		"total_sales_per_branch": "Total Sales per Branch",
+		"no_branch_sales_data": "No branch sales data available",
+		"avg_order": "Avg/Order",
+		"top_least_selling_products": "Top 5 Least Selling Products",
+		"low_sales": "Low Sales",
+		"no_data_available": "No data available",
+		"revenue": "revenue",
+		"least_selling_hint": "Products with the fewest orders. Consider reviewing pricing or promotions.",
+		"top_5_products": "Top 5 Products",
+		"sales_trend": "sales trend",
+		"sales_graph_by_product": "Sales graph by product",
+		"export": "EXPORT",
+		"date": "Date",
+		"product_unit_price": "Product unit price",
+		"page": "Page:",
+		"page_line_count": "Page Line Count:",
+		"retry": "Retry",
+		"failed_to_load": "Failed to load",
+		"network_error": "Network error",
+		"unit": "unit"
+	},
+	"category_report": {
+		"search_placeholder": "Search category...",
+		"export": "EXPORT",
+		"columns": {
+			"category": "Category",
+			"sales_quantity": "Sales quantity",
+			"total_sales": "Total sales",
+			"refund_quantity": "Refund quantity",
+			"refund_amount": "Refund amount",
+			"discounts": "Discounts",
+			"net_sales": "Net sales",
+			"unit_cost": "Unit cost",
+			"total_revenue": "Total revenue"
+		}
+	},
+	"menu_report": {
+		"search_placeholder": "Search goods or category...",
+		"export": "EXPORT",
+		"columns": {
+			"goods": "Goods",
+			"category": "Category",
+			"sales_quantity": "Sales quantity",
+			"total_sales": "Total sales",
+			"refund_quantity": "Refund quantity",
+			"refund_amount": "Refund amount",
+			"discounts": "Discounts",
+			"net_sales": "Net sales",
+			"unit_cost": "Unit cost",
+			"total_revenue": "Total Revenue"
+		}
+	},
+	"payment_report": {
+		"search_placeholder": "Search payment method...",
+		"export": "EXPORT",
+		"total": "Total",
+		"columns": {
+			"payment_method": "Payment method",
+			"payment_transaction": "Payment Transaction",
+			"payment_amount": "Payment amount",
+			"refund_transaction": "Refund transaction",
+			"refund_amount": "Refund amount",
+			"net_amount": "Net amount"
+		}
+	},
+	"receipt_report": {
+		"search_placeholder": "Search receipt number...",
+		"export": "EXPORT",
+		"filter_all_receipts": "All Receipts",
+		"filter_sale": "Sale",
+		"filter_refund_amount": "Refund Amount",
+		"type_sale": "Sale",
+		"type_refund": "Refund",
+		"detail_aggregate": "aggregate",
+		"detail_staff": "Staff",
+		"detail_pos": "POS",
+		"columns": {
+			"receipt_number": "Receipt number",
+			"date": "Date",
+			"employee": "Employee",
+			"customer": "Customer",
+			"type": "Type",
+			"total": "Total"
+		}
 	},
 	"notifications": {
 		"title": "Notifications",
@@ -1037,6 +1131,9 @@
 		"select_type": "Select type",
 		"loading_menu": "Loading menu...",
 		"select_item": "Select an item",
+		"search_placeholder": "Search orders...",
+		"order_no_placeholder": "e.g. ORD-20260225-101530",
+		"unknown": "Unknown",
 		"swal": {
 			"update_status_title": "Update Order Status?",
 			"update_status_text": "Change order {{orderNo}} to \"{{status}}\"?",
@@ -1169,7 +1266,9 @@
 			"delete_confirm_btn": "Yes, Delete",
 			"deleted_title": "Deleted!",
 			"deleted_msg": "\"{{name}}\" has been removed.",
-			"error_title": "Error"
+			"error_title": "Error",
+			"operation_failed": "Operation failed",
+			"delete_failed": "Delete failed"
 		}
 	},
 	"category": {
@@ -1420,6 +1519,13 @@
 	"header": {
 		"user_management": "User Management",
 		"subtitle_dashboard": "Hello {{name}}, welcome back!",
+		"subtitle_expenses": "Track and manage expenses.",
+		"subtitle_sales_report": "Review sales reports and performance.",
+		"subtitle_sales_analytics": "Explore sales analytics and trends.",
+		"subtitle_category": "Review performance by category.",
+		"subtitle_payment_type": "Analyze payments by type.",
+		"subtitle_receipt": "View and export receipt reports.",
+		"subtitle_user_management": "Manage users and access settings.",
 		"subtitle_orders": "View and manage restaurant orders.",
 		"subtitle_menu": "Manage your restaurant menu items.",
 		"subtitle_inventory": "Manage your restaurant supplies and stock.",

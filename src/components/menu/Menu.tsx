@@ -205,7 +205,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             closeModal();
             await refreshData();
         } catch (e) {
-            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Operation failed', onConfirm: () => setSwal(null) });
+            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : t('menu_page.messages.operation_failed'), onConfirm: () => setSwal(null) });
         } finally {
             setSubmitting(false);
         }
@@ -226,7 +226,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     await refreshData();
                     setSwal({ type: 'success', title: t('menu_page.messages.deleted_title'), text: t('menu_page.messages.deleted_msg', { name: item.name }), onConfirm: () => setSwal(null) });
                 } catch (e) {
-                    setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Delete failed', onConfirm: () => setSwal(null) });
+                    setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : t('menu_page.messages.delete_failed'), onConfirm: () => setSwal(null) });
                 }
             },
             onCancel: () => setSwal(null),
@@ -262,7 +262,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         {
             header: t('menu_page.table.price'),
             render: (item) => (
-                <span className="text-sm font-bold text-brand-text">₱{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="text-sm font-bold text-brand-text">{t('common.currency_symbol')}{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             ),
         },
         {
@@ -554,7 +554,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                             <div className="flex justify-center gap-3">
                                 {swal.showCancel && (
                                     <button onClick={() => { swal.onCancel?.(); setSwal(null); }} className="px-6 py-2.5 bg-gray-100 text-brand-muted rounded-xl font-bold hover:bg-gray-200 transition-all">
-                                        Cancel
+                                        {t('menu_page.modal.cancel')}
                                     </button>
                                 )}
                                 <button
@@ -567,7 +567,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                     : 'bg-brand-orange hover:opacity-90'
                                     )}
                                 >
-                                    {swal.confirmText || 'OK'}
+                                    {swal.confirmText || t('common.ok')}
                                 </button>
                             </div>
                         </motion.div>

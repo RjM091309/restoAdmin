@@ -73,7 +73,7 @@ interface CategoriesProps {
 }
 
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selectedBranch }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -215,8 +215,19 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     return { totalItems, totalValue, needsAttention };
   }, [inventoryItems]);
 
+  const localeForLanguage = (lng: string) => {
+    const base = String(lng || 'en').split('-')[0];
+    if (base === 'ja') return 'ja-JP';
+    if (base === 'ko') return 'ko-KR';
+    if (base === 'zh') return 'zh-CN';
+    return 'en-US';
+  };
+
   const formatValue = (value: number) =>
-    new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
+    `${t('common.currency_symbol')}${Number(value || 0).toLocaleString(localeForLanguage(i18n.language), {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   const columns: ColumnDef<InventoryCategory>[] = [
     {

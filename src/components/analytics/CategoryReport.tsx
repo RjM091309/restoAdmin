@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -25,9 +26,6 @@ type CategoryReportRow = {
   totalRevenue: number;
 };
 
-const money = (value: number) =>
-  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 const MOCK_CATEGORY_REPORT_BASE: Omit<CategoryReportRow, 'id'>[] = [
   { goods: 'Svc Dwanjangjjigae', category: 'Service', salesQty: 1416, totalSales: 0, refundQty: 0, refundAmount: 0, discounts: 0, netSales: 0, unitCost: 0, totalRevenue: 0 },
   { goods: 'Chamisul', category: 'DRINKS', salesQty: 1383, totalSales: 387240, refundQty: 3, refundAmount: 840, discounts: 224, netSales: 386176, unitCost: 0, totalRevenue: 386176 },
@@ -42,7 +40,11 @@ const MOCK_CATEGORY_REPORT_BASE: Omit<CategoryReportRow, 'id'>[] = [
 ];
 
 export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, dateRange }) => {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
+
+  const money = (value: number) =>
+    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const rows = useMemo(() => {
     const branchMultiplierById: Record<string, number> = {
@@ -83,47 +85,47 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
 
   const columns: ColumnDef<CategoryReportRow>[] = [
     {
-      header: 'Category',
+      header: t('category_report.columns.category'),
       accessorKey: 'category',
       className: 'min-w-[200px] border-r border-gray-200',
     },
     {
-      header: 'Sales quantity',
+      header: t('category_report.columns.sales_quantity'),
       render: (item) => item.salesQty.toLocaleString(),
       className: 'min-w-[130px] text-right',
     },
     {
-      header: 'Total sales',
+      header: t('category_report.columns.total_sales'),
       render: (item) => money(item.totalSales),
       className: 'min-w-[130px] text-right',
     },
     {
-      header: 'Refund quantity',
+      header: t('category_report.columns.refund_quantity'),
       render: (item) => item.refundQty.toLocaleString(),
       className: 'min-w-[130px] text-right',
     },
     {
-      header: 'Refund amount',
+      header: t('category_report.columns.refund_amount'),
       render: (item) => money(item.refundAmount),
       className: 'min-w-[130px] text-right',
     },
     {
-      header: 'Discounts',
+      header: t('category_report.columns.discounts'),
       render: (item) => money(item.discounts),
       className: 'min-w-[120px] text-right',
     },
     {
-      header: 'Net sales',
+      header: t('category_report.columns.net_sales'),
       render: (item) => money(item.netSales),
       className: 'min-w-[120px] text-right',
     },
     {
-      header: 'Unit cost',
+      header: t('category_report.columns.unit_cost'),
       render: (item) => money(item.unitCost),
       className: 'min-w-[110px] text-right',
     },
     {
-      header: 'Total Revenue',
+      header: t('category_report.columns.total_revenue'),
       render: (item) => money(item.totalRevenue),
       className: 'min-w-[140px] text-right',
     },
@@ -138,12 +140,12 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search category..."
+            placeholder={t('category_report.search_placeholder')}
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
         <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
-          EXPORT
+          {t('category_report.export')}
         </button>
       </div>
       <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />

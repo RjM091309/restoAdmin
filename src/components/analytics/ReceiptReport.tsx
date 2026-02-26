@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -41,9 +42,6 @@ type ReceiptDetail = {
   items: ReceiptLineItem[];
 };
 
-const money = (value: number) =>
-  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 const MOCK_RECEIPT_BASE: Omit<ReceiptReportRow, 'id'>[] = [
   { receiptNumber: '1-37301', date: '26 Feb 2026 14:06', employee: 'Operator', customer: '—', type: 'sale', total: 1860 },
   { receiptNumber: '1-37300', date: '26 Feb 2026 14:04', employee: 'Operator', customer: '—', type: 'sale', total: 1900 },
@@ -75,9 +73,14 @@ const MOCK_RECEIPT_DETAIL_MAP: Record<string, ReceiptDetail> = {
 };
 
 export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, dateRange }) => {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'sale' | 'refund'>('all');
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptReportRow | null>(null);
+
+  const money = (value: number) =>
+    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   const headerTextClass = 'text-[13px] font-medium whitespace-nowrap bg-white';
   const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';
   const receiptHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
@@ -164,42 +167,43 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
 
   const columns: ColumnDef<ReceiptReportRow>[] = [
     {
-      header: 'Receipt number',
+      header: t('receipt_report.columns.receipt_number'),
       accessorKey: 'receiptNumber',
       className: 'min-w-[160px] border-r border-gray-200',
       headerClassName: receiptHeaderClass,
       cellClassName: receiptBodyClass,
     },
     {
-      header: 'date',
+      header: t('receipt_report.columns.date'),
       accessorKey: 'date',
       className: 'min-w-[200px]',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
     },
     {
-      header: 'employee',
+      header: t('receipt_report.columns.employee'),
       accessorKey: 'employee',
       className: 'min-w-[140px]',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
     },
     {
-      header: 'customer',
+      header: t('receipt_report.columns.customer'),
       accessorKey: 'customer',
       className: 'min-w-[130px]',
       headerClassName: headerTextClass,
       cellClassName: bodyTextClass,
     },
     {
-      header: 'type',
+      header: t('receipt_report.columns.type'),
       accessorKey: 'type',
       className: 'min-w-[110px]',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} font-medium`,
+      render: (item) => (item.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale')),
     },
     {
-      header: 'total',
+      header: t('receipt_report.columns.total'),
       className: 'min-w-[130px] text-right',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} text-right`,
@@ -216,12 +220,12 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search receipt number..."
+            placeholder={t('receipt_report.search_placeholder')}
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
         <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
-          EXPORT
+          {t('receipt_report.export')}
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -234,7 +238,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
               : 'bg-white border-gray-100 hover:bg-gray-50'
           }`}
         >
-          <p className="text-sm text-brand-muted mb-1">All Receipts</p>
+          <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_all_receipts')}</p>
           <p className="text-2xl font-bold text-brand-text">{allReceiptsCount.toLocaleString()}</p>
         </button>
         <button
@@ -246,7 +250,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
               : 'bg-white border-gray-100 hover:bg-gray-50'
           }`}
         >
-          <p className="text-sm text-brand-muted mb-1">Sale</p>
+          <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_sale')}</p>
           <p className="text-2xl font-bold text-brand-text">{money(salesAmount)}</p>
         </button>
         <button
@@ -258,7 +262,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
               : 'bg-white border-gray-100 hover:bg-gray-50'
           }`}
         >
-          <p className="text-sm text-brand-muted mb-1">Refund Amount</p>
+          <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_refund_amount')}</p>
           <p className="text-2xl font-bold text-brand-text">{money(refundAmountTotal)}</p>
         </button>
       </div>
@@ -299,13 +303,13 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                   <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-5 text-brand-text">
                     <div className="text-center border-b border-gray-200 pb-3 pt-2">
                       <p className="text-[40px] leading-none tracking-tight">{money(selectedReceipt.total)}</p>
-                      <p className="text-sm text-brand-muted mt-1">aggregate</p>
+                      <p className="text-sm text-brand-muted mt-1">{t('receipt_report.detail_aggregate')}</p>
                     </div>
 
                     <div className="py-3 border-b border-gray-200 text-sm leading-6">
                       <p>{activeDetail.orderLabel}</p>
-                      <p>Staff : {activeDetail.staff}</p>
-                      <p>POS: {activeDetail.pos}</p>
+                      <p>{t('receipt_report.detail_staff')}: {activeDetail.staff}</p>
+                      <p>{t('receipt_report.detail_pos')}: {activeDetail.pos}</p>
                     </div>
 
                     <div className="py-3 border-b border-gray-200">
@@ -328,7 +332,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
 
                     <div className="py-3 border-b border-gray-200 space-y-1.5">
                       <div className="flex items-center justify-between text-sm font-semibold">
-                        <span>total</span>
+                        <span>{t('receipt_report.columns.total')}</span>
                         <span>{money(selectedReceipt.total)}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">

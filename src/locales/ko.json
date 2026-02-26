@@ -10,7 +10,8 @@
 		"delete": "삭제",
 		"search": "검색",
 		"loading": "로딩 중...",
-		"select_placeholder": "옵션을 선택하세요..."
+		"select_placeholder": "옵션을 선택하세요...",
+		"currency_symbol": "₱"
 	},
 	"expenses_page": {
 		"search_placeholder": "비용 검색...",
@@ -97,11 +98,19 @@
 		"search_placeholder": "재고 검색...",
 		"new_item": "새 항목 추가",
 		"back_to_categories": "카테고리로 돌아가기",
+		"currency_symbol": "₱",
 		"stats": {
 			"total_items": "총 항목",
 			"low_stock": "재고 부족",
 			"out_of_stock": "품절",
 			"total_value": "총 자산 가치"
+		},
+		"units": {
+			"kg": "kg",
+			"g": "g",
+			"L": "L",
+			"mL": "mL",
+			"pcs": "개"
 		},
 		"table": {
 			"item_code": "항목 코드",
@@ -111,7 +120,8 @@
 			"reorder_stock": "재주문 재고",
 			"unit_cost": "단가",
 			"status": "상태",
-			"actions": "작업"
+			"actions": "작업",
+			"delete_title": "삭제"
 		},
 		"status": {
 			"in_stock": "재고 있음",
@@ -382,7 +392,91 @@
 		"growth": "성장률",
 		"branch": "지점",
 		"top_menu": "인기 메뉴",
-		"sold": "판매"
+		"sold": "판매",
+		"total_sales_per_branch": "지점별 총 매출",
+		"no_branch_sales_data": "지점 매출 데이터가 없습니다",
+		"avg_order": "평균/주문",
+		"top_least_selling_products": "판매량이 가장 적은 5개 제품",
+		"low_sales": "낮은 매출",
+		"no_data_available": "데이터가 없습니다",
+		"revenue": "수익",
+		"least_selling_hint": "주문 수가 가장 적은 제품입니다. 가격이나 프로모션을 검토해 보세요.",
+		"top_5_products": "상위 5개 제품",
+		"sales_trend": "매출 추이",
+		"sales_graph_by_product": "제품별 매출 그래프",
+		"export": "내보내기",
+		"date": "날짜",
+		"product_unit_price": "제품 단가",
+		"page": "페이지:",
+		"page_line_count": "페이지 줄 수:",
+		"retry": "다시 시도",
+		"failed_to_load": "불러오기 실패",
+		"network_error": "네트워크 오류",
+		"unit": "단위"
+	},
+	"category_report": {
+		"search_placeholder": "카테고리 검색...",
+		"export": "내보내기",
+		"columns": {
+			"category": "카테고리",
+			"sales_quantity": "판매 수량",
+			"total_sales": "총 매출",
+			"refund_quantity": "환불 수량",
+			"refund_amount": "환불 금액",
+			"discounts": "할인",
+			"net_sales": "순매출",
+			"unit_cost": "단가",
+			"total_revenue": "총 수익"
+		}
+	},
+	"menu_report": {
+		"search_placeholder": "상품 또는 카테고리 검색...",
+		"export": "내보내기",
+		"columns": {
+			"goods": "상품",
+			"category": "카테고리",
+			"sales_quantity": "판매 수량",
+			"total_sales": "총 매출",
+			"refund_quantity": "환불 수량",
+			"refund_amount": "환불 금액",
+			"discounts": "할인",
+			"net_sales": "순매출",
+			"unit_cost": "단가",
+			"total_revenue": "총 수익"
+		}
+	},
+	"payment_report": {
+		"search_placeholder": "결제 수단 검색...",
+		"export": "내보내기",
+		"total": "합계",
+		"columns": {
+			"payment_method": "결제 수단",
+			"payment_transaction": "결제 거래 수",
+			"payment_amount": "결제 금액",
+			"refund_transaction": "환불 거래 수",
+			"refund_amount": "환불 금액",
+			"net_amount": "순액"
+		}
+	},
+	"receipt_report": {
+		"search_placeholder": "영수증 번호 검색...",
+		"export": "내보내기",
+		"filter_all_receipts": "전체 영수증",
+		"filter_sale": "판매",
+		"filter_refund_amount": "환불 금액",
+		"type_sale": "판매",
+		"type_refund": "환불",
+		"detail_aggregate": "합계",
+		"detail_staff": "직원",
+		"detail_pos": "POS",
+		"columns": {
+			"receipt_number": "영수증 번호",
+			"date": "날짜",
+			"employee": "직원",
+			"customer": "고객",
+			"type": "유형",
+			"total": "합계"
+		}
 	},
 	"notifications": {
 		"title": "알림",
@@ -1040,6 +1134,9 @@
 		"select_type": "유형 선택",
 		"loading_menu": "메뉴 로딩 중...",
 		"select_item": "항목 선택",
+		"search_placeholder": "주문 검색...",
+		"order_no_placeholder": "예: ORD-20260225-101530",
+		"unknown": "알 수 없음",
 		"swal": {
 			"update_status_title": "주문 상태 업데이트?",
 			"update_status_text": "주문 {{orderNo}}의 상태를 \"{{status}}\"로 변경하시겠습니까?",
@@ -1172,7 +1269,9 @@
 			"delete_confirm_btn": "네, 삭제합니다",
 			"deleted_title": "삭제 완료!",
 			"deleted_msg": "\"{{name}}\" 항목이 삭제되었습니다.",
-			"error_title": "오류"
+			"error_title": "오류",
+			"operation_failed": "작업에 실패했습니다",
+			"delete_failed": "삭제에 실패했습니다"
 		}
 	},
 	"category": {
@@ -1423,6 +1522,13 @@
 	"header": {
 		"user_management": "사용자 관리",
 		"subtitle_dashboard": "안녕하세요 {{name}}, 다시 오신 것을 환영합니다!",
+		"subtitle_expenses": "지출을 추적하고 관리합니다.",
+		"subtitle_sales_report": "판매 보고서와 성과를 확인합니다.",
+		"subtitle_sales_analytics": "판매 분석과 트렌드를 확인합니다.",
+		"subtitle_category": "카테고리별 성과를 확인합니다.",
+		"subtitle_payment_type": "결제 유형별 분석을 확인합니다.",
+		"subtitle_receipt": "영수증 보고서를 보고 내보냅니다.",
+		"subtitle_user_management": "사용자 및 접근 설정을 관리합니다.",
 		"subtitle_orders": "레스토랑 주문을 보고 관리합니다.",
 		"subtitle_menu": "레스토랑 메뉴 항목을 관리합니다.",
 		"subtitle_inventory": "레스토랑 용품과 재고를 관리합니다.",

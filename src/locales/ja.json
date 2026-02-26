@@ -10,7 +10,8 @@
 		"delete": "削除",
 		"search": "検索",
 		"loading": "読み込み中...",
-		"select_placeholder": "オプションを選択してください..."
+		"select_placeholder": "オプションを選択してください...",
+		"currency_symbol": "₱"
 	},
 	"expenses_page": {
 		"search_placeholder": "経費を検索...",
@@ -97,11 +98,19 @@
 		"search_placeholder": "在庫を検索...",
 		"new_item": "新しいアイテムを追加",
 		"back_to_categories": "カテゴリーに戻る",
+		"currency_symbol": "₱",
 		"stats": {
 			"total_items": "総アイテム数",
 			"low_stock": "在庫少",
 			"out_of_stock": "在庫切れ",
 			"total_value": "総資産価値"
+		},
+		"units": {
+			"kg": "kg",
+			"g": "g",
+			"L": "L",
+			"mL": "mL",
+			"pcs": "個"
 		},
 		"table": {
 			"item_code": "アイテムコード",
@@ -111,7 +120,8 @@
 			"reorder_stock": "再注文在庫",
 			"unit_cost": "単価",
 			"status": "ステータス",
-			"actions": "操作"
+			"actions": "操作",
+			"delete_title": "削除"
 		},
 		"status": {
 			"in_stock": "在庫あり",
@@ -381,7 +391,91 @@
 		"growth": "成長率",
 		"branch": "店舗",
 		"top_menu": "人気メニュー",
-		"sold": "販売"
+		"sold": "販売",
+		"total_sales_per_branch": "店舗ごとの総売上",
+		"no_branch_sales_data": "店舗の売上データがありません",
+		"avg_order": "平均/注文",
+		"top_least_selling_products": "売上の少ない商品 トップ5",
+		"low_sales": "低売上",
+		"no_data_available": "データがありません",
+		"revenue": "収益",
+		"least_selling_hint": "注文数が最も少ない商品です。価格やプロモーションの見直しを検討してください。",
+		"top_5_products": "上位5商品",
+		"sales_trend": "売上傾向",
+		"sales_graph_by_product": "商品別の売上グラフ",
+		"export": "エクスポート",
+		"date": "日付",
+		"product_unit_price": "商品単価",
+		"page": "ページ:",
+		"page_line_count": "1ページの行数:",
+		"retry": "再試行",
+		"failed_to_load": "読み込みに失敗しました",
+		"network_error": "ネットワークエラー",
+		"unit": "単位"
+	},
+	"category_report": {
+		"search_placeholder": "カテゴリーを検索...",
+		"export": "エクスポート",
+		"columns": {
+			"category": "カテゴリー",
+			"sales_quantity": "販売数量",
+			"total_sales": "総売上",
+			"refund_quantity": "返金数量",
+			"refund_amount": "返金額",
+			"discounts": "割引",
+			"net_sales": "純売上",
+			"unit_cost": "単価",
+			"total_revenue": "総収益"
+		}
+	},
+	"menu_report": {
+		"search_placeholder": "商品またはカテゴリーを検索...",
+		"export": "エクスポート",
+		"columns": {
+			"goods": "商品",
+			"category": "カテゴリー",
+			"sales_quantity": "販売数量",
+			"total_sales": "総売上",
+			"refund_quantity": "返金数量",
+			"refund_amount": "返金額",
+			"discounts": "割引",
+			"net_sales": "純売上",
+			"unit_cost": "単価",
+			"total_revenue": "総収益"
+		}
+	},
+	"payment_report": {
+		"search_placeholder": "支払い方法を検索...",
+		"export": "エクスポート",
+		"total": "合計",
+		"columns": {
+			"payment_method": "支払い方法",
+			"payment_transaction": "支払い取引数",
+			"payment_amount": "支払い金額",
+			"refund_transaction": "返金取引数",
+			"refund_amount": "返金額",
+			"net_amount": "正味金額"
+		}
+	},
+	"receipt_report": {
+		"search_placeholder": "領収書番号を検索...",
+		"export": "エクスポート",
+		"filter_all_receipts": "すべての領収書",
+		"filter_sale": "売上",
+		"filter_refund_amount": "返金額",
+		"type_sale": "売上",
+		"type_refund": "返金",
+		"detail_aggregate": "合計",
+		"detail_staff": "スタッフ",
+		"detail_pos": "POS",
+		"columns": {
+			"receipt_number": "領収書番号",
+			"date": "日付",
+			"employee": "従業員",
+			"customer": "顧客",
+			"type": "種別",
+			"total": "合計"
+		}
 	},
 	"notifications": {
 		"title": "通知",
@@ -1014,6 +1108,9 @@
 		"save_additional_order": "追加注文を保存",
 		"add": "追加",
 		"n_a": "該当なし",
+		"search_placeholder": "注文を検索...",
+		"order_no_placeholder": "例: ORD-20260225-101530",
+		"unknown": "不明",
 		"pagination": {
 			"showing": "表示中",
 			"to": "から",
@@ -1135,7 +1232,9 @@
 			"delete_confirm_btn": "はい、削除します",
 			"deleted_title": "削除完了！",
 			"deleted_msg": "「{{name}}」が削除されました。",
-			"error_title": "エラー"
+			"error_title": "エラー",
+			"operation_failed": "操作に失敗しました",
+			"delete_failed": "削除に失敗しました"
 		}
 	},
 	"category": {
@@ -1386,6 +1485,13 @@
 	"header": {
 		"user_management": "ユーザー管理",
 		"subtitle_dashboard": "こんにちは {{name}}さん、おかえりなさい！",
+		"subtitle_expenses": "経費を確認・管理します。",
+		"subtitle_sales_report": "売上レポートと実績を確認します。",
+		"subtitle_sales_analytics": "売上分析とトレンドを確認します。",
+		"subtitle_category": "カテゴリー別の実績を確認します。",
+		"subtitle_payment_type": "支払い方法別の分析を確認します。",
+		"subtitle_receipt": "領収書レポートを表示・エクスポートします。",
+		"subtitle_user_management": "ユーザーとアクセス設定を管理します。",
 		"subtitle_orders": "レストランの注文を確認・管理します。",
 		"subtitle_menu": "レストランのメニュー項目を管理します。",
 		"subtitle_inventory": "レストランの備品と在庫を管理します。",
