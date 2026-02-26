@@ -354,6 +354,7 @@ export default function App() {
   // Create breadcrumb array
   const breadcrumbs = pathParts.map(part => {
     if (part === 'users') return 'User Management';
+    if (part === 'sales-report') return 'Sales Report';
     if (part === 'info') return 'User Info';
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
@@ -399,10 +400,11 @@ export default function App() {
       case 'User Role': navigate(`/users/role${suffix}`); break;
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
-      case 'Sales Analytics': navigate(`/sales-analytics${suffix}`); break;
-      case 'Category': navigate(`/category${suffix}`); break;
-      case 'Payment type': navigate(`/payment-type${suffix}`); break;
-      case 'Receipt': navigate(`/receipt${suffix}`); break;
+      case 'Sales Analytics': navigate(`/sales-report/sales-analytics${suffix}`); break;
+      case 'Menu': navigate(`/sales-report/menu${suffix}`); break;
+      case 'Category': navigate(`/sales-report/category${suffix}`); break;
+      case 'Payment type': navigate(`/sales-report/payment-type${suffix}`); break;
+      case 'Receipt': navigate(`/sales-report/receipt${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };
@@ -555,13 +557,55 @@ export default function App() {
                   </motion.div>
                 } />
 
-                <Route path="/sales-analytics" element={
+                <Route path="/sales-report" element={<Navigate to={`/sales-report/sales-analytics${location.search || ''}`} replace />} />
+                <Route path="/sales-report/sales-analytics" element={
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <SalesAnalytics selectedBranch={selectedBranch} dateRange={dateRange} />
+                  </motion.div>
+                } />
+                <Route path="/sales-analytics" element={<Navigate to={`/sales-report/sales-analytics${location.search || ''}`} replace />} />
+                <Route path="/sales-report/menu" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
+                  >
+                    Sales Report Menu is coming soon...
+                  </motion.div>
+                } />
+                <Route path="/sales-report/category" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
+                  >
+                    Sales Report Category is coming soon...
+                  </motion.div>
+                } />
+                <Route path="/sales-report/payment-type" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
+                  >
+                    Sales Report Payment type is coming soon...
+                  </motion.div>
+                } />
+                <Route path="/sales-report/receipt" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
+                  >
+                    Sales Report Receipt is coming soon...
                   </motion.div>
                 } />
 

@@ -140,7 +140,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   }, [isSalesReportActive]);
 
   const handleUserMgmtToggle = () => {
-    setUserMgmtExpanded(!userMgmtExpanded);
+    setUserMgmtExpanded((prev) => {
+      const next = !prev;
+      if (next) setSalesReportExpanded(false);
+      return next;
+    });
+  };
+  const handleSalesReportToggle = () => {
+    setSalesReportExpanded((prev) => {
+      const next = !prev;
+      if (next) setUserMgmtExpanded(false);
+      return next;
+    });
   };
 
   return (
@@ -174,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           active={isSalesReportActive}
           isExpandable
           isExpanded={salesReportExpanded}
-          onClick={() => setSalesReportExpanded((prev) => !prev)}
+          onClick={handleSalesReportToggle}
         >
           <SubItem
             label="Sales Analytics"
