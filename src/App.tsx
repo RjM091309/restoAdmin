@@ -37,6 +37,7 @@ import { UserRole } from './components/users/UserRole';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
 import { SalesAnalytics } from './components/analytics/SalesAnalytics';
+import { MenuReport } from './components/analytics/MenuReport';
 import { cn } from './lib/utils';
 
 // Panels
@@ -573,9 +574,8 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
                   >
-                    Sales Report Menu is coming soon...
+                    <MenuReport selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
                 <Route path="/sales-report/category" element={

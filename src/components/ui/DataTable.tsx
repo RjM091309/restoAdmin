@@ -7,6 +7,8 @@ export interface ColumnDef<T> {
   accessorKey?: keyof T;
   render?: (item: T) => React.ReactNode;
   className?: string;
+  headerClassName?: string;
+  cellClassName?: string;
 }
 
 interface DataTableProps<T> {
@@ -33,7 +35,7 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
           <thead>
             <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider bg-gray-50/50">
               {columns.map((col, i) => (
-                <th key={col.header} className={cn("px-6 py-4", col.className)}>
+                <th key={col.header} className={cn("px-6 py-4", col.className, col.headerClassName)}>
                   {col.header}
                 </th>
               ))}
@@ -41,9 +43,9 @@ export function DataTable<T>({ data, columns, keyExtractor }: DataTableProps<T>)
           </thead>
           <tbody className="divide-y divide-gray-50">
             {currentData.map((item) => (
-              <tr key={keyExtractor(item)} className="hover:bg-brand-bg/50 transition-colors">
+              <tr key={keyExtractor(item)} className="group hover:bg-brand-bg/50 transition-colors">
                 {columns.map((col, i) => (
-                  <td key={i} className={cn("px-6 py-4", col.className)}>
+                  <td key={i} className={cn("px-6 py-4", col.className, col.cellClassName)}>
                     {col.render
                       ? col.render(item)
                       : col.accessorKey
