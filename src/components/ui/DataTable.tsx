@@ -40,7 +40,7 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
                   key={col.header}
                   className={cn(
                     "px-6 py-4 text-[13px] font-medium whitespace-nowrap",
-                    i === 0 ? "bg-violet-50 text-brand-text font-bold" : "text-brand-muted uppercase tracking-wider",
+                    i === 0 ? "bg-violet-50 text-brand-text uppercase tracking-wider" : "text-brand-muted uppercase tracking-wider",
                     col.className,
                     col.headerClassName,
                     i === 0 && "border-r-[3px] border-white"
