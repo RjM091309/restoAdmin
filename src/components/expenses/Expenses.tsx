@@ -64,94 +64,94 @@ const utilitiesSampleData = [
 // Columns for expense data
 const columns: ColumnDef<typeof expenseData[0]>[] = [
   {
+    header: 'Description',
+    className: 'w-[10%] text-left',
+    render: (expense) => (
+      <div>
+        <h3 className="text-base font-bold text-brand-text mb-0.5">
+          {expense.description}
+        </h3>
+        <div className="flex items-center gap-2 text-xs text-brand-muted">
+          <span className="flex items-center gap-1">
+            <Tag size={12} />
+            {expense.category}
+          </span>
+          <span>•</span>
+          <span>{expense.branch}</span>
+        </div>
+      </div>
+    ),
+  },
+  {
     header: 'Date',
     className: 'w-[18%] text-left',
     render: (expense) => (
       <div className="flex items-center gap-2 text-brand-text font-medium">
-          <Calendar size={16} className="text-brand-muted" />
-          {expense.date}
-        </div>
-    ),
-  },
-  {
-    header: 'Description',
-    className: 'w-[42%] text-left',
-    render: (expense) => (
-      <div>
-          <h3 className="text-base font-bold text-brand-text mb-0.5">
-            {expense.description}
-          </h3>
-          <div className="flex items-center gap-2 text-xs text-brand-muted">
-             <span className="flex items-center gap-1">
-                <Tag size={12} />
-                {expense.category}
-             </span>
-             <span>•</span>
-             <span>{expense.branch}</span>
-          </div>
-        </div>
+        <Calendar size={16} className="text-brand-muted" />
+        {expense.date}
+      </div>
     ),
   },
   {
     header: 'Amount',
-    className: 'w-[14%] text-left',
+    className: 'w-[18%] text-left',
     render: (expense) => (
       <span className="text-base font-bold text-brand-text">
-          ₱{expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-        </span>
+        ₱{expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+      </span>
     ),
   },
   {
     header: 'Status',
-    className: 'w-[14%] text-left',
+    className: 'w-[18%] text-left',
     render: (expense) => (
       <div className="flex justify-start">
-          <span
-            className={cn(
-              "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
-              expense.status === 'Approved'
-                ? "bg-green-100 text-green-600"
-                : expense.status === 'Pending'
+        <span
+          className={cn(
+            "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
+            expense.status === 'Approved'
+              ? "bg-green-100 text-green-600"
+              : expense.status === 'Pending'
                 ? "bg-orange-100 text-orange-600"
                 : "bg-red-100 text-red-600"
-            )}
-          >
-            <span className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              expense.status === 'Approved' ? "bg-green-500" :
+          )}
+        >
+          <span className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            expense.status === 'Approved' ? "bg-green-500" :
               expense.status === 'Pending' ? "bg-orange-500" : "bg-red-500"
-            )} />
-            {expense.status}
-          </span>
-        </div>
+          )} />
+          {expense.status}
+        </span>
+      </div>
     ),
   },
   {
     header: 'Actions',
-    className: 'w-[12%] text-left',
+    className: 'w-[16%] text-left',
     render: () => (
       <div className="flex justify-start items-center gap-2">
-          <button 
-            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Handle edit
-            }}
-            title="Edit Expense"
-          >
-            <Edit2 size={16} />
-          </button>
-          <button 
-            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Handle delete
-            }}
-            title="Delete Expense"
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
+        <button
+          className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+          onClick={(e) => {
+            e.stopPropagation();
+            // Handle edit
+          }}
+          title="Edit Expense"
+        >
+          <Edit2 size={16} />
+        </button>
+        <button
+          className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+          onClick={(e) => {
+            e.stopPropagation();
+            // Handle delete
+          }}
+          title="Delete Expense"
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
     ),
   },
 ];
@@ -311,96 +311,96 @@ export const Expenses: React.FC = () => {
   // Columns for expense data
   const columns: ColumnDef<typeof expenseData[0]>[] = [
     {
+      header: t('expenses_page.table.description'),
+      className: 'w-[30%] text-left',
+      render: (expense) => (
+        <div>
+          <h3 className="text-base font-bold text-brand-text mb-0.5">
+            {expense.description}
+          </h3>
+          <div className="flex items-center gap-2 text-xs text-brand-muted">
+            <span className="flex items-center gap-1">
+              <Tag size={12} />
+              {getCategoryLabel(expense.category)}
+            </span>
+            <span>•</span>
+            <span>{getBranchLabel(expense.branch)}</span>
+          </div>
+        </div>
+      ),
+    },
+    {
       header: t('expenses_page.table.date'),
       className: 'w-[18%] text-left',
       render: (expense) => (
         <div className="flex items-center gap-2 text-brand-text font-medium">
-            <Calendar size={16} className="text-brand-muted" />
-            {expense.date}
-          </div>
-      ),
-    },
-    {
-      header: t('expenses_page.table.description'),
-      className: 'w-[42%] text-left',
-      render: (expense) => (
-        <div>
-            <h3 className="text-base font-bold text-brand-text mb-0.5">
-              {expense.description}
-            </h3>
-            <div className="flex items-center gap-2 text-xs text-brand-muted">
-               <span className="flex items-center gap-1">
-                  <Tag size={12} />
-                  {getCategoryLabel(expense.category)}
-               </span>
-               <span>•</span>
-               <span>{getBranchLabel(expense.branch)}</span>
-            </div>
-          </div>
+          <Calendar size={16} className="text-brand-muted" />
+          {expense.date}
+        </div>
       ),
     },
     {
       header: t('expenses_page.table.amount'),
-      className: 'w-[14%] text-left',
+      className: 'w-[18%] text-left',
       render: (expense) => (
         <span className="text-base font-bold text-brand-text">
-            ₱{expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
+          ₱{expense.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        </span>
       ),
     },
     {
       header: t('expenses_page.table.status'),
-      className: 'w-[14%] text-left',
+      className: 'w-[18%] text-left',
       render: (expense) => (
         <div className="flex justify-start">
-            <span
-              className={cn(
-                "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
-                expense.status === 'Approved'
-                  ? "bg-green-100 text-green-600"
-                  : expense.status === 'Pending'
+          <span
+            className={cn(
+              "text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 w-fit",
+              expense.status === 'Approved'
+                ? "bg-green-100 text-green-600"
+                : expense.status === 'Pending'
                   ? "bg-orange-100 text-orange-600"
                   : "bg-red-100 text-red-600"
-              )}
-            >
-              <span className={cn(
-                "w-1.5 h-1.5 rounded-full",
-                expense.status === 'Approved' ? "bg-green-500" :
+            )}
+          >
+            <span className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              expense.status === 'Approved' ? "bg-green-500" :
                 expense.status === 'Pending' ? "bg-orange-500" : "bg-red-500"
-              )} />
-              {expense.status === 'Approved' ? t('expenses_page.table.status_approved') :
-               expense.status === 'Pending' ? t('expenses_page.table.status_pending') :
-               t('expenses_page.table.status_review')}
-            </span>
-          </div>
+            )} />
+            {expense.status === 'Approved' ? t('expenses_page.table.status_approved') :
+              expense.status === 'Pending' ? t('expenses_page.table.status_pending') :
+                t('expenses_page.table.status_review')}
+          </span>
+        </div>
       ),
     },
     {
       header: t('expenses_page.table.actions'),
-      className: 'w-[12%] text-left',
+      className: 'w-[16%] text-left',
       render: () => (
         <div className="flex justify-start items-center gap-2">
-            <button 
-              className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-              onClick={(e) => {
-                e.stopPropagation();
-                // Handle edit
-              }}
-              title={t('expenses_page.table.edit_title')}
-            >
-              <Edit2 size={16} />
-            </button>
-            <button 
-              className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-              onClick={(e) => {
-                e.stopPropagation();
-                // Handle delete
-              }}
-              title={t('expenses_page.table.delete_title')}
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
+          <button
+            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Handle edit
+            }}
+            title={t('expenses_page.table.edit_title')}
+          >
+            <Edit2 size={16} />
+          </button>
+          <button
+            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Handle delete
+            }}
+            title={t('expenses_page.table.delete_title')}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       ),
     },
   ];
@@ -553,7 +553,7 @@ export const Expenses: React.FC = () => {
     <div className="pt-6">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="skeleton"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -568,7 +568,7 @@ export const Expenses: React.FC = () => {
             </div>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="content"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -589,7 +589,7 @@ export const Expenses: React.FC = () => {
                   />
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setIsModalOpen(true)}
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
@@ -605,21 +605,21 @@ export const Expenses: React.FC = () => {
               </div>
               <div
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-primary/20 transition-all"
-                onClick={() => {setActiveParentCategory('Inventory'); setSelectedSubCategory('All Data');}}
+                onClick={() => { setActiveParentCategory('Inventory'); setSelectedSubCategory('All Data'); }}
               >
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.inventory')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱2,140.25</h3>
               </div>
               <div
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-maintenance/30 transition-all"
-                onClick={() => {setActiveParentCategory('Maintenance'); setSelectedSubCategory('All Data');}}
+                onClick={() => { setActiveParentCategory('Maintenance'); setSelectedSubCategory('All Data'); }}
               >
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.maintenance')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱320.00</h3>
               </div>
-              <div 
+              <div
                 className="bg-white p-6 rounded-2xl shadow-sm cursor-pointer hover:ring-2 hover:ring-brand-utilities/30 transition-all"
-                onClick={() => {setActiveParentCategory('Utilities'); setSelectedSubCategory('All Data');}}
+                onClick={() => { setActiveParentCategory('Utilities'); setSelectedSubCategory('All Data'); }}
               >
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('expenses_page.utilities')}</p>
                 <h3 className="text-3xl font-bold text-brand-text">₱450.50</h3>
@@ -646,19 +646,19 @@ export const Expenses: React.FC = () => {
                             ? "bg-brand-maintenance text-white shadow-lg shadow-brand-maintenance/20"
                             : "bg-brand-maintenance-soft text-brand-maintenance hover:bg-brand-maintenance-soft/70"
                           : activeParentCategory === 'Utilities'
-                          ? selectedSubCategory === subCat
-                            ? "bg-brand-utilities text-white shadow-lg shadow-brand-utilities/20"
-                            : "bg-brand-utilities-soft text-brand-utilities hover:bg-brand-utilities-soft/70"
-                          : selectedSubCategory === subCat
-                          ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20"
-                          : "bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20"
+                            ? selectedSubCategory === subCat
+                              ? "bg-brand-utilities text-white shadow-lg shadow-brand-utilities/20"
+                              : "bg-brand-utilities-soft text-brand-utilities hover:bg-brand-utilities-soft/70"
+                            : selectedSubCategory === subCat
+                              ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20"
+                              : "bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20"
                       )}
                     >
                       {getSubCategoryLabel(activeParentCategory, subCat)}
                     </button>
                   ))}
                   <button
-                    onClick={() => {setActiveParentCategory(null); setSelectedSubCategory(null);}}
+                    onClick={() => { setActiveParentCategory(null); setSelectedSubCategory(null); }}
                     className="ml-auto p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
                     title={t('expenses_page.clear_filter')}
                   >
@@ -702,22 +702,22 @@ export const Expenses: React.FC = () => {
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_date')}</label>
-                <input 
-                type="date" 
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_date')}</label>
+              <input
+                type="date"
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                />
+              />
             </div>
             <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_amount')}</label>
-                <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₱</span>
-                    <input 
-                    type="number" 
-                    placeholder={t('expenses_page.form_amount_placeholder')}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                    />
-                </div>
+              <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_amount')}</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₱</span>
+                <input
+                  type="number"
+                  placeholder={t('expenses_page.form_amount_placeholder')}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                />
+              </div>
             </div>
           </div>
           <div>
@@ -736,7 +736,7 @@ export const Expenses: React.FC = () => {
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">{t('expenses_page.form_description')}</label>
-            <textarea 
+            <textarea
               rows={3}
               placeholder={t('expenses_page.form_description_placeholder')}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 resize-none"

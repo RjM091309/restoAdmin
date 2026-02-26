@@ -43,10 +43,6 @@ const MOCK_CATEGORY_REPORT_BASE: Omit<CategoryReportRow, 'id'>[] = [
 
 export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, dateRange }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const headerTextClass = 'text-[13px] font-medium whitespace-nowrap bg-white';
-  const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';
-  const categoryHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
-  const categoryBodyClass = 'text-sm text-brand-text font-medium bg-violet-50 group-hover:bg-violet-100';
 
   const rows = useMemo(() => {
     const branchMultiplierById: Record<string, number> = {
@@ -90,64 +86,46 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       header: 'Category',
       accessorKey: 'category',
       className: 'min-w-[200px] border-r border-gray-200',
-      headerClassName: categoryHeaderClass,
-      cellClassName: categoryBodyClass,
     },
     {
       header: 'Sales quantity',
       render: (item) => item.salesQty.toLocaleString(),
       className: 'min-w-[130px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Total sales',
       render: (item) => money(item.totalSales),
       className: 'min-w-[130px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Refund quantity',
       render: (item) => item.refundQty.toLocaleString(),
       className: 'min-w-[130px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Refund amount',
       render: (item) => money(item.refundAmount),
       className: 'min-w-[130px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Discounts',
       render: (item) => money(item.discounts),
       className: 'min-w-[120px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Net sales',
       render: (item) => money(item.netSales),
       className: 'min-w-[120px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Unit cost',
       render: (item) => money(item.unitCost),
       className: 'min-w-[110px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
     {
       header: 'Total Revenue',
       render: (item) => money(item.totalRevenue),
       className: 'min-w-[140px] text-right',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
     },
   ];
 

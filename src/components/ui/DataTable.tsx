@@ -34,9 +34,18 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
-            <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider bg-gray-50/50">
+            <tr className="bg-white border-b border-gray-100">
               {columns.map((col, i) => (
-                <th key={col.header} className={cn("px-6 py-4", col.className, col.headerClassName)}>
+                <th
+                  key={col.header}
+                  className={cn(
+                    "px-6 py-4 text-[13px] font-medium whitespace-nowrap",
+                    i === 0 ? "bg-violet-50 text-brand-text font-bold" : "text-brand-muted uppercase tracking-wider",
+                    col.className,
+                    col.headerClassName,
+                    i === 0 && "border-r-[3px] border-white"
+                  )}
+                >
                   {col.header}
                 </th>
               ))}
@@ -48,24 +57,33 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
                 key={keyExtractor(item)}
                 onClick={onRowClick ? () => onRowClick(item) : undefined}
                 className={cn(
-                  "group hover:bg-brand-bg/50 transition-colors",
+                  "group transition-colors",
                   onRowClick ? "cursor-pointer" : ""
                 )}
               >
                 {columns.map((col, i) => (
-                  <td key={i} className={cn("px-6 py-4", col.className, col.cellClassName)}>
+                  <td
+                    key={i}
+                    className={cn(
+                      "px-6 py-4 text-sm text-brand-text",
+                      i === 0 ? "bg-violet-50 font-medium group-hover:bg-violet-100" : "bg-white group-hover:bg-brand-bg/50",
+                      col.className,
+                      col.cellClassName,
+                      i === 0 && "border-r-[3px] border-white"
+                    )}
+                  >
                     {col.render
                       ? col.render(item)
                       : col.accessorKey
-                      ? (item[col.accessorKey] as React.ReactNode)
-                      : null}
+                        ? (item[col.accessorKey] as React.ReactNode)
+                        : null}
                   </td>
                 ))}
               </tr>
             ))}
             {currentData.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted">
+                <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted bg-white">
                   No data available
                 </td>
               </tr>

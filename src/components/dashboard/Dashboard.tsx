@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
+import { DataTable, type ColumnDef } from '../ui/DataTable';
 import {
   ClipboardList,
   Package,
@@ -221,31 +222,31 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
 
   return (
     <div className="relative h-full overflow-hidden">
-    <AnimatePresence initial={false} mode="popLayout">
-      <motion.div
-        key={index}
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: -100, opacity: 0 }}
-        transition={{
-          type: "spring",
-          stiffness: 300,
-          damping: 30,
-          opacity: { duration: 0.2 },
-        }}
-        className="space-y-6"
-      >
-        {[...items, ...items, ...items]
-          .slice(index, index + 3)
-          .map((menu, i) => (
-            <TrendingMenuItem
-              key={`${menu.name}-${index}-${i}`}
-              menu={menu}
-            />
-          ))}
-      </motion.div>
-    </AnimatePresence>
-  </div>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.div
+          key={index}
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -100, opacity: 0 }}
+          transition={{
+            type: "spring",
+            stiffness: 300,
+            damping: 30,
+            opacity: { duration: 0.2 },
+          }}
+          className="space-y-6"
+        >
+          {[...items, ...items, ...items]
+            .slice(index, index + 3)
+            .map((menu, i) => (
+              <TrendingMenuItem
+                key={`${menu.name}-${index}-${i}`}
+                menu={menu}
+              />
+            ))}
+        </motion.div>
+      </AnimatePresence>
+    </div>
   );
 };
 
@@ -310,7 +311,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
   return (
     <AnimatePresence mode="wait">
       {loading || !dashboardData ? (
-        <motion.div 
+        <motion.div
           key="skeleton"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -335,7 +336,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
           </div>
         </motion.div>
       ) : (
-        <motion.div 
+        <motion.div
           key="content"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -588,71 +589,74 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                   </button>
                 </div>
               </div>
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="text-xs text-brand-muted font-bold uppercase tracking-wider border-b border-gray-50">
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.order_id')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.photo')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.menu')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.qty')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.amount')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.customer')} <ChevronDown size={10} className="inline" />
-                    </th>
-                    <th className="pb-4 font-bold">
-                      {t('dashboard.status')} <ChevronDown size={10} className="inline" />
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {recentOrders.map((order) => (
-                    <tr key={order.id} className="group hover:bg-brand-bg/50 transition-colors">
-                      <td className="py-4 text-sm font-bold text-brand-muted">{order.id}</td>
-                      <td className="py-4">
-                        <img
-                          src={order.image}
-                          alt={order.menu}
-                          className="w-10 h-10 rounded-lg object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </td>
-                      <td className="py-4">
+              <DataTable
+                data={recentOrders}
+                columns={[
+                  {
+                    header: t('dashboard.order_id'),
+                    className: 'pb-4',
+                    render: (order) => <span className="text-sm font-bold text-brand-muted">{order.id}</span>
+                  },
+                  {
+                    header: t('dashboard.photo'),
+                    className: 'pb-4',
+                    render: (order) => (
+                      <img
+                        src={order.image}
+                        alt={order.menu}
+                        className="w-10 h-10 rounded-lg object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    )
+                  },
+                  {
+                    header: t('dashboard.menu'),
+                    className: 'pb-4',
+                    render: (order) => (
+                      <div>
                         <p className="text-sm font-bold">{order.menu}</p>
                         <p className="text-xs text-brand-muted font-medium">{order.category}</p>
-                      </td>
-                      <td className="py-4 text-sm font-bold">{order.qty}</td>
-                      <td className="py-4 text-sm font-bold">${order.amount.toFixed(2)}</td>
-                      <td className="py-4 text-sm font-bold">{order.customer}</td>
-                      <td className="py-4">
-                        <span
-                          className={cn(
-                            'text-xs font-bold px-2 py-1 rounded-lg',
-                            order.status === 'On Process'
-                              ? 'bg-orange-100 text-orange-600'
-                              : order.status === 'Completed'
+                      </div>
+                    )
+                  },
+                  {
+                    header: t('dashboard.qty'),
+                    className: 'pb-4',
+                    render: (order) => <span className="text-sm font-bold">{order.qty}</span>
+                  },
+                  {
+                    header: t('dashboard.amount'),
+                    className: 'pb-4',
+                    render: (order) => <span className="text-sm font-bold">${order.amount.toFixed(2)}</span>
+                  },
+                  {
+                    header: t('dashboard.customer'),
+                    className: 'pb-4',
+                    render: (order) => <span className="text-sm font-bold">{order.customer}</span>
+                  },
+                  {
+                    header: t('dashboard.status'),
+                    className: 'pb-4',
+                    render: (order) => (
+                      <span
+                        className={cn(
+                          'text-xs font-bold px-2 py-1 rounded-lg',
+                          order.status === 'On Process'
+                            ? 'bg-orange-100 text-orange-600'
+                            : order.status === 'Completed'
                               ? 'bg-green-100 text-green-600'
                               : 'bg-gray-100 text-gray-600',
-                          )}
-                        >
-                          {order.status === 'On Process' ? t('dashboard.on_process') :
-                           order.status === 'Completed' ? t('dashboard.completed') :
-                           t('dashboard.pending')}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        )}
+                      >
+                        {order.status === 'On Process' ? t('dashboard.on_process') :
+                          order.status === 'Completed' ? t('dashboard.completed') :
+                            t('dashboard.pending')}
+                      </span>
+                    )
+                  }
+                ]}
+                keyExtractor={(item) => item.id}
+              />
             </div>
           </div>
 
