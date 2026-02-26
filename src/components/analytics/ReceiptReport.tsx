@@ -117,6 +117,11 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
         row.type.toLowerCase().includes(keyword)
     );
   }, [rows, searchTerm, activeFilter]);
+
+  const allReceiptsCount = useMemo(
+    () => rows.length,
+    [rows]
+  );
   const allReceiptsAmount = useMemo(
     () => rows.reduce((sum, row) => sum + Number(row.total || 0), 0),
     [rows]
@@ -230,7 +235,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
           }`}
         >
           <p className="text-sm text-brand-muted mb-1">All Receipts</p>
-          <p className="text-2xl font-bold text-brand-text">{money(allReceiptsAmount)}</p>
+          <p className="text-2xl font-bold text-brand-text">{allReceiptsCount.toLocaleString()}</p>
         </button>
         <button
           type="button"
