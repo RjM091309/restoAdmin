@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X,
@@ -159,7 +160,7 @@ type Branch = {
     PHONE?: string;
 };
 
-const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const BranchManagementView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const [branches, setBranches] = useState<Branch[]>([]);
     const [loading, setLoading] = useState(true);
     const [toast, setToast] = useState<Toast>(null);
@@ -183,7 +184,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             const res = await fetch('/branch/', { headers: authHeaders() });
             const data = await res.json();
             if (data.success) setBranches(data.data || []);
-        } catch { setToast({ type: 'error', message: 'Failed to load branches' }); }
+        } catch { setToast({ type: 'error', message: t('system_settings.branch_load_failed') }); }
         finally { setLoading(false); }
     }, []);
 
@@ -206,7 +207,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     const handleSave = async () => {
         if (!formCode.trim() || !formName.trim()) {
-            setToast({ type: 'error', message: 'Branch code and name are required.' });
+            setToast({ type: 'error', message: t('system_settings.branch_required') });
             return;
         }
         setSaving(true);
@@ -220,26 +221,26 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             }
             const data = await res.json();
             if (data.success) {
-                setToast({ type: 'success', message: editingBranch ? 'Branch updated!' : 'Branch created!' });
+                setToast({ type: 'success', message: editingBranch ? t('system_settings.branch_updated') : t('system_settings.branch_created') });
                 resetForm();
                 fetchBranches();
             } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Failed to save branch' });
+                setToast({ type: 'error', message: data.message || data.error || t('system_settings.branch_save_failed') });
             }
         } catch { setToast({ type: 'error', message: 'Network error' }); }
         finally { setSaving(false); }
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm('Are you sure you want to delete this branch?')) return;
+        if (!confirm(t('system_settings.branch_delete_confirm'))) return;
         try {
             const res = await fetch(`/branch/${id}`, { method: 'DELETE', headers: authHeaders() });
             const data = await res.json();
             if (data.success) {
-                setToast({ type: 'success', message: 'Branch deleted' });
+                setToast({ type: 'success', message: t('system_settings.branch_deleted') });
                 fetchBranches();
             } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Failed to delete' });
+                setToast({ type: 'error', message: data.message || data.error || t('system_settings.branch_delete_failed') });
             }
         } catch { setToast({ type: 'error', message: 'Network error' }); }
     };
@@ -249,7 +250,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     return (
         <div className="flex flex-col h-full">
             <SubViewHeader
-                title="Branch Management"
+                title={t('system_settings.branch_management')}
                 onBack={onBack}
                 action={
                     !showForm ? (
@@ -264,9 +265,9 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
                 {showForm ? (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                        <h4 className="text-sm font-bold text-brand-text">{editingBranch ? 'Edit Branch' : 'New Branch'}</h4>
+                        <h4 className="text-sm font-bold text-brand-text">{editingBranch ? t('system_settings.edit_branch') : t('system_settings.new_branch')}</h4>
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Branch Code *</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">{t('system_settings.branch_code')} *</label>
                             <div className="relative">
                                 <Hash size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                                 <input value={formCode} onChange={e => setFormCode(e.target.value)} disabled={saving}
@@ -274,7 +275,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             </div>
                         </div>
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Branch Name *</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">{t('system_settings.branch_name')} *</label>
                             <div className="relative">
                                 <Store size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                                 <input value={formName} onChange={e => setFormName(e.target.value)} disabled={saving}
@@ -282,7 +283,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             </div>
                         </div>
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Address</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">{t('system_settings.address')}</label>
                             <div className="relative">
                                 <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                                 <input value={formAddress} onChange={e => setFormAddress(e.target.value)} disabled={saving}
@@ -290,7 +291,7 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             </div>
                         </div>
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">Phone</label>
+                            <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">{t('system_settings.phone')}</label>
                             <div className="relative">
                                 <Phone size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
                                 <input value={formPhone} onChange={e => setFormPhone(e.target.value)} disabled={saving}
@@ -300,11 +301,11 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                         <div className="flex gap-3 pt-2">
                             <button onClick={resetForm} disabled={saving}
                                 className="flex-1 py-3 bg-gray-100 text-brand-text rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors cursor-pointer disabled:opacity-50">
-                                Cancel
+                                {t('system_settings.cancel')}
                             </button>
                             <button onClick={handleSave} disabled={saving}
                                 className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2">
-                                {saving ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : 'Save'}
+                                {saving ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.saving')}...</> : t('system_settings.save')}
                             </button>
                         </div>
                     </motion.div>
@@ -315,8 +316,8 @@ const BranchManagementView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 ) : branches.length === 0 ? (
                     <div className="text-center py-12">
                         <Store size={40} className="mx-auto text-brand-muted/30 mb-3" />
-                        <p className="text-sm text-brand-muted font-medium">No branches yet</p>
-                        <button onClick={startCreate} className="mt-3 text-sm text-brand-orange font-bold hover:underline cursor-pointer">+ Add first branch</button>
+                        <p className="text-sm text-brand-muted font-medium">{t('system_settings.no_branches')}</p>
+                        <button onClick={startCreate} className="mt-3 text-sm text-brand-orange font-bold hover:underline cursor-pointer">+ {t('system_settings.add_first_branch')}</button>
                     </div>
                 ) : (
                     branches.map(b => (
@@ -359,7 +360,7 @@ const LANGUAGES = [
     { code: 'zh', label: '中文 (Chinese)', flag: '🇨🇳' },
 ];
 
-const LocalizationView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const LocalizationView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const [currentLang, setCurrentLang] = useState('en');
     const [toast, setToast] = useState<Toast>(null);
     const [saving, setSaving] = useState(false);
@@ -384,7 +385,7 @@ const LocalizationView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 setCurrentLang(code);
                 setToast({ type: 'success', message: `Language changed to ${LANGUAGES.find(l => l.code === code)?.label}` });
             } else {
-                setToast({ type: 'error', message: 'Failed to change language' });
+                setToast({ type: 'error', message: t('system_settings.lang_change_failed') });
             }
         } catch { setToast({ type: 'error', message: 'Network error' }); }
         finally { setSaving(false); }
@@ -392,10 +393,10 @@ const LocalizationView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title="Localization" onBack={onBack} />
+            <SubViewHeader title={t('system_settings.localization')} onBack={onBack} />
             <ToastMessage toast={toast} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-3">
-                <p className="text-xs text-brand-muted font-medium mb-4">Select your preferred system language. This affects the backend translations.</p>
+                <p className="text-xs text-brand-muted font-medium mb-4">{t('system_settings.lang_description')}</p>
                 {LANGUAGES.map(lang => (
                     <button
                         key={lang.code}
@@ -438,7 +439,7 @@ const DASHBOARD_WIDGETS = [
 
 const STORAGE_KEY = 'dashboard_widget_visibility';
 
-const DashboardLayoutView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const DashboardLayoutView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const [visibility, setVisibility] = useState<Record<string, boolean>>(() => {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
@@ -462,10 +463,10 @@ const DashboardLayoutView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title="Dashboard Layout" onBack={onBack} />
+            <SubViewHeader title={t('system_settings.dashboard_layout')} onBack={onBack} />
             <ToastMessage toast={toast} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-3">
-                <p className="text-xs text-brand-muted font-medium mb-4">Toggle which widgets appear on your dashboard.</p>
+                <p className="text-xs text-brand-muted font-medium mb-4">{t('system_settings.dashboard_layout_desc')}</p>
                 {DASHBOARD_WIDGETS.map(w => (
                     <button
                         key={w.key}
@@ -508,7 +509,7 @@ const DashboardLayoutView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 // SUB-VIEW: Data Sync (Loyverse)
 // ═══════════════════════════════════════════════════════
 
-const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const [status, setStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
@@ -562,7 +563,7 @@ const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title="Data Sync" onBack={onBack} />
+            <SubViewHeader title={t('system_settings.data_sync')} onBack={onBack} />
             <ToastMessage toast={toast} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
                 {loading ? (
@@ -581,7 +582,7 @@ const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                                         <WifiOff size={16} className="text-gray-400" />
                                     )}
                                     <span className="text-sm font-bold text-brand-text">
-                                        Auto-Sync: {status?.autoSync?.running ? 'Active' : 'Inactive'}
+                                        {t('system_settings.auto_sync')}: {status?.autoSync?.running ? t('system_settings.active') : t('system_settings.inactive')}
                                     </span>
                                 </div>
                                 <button
@@ -593,7 +594,7 @@ const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                                             : "bg-green-100 text-green-600 hover:bg-green-200"
                                     )}
                                 >
-                                    {status?.autoSync?.running ? 'Stop' : 'Start'}
+                                    {status?.autoSync?.running ? t('system_settings.stop') : t('system_settings.start')}
                                 </button>
                             </div>
                             {status?.autoSync?.intervalMs && (
@@ -614,11 +615,11 @@ const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             disabled={syncing}
                             className="w-full py-3.5 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                         >
-                            {syncing ? <><Loader2 size={16} className="animate-spin" /> Syncing...</> : <><RefreshCw size={16} /> Sync Now</>}
+                            {syncing ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.syncing')}...</> : <><RefreshCw size={16} /> {t('system_settings.sync_now')}</>}
                         </button>
 
                         <p className="text-xs text-brand-muted text-center font-medium">
-                            Sync receipts and sales data from Loyverse POS to your local database.
+                            {t('system_settings.sync_description')}
                         </p>
                     </>
                 )}
@@ -631,25 +632,25 @@ const DataSyncView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 // SUB-VIEW: Mobile App
 // ═══════════════════════════════════════════════════════
 
-const MobileAppView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const MobileAppView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const serverUrl = window.location.origin;
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title="Mobile App" onBack={onBack} />
+            <SubViewHeader title={t('system_settings.mobile_app')} onBack={onBack} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
                 <div className="text-center">
                     <div className="w-20 h-20 mx-auto bg-brand-orange/10 rounded-3xl flex items-center justify-center mb-4">
                         <Smartphone size={36} className="text-brand-orange" />
                     </div>
-                    <h4 className="text-base font-bold text-brand-text mb-2">Connect Mobile Apps</h4>
+                    <h4 className="text-base font-bold text-brand-text mb-2">{t('system_settings.connect_mobile')}</h4>
                     <p className="text-xs text-brand-muted font-medium leading-relaxed">
-                        Waiter and Chef apps can connect to this server to receive orders in real-time using the server address below.
+                        {t('system_settings.mobile_description')}
                     </p>
                 </div>
 
                 <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
-                    <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Server Address</p>
+                    <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.server_address')}</p>
                     <div className="flex items-center gap-2">
                         <code className="flex-1 bg-white px-3 py-2.5 rounded-xl text-sm font-mono text-brand-text border border-gray-200 truncate">
                             {serverUrl}
@@ -658,23 +659,23 @@ const MobileAppView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                             onClick={() => { navigator.clipboard.writeText(serverUrl); }}
                             className="px-3 py-2.5 bg-brand-orange/10 text-brand-orange rounded-xl text-xs font-bold hover:bg-brand-orange/20 transition-colors cursor-pointer shrink-0"
                         >
-                            Copy
+                            {t('system_settings.copy')}
                         </button>
                     </div>
                 </div>
 
                 <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 text-center space-y-3">
                     <QrCode size={80} className="mx-auto text-brand-muted/30" />
-                    <p className="text-xs text-brand-muted font-medium">Scan QR code from the mobile app to connect automatically.</p>
+                    <p className="text-xs text-brand-muted font-medium">{t('system_settings.qr_description')}</p>
                 </div>
 
                 <div className="space-y-2">
-                    <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest px-1">Requirements</p>
+                    <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest px-1">{t('system_settings.requirements')}</p>
                     <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-700 font-medium">
-                        ✓ Both devices must be on the same network
+                        ✓ {t('system_settings.req_same_network')}
                     </div>
                     <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-xs text-blue-700 font-medium">
-                        ✓ Server must be running on port 2000
+                        ✓ {t('system_settings.req_server_port')}
                     </div>
                 </div>
             </div>
@@ -700,7 +701,7 @@ type AuditLog = {
     CREATED_DT: string;
 };
 
-const SecurityAuditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const SecurityAuditView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [toast, setToast] = useState<Toast>(null);
@@ -735,7 +736,7 @@ const SecurityAuditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     return (
         <div className="flex flex-col h-full">
             <SubViewHeader
-                title="Security Audit"
+                title={t('system_settings.security_audit')}
                 onBack={onBack}
                 action={
                     <button onClick={fetchLogs} disabled={loading}
@@ -753,7 +754,7 @@ const SecurityAuditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 ) : logs.length === 0 ? (
                     <div className="text-center py-12">
                         <Shield size={40} className="mx-auto text-brand-muted/30 mb-3" />
-                        <p className="text-sm text-brand-muted font-medium">No audit logs found</p>
+                        <p className="text-sm text-brand-muted font-medium">{t('system_settings.no_audit_logs')}</p>
                     </div>
                 ) : (
                     logs.map(log => (
@@ -788,32 +789,32 @@ const SecurityAuditView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
 // SUB-VIEW: Version Info
 // ═══════════════════════════════════════════════════════
 
-const VersionInfoView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+const VersionInfoView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
     const appName = '3Core Dashboard';
     const appVersion = '1.0.0';
     const buildDate = 'Feb 26, 2026';
 
     const infoItems = [
-        { label: 'Application', value: appName },
-        { label: 'Version', value: `v${appVersion}` },
-        { label: 'Build Date', value: buildDate },
-        { label: 'Frontend', value: 'React 19 + Vite 6' },
-        { label: 'Backend', value: 'Node.js + Express 4' },
-        { label: 'Database', value: 'MySQL' },
-        { label: 'Auth', value: 'JWT + Session' },
-        { label: 'Real-time', value: 'Socket.IO' },
+        { label: t('system_settings.application'), value: appName },
+        { label: t('system_settings.version'), value: `v${appVersion}` },
+        { label: t('system_settings.build_date'), value: buildDate },
+        { label: t('system_settings.frontend'), value: 'React 19 + Vite 6' },
+        { label: t('system_settings.backend'), value: 'Node.js + Express 4' },
+        { label: t('system_settings.database'), value: 'MySQL' },
+        { label: t('system_settings.auth'), value: 'JWT + Session' },
+        { label: t('system_settings.realtime'), value: 'Socket.IO' },
     ];
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title="Version Info" onBack={onBack} />
+            <SubViewHeader title={t('system_settings.version_info')} onBack={onBack} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
                 <div className="text-center">
                     <div className="w-20 h-20 mx-auto bg-gradient-to-br from-brand-orange/20 to-brand-primary/20 rounded-3xl flex items-center justify-center mb-4">
                         <Settings size={36} className="text-brand-orange" />
                     </div>
                     <h4 className="text-lg font-bold text-brand-text">{appName}</h4>
-                    <p className="text-sm text-brand-muted font-medium">Restaurant Management System</p>
+                    <p className="text-sm text-brand-muted font-medium">{t('system_settings.restaurant_management')}</p>
                 </div>
 
                 <div className="space-y-1">
@@ -828,9 +829,9 @@ const VersionInfoView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                 <div className="p-4 bg-green-50 rounded-2xl border border-green-100 text-center">
                     <div className="flex items-center justify-center gap-2 mb-1">
                         <Check size={16} className="text-green-600" />
-                        <span className="text-sm font-bold text-green-700">You're on the latest version</span>
+                        <span className="text-sm font-bold text-green-700">{t('system_settings.latest_version')}</span>
                     </div>
-                    <p className="text-xs text-green-600 font-medium">No updates available at this time.</p>
+                    <p className="text-xs text-green-600 font-medium">{t('system_settings.no_updates')}</p>
                 </div>
             </div>
         </div>
@@ -853,6 +854,7 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
     onClose,
 }) => {
     const [view, setView] = useState<ViewState>('main');
+    const { t } = useTranslation();
 
     const handleClose = () => {
         onClose();
@@ -898,7 +900,7 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                                 <div className="w-10 h-10 bg-brand-orange/10 text-brand-orange rounded-xl flex items-center justify-center">
                                                     <Settings size={20} />
                                                 </div>
-                                                <h3 className="text-lg font-bold text-brand-text">System Settings</h3>
+                                                <h3 className="text-lg font-bold text-brand-text">{t('system_settings.title')}</h3>
                                             </div>
                                             <button
                                                 onClick={handleClose}
@@ -912,56 +914,56 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                     {/* Scrollable Content */}
                                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
                                         <div className="px-4 py-2">
-                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">General Settings</h5>
+                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.general')}</h5>
                                         </div>
                                         <SettingsItem
                                             icon={Store}
-                                            label="Branch Management"
-                                            description="Configure store locations and details"
+                                            label={t('system_settings.branch_management')}
+                                            description={t('system_settings.branch_management_desc')}
                                             onClick={() => setView('branch')}
                                         />
                                         <SettingsItem
                                             icon={Globe}
-                                            label="Localization"
-                                            description="Timezone, currency, and language"
+                                            label={t('system_settings.localization')}
+                                            description={t('system_settings.localization_desc')}
                                             onClick={() => setView('localization')}
                                         />
                                         <SettingsItem
                                             icon={Layout}
-                                            label="Dashboard Layout"
-                                            description="Customize widget visibility"
-                                            badge="New"
+                                            label={t('system_settings.dashboard_layout')}
+                                            description={t('system_settings.dashboard_layout_desc_short')}
+                                            badge={t('system_settings.new')}
                                             onClick={() => setView('dashboard-layout')}
                                         />
 
                                         <div className="px-4 py-2 mt-4">
-                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Connect & Sync</h5>
+                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.connect_sync')}</h5>
                                         </div>
                                         <SettingsItem
                                             icon={Database}
-                                            label="Data Sync"
-                                            description="Loyverse POS sync & auto-backup"
+                                            label={t('system_settings.data_sync')}
+                                            description={t('system_settings.data_sync_desc')}
                                             onClick={() => setView('data-sync')}
                                         />
                                         <SettingsItem
                                             icon={Smartphone}
-                                            label="Mobile App"
-                                            description="Connect with waiter & chef apps"
+                                            label={t('system_settings.mobile_app')}
+                                            description={t('system_settings.mobile_app_desc')}
                                             onClick={() => setView('mobile-app')}
                                         />
 
                                         <div className="px-4 py-2 mt-4">
-                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">System Info</h5>
+                                            <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.system_info')}</h5>
                                         </div>
                                         <SettingsItem
                                             icon={Shield}
-                                            label="Security Audit"
-                                            description="View recent system activity"
+                                            label={t('system_settings.security_audit')}
+                                            description={t('system_settings.security_audit_desc')}
                                             onClick={() => setView('security-audit')}
                                         />
                                         <SettingsItem
                                             icon={Info}
-                                            label="Version Info"
+                                            label={t('system_settings.version_info')}
                                             description="v1.0.0 — 3Core Dashboard"
                                             onClick={() => setView('version-info')}
                                         />
@@ -971,7 +973,7 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                     <div className="p-6 border-t border-gray-100">
                                         <div className="bg-brand-bg rounded-2xl p-4 border border-gray-100">
                                             <p className="text-xs text-brand-muted font-medium mb-3">
-                                                System Health: <span className="text-green-600 font-bold uppercase tracking-wider ml-1">Optimal</span>
+                                                {t('system_settings.system_health')}: <span className="text-green-600 font-bold uppercase tracking-wider ml-1">{t('system_settings.optimal')}</span>
                                             </p>
                                             <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden">
                                                 <motion.div
@@ -981,7 +983,7 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                                 />
                                             </div>
                                             <p className="mt-3 text-[10px] text-brand-muted leading-relaxed">
-                                                Last system-wide update: Feb 26, 2026 at 11:00 AM
+                                                {t('system_settings.last_update')}: Feb 26, 2026 at 11:00 AM
                                             </p>
                                         </div>
                                     </div>
@@ -994,13 +996,13 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                     exit={{ opacity: 0, x: -20 }}
                                     className="flex flex-col h-full"
                                 >
-                                    {view === 'branch' && <BranchManagementView onBack={goBack} />}
-                                    {view === 'localization' && <LocalizationView onBack={goBack} />}
-                                    {view === 'dashboard-layout' && <DashboardLayoutView onBack={goBack} />}
-                                    {view === 'data-sync' && <DataSyncView onBack={goBack} />}
-                                    {view === 'mobile-app' && <MobileAppView onBack={goBack} />}
-                                    {view === 'security-audit' && <SecurityAuditView onBack={goBack} />}
-                                    {view === 'version-info' && <VersionInfoView onBack={goBack} />}
+                                    {view === 'branch' && <BranchManagementView onBack={goBack} t={t} />}
+                                    {view === 'localization' && <LocalizationView onBack={goBack} t={t} />}
+                                    {view === 'dashboard-layout' && <DashboardLayoutView onBack={goBack} t={t} />}
+                                    {view === 'data-sync' && <DataSyncView onBack={goBack} t={t} />}
+                                    {view === 'mobile-app' && <MobileAppView onBack={goBack} t={t} />}
+                                    {view === 'security-audit' && <SecurityAuditView onBack={goBack} t={t} />}
+                                    {view === 'version-info' && <VersionInfoView onBack={goBack} t={t} />}
                                 </motion.div>
                             )}
                         </AnimatePresence>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -123,6 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   // Menu tab is only visible when a specific branch is selected (not 'all' or null)
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const { logout } = useUser();
+  const { t } = useTranslation();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
   const [salesReportExpanded, setSalesReportExpanded] = useState(false);
   const isSalesReportActive =
@@ -162,53 +164,53 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
         </div>
         <div>
           <h1 className="text-2xl font-black tracking-tight text-brand-text leading-none">3CORE</h1>
-          <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1">Restaurant Pro</p>
+          <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1">{t('sidebar.restaurant_pro')}</p>
         </div>
       </div>
 
       <nav className="flex-1 space-y-0.5">
         <SidebarItem
           icon={LayoutDashboard}
-          label="Dashboard"
+          label={t('sidebar.dashboard')}
           active={activeTab === 'Dashboard'}
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
         <SidebarItem
           icon={DollarSign}
-          label="Expenses"
+          label={t('sidebar.expenses')}
           active={activeTab === 'Expenses'}
           onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
         <SidebarItem
           icon={BarChart3}
-          label="Sales Report"
+          label={t('sidebar.sales_report')}
           active={isSalesReportActive}
           isExpandable
           isExpanded={salesReportExpanded}
           onClick={handleSalesReportToggle}
         >
           <SubItem
-            label="Sales Analytics"
+            label={t('sidebar.sales_analytics')}
             active={activeTab === 'Sales Analytics'}
             onClick={() => onTabChange('Sales Analytics')}
           />
           <SubItem
-            label="Menu"
+            label={t('sidebar.menu')}
             active={activeTab === 'Menu'}
             onClick={() => onTabChange('Menu')}
           />
           <SubItem
-            label="Category"
+            label={t('sidebar.category')}
             active={activeTab === 'Category'}
             onClick={() => onTabChange('Category')}
           />
           <SubItem
-            label="Payment type"
+            label={t('sidebar.payment_type')}
             active={activeTab === 'Payment type'}
             onClick={() => onTabChange('Payment type')}
           />
           <SubItem
-            label="Receipt"
+            label={t('sidebar.receipt')}
             active={activeTab === 'Receipt'}
             onClick={() => onTabChange('Receipt')}
           />
@@ -216,7 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
         {isSpecificBranch && (
           <SidebarItem
             icon={ClipboardList}
-            label="Orders"
+            label={t('sidebar.orders')}
             active={activeTab === 'Orders'}
             onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
@@ -224,31 +226,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
         {isSpecificBranch && (
           <SidebarItem
             icon={Package}
-            label="Inventory"
+            label={t('sidebar.inventory')}
             active={activeTab === 'Inventory'}
             onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
         <SidebarItem
           icon={Users}
-          label="User Management"
+          label={t('sidebar.user_management')}
           active={activeTab.startsWith('User')}
           isExpandable
           isExpanded={userMgmtExpanded}
           onClick={handleUserMgmtToggle}
         >
           <SubItem
-            label="User Info"
+            label={t('sidebar.user_info')}
             active={activeTab === 'User Info'}
             onClick={() => onTabChange('User Info')}
           />
           <SubItem
-            label="User Role"
+            label={t('sidebar.user_role')}
             active={activeTab === 'User Role'}
             onClick={() => onTabChange('User Role')}
           />
           <SubItem
-            label="User Access"
+            label={t('sidebar.user_access')}
             active={activeTab === 'User Access'}
             onClick={() => onTabChange('User Access')}
           />
@@ -261,7 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           className="w-full flex items-center gap-3 px-6 py-4 text-brand-muted hover:text-red-500 hover:bg-red-50/50 rounded-2xl transition-all group border border-transparent hover:border-red-100"
         >
           <LogOut size={20} className="group-hover:rotate-12 transition-transform" />
-          <span className="font-bold text-base">Logout</span>
+          <span className="font-bold text-base">{t('sidebar.logout')}</span>
         </button>
       </div>
     </aside>

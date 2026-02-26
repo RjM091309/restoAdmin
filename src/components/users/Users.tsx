@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Loader2, Shield, User as UserIcon, Plus, Edit2, Trash2, Key, MapPin, Tablet } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
@@ -24,6 +25,7 @@ interface UserRow {
 }
 
 export const Users: React.FC = () => {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -87,7 +89,7 @@ export const Users: React.FC = () => {
       setFilteredUsers(mappedData);
     } catch (e: any) {
       console.error('Failed to fetch users', e);
-      setError(e.message || 'Failed to load users');
+      setError(e.message || t('manage_users.failed_to_load'));
     } finally {
       setLoading(false);
     }
@@ -163,7 +165,7 @@ export const Users: React.FC = () => {
 
   useEffect(() => {
     if (formData.confirmPassword && formData.password !== formData.confirmPassword) {
-      setPasswordError('Passwords do not match.');
+      setPasswordError(t('manage_users.passwords_do_not_match'));
     } else {
       setPasswordError(null);
     }
@@ -251,11 +253,11 @@ export const Users: React.FC = () => {
         throw new Error(json.error || `Failed to ${editingUser ? 'update' : 'create'} user`);
       }
 
-      toast.success(editingUser ? 'User updated successfully!' : 'User created successfully!');
+      toast.success(editingUser ? t('manage_users.toast.updated_success') : t('manage_users.toast.created_success'));
       setIsModalOpen(false);
       fetchUsers();
     } catch (e: any) {
-      toast.error(e.message || 'Error saving user');
+      toast.error(e.message || t('manage_users.toast.save_error'));
     } finally {
       setIsSubmitting(false);
     }
@@ -275,13 +277,13 @@ export const Users: React.FC = () => {
         },
       });
 
-      if (!res.ok) throw new Error('Failed to delete user');
+      if (!res.ok) throw new Error(t('manage_users.toast.delete_failed'));
       
-      toast.success(`User "${userToDelete?.fullName}" deleted successfully!`);
+      toast.success(t('manage_users.toast.deleted_success', { name: userToDelete?.fullName }));
       setIsDeleteModalOpen(false);
       fetchUsers();
     } catch (e: any) {
-      toast.error(e.message || 'Error deleting user');
+      toast.error(e.message || t('manage_users.toast.delete_error'));
     } finally {
       setIsSubmitting(false);
     }
@@ -289,27 +291,27 @@ export const Users: React.FC = () => {
 
   const columns: ColumnDef<UserRow>[] = [
     {
-      header: 'Full Name',
+      header: t('manage_users.name'),
       render: (user) => <span className="text-sm font-bold">{user.fullName}</span>,
     },
     {
-      header: 'Username',
+      header: t('manage_users.username'),
       render: (user) => <span className="text-sm font-bold text-brand-muted">{user.username}</span>,
     },
     {
-      header: 'Role',
+      header: t('manage_users.role'),
       render: (user) => <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded-lg">{user.role}</span>,
     },
     {
-      header: 'Branch',
+      header: t('manage_users.branch'),
       render: (user) => <span className="text-sm font-medium">{user.branch}</span>,
     },
     {
-      header: 'Table #',
+      header: t('manage_users.table_no'),
       render: (user) => <span className="text-sm font-medium">{user.tableNumber}</span>,
     },
     {
-      header: 'Status',
+      header: t('manage_users.status'),
       render: (user) => (
         <span
           className={cn(
@@ -317,26 +319,26 @@ export const Users: React.FC = () => {
             user.status === 'Active' ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
           )}
         >
-          {user.status}
+          {user.status === 'Active' ? t('manage_users.active') : t('manage_users.inactive')}
         </span>
       ),
     },
     {
-      header: 'Actions',
+      header: t('manage_users.action'),
       className: 'text-right',
       render: (user) => (
         <div className="flex justify-end items-center gap-2">
           <button
             onClick={() => handleOpenEditModal(user)}
             className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            title="Edit User"
+            title={t('manage_users.edit_user')}
           >
             <Edit2 size={16} />
           </button>
           <button
             onClick={() => handleOpenDeleteModal(user)}
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title="Delete User"
+            title={t('manage_users.delete_user')}
           >
             <Trash2 size={16} />
           </button>
@@ -387,7 +389,7 @@ export const Users: React.FC = () => {
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                   <input
                     type="text"
-                    placeholder="Search users..."
+                    placeholder={t('manage_users.search_placeholder')}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -399,25 +401,25 @@ export const Users: React.FC = () => {
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
-                Add New User
+                {t('manage_users.add_new_user')}
               </button>
             </div>
 
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Total Users</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.total_users')}</p>
                 <h3 className="text-3xl font-bold">{users.length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Active Users</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.active_users')}</p>
                 <h3 className="text-3xl font-bold text-green-600">{users.filter(u => u.status === 'Active').length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">Inactive Users</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.inactive_users')}</p>
                 <h3 className="text-3xl font-bold text-red-500">{users.filter(u => u.status === 'Inactive').length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
-                <p className="text-brand-muted text-sm font-medium mb-1">User Roles</p>
+                <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.user_roles_count')}</p>
                 <h3 className="text-3xl font-bold">{new Set(users.map(u => u.role)).size}</h3>
               </div>
             </div>
@@ -449,7 +451,7 @@ export const Users: React.FC = () => {
             });
           }
         }}
-        title={editingUser ? "Edit User" : "Add New User"}
+        title={editingUser ? t('manage_users.edit_user') : t('manage_users.add_new_user')}
         maxWidth="lg"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -458,7 +460,7 @@ export const Users: React.FC = () => {
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('manage_users.cancel')}
             </button>
             <button
               onClick={handleSubmit}
@@ -466,7 +468,7 @@ export const Users: React.FC = () => {
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
-              {editingUser ? "Update User" : "Save User"}
+              {editingUser ? t('manage_users.update_user') : t('manage_users.save_user')}
             </button>
           </div>
         }
@@ -474,46 +476,46 @@ export const Users: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">User Role</label>
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.user_role')}</label>
               <Select2
                 options={roles}
                 value={formData.roleId}
                 onChange={(val) => setFormData({ ...formData, roleId: val as string | number, tableId: val === 2 ? formData.tableId : null })}
-                placeholder="Select Role"
+                placeholder={t('manage_users.select_role')}
               />
             </div>
 
             <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Branch</label>
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.branch')}</label>
               <Select2
                 options={branches}
                 value={formData.branchId}
                 onChange={(val) => setFormData({ ...formData, branchId: val as string | number | null })}
-                placeholder="Select Branch"
+                placeholder={t('manage_users.select_branch')}
                 disabled={formData.roleId === 1}
               />
             </div>
 
             {Number(formData.roleId) === 2 && (
               <div className="space-y-2 col-span-2">
-                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Assigned Table</label>
+                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.assigned_table')}</label>
                 <Select2
                   options={tables}
                   value={formData.tableId}
                   onChange={(val) => setFormData({ ...formData, tableId: val as string | number | null })}
-                  placeholder="Select Table"
+                  placeholder={t('manage_users.select_table')}
                 />
               </div>
             )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">First Name</label>
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.first_name')}</label>
               <div className="relative">
                 <input
                   type="text"
                   required
-                  placeholder="Enter first name"
+                  placeholder={t('manage_users.enter_first_name')}
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
@@ -522,12 +524,12 @@ export const Users: React.FC = () => {
               </div>
             </div>
             <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Last Name</label>
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.last_name')}</label>
               <div className="relative">
                 <input
                   type="text"
                   required
-                  placeholder="Enter last name"
+                  placeholder={t('manage_users.enter_last_name')}
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
@@ -538,12 +540,12 @@ export const Users: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Username</label>
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.username')}</label>
             <div className="relative">
               <input
                 type="text"
                 required
-                placeholder="Enter username"
+                placeholder={t('manage_users.enter_username')}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
@@ -555,7 +557,7 @@ export const Users: React.FC = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-3">
               <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-                {editingUser ? "New Password (optional)" : "Password"}
+                {editingUser ? t('manage_users.new_password_optional') : t('manage_users.password')}
               </label>
               <div className="relative">
                 <input
@@ -570,7 +572,7 @@ export const Users: React.FC = () => {
               </div>
             </div>
             <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Confirm Password</label>
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">{t('manage_users.confirm_password')}</label>
               <div className="relative">
                 <input
                   type="password"
@@ -592,7 +594,7 @@ export const Users: React.FC = () => {
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => !isSubmitting && setIsDeleteModalOpen(false)}
-        title="Delete User"
+        title={t('manage_users.delete_user')}
         maxWidth="sm"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -601,7 +603,7 @@ export const Users: React.FC = () => {
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('manage_users.cancel')}
             </button>
             <button
               onClick={confirmDelete}
@@ -609,7 +611,7 @@ export const Users: React.FC = () => {
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
-              Delete User
+              {t('manage_users.delete_user')}
             </button>
           </div>
         }
@@ -618,9 +620,9 @@ export const Users: React.FC = () => {
           <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Trash2 size={32} />
           </div>
-          <p className="text-center font-bold text-brand-text text-lg">Are you sure?</p>
+          <p className="text-center font-bold text-brand-text text-lg">{t('manage_users.delete_confirm_title')}</p>
           <p className="text-center text-brand-muted text-sm px-4">
-            You are about to delete <span className="font-bold text-brand-text">{userToDelete?.fullName}</span>. This action will archive the user and they will no longer be able to login.
+            {t('manage_users.delete_confirm_text_prefix')} <span className="font-bold text-brand-text">{userToDelete?.fullName}</span>{t('manage_users.delete_confirm_text_suffix')}
           </p>
         </div>
       </Modal>

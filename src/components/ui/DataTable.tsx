@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -19,6 +20,7 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTableProps<T>) {
+  const { t } = useTranslation();
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [perPageOpen, setPerPageOpen] = useState(false);
@@ -83,8 +85,8 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
             ))}
             {currentData.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted bg-white">
-                  No data available
+                <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted">
+                  {t('datatable.no_data')}
                 </td>
               </tr>
             )}
@@ -95,7 +97,7 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
       {/* Pagination Container */}
       <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white">
         <div className="flex items-center gap-4 text-sm text-brand-muted">
-          <span>Show</span>
+          <span>{t('datatable.show')}</span>
           <div className="relative">
             <button
               onClick={() => setPerPageOpen(!perPageOpen)}
@@ -134,12 +136,16 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
               </>
             )}
           </div>
-          <span>entries</span>
+          <span>{t('datatable.entries')}</span>
         </div>
 
         <div className="flex items-center gap-2 text-sm">
           <span className="text-brand-muted mr-4">
-            Showing {data.length > 0 ? startIndex + 1 : 0} to {Math.min(endIndex, data.length)} of {data.length} entries
+            {t('datatable.showing_info', {
+              from: data.length > 0 ? startIndex + 1 : 0,
+              to: Math.min(endIndex, data.length),
+              total: data.length
+            })}
           </span>
           <div className="flex items-center gap-1">
             <button

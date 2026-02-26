@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import Select, { components, ControlProps, SingleValueProps } from 'react-select';
 import { cn } from '../../lib/utils';
 
@@ -46,11 +47,12 @@ export const Select2: React.FC<Select2Props> = ({
   options,
   value,
   onChange,
-  placeholder = 'Select an option...',
+  placeholder,
   className,
   disabled = false,
   leftIcon
 }) => {
+  const { t } = useTranslation();
   const selectedOption = options.find(opt => opt.value === value) || null;
 
   return (
@@ -59,7 +61,7 @@ export const Select2: React.FC<Select2Props> = ({
         value={selectedOption}
         onChange={(opt) => onChange(opt ? opt.value : null)}
         options={options}
-        placeholder={placeholder}
+        placeholder={placeholder || t('common.select_placeholder')}
         isDisabled={disabled}
         isClearable
         isSearchable

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Loader2, Plus, Edit2, Trash2, Shield, User as UserIcon, MoreVertical } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ interface UserRoleRow {
 }
 
 export const UserRole: React.FC = () => {
+  const { t } = useTranslation();
   const [roles, setRoles] = useState<UserRoleRow[]>([]);
   const [filteredRoles, setFilteredRoles] = useState<UserRoleRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,7 +54,7 @@ export const UserRole: React.FC = () => {
       setFilteredRoles(mappedData);
     } catch (e: any) {
       console.error('Failed to fetch roles', e);
-      setError(e.message || 'Failed to load roles');
+      setError(e.message || t('user_roles.failed_to_load'));
     } finally {
       setLoading(false);
     }
@@ -93,13 +95,13 @@ export const UserRole: React.FC = () => {
         },
       });
 
-      if (!res.ok) throw new Error('Failed to delete role');
+      if (!res.ok) throw new Error(t('user_roles.toast.delete_failed'));
       
-      toast.success(`Role "${roleToDelete?.role}" deleted successfully!`);
+      toast.success(t('user_roles.toast.deleted_success', { role: roleToDelete?.role }));
       setIsDeleteModalOpen(false);
       fetchRoles();
     } catch (e: any) {
-      toast.error(e.message || 'Error deleting role');
+      toast.error(e.message || t('user_roles.toast.delete_error'));
     } finally {
       setIsSubmitting(false);
     }
@@ -126,13 +128,13 @@ export const UserRole: React.FC = () => {
         body: JSON.stringify(formData),
       });
 
-      if (!res.ok) throw new Error(`Failed to ${editingRole ? 'update' : 'create'} role`);
+      if (!res.ok) throw new Error(editingRole ? t('user_roles.toast.update_failed') : t('user_roles.toast.create_failed'));
 
-      toast.success(editingRole ? 'Role updated successfully!' : 'Role created successfully!');
+      toast.success(editingRole ? t('user_roles.toast.updated_success') : t('user_roles.toast.created_success'));
       setIsModalOpen(false);
       fetchRoles();
     } catch (e: any) {
-      toast.error(e.message || 'Error saving role');
+      toast.error(e.message || t('user_roles.toast.save_error'));
     } finally {
       setIsSubmitting(false);
     }
@@ -201,7 +203,7 @@ export const UserRole: React.FC = () => {
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                   <input
                     type="text"
-                    placeholder="Search roles..."
+                    placeholder={t('user_roles.search_placeholder')}
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -213,7 +215,7 @@ export const UserRole: React.FC = () => {
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
-                Add New Role
+                {t('user_roles.add_new_role')}
               </button>
             </div>
 
@@ -236,14 +238,14 @@ export const UserRole: React.FC = () => {
                         <button 
                           onClick={() => handleOpenEditModal(role)}
                           className="p-2.5 bg-white text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-xl transition-all shadow-sm border border-gray-50"
-                          title="Edit Role"
+                          title={t('user_roles.edit_role')}
                         >
                           <Edit2 size={18} />
                         </button>
                         <button 
                           onClick={() => handleOpenDeleteModal(role)}
                           className="p-2.5 bg-white text-brand-muted hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shadow-sm border border-gray-50"
-                          title="Delete Role"
+                          title={t('user_roles.delete_role')}
                         >
                           <Trash2 size={18} />
                         </button>
@@ -255,7 +257,7 @@ export const UserRole: React.FC = () => {
                         {role.role}
                       </h3>
                       <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-0.5">
-                        Access Level Profile
+                        {t('user_roles.access_level_profile')}
                       </p>
                     </div>
                     
@@ -283,7 +285,7 @@ export const UserRole: React.FC = () => {
                           "w-1.5 h-1.5 rounded-full animate-pulse",
                           role.status === 'Active' ? "bg-green-500 group-hover:bg-white" : "bg-red-500 group-hover:bg-white"
                         )} />
-                        {role.status}
+                        {role.status === 'Active' ? t('user_roles.active') : t('user_roles.inactive')}
                       </span>
                     </div>
                   </div>
@@ -293,7 +295,7 @@ export const UserRole: React.FC = () => {
               {filteredRoles.length === 0 && (
                 <div className="col-span-full py-12 text-center bg-white rounded-2xl shadow-sm">
                   <Shield size={48} className="mx-auto text-brand-muted/20 mb-4" />
-                  <p className="text-brand-muted font-medium text-lg">No roles found matching your search.</p>
+                  <p className="text-brand-muted font-medium text-lg">{t('user_roles.no_roles_found')}</p>
                 </div>
               )}
             </div>
@@ -305,7 +307,7 @@ export const UserRole: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => !isSubmitting && setIsModalOpen(false)}
-        title={editingRole ? "Edit Role" : "Add New Role"}
+        title={editingRole ? t('user_roles.edit_role') : t('user_roles.add_new_role')}
         maxWidth="md"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -314,7 +316,7 @@ export const UserRole: React.FC = () => {
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('user_roles.cancel')}
             </button>
             <button
               onClick={handleSubmit}
@@ -322,18 +324,18 @@ export const UserRole: React.FC = () => {
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
-              {editingRole ? "Update Role" : "Save Role"}
+              {editingRole ? t('user_roles.update_role') : t('user_roles.save_role')}
             </button>
           </div>
         }
       >
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-3">
-            <label className="text-sm font-bold text-brand-text block">Role Name</label>
+            <label className="text-sm font-bold text-brand-text block">{t('user_roles.role_name')}</label>
             <input
               type="text"
               required
-              placeholder="e.g. Supervisor, Waiter, Kitchen Staff"
+              placeholder={t('user_roles.role_name_placeholder')}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
@@ -341,7 +343,7 @@ export const UserRole: React.FC = () => {
             />
           </div>
           <p className="text-xs text-brand-muted">
-            Configure a new role for your staff. You can manage their specific access levels in the User Access section.
+            {t('user_roles.role_description')}
           </p>
         </form>
       </Modal>
@@ -350,7 +352,7 @@ export const UserRole: React.FC = () => {
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => !isSubmitting && setIsDeleteModalOpen(false)}
-        title="Delete Role"
+        title={t('user_roles.delete_role')}
         maxWidth="sm"
         footer={
           <div className="flex items-center justify-end gap-3">
@@ -359,7 +361,7 @@ export const UserRole: React.FC = () => {
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
-              Cancel
+              {t('user_roles.cancel')}
             </button>
             <button
               onClick={confirmDelete}
@@ -367,7 +369,7 @@ export const UserRole: React.FC = () => {
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
-              Delete Role
+              {t('user_roles.delete_role')}
             </button>
           </div>
         }
@@ -376,9 +378,9 @@ export const UserRole: React.FC = () => {
           <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Trash2 size={32} />
           </div>
-          <p className="text-center font-bold text-brand-text text-lg">Are you sure?</p>
+          <p className="text-center font-bold text-brand-text text-lg">{t('user_roles.delete_confirm_title')}</p>
           <p className="text-center text-brand-muted text-sm px-4">
-            You are about to delete the role <span className="font-bold text-brand-text">"{roleToDelete?.role}"</span>. This action will archive the role but keep existing user associations.
+            {t('user_roles.delete_confirm_text', { role: roleToDelete?.role })}
           </p>
         </div>
       </Modal>

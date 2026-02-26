@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -86,6 +87,12 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { t, i18n } = useTranslation();
+
+  const currentLanguageLabel = i18n.language === 'ko' ? '한국어'
+    : i18n.language === 'ja' ? '日本語'
+      : i18n.language === 'zh' ? '中文'
+        : 'English (United States)';
   const [view, setView] = useState<'main' | 'edit-profile'>('main');
   const { user, updateUser, logout } = useUser();
 
@@ -99,7 +106,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const displayName = user ? `${user.firstname} ${user.lastname}` : 'User';
-  const displayRole = user?.permissions === 1 ? 'Administrator' : 'Staff';
+  const displayRole = user?.permissions === 1 ? t('account_settings.administrator') : t('account_settings.staff');
   const avatarSrc = user?.avatar || 'https://picsum.photos/seed/user/100/100';
 
   // Sync form fields when switching to edit view or when user data changes
@@ -127,39 +134,6 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
       setToast(null);
     }, 300);
   };
-
-  const handleSaveProfile = async () => {
-    // Basic validation
-    if (!firstname.trim() || !lastname.trim() || !username.trim()) {
-      setToast({ type: 'error', message: 'All fields are required.' });
-      return;
-    }
-
-    setIsSaving(true);
-    setToast(null);
-
-    try {
-      const result = await updateUser({ firstname: firstname.trim(), lastname: lastname.trim(), username: username.trim() });
-
-      if (result.success) {
-        setToast({ type: 'success', message: result.message });
-        // Return to main view after a short delay
-        setTimeout(() => setView('main'), 1200);
-      } else {
-        setToast({ type: 'error', message: result.message });
-      }
-    } catch {
-      setToast({ type: 'error', message: 'Something went wrong. Please try again.' });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const hasChanges = user
-    ? firstname.trim() !== (user.firstname || '') ||
-    lastname.trim() !== (user.lastname || '') ||
-    username.trim() !== (user.username || '')
-    : false;
 
   return (
     <AnimatePresence>
@@ -194,7 +168,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   {/* Header */}
                   <div className="p-6 border-b border-gray-100">
                     <div className="flex items-center justify-between mb-8">
-                      <h3 className="text-lg font-bold">Account Settings</h3>
+                      <h3 className="text-lg font-bold">{t('account_settings.title')}</h3>
                       <button
                         onClick={handleClose}
                         className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer"
@@ -219,7 +193,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                         <p className="text-sm text-brand-muted font-medium">{displayRole}</p>
                         <div className="inline-flex items-center gap-1 px-2 py-0.5 mt-1 bg-green-100 text-green-700 rounded-md text-[10px] font-bold uppercase tracking-wider">
                           <ShieldCheck size={10} />
-                          Verified
+                          {t('account_settings.verified')}
                         </div>
                       </div>
                     </div>
@@ -228,32 +202,32 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   {/* Settings Options */}
                   <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
                     <div className="px-4 py-2">
-                      <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Personal</h5>
+                      <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('account_settings.personal')}</h5>
                     </div>
                     <SettingsItem
                       icon={User}
-                      label="Edit Profile"
-                      description="Update your name and photo"
+                      label={t('account_settings.edit_profile')}
+                      description={t('account_settings.edit_profile_desc')}
                       onClick={() => setView('edit-profile')}
                     />
                     <SettingsItem
                       icon={Lock}
-                      label="Security"
-                      description="Change password and 2FA"
+                      label={t('account_settings.security')}
+                      description={t('account_settings.security_desc')}
                     />
 
                     <div className="px-4 py-2 mt-4">
-                      <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Preferences</h5>
+                      <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('account_settings.preferences')}</h5>
                     </div>
                     <SettingsItem
                       icon={Bell}
-                      label="Notifications"
-                      description="Configure alerts & emails"
+                      label={t('account_settings.notifications')}
+                      description={t('account_settings.notifications_desc')}
                     />
                     <SettingsItem
                       icon={Globe}
-                      label="Language"
-                      description="English (United States)"
+                      label={t('account_settings.language')}
+                      description={currentLanguageLabel}
                     />
                   </div>
 
@@ -261,7 +235,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   <div className="p-6 border-t border-gray-100">
                     <SettingsItem
                       icon={LogOut}
-                      label="Sign Out"
+                      label={t('account_settings.sign_out')}
                       danger
                       onClick={() => {
                         onClose();
@@ -291,7 +265,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                       >
                         <ArrowLeft size={20} />
                       </button>
-                      <h3 className="text-lg font-bold">Edit Profile</h3>
+                      <h3 className="text-lg font-bold">{t('account_settings.edit_profile_title')}</h3>
                     </div>
 
                     {/* Profile Picture Upload */}
@@ -310,7 +284,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                         <input type="file" className="hidden" />
                       </div>
                       <p className="mt-3 text-xs font-bold text-brand-orange hover:underline cursor-pointer">
-                        Change Photo
+                        {t('account_settings.change_photo')}
                       </p>
                     </div>
                   </div>
@@ -343,7 +317,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        First Name
+                        {t('account_settings.firstname')}
                       </label>
                       <div className="relative">
                         <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
@@ -359,7 +333,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
 
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Last Name
+                        {t('account_settings.lastname')}
                       </label>
                       <div className="relative">
                         <User size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
@@ -375,7 +349,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
 
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Username
+                        {t('account_settings.username')}
                       </label>
                       <div className="relative">
                         <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-muted" />
@@ -391,7 +365,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
 
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted ml-1">
-                        Role
+                        {t('account_settings.role')}
                       </label>
                       <input
                         type="text"
@@ -412,26 +386,16 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                       disabled={isSaving}
                       className="flex-1 py-3 bg-gray-100 text-brand-text rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Cancel
+                      {t('account_settings.cancel')}
                     </button>
                     <button
-                      disabled={isSaving || !hasChanges}
-                      className={cn(
-                        "flex-1 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer flex items-center justify-center gap-2",
-                        hasChanges && !isSaving
-                          ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20 hover:opacity-90"
-                          : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
-                      )}
-                      onClick={handleSaveProfile}
+                      className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer"
+                      onClick={() => {
+                        updateUser({ firstname, lastname, username });
+                        setView('main');
+                      }}
                     >
-                      {isSaving ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" />
-                          Saving...
-                        </>
-                      ) : (
-                        'Save Changes'
-                      )}
+                      {t('account_settings.save_changes')}
                     </button>
                   </div>
                 </motion.div>

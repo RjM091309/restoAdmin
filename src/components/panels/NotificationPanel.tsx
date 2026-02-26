@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Bell, ShoppingBag, User, CheckCircle, Info } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -61,8 +62,47 @@ type NotificationPanelProps = {
 export const NotificationPanel: React.FC<NotificationPanelProps> = ({
   isOpen,
   onClose,
-  notifications = mockNotifications,
+  notifications: propsNotifications,
 }) => {
+  const { t } = useTranslation();
+
+  const defaultNotifications: Notification[] = [
+    {
+      id: '1',
+      title: t('notifications.new_order_title'),
+      message: t('notifications.new_order_message'),
+      time: t('notifications.time_2_mins_ago'),
+      type: 'order',
+      unread: true,
+    },
+    {
+      id: '2',
+      title: t('notifications.new_customer_title'),
+      message: t('notifications.new_customer_message'),
+      time: t('notifications.time_15_mins_ago'),
+      type: 'user',
+      unread: true,
+    },
+    {
+      id: '3',
+      title: t('notifications.stock_alert_title'),
+      message: t('notifications.stock_alert_message'),
+      time: t('notifications.time_1_hour_ago'),
+      type: 'system',
+      unread: false,
+    },
+    {
+      id: '4',
+      title: t('notifications.payment_completed_title'),
+      message: t('notifications.payment_completed_message'),
+      time: t('notifications.time_2_hours_ago'),
+      type: 'success',
+      unread: false,
+    },
+  ];
+
+  const notifications = propsNotifications || defaultNotifications;
+
   const unreadCount = notifications.filter((n) => n.unread).length;
 
   return (
@@ -92,9 +132,9 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
                   <Bell size={20} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold">Notifications</h3>
+                  <h3 className="text-lg font-bold">{t('notifications.title')}</h3>
                   <p className="text-xs text-brand-muted font-medium">
-                    You have {unreadCount} unread messages
+                    {t('notifications.unread_messages', { count: unreadCount })}
                   </p>
                 </div>
               </div>
@@ -153,14 +193,14 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-brand-muted py-20">
                   <Bell size={48} className="mb-4 opacity-20" />
-                  <p className="text-sm font-medium">No notifications yet</p>
+                  <p className="text-sm font-medium">{t('notifications.no_notifications')}</p>
                 </div>
               )}
             </div>
 
             <div className="p-6 border-t border-gray-100">
               <button className="w-full py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer">
-                Mark all as read
+                {t('notifications.mark_all_as_read')}
               </button>
             </div>
           </motion.div>

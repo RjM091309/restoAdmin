@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -25,6 +26,7 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   maxWidth = 'md',
 }) => {
+  const { t } = useTranslation();
   // Prevent body scroll when modal is open
   useEffect(() => {
     if (isOpen) {
@@ -75,6 +77,7 @@ export const Modal: React.FC<ModalProps> = ({
                 <h3 className="text-xl font-bold text-brand-text">{title}</h3>
                 <button
                   onClick={onClose}
+                  title={t('common.close')}
                   className="w-8 h-8 flex items-center justify-center rounded-xl bg-gray-50 text-brand-muted hover:bg-red-50 hover:text-red-500 transition-colors"
                 >
                   <X size={18} />

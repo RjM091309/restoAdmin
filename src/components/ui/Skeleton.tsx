@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const shimmerClass = 'skeleton-shimmer';
 
@@ -29,6 +30,7 @@ export const SkeletonTransition: React.FC<SkeletonTransitionProps> = ({
   children,
   className = '',
 }) => {
+  const { t } = useTranslation();
   const [showSkeleton, setShowSkeleton] = useState(loading);
   const [fadeOut, setFadeOut] = useState(false);
   const loadingStartRef = useRef<number | null>(null);
@@ -72,6 +74,9 @@ export const SkeletonTransition: React.FC<SkeletonTransitionProps> = ({
     <div
       className={`skeleton-transition-wrapper ${fadeOut ? 'skeleton-fade-out' : ''} ${className}`.trim()}
       style={{ transition: `opacity ${fadeOutMs}ms ease-out` }}
+      aria-busy={loading}
+      aria-live="polite"
+      aria-label={loading ? t('common.loading') : undefined}
     >
       {skeleton}
     </div>
@@ -125,17 +130,20 @@ export const SkeletonTable: React.FC<SkeletonTableProps> = ({
   rows = 10,
   showToolbar = true,
   className = '',
-}) => (
-  <div className={className}>
-    {showToolbar && (
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-        <Skeleton className="h-10 w-64 rounded-xl" />
-        <Skeleton className="h-10 w-48 rounded-xl" />
-      </div>
-    )}
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
+}) => {
+  const { t } = useTranslation();
+  return (
+    <div className={className} aria-busy aria-live="polite">
+      {showToolbar && (
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <Skeleton className="h-10 w-64 rounded-xl" />
+          <Skeleton className="h-10 w-48 rounded-xl" />
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" aria-label={t('common.loading')}>
+          <caption className="sr-only">{t('common.loading')}</caption>
+          <thead>
           <tr className="text-left border-b border-slate-200">
             {Array.from({ length: columns }).map((_, i) => (
               <th key={i} className="pb-3 pr-4">
@@ -165,7 +173,8 @@ export const SkeletonTable: React.FC<SkeletonTableProps> = ({
       </div>
     </div>
   </div>
-);
+  );
+};
 
 /** Grid of stat cards (e.g. 4 cards). */
 export const SkeletonStatCards: React.FC<SkeletonProps & { count?: number }> = ({

@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
             id: b.IDNo,
             name: b.BRANCH_LABEL || b.BRANCH_NAME,
           }));
-          const allBranches = [{ id: 'all', name: 'All Branches' }, ...data];
+          const allBranches = [{ id: 'all', name: t('header.all_branches') }, ...data];
           setBranches(allBranches);
           if (!selectedBranch && allBranches.length > 0) {
             const params = new URLSearchParams(window.location.search);
@@ -114,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     fetchBranches();
-  }, [onBranchChange, selectedBranch]);
+  }, [onBranchChange, selectedBranch, t]);
 
   const startDate = toDate(dateRange.start);
   const endDate = toDate(dateRange.end);
@@ -146,233 +146,235 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-    <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
-      <div>
-        <h2 className="text-3xl font-bold flex items-center gap-2">
-          {breadcrumbs.length > 0 ? (
-            breadcrumbs.map((crumb, idx) => (
-              <React.Fragment key={idx}>
-                <span className={idx === breadcrumbs.length - 1 ? "text-brand-text" : "text-brand-muted"}>
-                  {crumb}
-                </span>
-                {idx < breadcrumbs.length - 1 && (
-                  <span className="text-brand-muted text-xl mx-1">/</span>
-                )}
-              </React.Fragment>
-            ))
-          ) : (
-            activeTab.startsWith('User') ? 'User Management' : activeTab
-          )}
-        </h2>
-        <p className="text-brand-muted text-sm mt-1">
-          {activeTab === 'Dashboard'
-            ? `Hello ${user?.firstname || 'User'}, welcome back!`
-            : activeTab === 'Orders'
-              ? 'View and manage restaurant orders.'
-              : activeTab === 'Menu'
-                ? 'Manage your restaurant menu items.'
-                : activeTab === 'Inventory'
-                  ? 'Manage your restaurant supplies and stock.'
-                  : activeTab === 'User Info'
-                    ? 'View and manage individual user accounts.'
-                    : activeTab === 'User Role'
-                      ? 'Configure user roles and their permissions.'
-                      : activeTab === 'User Access'
-                        ? 'Control user access levels to system features.'
-                        : `View your ${activeTab.toLowerCase()}.`}
-        </p>
-      </div>
+      <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
+        <div>
+          <h2 className="text-3xl font-bold flex items-center gap-2">
+            {breadcrumbs.length > 0 ? (
+              breadcrumbs.map((crumb, idx) => (
+                <React.Fragment key={idx}>
+                  <span className={idx === breadcrumbs.length - 1 ? "text-brand-text" : "text-brand-muted"}>
+                    {crumb}
+                  </span>
+                  {idx < breadcrumbs.length - 1 && (
+                    <span className="text-brand-muted text-xl mx-1">/</span>
+                  )}
+                </React.Fragment>
+              ))
+            ) : (
+              activeTab.startsWith('User') ? t('header.user_management') : activeTab
+            )}
+          </h2>
+          <p className="text-brand-muted text-sm mt-1">
+            {activeTab === 'Dashboard'
+              ? t('header.subtitle_dashboard', { name: user?.firstname || t('header.user') })
+              : activeTab === 'Orders'
+                ? t('header.subtitle_orders')
+                : activeTab === 'Menu'
+                  ? t('header.subtitle_menu')
+                  : activeTab === 'Inventory'
+                    ? t('header.subtitle_inventory')
+                    : activeTab === 'User Info'
+                      ? t('header.subtitle_user_info')
+                      : activeTab === 'User Role'
+                        ? t('header.subtitle_user_role')
+                        : activeTab === 'User Access'
+                          ? t('header.subtitle_user_access')
+                          : t('header.subtitle_default', { tab: activeTab.toLowerCase() })}
+          </p>
+        </div>
 
-      <div className="flex items-center gap-6">
-        {showDateRangePicker && (
+        <div className="flex items-center gap-6">
+          {showDateRangePicker && (
+            <div className="relative">
+              <button
+                onClick={() => setDropdownOpen((o) => !o)}
+                className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all cursor-pointer"
+              >
+                <Calendar size={20} className="text-brand-muted" />
+                <span className="text-sm text-brand-muted whitespace-nowrap">
+                  {dateRange.start && dateRange.end
+                    ? `${formatDate(dateRange.start)} - ${formatDate(dateRange.end)}`
+                    : t('header.date_range')}
+                </span>
+                <ChevronDown
+                  size={16}
+                  className="text-brand-muted group-hover:text-brand-primary transition-colors"
+                />
+              </button>
+
+              {dropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={handleClose}
+                    aria-hidden
+                  />
+                  <div className="absolute top-full right-0 mt-2 z-50">
+                    <DatePicker
+                      inline
+                      selectsRange
+                      startDate={pickerValue[0]}
+                      endDate={pickerValue[1]}
+                      onChange={handleDateRangeChange}
+                      dateFormat="MMM d, yyyy"
+                      calendarClassName="react-datepicker-material"
+                      isClearable
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="relative">
             <button
-              onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-3 bg-white px-5 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all cursor-pointer"
+              onClick={() => setBranchDropdownOpen((o) => !o)}
+              className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all w-64 justify-between group cursor-pointer"
             >
-              <Calendar size={20} className="text-brand-muted" />
-              <span className="text-sm text-brand-muted whitespace-nowrap">
-                {dateRange.start && dateRange.end
-                  ? `${formatDate(dateRange.start)} - ${formatDate(dateRange.end)}`
-                  : 'Date range'}
-              </span>
+              <div className="flex items-center gap-2">
+                <MapPin size={20} className="text-brand-muted" />
+                <span className="text-sm text-brand-muted">
+                  {selectedBranch 
+                    ? (selectedBranch.id === 'all' ? t('header.all_branches') : selectedBranch.name) 
+                    : t('header.select_branch')}
+                </span>
+              </div>
               <ChevronDown
                 size={16}
-                className="text-brand-muted group-hover:text-brand-primary transition-colors"
+                className={clsx(
+                  'text-brand-muted group-hover:text-brand-primary transition-all duration-200',
+                  branchDropdownOpen && 'rotate-180 text-brand-primary'
+                )}
               />
             </button>
 
-            {dropdownOpen && (
+            {branchDropdownOpen && (
               <>
                 <div
                   className="fixed inset-0 z-40"
-                  onClick={handleClose}
+                  onClick={() => setBranchDropdownOpen(false)}
                   aria-hidden
                 />
-                <div className="absolute top-full right-0 mt-2 z-50">
-                  <DatePicker
-                    inline
-                    selectsRange
-                    startDate={pickerValue[0]}
-                    endDate={pickerValue[1]}
-                    onChange={handleDateRangeChange}
-                    dateFormat="MMM d, yyyy"
-                    calendarClassName="react-datepicker-material"
-                    isClearable
-                  />
+                <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
+                  {branches.map((branch) => (
+                    <button
+                      key={branch.id}
+                      onClick={() => {
+                        openBranchInNewTab(branch);
+                        setBranchDropdownOpen(false);
+                      }}
+                      className={clsx(
+                        'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-primary/5 cursor-pointer',
+                        selectedBranch?.id === branch.id
+                          ? 'text-brand-muted bg-brand-primary/5'
+                          : 'text-brand-text'
+                      )}
+                    >
+                      {branch.id === 'all' ? t('header.all_branches') : branch.name}
+                    </button>
+                  ))}
                 </div>
               </>
             )}
           </div>
-        )}
 
-        <div className="relative">
-          <button
-            onClick={() => setBranchDropdownOpen((o) => !o)}
-            className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all w-64 justify-between group cursor-pointer"
-          >
-            <div className="flex items-center gap-2">
-              <MapPin size={20} className="text-brand-muted" />
-              <span className="text-sm text-brand-muted">
-                {selectedBranch ? selectedBranch.name : 'Select Branch'}
-              </span>
-            </div>
-            <ChevronDown
-              size={16}
-              className={clsx(
-                'text-brand-muted group-hover:text-brand-primary transition-all duration-200',
-                branchDropdownOpen && 'rotate-180 text-brand-primary'
-              )}
-            />
-          </button>
-
-          {branchDropdownOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setBranchDropdownOpen(false)}
-                aria-hidden
-              />
-              <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
-                {branches.map((branch) => (
-                  <button
-                    key={branch.id}
-                    onClick={() => {
-                      openBranchInNewTab(branch);
-                      setBranchDropdownOpen(false);
-                    }}
-                    className={clsx(
-                      'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-primary/5 cursor-pointer',
-                      selectedBranch?.id === branch.id
-                        ? 'text-brand-muted bg-brand-primary/5'
-                        : 'text-brand-text'
-                    )}
-                  >
-                    {branch.name}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsLanguagePanelOpen(true)}
-            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
-          >
-            <Globe size={20} />
-          </button>
-          <button
-            onClick={onOpenNotifications}
-            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
-          >
-            <Bell size={20} />
-          </button>
-          <button
-            onClick={onOpenSystemSettings}
-            className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
-          >
-            <Settings size={20} />
-          </button>
-        </div>
-
-        <div
-          onClick={onOpenAccountSettings}
-          className="flex items-center gap-3 pl-6 border-l border-gray-200 cursor-pointer group"
-        >
-          <div className="text-right">
-            <p className="text-base font-bold group-hover:text-brand-primary transition-colors">
-              {user ? `${user.firstname} ${user.lastname}` : 'User'}
-            </p>
-            <p className="text-xs text-brand-muted font-medium">
-              {user?.permissions === 1 ? 'Admin' : 'Staff'}
-            </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsLanguagePanelOpen(true)}
+              className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+            >
+              <Globe size={20} />
+            </button>
+            <button
+              onClick={onOpenNotifications}
+              className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+            >
+              <Bell size={20} />
+            </button>
+            <button
+              onClick={onOpenSystemSettings}
+              className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+            >
+              <Settings size={20} />
+            </button>
           </div>
-          <img
-            src={user?.avatar || 'https://picsum.photos/seed/user/100/100'}
-            alt="Profile"
-            className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-primary/20 transition-all"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      </div>
-    </header>
 
-    <AnimatePresence>
-      {isLanguagePanelOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsLanguagePanelOpen(false)}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
-          />
-          <motion.div
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed top-0 right-0 h-full w-96 bg-white shadow-2xl z-[70] flex flex-col"
+          <div
+            onClick={onOpenAccountSettings}
+            className="flex items-center gap-3 pl-6 border-l border-gray-200 cursor-pointer group"
           >
-            <div className="flex flex-col h-full">
-              <div className="p-6 border-b border-gray-100">
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => setIsLanguagePanelOpen(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer"
-                  >
-                    <ArrowLeft size={20} />
-                  </button>
-                  <h3 className="text-lg font-bold">{t('topbar.select_language')}</h3>
+            <div className="text-right">
+              <p className="text-base font-bold group-hover:text-brand-primary transition-colors">
+                {user ? `${user.firstname} ${user.lastname}` : t('header.user')}
+              </p>
+              <p className="text-xs text-brand-muted font-medium">
+                {user?.permissions === 1 ? t('header.admin') : t('header.staff')}
+              </p>
+            </div>
+            <img
+              src={user?.avatar || 'https://picsum.photos/seed/user/100/100'}
+              alt={t('header.profile')}
+              className="w-10 h-10 rounded-xl object-cover border-2 border-white shadow-sm group-hover:border-brand-primary/20 transition-all"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        </div>
+      </header>
+
+      <AnimatePresence>
+        {isLanguagePanelOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsLanguagePanelOpen(false)}
+              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 right-0 h-full w-96 bg-white shadow-2xl z-[70] flex flex-col"
+            >
+              <div className="flex flex-col h-full">
+                <div className="p-6 border-b border-gray-100">
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={() => setIsLanguagePanelOpen(false)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer"
+                    >
+                      <ArrowLeft size={20} />
+                    </button>
+                    <h3 className="text-lg font-bold">{t('header.select_language')}</h3>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                  {languages.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => handleLanguageChange(lang.code)}
+                      className={cn(
+                        "w-full flex items-center justify-between p-4 rounded-2xl transition-all cursor-pointer border",
+                        i18n.language === lang.code
+                          ? "bg-brand-orange/5 border-brand-orange/20 text-brand-orange"
+                          : "bg-transparent border-transparent hover:bg-gray-50 text-brand-text"
+                      )}
+                    >
+                      <div className="flex items-center gap-4">
+                        <span className="text-2xl">{lang.flag}</span>
+                        <span className="font-bold text-sm">{lang.name}</span>
+                      </div>
+                      {i18n.language === lang.code && <Check size={18} />}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
-                {languages.map((lang) => (
-                  <button
-                    key={lang.code}
-                    onClick={() => handleLanguageChange(lang.code)}
-                    className={cn(
-                      "w-full flex items-center justify-between p-4 rounded-2xl transition-all cursor-pointer border",
-                      i18n.language === lang.code
-                        ? "bg-brand-orange/5 border-brand-orange/20 text-brand-orange"
-                        : "bg-transparent border-transparent hover:bg-gray-50 text-brand-text"
-                    )}
-                  >
-                    <div className="flex items-center gap-4">
-                      <span className="text-2xl">{lang.flag}</span>
-                      <span className="font-bold text-sm">{lang.name}</span>
-                    </div>
-                    {i18n.language === lang.code && <Check size={18} />}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
@@ -25,7 +26,6 @@ import {
     getOrderItems,
     createOrder,
     updateOrderStatus,
-    getOrderStatusLabel,
     ORDER_STATUS,
     type OrderRecord,
     type OrderItemRecord,
@@ -56,6 +56,7 @@ type NewOrderItem = {
 };
 
 export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
+    const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
 
     // ----- Data -----
@@ -87,6 +88,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
     const [newOrderSelectedMenuId, setNewOrderSelectedMenuId] = useState<string>('');
     const [newOrderQty, setNewOrderQty] = useState<number>(1);
 
+    // ==================== Helper ====================
+    const getStatusLabel = (status: number) => {
+        switch (Number(status)) {
+            case ORDER_STATUS.PENDING: return t('orders.pending');
+            case ORDER_STATUS.CONFIRMED: return t('orders.confirmed');
+            case ORDER_STATUS.SETTLED: return t('orders.settled');
+            case ORDER_STATUS.CANCELLED: return t('orders.cancelled');
+            default: return 'Unknown';
+        }
+    };
+
     // ==================== Data fetching ====================
     const loadOrders = useCallback(async () => {
         setLoading(true);
@@ -95,12 +107,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             const data = await getOrders(branchId);
             setOrders(Array.isArray(data) ? data : []);
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'Failed to load orders');
+            setError(e instanceof Error ? e.message : t('orders.failed_to_load'));
             setOrders([]);
         } finally {
             setLoading(false);
         }
-    }, [branchId]);
+    }, [branchId, t]);
 
     useEffect(() => {
         loadOrders();
@@ -145,13 +157,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
 
     // ==================== Status update ====================
     const confirmUpdateStatus = (order: OrderRecord, newStatus: number) => {
-        const label = getOrderStatusLabel(newStatus);
+        const label = getStatusLabel(newStatus);
         setSwal({
             type: 'question',
-            title: 'Update Order Status?',
-            text: `Change order ${order.ORDER_NO} to "${label}"?`,
+            title: t('orders.swal.update_status_title'),
+            text: t('orders.swal.update_status_text', { orderNo: order.ORDER_NO, status: label }),
             showCancel: true,
-            confirmText: 'Yes, Update',
+            confirmText: t('orders.swal.confirm_update'),
             onConfirm: async () => {
                 setSwal(null);
                 setStatusSubmitting(true);
@@ -159,9 +171,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                     await updateOrderStatus(String(order.IDNo), newStatus);
                     await loadOrders();
                     if (detailOrder?.IDNo === order.IDNo) setDetailOrder({ ...order, STATUS: newStatus });
-                    setSwal({ type: 'success', title: 'Updated!', text: `Order ${order.ORDER_NO} is now ${label}.`, onConfirm: () => setSwal(null) });
+                    setSwal({ 
+                        type: 'success', 
+                        title: t('orders.swal.updated_title'), 
+                        text: t('orders.swal.updated_text', { orderNo: order.ORDER_NO, status: label }), 
+                        onConfirm: () => setSwal(null) 
+                    });
                 } catch (e) {
-                    setSwal({ type: 'error', title: 'Error', text: e instanceof Error ? e.message : 'Failed to update', onConfirm: () => setSwal(null) });
+                    setSwal({ 
+                        type: 'error', 
+                        title: t('orders.swal.error_title'), 
+                        text: e instanceof Error ? e.message : t('orders.swal.update_failed'), 
+                        onConfirm: () => setSwal(null) 
+                    });
                 } finally {
                     setStatusSubmitting(false);
                 }
@@ -205,9 +227,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
     const newOrderSubtotal = newOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
     const addNewOrderItem = () => {
-        if (!newOrderSelectedMenuId) { setSwal({ type: 'warning', title: 'Select an Item', text: 'Please select a menu item first.', onConfirm: () => setSwal(null) }); return; }
+        if (!newOrderSelectedMenuId) { 
+            setSwal({ 
+                type: 'warning', 
+                title: t('orders.swal.select_item_title'), 
+                text: t('orders.swal.select_item_text'), 
+                onConfirm: () => setSwal(null) 
+            }); 
+            return; 
+        }
         const qty = Number(newOrderQty);
-        if (!Number.isFinite(qty) || qty <= 0) { setSwal({ type: 'warning', title: 'Invalid Quantity', text: 'Quantity must be greater than 0.', onConfirm: () => setSwal(null) }); return; }
+        if (!Number.isFinite(qty) || qty <= 0) { 
+            setSwal({ 
+                type: 'warning', 
+                title: t('orders.swal.invalid_qty_title'), 
+                text: t('orders.swal.invalid_qty_text'), 
+                onConfirm: () => setSwal(null) 
+            }); 
+            return; 
+        }
         const menu = newOrderMenus.find((m) => m.id === newOrderSelectedMenuId);
         if (!menu) return;
         setNewOrderItems((prev) => {
@@ -221,8 +259,24 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
     const removeNewOrderItem = (menuId: string) => setNewOrderItems((prev) => prev.filter((p) => p.menuId !== menuId));
 
     const submitNewOrder = async () => {
-        if (!newOrderNo.trim()) { setSwal({ type: 'warning', title: 'Order No Required', text: 'Please provide an order number.', onConfirm: () => setSwal(null) }); return; }
-        if (newOrderItems.length === 0) { setSwal({ type: 'warning', title: 'Add Items', text: 'Please add at least one item.', onConfirm: () => setSwal(null) }); return; }
+        if (!newOrderNo.trim()) { 
+            setSwal({ 
+                type: 'warning', 
+                title: t('orders.swal.order_no_required_title'), 
+                text: t('orders.swal.order_no_required_text'), 
+                onConfirm: () => setSwal(null) 
+            }); 
+            return; 
+        }
+        if (newOrderItems.length === 0) { 
+            setSwal({ 
+                type: 'warning', 
+                title: t('orders.swal.add_items_title'), 
+                text: t('orders.swal.add_items_text'), 
+                onConfirm: () => setSwal(null) 
+            }); 
+            return; 
+        }
         setNewOrderSubmitting(true);
         try {
             const items = newOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
@@ -236,9 +290,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             });
             setNewOrderOpen(false);
             await loadOrders();
-            setSwal({ type: 'success', title: 'Created!', text: `Order ${newOrderNo.trim()} has been created.`, onConfirm: () => setSwal(null) });
+            setSwal({ 
+                type: 'success', 
+                title: t('orders.swal.created_title'), 
+                text: t('orders.swal.created_text', { orderNo: newOrderNo.trim() }), 
+                onConfirm: () => setSwal(null) 
+            });
         } catch (e) {
-            setSwal({ type: 'error', title: 'Error!', text: e instanceof Error ? e.message : 'Failed to create order', onConfirm: () => setSwal(null) });
+            setSwal({ 
+                type: 'error', 
+                title: t('orders.swal.error_title'), 
+                text: e instanceof Error ? e.message : t('orders.swal.create_failed'), 
+                onConfirm: () => setSwal(null) 
+            });
         } finally {
             setNewOrderSubmitting(false);
         }
@@ -246,7 +310,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
 
     // ==================== Badges ====================
     const statusBadge = (status: number) => {
-        const label = getOrderStatusLabel(status);
+        const label = getStatusLabel(status);
         const style = status === ORDER_STATUS.SETTLED ? 'bg-green-100 text-green-600' : status === ORDER_STATUS.CANCELLED ? 'bg-red-100 text-red-600' : status === ORDER_STATUS.CONFIRMED ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600';
         return <span className={cn('text-xs font-bold px-2 py-1 rounded-lg', style)}>{label}</span>;
     };
@@ -254,14 +318,14 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
     const orderTypeBadge = (orderType: string | null | undefined) => {
         if (!orderType) return <span className="text-brand-muted text-sm">—</span>;
         const normalized = orderType.trim().toUpperCase().replace(/\s+/g, '_');
-        const label = normalized === 'DINE_IN' ? 'Dine In' : normalized === 'TAKE_OUT' ? 'Take Out' : normalized === 'DELIVERY' ? 'Delivery' : orderType;
+        const label = normalized === 'DINE_IN' ? t('orders.dine_in') : normalized === 'TAKE_OUT' ? t('orders.take_out') : normalized === 'DELIVERY' ? t('orders.delivery') : orderType;
         return <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded-lg">{label}</span>;
     };
 
     // ==================== Table columns ====================
     const columns: ColumnDef<OrderRecord>[] = useMemo(() => [
         {
-            header: 'Order',
+            header: t('orders.order_no'),
             render: (order) => (
                 <div className="flex items-center gap-3 min-w-[160px]">
                     <Receipt size={16} className="text-brand-muted shrink-0" />
@@ -275,37 +339,37 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             ),
         },
         {
-            header: 'Table',
+            header: t('orders.table'),
             render: (order) => <span className="text-sm font-bold">{order.TABLE_NUMBER ?? '—'}</span>,
         },
         {
-            header: 'Type',
+            header: t('orders.type'),
             render: (order) => orderTypeBadge(order.ORDER_TYPE),
         },
         {
-            header: 'Status',
+            header: t('orders.status'),
             render: (order) => statusBadge(order.STATUS),
         },
         {
-            header: 'Total',
+            header: t('orders.grand_total'),
             render: (order) => (
                 <span className="text-sm font-bold text-brand-text">₱{Number(order.GRAND_TOTAL).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
             ),
         },
         {
-            header: 'Actions',
+            header: t('orders.actions'),
             className: 'text-right',
             render: (order) => (
                 <div className="flex justify-end items-center gap-2">
-                    <button onClick={() => openDetail(order)} className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg" title="View Details">
+                    <button onClick={() => openDetail(order)} className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg" title={t('orders.view_details')}>
                         <Eye size={16} />
                     </button>
                     {order.STATUS !== ORDER_STATUS.SETTLED && order.STATUS !== ORDER_STATUS.CANCELLED && (
                         <>
-                            <button onClick={() => confirmUpdateStatus(order, ORDER_STATUS.SETTLED)} disabled={statusSubmitting} className="p-2 text-green-600 hover:bg-green-50 transition-colors rounded-lg disabled:opacity-50" title="Settle">
+                            <button onClick={() => confirmUpdateStatus(order, ORDER_STATUS.SETTLED)} disabled={statusSubmitting} className="p-2 text-green-600 hover:bg-green-50 transition-colors rounded-lg disabled:opacity-50" title={t('orders.mark_as_settled')}>
                                 <CheckCircle2 size={16} />
                             </button>
-                            <button onClick={() => confirmUpdateStatus(order, ORDER_STATUS.CANCELLED)} disabled={statusSubmitting} className="p-2 text-red-500 hover:bg-red-50 transition-colors rounded-lg disabled:opacity-50" title="Cancel">
+                            <button onClick={() => confirmUpdateStatus(order, ORDER_STATUS.CANCELLED)} disabled={statusSubmitting} className="p-2 text-red-500 hover:bg-red-50 transition-colors rounded-lg disabled:opacity-50" title={t('orders.cancel_order')}>
                                 <XCircle size={16} />
                             </button>
                         </>
@@ -313,7 +377,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                 </div>
             ),
         },
-    ], [statusSubmitting]);
+    ], [statusSubmitting, t]);
 
     // ==================== RENDER ====================
     return (
@@ -352,7 +416,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                                     <input
                                         type="text"
-                                        placeholder="Search orders..."
+                                        placeholder={t('orders.pagination.search_placeholder')}
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
                                         className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
@@ -360,15 +424,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                                 </div>
                                 <Select2
                                     options={[
-                                        { value: 'all', label: 'All Statuses' },
-                                        { value: String(ORDER_STATUS.PENDING), label: 'Pending' },
-                                        { value: String(ORDER_STATUS.CONFIRMED), label: 'Confirmed' },
-                                        { value: String(ORDER_STATUS.SETTLED), label: 'Settled' },
-                                        { value: String(ORDER_STATUS.CANCELLED), label: 'Cancelled' },
+                                        { value: 'all', label: t('orders.all_statuses') },
+                                        { value: String(ORDER_STATUS.PENDING), label: t('orders.pending') },
+                                        { value: String(ORDER_STATUS.CONFIRMED), label: t('orders.confirmed') },
+                                        { value: String(ORDER_STATUS.SETTLED), label: t('orders.settled') },
+                                        { value: String(ORDER_STATUS.CANCELLED), label: t('orders.cancelled') },
                                     ]}
                                     value={statusFilter}
                                     onChange={(v) => setStatusFilter(v ? String(v) : 'all')}
-                                    placeholder="All Statuses"
+                                    placeholder={t('orders.all_statuses')}
                                     className="w-48"
                                 />
                             </div>
@@ -377,7 +441,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
                             >
                                 <Plus size={18} />
-                                New Order
+                                {t('orders.new_order')}
                             </button>
                         </div>
 
@@ -386,7 +450,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             <div className="flex items-start gap-3 bg-red-50 border border-red-100 text-red-700 p-4 rounded-2xl">
                                 <AlertTriangle size={18} className="mt-0.5 shrink-0" />
                                 <div className="text-sm">
-                                    <p className="font-bold">Unable to load orders</p>
+                                    <p className="font-bold">{t('orders.unable_to_load')}</p>
                                     <p className="text-xs text-red-600 mt-0.5">{error}</p>
                                 </div>
                             </div>
@@ -395,22 +459,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                         {/* Stat Cards */}
                         <div className="grid grid-cols-4 gap-6">
                             <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">Total Orders</p>
+                                <p className="text-brand-muted text-sm font-medium mb-1">{t('orders.total_orders')}</p>
                                 <h3 className="text-3xl font-bold">{stats.total}</h3>
                             </div>
                             <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">Pending</p>
+                                <p className="text-brand-muted text-sm font-medium mb-1">{t('orders.pending')}</p>
                                 <div className="flex items-center gap-2">
                                     <h3 className="text-3xl font-bold text-orange-500">{stats.pending}</h3>
                                     {stats.pending > 0 && <Clock size={18} className="text-orange-500" />}
                                 </div>
                             </div>
                             <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">Settled</p>
+                                <p className="text-brand-muted text-sm font-medium mb-1">{t('orders.settled')}</p>
                                 <h3 className="text-3xl font-bold text-green-500">{stats.settled}</h3>
                             </div>
                             <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">Revenue</p>
+                                <p className="text-brand-muted text-sm font-medium mb-1">{t('orders.revenue')}</p>
                                 <h3 className="text-3xl font-bold">₱{stats.totalRevenue.toLocaleString()}</h3>
                             </div>
                         </div>
@@ -429,16 +493,16 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             <Modal
                 isOpen={newOrderOpen}
                 onClose={closeNewOrder}
-                title="Create New Order"
+                title={t('orders.create_new_order')}
                 maxWidth="lg"
                 footer={
                     <div className="flex items-center justify-end gap-3">
                         <button onClick={closeNewOrder} disabled={newOrderSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50">
-                            Cancel
+                            {t('orders.cancel')}
                         </button>
                         <button onClick={submitNewOrder} disabled={newOrderSubmitting} className="px-6 py-2.5 rounded-xl font-bold text-white bg-green-600 shadow-lg shadow-green-600/30 hover:bg-green-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2">
                             {newOrderSubmitting && <Loader2 size={16} className="animate-spin" />}
-                            Create Order
+                            {t('orders.create_order_btn')}
                         </button>
                     </div>
                 }
@@ -446,35 +510,35 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                 <div className="space-y-5">
                     <div className="grid grid-cols-2 gap-5">
                         <div>
-                            <label className="block text-sm font-bold text-brand-text mb-2">Order No *</label>
+                            <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_no_label')}</label>
                             <input type="text" value={newOrderNo} onChange={(e) => setNewOrderNo(e.target.value)} placeholder="e.g. ORD-20260225-101530"
                                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400" />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-brand-text mb-2">Order Type</label>
+                            <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_type')}</label>
                             <Select2
                                 options={[
-                                    { value: 'DINE_IN', label: 'Dine In' },
-                                    { value: 'TAKE_OUT', label: 'Take Out' },
-                                    { value: 'DELIVERY', label: 'Delivery' },
+                                    { value: 'DINE_IN', label: t('orders.dine_in') },
+                                    { value: 'TAKE_OUT', label: t('orders.take_out') },
+                                    { value: 'DELIVERY', label: t('orders.delivery') },
                                 ]}
                                 value={newOrderType}
                                 onChange={(v) => setNewOrderType((v as typeof newOrderType) || 'DINE_IN')}
-                                placeholder="Select type"
+                                placeholder={t('orders.select_type')}
                             />
                         </div>
                     </div>
 
                     {/* Items section */}
                     <div>
-                        <label className="block text-sm font-bold text-brand-text mb-2">Order Items</label>
+                        <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
                         <div className="grid grid-cols-12 gap-3 items-end">
                             <div className="col-span-7">
                                 <Select2
                                     options={newOrderMenus.map((m) => ({ value: m.id, label: `${m.name} — ₱${Number(m.price).toLocaleString()}` }))}
                                     value={newOrderSelectedMenuId || null}
                                     onChange={(v) => setNewOrderSelectedMenuId(v ? String(v) : '')}
-                                    placeholder={newOrderLoadingRefs ? 'Loading menu...' : 'Select an item'}
+                                    placeholder={newOrderLoadingRefs ? t('orders.loading_menu') : t('orders.select_item')}
                                     disabled={newOrderLoadingRefs}
                                 />
                             </div>
@@ -485,22 +549,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             <div className="col-span-3">
                                 <button type="button" onClick={addNewOrderItem} disabled={newOrderLoadingRefs}
                                     className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1">
-                                    <Plus size={14} /> Add
+                                    <Plus size={14} /> {t('orders.add')}
                                 </button>
                             </div>
                         </div>
 
                         <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden bg-white">
                             {newOrderItems.length === 0 ? (
-                                <div className="p-4 text-sm text-brand-muted text-center">No items added yet.</div>
+                                <div className="p-4 text-sm text-brand-muted text-center">{t('orders.no_items_added')}</div>
                             ) : (
                                 <table className="w-full text-sm">
                                     <thead className="bg-gray-50">
                                         <tr>
-                                            <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">Item</th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Qty</th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Unit</th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Total</th>
+                                            <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">{t('orders.item')}</th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.qty')}</th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
                                             <th className="px-4 py-2 w-12"></th>
                                         </tr>
                                     </thead>
@@ -523,7 +587,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
 
                         {newOrderItems.length > 0 && (
                             <div className="mt-3 flex justify-end text-sm text-brand-text">
-                                Grand Total: <span className="font-bold text-brand-orange text-lg ml-2">₱{newOrderSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                {t('orders.grand_total')}: <span className="font-bold text-brand-orange text-lg ml-2">₱{newOrderSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                             </div>
                         )}
                     </div>
@@ -531,43 +595,43 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
             </Modal>
 
             {/* Detail Modal */}
-            <Modal isOpen={!!detailOrder} onClose={closeDetail} title={detailOrder ? `Order ${detailOrder.ORDER_NO}` : 'Order Detail'} maxWidth="lg">
+            <Modal isOpen={!!detailOrder} onClose={closeDetail} title={detailOrder ? `${t('orders.order_no')} ${detailOrder.ORDER_NO}` : t('orders.view_details')} maxWidth="lg">
                 {detailOrder && (
                     <div className="space-y-5">
                         <div className="flex flex-wrap gap-6">
                             <div>
-                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Status</p>
+                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('orders.status')}</p>
                                 <div className="mt-1">{statusBadge(detailOrder.STATUS)}</div>
                             </div>
                             <div>
-                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Type</p>
+                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('orders.type')}</p>
                                 <div className="mt-1">{orderTypeBadge(detailOrder.ORDER_TYPE)}</div>
                             </div>
                             <div>
-                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Table</p>
+                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('orders.table')}</p>
                                 <p className="text-sm font-bold mt-1">{detailOrder.TABLE_NUMBER ?? '—'}</p>
                             </div>
                             <div>
-                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">Grand Total</p>
+                                <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('orders.grand_total')}</p>
                                 <p className="text-lg font-bold text-brand-orange mt-1">₱{Number(detailOrder.GRAND_TOTAL).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                             </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-bold text-brand-text mb-2">Order Items</label>
+                            <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
                             {detailLoading ? (
                                 <div className="flex items-center justify-center py-8"><Loader2 size={24} className="animate-spin text-brand-orange" /></div>
                             ) : detailItems.length === 0 ? (
-                                <p className="text-sm text-brand-muted py-4">No items found.</p>
+                                <p className="text-sm text-brand-muted py-4">{t('orders.no_items_added')}</p>
                             ) : (
                                 <div className="border border-gray-100 rounded-xl overflow-hidden">
                                     <table className="w-full text-sm">
                                         <thead className="bg-gray-50">
                                             <tr>
-                                                <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">Item</th>
-                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Qty</th>
-                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Unit</th>
-                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">Total</th>
+                                                <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">{t('orders.item')}</th>
+                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.qty')}</th>
+                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
+                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
@@ -589,11 +653,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
                                 <button onClick={() => { closeDetail(); confirmUpdateStatus(detailOrder, ORDER_STATUS.SETTLED); }} disabled={statusSubmitting}
                                     className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                                    <CheckCircle2 size={16} /> Mark as Settled
+                                    <CheckCircle2 size={16} /> {t('orders.mark_as_settled')}
                                 </button>
                                 <button onClick={() => { closeDetail(); confirmUpdateStatus(detailOrder, ORDER_STATUS.CANCELLED); }} disabled={statusSubmitting}
                                     className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                                    <XCircle size={16} /> Cancel Order
+                                    <XCircle size={16} /> {t('orders.cancel_order')}
                                 </button>
                             </div>
                         )}
@@ -616,12 +680,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
                             <p className="text-brand-muted text-center mb-6">{swal.text}</p>
                             <div className="flex justify-center gap-3">
                                 {swal.showCancel && (
-                                    <button onClick={() => { swal.onCancel?.(); setSwal(null); }} className="px-6 py-2.5 bg-gray-100 text-brand-muted rounded-xl font-bold hover:bg-gray-200 transition-all">Cancel</button>
+                                    <button onClick={() => { swal.onCancel?.(); setSwal(null); }} className="px-6 py-2.5 bg-gray-100 text-brand-muted rounded-xl font-bold hover:bg-gray-200 transition-all">{t('orders.cancel')}</button>
                                 )}
                                 <button onClick={async () => { if (swal.onConfirm) await swal.onConfirm(); }}
                                     className={cn('px-6 py-2.5 text-white rounded-xl font-bold transition-all',
                                         swal.type === 'error' ? 'bg-red-500 hover:bg-red-600' : swal.type === 'success' ? 'bg-green-500 hover:bg-green-600' : swal.type === 'question' ? 'bg-red-500 hover:bg-red-600' : 'bg-brand-orange hover:opacity-90')}>
-                                    {swal.confirmText || 'OK'}
+                                    {swal.confirmText || t('orders.swal.ok')}
                                 </button>
                             </div>
                         </motion.div>
