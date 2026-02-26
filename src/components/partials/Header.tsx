@@ -112,6 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const handleClose = () => setDropdownOpen(false);
+  const showDateRangePicker = activeTab === 'Dashboard' || activeTab === 'Sales Analytics';
   const openBranchInNewTab = (branch: Branch) => {
     const url = new URL(window.location.href);
     url.searchParams.set('branchId', String(branch.id));
@@ -158,7 +159,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-6">
-        {activeTab === 'Dashboard' && (
+        {showDateRangePicker && (
           <div className="relative">
             <button
               onClick={() => setDropdownOpen((o) => !o)}

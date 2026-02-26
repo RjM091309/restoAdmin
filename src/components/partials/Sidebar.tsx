@@ -4,6 +4,7 @@ import {
   ClipboardList,
   UtensilsCrossed,
   Package,
+  BarChart3,
   Users,
   LogOut,
   ChevronDown,
@@ -150,6 +151,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           label="Dashboard"
           active={activeTab === 'Dashboard'}
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); }}
+        />
+        <SidebarItem
+          icon={BarChart3}
+          label="Sales Analytics"
+          active={activeTab === 'Sales Analytics'}
+          onClick={() => { onTabChange('Sales Analytics'); setUserMgmtExpanded(false); }}
         />
         {isSpecificBranch && (
           <SidebarItem

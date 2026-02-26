@@ -36,6 +36,7 @@ import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
+import { SalesAnalytics } from './components/analytics/SalesAnalytics';
 import { cn } from './lib/utils';
 
 // Panels
@@ -356,6 +357,7 @@ export default function App() {
     if (part === 'info') return 'User Info';
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
+    if (part === 'sales-analytics') return 'Sales Analytics';
     return part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ');
   });
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
@@ -397,6 +399,7 @@ export default function App() {
       case 'User Role': navigate(`/users/role${suffix}`); break;
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
+      case 'Sales Analytics': navigate(`/sales-analytics${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };
@@ -546,6 +549,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Expenses />
+                  </motion.div>
+                } />
+
+                <Route path="/sales-analytics" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <SalesAnalytics selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
 
