@@ -295,6 +295,34 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       grossProfit: Math.round(row.grossProfit * multiplier),
     }));
   }, [dateRange.end, dateRange.start, isAllBranch, selectedBranch]);
+  const chartPointCount = trendData.length;
+  const responsiveBarSize = useMemo(() => {
+    if (chartPointCount <= 2) return 180;
+    if (chartPointCount <= 4) return 120;
+    if (chartPointCount <= 7) return 72;
+    if (chartPointCount <= 14) return 42;
+    if (chartPointCount <= 31) return 24;
+    if (chartPointCount <= 62) return 16;
+    return 10;
+  }, [chartPointCount]);
+  const responsiveBarCategoryGap = useMemo(() => {
+    if (chartPointCount <= 2) return '0%';
+    if (chartPointCount <= 4) return '4%';
+    if (chartPointCount <= 7) return '8%';
+    if (chartPointCount <= 14) return '12%';
+    return '18%';
+  }, [chartPointCount]);
+  const responsiveXAxisInterval = useMemo(() => {
+    if (chartPointCount <= 14) return 0;
+    if (chartPointCount <= 31) return 1;
+    if (chartPointCount <= 62) return 3;
+    return 6;
+  }, [chartPointCount]);
+  const useSlantedXAxisLabels = chartPointCount > 31;
+  const responsiveXAxisAngle: 0 | -35 = useSlantedXAxisLabels ? -35 : 0;
+  const responsiveXAxisTextAnchor: 'middle' | 'end' = useSlantedXAxisLabels ? 'end' : 'middle';
+  const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
+  const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
 
   const baseSales = isAllBranch ? allSummary.totalSales : selectedData?.totalSales || 0;
   const topStatItems = useMemo(
@@ -398,16 +426,16 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'bar chart' ? (
-                <BarChart data={trendData} barCategoryGap="18%" barGap={0}>
+                <BarChart data={trendData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
                   <XAxis
                     dataKey="label"
                     tick={{ fill: '#64748b', fontSize: 11 }}
-                    interval={1}
-                    angle={-35}
-                    textAnchor="end"
-                    height={72}
-                    tickMargin={12}
+                    interval={responsiveXAxisInterval}
+                  angle={responsiveXAxisAngle}
+                  textAnchor={responsiveXAxisTextAnchor}
+                  height={responsiveXAxisHeight}
+                  tickMargin={responsiveXAxisTickMargin}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -418,7 +446,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                     tickLine={false}
                   />
                   <Tooltip {...tooltipProps} />
-                  <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={22} />
+                  <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={responsiveBarSize} />
                 </BarChart>
               ) : (
                 <AreaChart data={trendData}>
@@ -426,11 +454,11 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                   <XAxis
                     dataKey="label"
                     tick={{ fill: '#64748b', fontSize: 11 }}
-                    interval={1}
-                    angle={-35}
-                    textAnchor="end"
-                    height={72}
-                    tickMargin={12}
+                    interval={responsiveXAxisInterval}
+                    angle={responsiveXAxisAngle}
+                    textAnchor={responsiveXAxisTextAnchor}
+                    height={responsiveXAxisHeight}
+                    tickMargin={responsiveXAxisTickMargin}
                     axisLine={false}
                     tickLine={false}
                   />
