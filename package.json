@@ -20,6 +20,7 @@
     "@mui/x-date-pickers": "^8.27.2",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
+    "axios": "^1.13.5",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.19",
@@ -39,6 +40,7 @@
     "react-select": "^5.10.2",
     "recharts": "^3.7.0",
     "sonner": "^2.0.7",
+    "sweetalert2": "^11.26.20",
     "tailwind-merge": "^3.5.0",
     "vite": "^6.2.0"
   },

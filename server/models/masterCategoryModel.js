@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const BranchModel = require('./branchModel');
 
 class MasterCategoryModel {
 	static _schemaReady = false;
@@ -9,6 +10,8 @@ class MasterCategoryModel {
 		if (MasterCategoryModel._schemaPromise) return MasterCategoryModel._schemaPromise;
 
 		MasterCategoryModel._schemaPromise = (async () => {
+			await BranchModel.ensureSchema();
+
 			await pool.execute(`
 				CREATE TABLE IF NOT EXISTS master_categories (
 					IDNo INT AUTO_INCREMENT PRIMARY KEY,
@@ -24,13 +27,19 @@ class MasterCategoryModel {
 					EDITED_DT DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 					INDEX idx_master_categories_branch (BRANCH_ID),
 					INDEX idx_master_categories_active (ACTIVE),
-					INDEX idx_master_categories_type (CATEGORY_TYPE)
-				)
+					INDEX idx_master_categories_type (CATEGORY_TYPE),
+					CONSTRAINT fk_master_categories_branch
+						FOREIGN KEY (BRANCH_ID) REFERENCES branches(IDNo)
+						ON UPDATE CASCADE ON DELETE RESTRICT
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 			`);
 
 			MasterCategoryModel._schemaReady = true;
 			MasterCategoryModel._schemaPromise = null;
-		})();
+		})().catch((error) => {
+			MasterCategoryModel._schemaPromise = null;
+			throw error;
+		});
 
 		return MasterCategoryModel._schemaPromise;
 	}
@@ -70,6 +79,53 @@ class MasterCategoryModel {
 		const [rows] = await pool.execute(
 			`SELECT * FROM master_categories WHERE IDNo = ? AND ACTIVE = 1`,
 			[id]
+		);
+		return rows[0] || null;
+	}
+
+	static async getByIdForBranch(branchId, id) {
+		await MasterCategoryModel.ensureSchema();
+		const [rows] = await pool.execute(
+			`
+			SELECT
+				IDNo,
+				BRANCH_ID,
+				CATEGORY_NAME,
+				CATEGORY_TYPE,
+				DESCRIPTION,
+				ICON,
+				ACTIVE
+			FROM master_categories
+			WHERE ACTIVE = 1
+				AND BRANCH_ID = ?
+				AND IDNo = ?
+			LIMIT 1
+			`,
+			[Number(branchId), Number(id)]
+		);
+		return rows[0] || null;
+	}
+
+	static async getByTypeAndName(branchId, categoryType, categoryName) {
+		await MasterCategoryModel.ensureSchema();
+		const [rows] = await pool.execute(
+			`
+			SELECT
+				IDNo,
+				BRANCH_ID,
+				CATEGORY_NAME,
+				CATEGORY_TYPE,
+				DESCRIPTION,
+				ICON,
+				ACTIVE
+			FROM master_categories
+			WHERE ACTIVE = 1
+				AND BRANCH_ID = ?
+				AND CATEGORY_TYPE = ?
+				AND CATEGORY_NAME = ?
+			LIMIT 1
+			`,
+			[Number(branchId), String(categoryType), String(categoryName)]
 		);
 		return rows[0] || null;
 	}

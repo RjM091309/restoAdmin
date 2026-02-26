@@ -104,7 +104,13 @@ export const Header: React.FC<HeaderProps> = ({
             const params = new URLSearchParams(window.location.search);
             const branchIdFromUrl = params.get('branchId');
             if (!branchIdFromUrl) {
-              onBranchChange(allBranches[0]);
+              const userBranchId = user?.branch_id ? String(user.branch_id) : '';
+              const resolved =
+                userBranchId && userBranchId !== 'all'
+                  ? allBranches.find((b) => String(b.id) === userBranchId) || null
+                  : null;
+              const firstSpecific = allBranches.find((b) => String(b.id) !== 'all') || null;
+              onBranchChange(resolved || firstSpecific || allBranches[0]);
             }
           }
         }
@@ -114,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     fetchBranches();
-  }, [onBranchChange, selectedBranch, t]);
+  }, [onBranchChange, selectedBranch, t, user?.branch_id]);
 
   const startDate = toDate(dateRange.start);
   const endDate = toDate(dateRange.end);

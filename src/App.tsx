@@ -570,7 +570,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Expenses />
+                    <Expenses selectedBranch={selectedBranch} />
                   </motion.div>
                 } />
 

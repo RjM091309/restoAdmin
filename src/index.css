@@ -190,3 +190,8 @@
 .recharts-surface:focus-visible {
   outline: none !important;
 }
+
+/* SweetAlert2: force confirm (Yes) on the left, cancel on the right */
+.swal2-actions.swal-actions-confirm-left {
+  flex-direction: row !important;
+}
