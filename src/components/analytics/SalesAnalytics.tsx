@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Flame, ChevronDown } from 'lucide-react';
+import { BarChart3, Flame, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
   ResponsiveContainer,
@@ -102,36 +102,36 @@ const MOCK_BRANCH_SALES: BranchSales[] = [
 ];
 
 const FALLBACK_DAILY_SALES = [
-  { label: '28 Jan', sales: 82000 },
-  { label: '29 Jan', sales: 128000 },
-  { label: '30 Jan', sales: 167000 },
-  { label: '31 Jan', sales: 189000 },
-  { label: '01 Feb', sales: 228000 },
-  { label: '02 Feb', sales: 136000 },
-  { label: '03 Feb', sales: 149000 },
-  { label: '04 Feb', sales: 142000 },
-  { label: '05 Feb', sales: 178000 },
-  { label: '06 Feb', sales: 236000 },
-  { label: '07 Feb', sales: 258000 },
-  { label: '08 Feb', sales: 231000 },
-  { label: '09 Feb', sales: 121000 },
-  { label: '10 Feb', sales: 124000 },
-  { label: '11 Feb', sales: 160000 },
-  { label: '12 Feb', sales: 137000 },
-  { label: '13 Feb', sales: 166000 },
-  { label: '14 Feb', sales: 341000 },
-  { label: '15 Feb', sales: 315000 },
-  { label: '16 Feb', sales: 239000 },
-  { label: '17 Feb', sales: 221000 },
-  { label: '18 Feb', sales: 229000 },
-  { label: '19 Feb', sales: 181000 },
-  { label: '20 Feb', sales: 227000 },
-  { label: '21 Feb', sales: 273000 },
-  { label: '22 Feb', sales: 205000 },
-  { label: '23 Feb', sales: 161000 },
-  { label: '24 Feb', sales: 152000 },
-  { label: '25 Feb', sales: 131000 },
-  { label: '26 Feb', sales: 61000 },
+  { label: '28 Jan', tableDate: '28 Jan 2026', sales: 82000 },
+  { label: '29 Jan', tableDate: '29 Jan 2026', sales: 128000 },
+  { label: '30 Jan', tableDate: '30 Jan 2026', sales: 167000 },
+  { label: '31 Jan', tableDate: '31 Jan 2026', sales: 189000 },
+  { label: '01 Feb', tableDate: '01 Feb 2026', sales: 228000 },
+  { label: '02 Feb', tableDate: '02 Feb 2026', sales: 136000 },
+  { label: '03 Feb', tableDate: '03 Feb 2026', sales: 149000 },
+  { label: '04 Feb', tableDate: '04 Feb 2026', sales: 142000 },
+  { label: '05 Feb', tableDate: '05 Feb 2026', sales: 178000 },
+  { label: '06 Feb', tableDate: '06 Feb 2026', sales: 236000 },
+  { label: '07 Feb', tableDate: '07 Feb 2026', sales: 258000 },
+  { label: '08 Feb', tableDate: '08 Feb 2026', sales: 231000 },
+  { label: '09 Feb', tableDate: '09 Feb 2026', sales: 121000 },
+  { label: '10 Feb', tableDate: '10 Feb 2026', sales: 124000 },
+  { label: '11 Feb', tableDate: '11 Feb 2026', sales: 160000 },
+  { label: '12 Feb', tableDate: '12 Feb 2026', sales: 137000 },
+  { label: '13 Feb', tableDate: '13 Feb 2026', sales: 166000 },
+  { label: '14 Feb', tableDate: '14 Feb 2026', sales: 341000 },
+  { label: '15 Feb', tableDate: '15 Feb 2026', sales: 315000 },
+  { label: '16 Feb', tableDate: '16 Feb 2026', sales: 239000 },
+  { label: '17 Feb', tableDate: '17 Feb 2026', sales: 221000 },
+  { label: '18 Feb', tableDate: '18 Feb 2026', sales: 229000 },
+  { label: '19 Feb', tableDate: '19 Feb 2026', sales: 181000 },
+  { label: '20 Feb', tableDate: '20 Feb 2026', sales: 227000 },
+  { label: '21 Feb', tableDate: '21 Feb 2026', sales: 273000 },
+  { label: '22 Feb', tableDate: '22 Feb 2026', sales: 205000 },
+  { label: '23 Feb', tableDate: '23 Feb 2026', sales: 161000 },
+  { label: '24 Feb', tableDate: '24 Feb 2026', sales: 152000 },
+  { label: '25 Feb', tableDate: '25 Feb 2026', sales: 131000 },
+  { label: '26 Feb', tableDate: '26 Feb 2026', sales: 61000 },
 ];
 
 const parseDateSafe = (value: string) => {
@@ -148,7 +148,7 @@ const createRangeSales = (start: string, end: string) => {
   const endDate = parseDateSafe(end);
   if (!startDate || !endDate || startDate > endDate) return FALLBACK_DAILY_SALES;
 
-  const rows: { label: string; sales: number }[] = [];
+  const rows: { label: string; tableDate: string; sales: number }[] = [];
   const cursor = new Date(startDate);
   let index = 0;
 
@@ -158,6 +158,7 @@ const createRangeSales = (start: string, end: string) => {
     const sales = Math.max(50000, 120000 + seasonal + trend);
     rows.push({
       label: formatDateLabel(cursor),
+      tableDate: cursor.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
       sales,
     });
     cursor.setDate(cursor.getDate() + 1);
@@ -222,15 +223,48 @@ const MOCK_TOP_MENU_BRANCH: Record<string, TopMenuItem[]> = {
   ],
 };
 
+const MOCK_LOW_MENU_ALL: TopMenuItem[] = [
+  { name: 'Miso Soup', category: 'Soup', orders: 9, sales: 1710 },
+  { name: 'Tofu Salad', category: 'Salad', orders: 7, sales: 1540 },
+  { name: 'Cucumber Roll', category: 'Sushi', orders: 5, sales: 975 },
+];
+
+const MOCK_LOW_MENU_BRANCH: Record<string, TopMenuItem[]> = {
+  '1': [
+    { name: 'Miso Soup', category: 'Soup', orders: 4, sales: 760 },
+    { name: 'Tofu Salad', category: 'Salad', orders: 3, sales: 660 },
+  ],
+  '2': [
+    { name: 'Cucumber Roll', category: 'Sushi', orders: 3, sales: 585 },
+    { name: 'Veggie Tempura', category: 'Appetizer', orders: 2, sales: 390 },
+  ],
+  '3': [
+    { name: 'Cold Soba', category: 'Noodles', orders: 2, sales: 430 },
+    { name: 'Miso Soup', category: 'Soup', orders: 1, sales: 190 },
+  ],
+};
+
 const money = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
+const PRODUCT_SERIES = [
+  { key: 'p1', name: 'S2 Premium Set B (4Pax)', color: '#6366f1' },
+  { key: 'p2', name: 'I1 Iberico Kkot Moksal', color: '#10b981' },
+  { key: 'p3', name: 'S1 Premium Set A (2Pax)', color: '#f59e0b' },
+  { key: 'p4', name: 'K1 Handon KKotsamgyeopsal', color: '#ef4444' },
+  { key: 'p5', name: 'Chamisul', color: '#8b5cf6' },
+] as const;
+type ProductKey = (typeof PRODUCT_SERIES)[number]['key'];
 
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
   const [activeMetric, setActiveMetric] = useState<MetricKey>('totalSales');
   const [chartType, setChartType] = useState<ChartType>('bar chart');
   const [viewMode, setViewMode] = useState<ViewMode>('glance');
+  const [productChartType, setProductChartType] = useState<'bar chart'>('bar chart');
+  const [productViewMode, setProductViewMode] = useState<ViewMode>('glance');
+  const [activeProductKey, setActiveProductKey] = useState<ProductKey | 'all'>('all');
+  const [tablePage, setTablePage] = useState(0);
 
   const selectedData = useMemo(() => {
     if (isAllBranch) return null;
@@ -260,6 +294,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     if (isAllBranch) return MOCK_TOP_MENU_ALL;
     return MOCK_TOP_MENU_BRANCH[String(selectedBranch?.id)] || MOCK_TOP_MENU_ALL.slice(0, 3);
   }, [isAllBranch, selectedBranch]);
+  const lowMenuItems = useMemo(() => {
+    if (isAllBranch) return MOCK_LOW_MENU_ALL;
+    return MOCK_LOW_MENU_BRANCH[String(selectedBranch?.id)] || MOCK_LOW_MENU_ALL.slice(0, 2);
+  }, [isAllBranch, selectedBranch]);
 
   const trendData = useMemo(() => {
     const baseData = createRangeSales(dateRange.start, dateRange.end);
@@ -271,6 +309,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       const grossProfit = Math.round(netSales * 0.995);
       return {
         label: row.label,
+        tableDate: row.tableDate,
         totalSales,
         refund,
         discount,
@@ -295,6 +334,12 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       grossProfit: Math.round(row.grossProfit * multiplier),
     }));
   }, [dateRange.end, dateRange.start, isAllBranch, selectedBranch]);
+  useEffect(() => {
+    setTablePage(0);
+  }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
+  useEffect(() => {
+    setActiveProductKey('all');
+  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
     if (chartPointCount <= 2) return 180;
@@ -323,6 +368,76 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const responsiveXAxisTextAnchor: 'middle' | 'end' = useSlantedXAxisLabels ? 'end' : 'middle';
   const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
   const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
+  const salesTableRows = useMemo(
+    () =>
+      [...trendData]
+        .slice()
+        .reverse()
+        .map((row) => ({
+          date: row.tableDate,
+          totalSales: row.totalSales,
+          refund: row.refund,
+          discount: row.discount,
+          netSales: row.netSales,
+          productUnitPrice: 0,
+          grossProfit: row.grossProfit,
+        })),
+    [trendData]
+  );
+  const productGraphData = useMemo(() => {
+    const baseShares: Record<ProductKey, number> = {
+      p1: 0.34,
+      p2: 0.24,
+      p3: 0.18,
+      p4: 0.14,
+      p5: 0.1,
+    };
+    return trendData.map((row, idx) => {
+      const total = row.netSales;
+      const dynamic = {
+        p1: baseShares.p1 + Math.sin(idx / 4) * 0.02,
+        p2: baseShares.p2 + Math.cos(idx / 5) * 0.015,
+        p3: baseShares.p3 + Math.sin(idx / 6) * 0.012,
+        p4: baseShares.p4 + Math.cos(idx / 3) * 0.01,
+        p5: baseShares.p5 + Math.sin(idx / 2.5) * 0.008,
+      } as Record<ProductKey, number>;
+      const totalShare = Object.values(dynamic).reduce((sum, value) => sum + value, 0);
+      const normalized = Object.fromEntries(
+        Object.entries(dynamic).map(([key, value]) => [key, value / totalShare])
+      ) as Record<ProductKey, number>;
+      return {
+        label: row.label,
+        p1: Math.round(total * normalized.p1),
+        p2: Math.round(total * normalized.p2),
+        p3: Math.round(total * normalized.p3),
+        p4: Math.round(total * normalized.p4),
+        p5: Math.round(total * normalized.p5),
+      };
+    });
+  }, [trendData]);
+  const topProductRows = useMemo(
+    () =>
+      PRODUCT_SERIES.map((series) => ({
+        ...series,
+        netSales: productGraphData.reduce((sum, row) => sum + Number(row[series.key] || 0), 0),
+      })).sort((a, b) => b.netSales - a.netSales),
+    [productGraphData]
+  );
+  const activeProduct = useMemo(
+    () => PRODUCT_SERIES.find((series) => series.key === activeProductKey) || null,
+    [activeProductKey]
+  );
+  const visibleProductSeries = useMemo(
+    () => (activeProduct ? [activeProduct] : PRODUCT_SERIES),
+    [activeProduct]
+  );
+  const TABLE_PAGE_SIZE = 10;
+  const totalTablePages = Math.max(1, Math.ceil(salesTableRows.length / TABLE_PAGE_SIZE));
+  const safeTablePage = Math.min(tablePage, totalTablePages - 1);
+  const pagedTableRows = salesTableRows.slice(
+    safeTablePage * TABLE_PAGE_SIZE,
+    safeTablePage * TABLE_PAGE_SIZE + TABLE_PAGE_SIZE
+  );
 
   const baseSales = isAllBranch ? allSummary.totalSales : selectedData?.totalSales || 0;
   const topStatItems = useMemo(
@@ -408,7 +523,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
               <BarChart3 size={18} className="text-brand-muted" />
-              <h4 className="text-lg font-bold text-brand-text">{activeMetricLabel}</h4>
+              <h4 className="text-lg font-normal text-brand-text">{activeMetricLabel}</h4>
             </div>
             <div className="flex items-center gap-3">
               <InlineDropdown
@@ -486,68 +601,163 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {isAllBranch ? (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart3 size={18} className="text-brand-muted" />
-              <h4 className="text-lg font-bold text-brand-text">Branch Sales Overview</h4>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="grid grid-cols-1 items-stretch xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
+          <div className="px-5 py-4 border-b xl:border-b-0 xl:border-r border-gray-100">
+            <div className="flex items-center justify-between text-sm font-normal text-brand-text mb-3.5">
+              <span>Top 5 Products</span>
+              <span className="text-brand-muted">Net sales</span>
             </div>
-            <div className="space-y-3">
-              {MOCK_BRANCH_SALES.map((branch) => (
-                <div key={branch.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-                  <div>
-                    <p className="font-bold text-brand-text">{branch.name}</p>
-                    <p className="text-xs text-brand-muted">{branch.orders.toLocaleString()} orders</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-brand-text">{money(branch.totalSales)}</p>
-                    <p className="text-xs text-green-600">+{branch.growth}%</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="bg-white rounded-2xl shadow-sm p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart3 size={18} className="text-brand-muted" />
-              <h4 className="text-lg font-bold text-brand-text">{selectedData?.name} Sales Analytics</h4>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-brand-muted mb-1">Growth</p>
-                <p className="text-xl font-bold text-green-600">+{selectedData?.growth || 0}%</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-brand-muted mb-1">Branch</p>
-                <p className="text-xl font-bold text-brand-text">{selectedData?.name}</p>
-              </div>
+            <div className="overflow-hidden rounded-xl">
+              <table className="w-full table-auto">
+                <tbody>
+                  {topProductRows.map((item) => {
+                    const isSelected = activeProductKey === item.key;
+                    return (
+                      <tr
+                        key={item.key}
+                        onClick={() => setActiveProductKey((prev) => (prev === item.key ? 'all' : item.key))}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected ? 'bg-violet-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <td className="px-3 py-3 align-top">
+                          <div className="flex items-start gap-3">
+                            <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                            <p className="text-sm text-brand-text whitespace-normal break-words leading-5">{item.name}</p>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
+                          {money(item.netSales)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
-        )}
-
-        <div className="bg-white rounded-2xl shadow-sm p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Flame size={18} className="text-orange-500" />
-            <h4 className="text-lg font-bold text-brand-text">Top Menu</h4>
-          </div>
-          <div className="space-y-3">
-            {topMenuItems.map((item, idx) => (
-              <div key={`${item.name}-${idx}`} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-                <div>
-                  <p className="font-bold text-brand-text">{item.name}</p>
-                  <p className="text-xs text-brand-muted">{item.category}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-brand-text">{money(item.sales)}</p>
-                  <p className="text-xs text-brand-muted">{item.orders.toLocaleString()} sold</p>
-                </div>
+          <div className="px-5 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-lg font-normal text-brand-text">
+                {activeProduct ? `${activeProduct.name} sales trend` : 'Sales graph by product'}
+              </h4>
+              <div className="flex items-center gap-3">
+                <InlineDropdown
+                  value={productChartType}
+                  options={['bar chart'] as const}
+                  onChange={(value) => setProductChartType(value)}
+                />
+                <InlineDropdown
+                  value={productViewMode}
+                  options={['glance', 'week'] as const}
+                  onChange={(value) => setProductViewMode(value)}
+                />
               </div>
-            ))}
+            </div>
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={productGraphData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
+                  <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    interval={responsiveXAxisInterval}
+                    angle={responsiveXAxisAngle}
+                    textAnchor={responsiveXAxisTextAnchor}
+                    height={responsiveXAxisHeight}
+                    tickMargin={responsiveXAxisTickMargin}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: '#64748b', fontSize: 12 }}
+                    tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip {...tooltipProps} />
+                  {visibleProductSeries.map((series) => (
+                    <Bar
+                      key={series.key}
+                      dataKey={series.key}
+                      stackId={activeProduct ? undefined : 'products'}
+                      fill={series.color}
+                      barSize={activeProduct ? Math.max(18, responsiveBarSize) : responsiveBarSize}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
       </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
+            EXPORT
+          </button>
+          <button type="button" className="text-brand-muted hover:text-brand-text transition-colors">
+            <LayoutGrid size={18} />
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px]">
+            <thead>
+              <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100">
+                <th className="px-5 py-3">Date</th>
+                <th className="px-5 py-3">Total sales</th>
+                <th className="px-5 py-3">Refund</th>
+                <th className="px-5 py-3">Discount</th>
+                <th className="px-5 py-3">Net sales</th>
+                <th className="px-5 py-3">Product unit price</th>
+                <th className="px-5 py-3">Gross profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedTableRows.map((row, idx) => (
+                <tr key={`${row.date}-${idx}`} className="border-b border-gray-100 last:border-b-0">
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{row.date}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.totalSales)}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.refund)}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.discount)}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.netSales)}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.productUnitPrice)}</td>
+                  <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.grossProfit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTablePage((prev) => Math.max(0, prev - 1))}
+              disabled={safeTablePage === 0}
+              className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTablePage((prev) => Math.min(totalTablePages - 1, prev + 1))}
+              disabled={safeTablePage >= totalTablePages - 1}
+              className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="text-sm text-brand-muted">
+            Page: <span className="font-semibold text-brand-text">{safeTablePage + 1}</span> / {totalTablePages}
+          </div>
+          <div className="text-sm text-brand-muted">
+            Page Line Count: <span className="font-semibold text-brand-text">{TABLE_PAGE_SIZE}</span>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 };
