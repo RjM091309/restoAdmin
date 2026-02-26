@@ -313,11 +313,11 @@ class ReportsController {
 	static async importGoodsSalesReport(req, res) {
 		try {
 			const { data } = req.body;
-			
+
 			if (!Array.isArray(data) || data.length === 0) {
 				return ApiResponse.badRequest(res, 'No data to import. Expected array of { goods, category, sales_quantity, discounts, net_sales, unit_cost, total_revenue }');
 			}
-			
+
 			const result = await ReportsModel.importGoodsSalesReport(data);
 			return ApiResponse.success(res, result, `Successfully imported ${result.inserted} goods sales record(s)`);
 		} catch (error) {
@@ -340,7 +340,46 @@ class ReportsController {
 			return ApiResponse.error(res, 'Failed to validate imported data', 500, error.message);
 		}
 	}
+
+	// Get total sales per branch
+	static async getSalesPerBranch(req, res) {
+		try {
+			const { start_date, end_date, branch_id } = req.query;
+
+			const report = await ReportsModel.getSalesPerBranch(start_date || null, end_date || null, branch_id || null);
+
+			return ApiResponse.success(res, {
+				start_date: start_date || null,
+				end_date: end_date || null,
+				branch_id: branch_id || null,
+				data: report
+			}, 'Sales per branch retrieved successfully');
+		} catch (error) {
+			console.error('Error fetching sales per branch:', error);
+			return ApiResponse.error(res, 'Failed to fetch sales per branch', 500, error.message);
+		}
+	}
+
+	// Get least selling / zero-sales menu items
+	static async getLeastSellingItems(req, res) {
+		try {
+			const { start_date, end_date, limit = 5 } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const report = await ReportsModel.getLeastSellingItems(start_date || null, end_date || null, branchId, parseInt(limit));
+
+			return ApiResponse.success(res, {
+				start_date: start_date || null,
+				end_date: end_date || null,
+				branch_id: branchId,
+				limit: parseInt(limit),
+				data: report
+			}, 'Least selling items retrieved successfully');
+		} catch (error) {
+			console.error('Error fetching least selling items:', error);
+			return ApiResponse.error(res, 'Failed to fetch least selling items', 500, error.message);
+		}
+	}
 }
 
 module.exports = ReportsController;
-

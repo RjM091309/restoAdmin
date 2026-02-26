@@ -58,7 +58,7 @@ class ReportsModel {
 		} else if (period === 'monthly') {
 			billingGroupBy = ` GROUP BY YEAR(b.ENCODED_DT), MONTH(b.ENCODED_DT)`;
 		}
-		
+
 		let billingQuery = `
 			SELECT 
 				DATE(b.ENCODED_DT) as date,
@@ -74,7 +74,7 @@ class ReportsModel {
 			billingQuery += ` AND b.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		
+
 		billingQuery += billingGroupBy;
 
 		// Build sales_hourly_summary query with grouping
@@ -86,7 +86,7 @@ class ReportsModel {
 		} else if (period === 'monthly') {
 			summaryGroupBy = ` GROUP BY YEAR(s.sale_datetime), MONTH(s.sale_datetime)`;
 		}
-		
+
 		let summaryQuery = `
 			SELECT 
 				DATE(s.sale_datetime) as date,
@@ -102,7 +102,7 @@ class ReportsModel {
 			summaryQuery += ` AND (s.branch_id = ? OR s.branch_id IS NULL)`;
 			summaryParams.push(branchId);
 		}
-		
+
 		summaryQuery += summaryGroupBy;
 
 		// Combine both queries with UNION and aggregate
@@ -237,7 +237,7 @@ class ReportsModel {
 			CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
 			DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
 		)`;
-		
+
 		if (startDate && endDate) {
 			// Use DATE() with timezone adjustment to ensure proper date comparison
 			// Convert to local time (UTC+8 for Philippines) before extracting date
@@ -279,7 +279,7 @@ class ReportsModel {
 		topProductsParams.push(limit);
 
 		const [topProducts] = await pool.execute(topProductsQuery, topProductsParams);
-		
+
 		if (!topProducts || topProducts.length === 0) {
 			return [];
 		}
@@ -287,7 +287,7 @@ class ReportsModel {
 		const productIds = topProducts
 			.map(p => p && p.IDNo ? parseInt(p.IDNo, 10) : null)
 			.filter(id => id !== null && !isNaN(id));
-		
+
 		if (productIds.length === 0) {
 			return [];
 		}
@@ -478,7 +478,7 @@ class ReportsModel {
 		const refundParams = [];
 		let refundDateFilter = '';
 		let refundBranchFilter = '';
-		
+
 		if (startDate && endDate) {
 			refundDateFilter = 'AND DATE(r.receipt_date) BETWEEN ? AND ?';
 			refundParams.push(startDate, endDate);
@@ -499,7 +499,7 @@ class ReportsModel {
 
 		// Combine data: merge summary data with actual orders data
 		const dataMap = new Map();
-		
+
 		// Add summary data
 		summaryRows.forEach(row => {
 			const hour = row.hour;
@@ -554,7 +554,7 @@ class ReportsModel {
 			const hour = row.hour;
 			const refundAmount = parseFloat(row.refund_amount) || 0;
 			if (refundAmount === 0) return;
-			
+
 			if (!dataMap.has(hour)) {
 				dataMap.set(hour, {
 					hour: hour,
@@ -568,7 +568,7 @@ class ReportsModel {
 			}
 			const data = dataMap.get(hour);
 			const currentRefund = data.refund || 0;
-			
+
 			// Sum refunds: summary refunds + receipts refunds
 			// This ensures we capture all refunds (both imported and actual)
 			data.refund = currentRefund + refundAmount;
@@ -656,7 +656,7 @@ class ReportsModel {
 			}
 
 			const order = orderRows[0];
-			
+
 			// Only sync if billing is PAID (status = 1)
 			if (!order.billing_status || parseInt(order.billing_status) !== 1) {
 				return { success: false, message: 'Order not paid yet' };
@@ -688,7 +688,7 @@ class ReportsModel {
 
 			// Aggregate by category
 			const categoryMap = new Map();
-			
+
 			orderItems.forEach((item) => {
 				const categoryName = (item.category_name || 'Uncategorized').trim();
 				if (!categoryName) return;
@@ -696,7 +696,7 @@ class ReportsModel {
 				const qty = parseFloat(item.QTY) || 0;
 				const unitPrice = parseFloat(item.UNIT_PRICE) || 0;
 				const lineTotal = parseFloat(item.LINE_TOTAL) || 0;
-				
+
 				// Apply discount proportionally to this item's line total
 				const netSales = lineTotal * (1 - discountRatio);
 
@@ -794,7 +794,7 @@ class ReportsModel {
 			}
 
 			const order = orderRows[0];
-			
+
 			// Only sync if billing is PAID (status = 1)
 			if (!order.billing_status || parseInt(order.billing_status) !== 1) {
 				return { success: false, message: 'Order not paid yet' };
@@ -874,7 +874,7 @@ class ReportsModel {
 			}
 
 			const order = orderRows[0];
-			
+
 			// Only sync if billing is PAID (status = 1)
 			if (!order.billing_status || parseInt(order.billing_status) !== 1) {
 				return { success: false, message: 'Order not paid yet' };
@@ -907,7 +907,7 @@ class ReportsModel {
 
 			// Aggregate by goods/product
 			const goodsMap = new Map();
-			
+
 			orderItems.forEach((item) => {
 				const goodsName = (item.MENU_NAME || 'Unnamed Product').trim();
 				if (!goodsName) return;
@@ -916,7 +916,7 @@ class ReportsModel {
 				const unitPrice = parseFloat(item.UNIT_PRICE) || 0;
 				const lineTotal = parseFloat(item.LINE_TOTAL) || 0;
 				const categoryName = (item.category_name || 'Uncategorized').trim();
-				
+
 				// Calculate discount for this item proportionally
 				const itemDiscount = lineTotal * discountRatio;
 				const netSales = lineTotal - itemDiscount;
@@ -1121,9 +1121,9 @@ class ReportsModel {
 		// We'll add it as "Total Discount from Orders" if there's a significant difference
 		if (totalDiscountFromOrders > 0 && Math.abs(totalDiscountFromOrders - totalFromReport) > 0.01) {
 			// Check if there's already a "Total" or similar row
-			const hasTotalRow = result.some(row => 
+			const hasTotalRow = result.some(row =>
 				row.name && (
-					row.name.toLowerCase().includes('total') || 
+					row.name.toLowerCase().includes('total') ||
 					row.name.toLowerCase().includes('할인') ||
 					row.name === 'Total Discount'
 				)
@@ -1141,9 +1141,9 @@ class ReportsModel {
 				}
 			} else if (hasTotalRow) {
 				// Update the total row to match actual orders total
-				const totalRowIndex = result.findIndex(row => 
+				const totalRowIndex = result.findIndex(row =>
 					row.name && (
-						row.name.toLowerCase().includes('total') || 
+						row.name.toLowerCase().includes('total') ||
 						row.name.toLowerCase().includes('할인') ||
 						row.name === 'Total Discount'
 					)
@@ -1235,7 +1235,7 @@ class ReportsModel {
 		// If date range is provided, only use actual orders (to avoid double-counting synced orders)
 		// If no date range, combine with sales_category_report for imported historical data
 		const dataMap = new Map();
-		
+
 		if (!startDate || !endDate) {
 			// No date range: include imported data from sales_category_report
 			// Get data from sales_category_report (imported data)
@@ -1251,7 +1251,7 @@ class ReportsModel {
 				FROM sales_category_report
 			`;
 			const [summaryRows] = await pool.execute(summaryQuery);
-			
+
 			// Add summary data (imported historical data)
 			summaryRows.forEach(row => {
 				const category = row.category || 'Uncategorized';
@@ -1390,7 +1390,7 @@ class ReportsModel {
 					created_at
 				FROM product_sales_summary
 			`;
-			
+
 			const summaryParams = [];
 			if (startDate || endDate) {
 				const conditions = [];
@@ -1406,7 +1406,7 @@ class ReportsModel {
 					summaryQuery += ' WHERE ' + conditions.join(' AND ');
 				}
 			}
-			
+
 			const [summaryRows] = await pool.execute(summaryQuery, summaryParams);
 
 			// Get data from actual orders (paid orders only)
@@ -1451,7 +1451,7 @@ class ReportsModel {
 
 			// Combine data: merge summary data with actual orders data
 			const dataMap = new Map();
-			
+
 			// Add summary data
 			summaryRows.forEach(row => {
 				const goods = (row.goods || '').trim();
@@ -1516,14 +1516,14 @@ class ReportsModel {
 
 			// Convert map to array
 			const allRows = Array.from(dataMap.values());
-			
+
 			const [menuItems] = await pool.execute(`
 				SELECT m.MENU_NAME, c.CAT_NAME
 				FROM menu m
 				LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
 				WHERE m.ACTIVE = 1 AND c.CAT_NAME IS NOT NULL
 			`);
-			
+
 			const goodsToCategoryMap = new Map();
 			menuItems.forEach(item => {
 				if (item.MENU_NAME && item.CAT_NAME) {
@@ -1533,7 +1533,7 @@ class ReportsModel {
 					goodsToCategoryMap.set(item.MENU_NAME.trim(), normalizedCategoryName);
 				}
 			});
-			
+
 			const [categories] = await pool.execute(`
 				SELECT IDNo, CAT_NAME FROM categories WHERE ACTIVE = 1
 			`);
@@ -1541,11 +1541,11 @@ class ReportsModel {
 			categories.forEach(cat => {
 				categoryIdMap.set(cat.IDNo.toString(), cat.CAT_NAME);
 			});
-			
+
 			const mappedRows = allRows.map(row => {
 				let categoryName = row.category;
 				const goodsName = (row.goods || '').trim();
-				
+
 				if (categoryName && /^[0-9]+$/.test(categoryName.trim())) {
 					if (goodsName && goodsToCategoryMap.has(goodsName)) {
 						categoryName = goodsToCategoryMap.get(goodsName);
@@ -1555,7 +1555,7 @@ class ReportsModel {
 							categoryName = goodsToCategoryMap.get(normalizedGoodsName);
 						} else {
 							for (const [menuName, catName] of goodsToCategoryMap.entries()) {
-								if (normalizedGoodsName.includes(menuName.toLowerCase()) || 
+								if (normalizedGoodsName.includes(menuName.toLowerCase()) ||
 									menuName.toLowerCase().includes(normalizedGoodsName)) {
 									categoryName = catName;
 									break;
@@ -1570,13 +1570,13 @@ class ReportsModel {
 					categoryName = categoryName.trim().replace(/\s+/g, ' ');
 					categoryName = categoryName.replace(/\s*-\s+/g, '-').replace(/\s+-\s*/g, '-');
 				}
-				
+
 				return {
 					...row,
 					category: categoryName || 'Uncategorized'
 				};
 			});
-			
+
 			return mappedRows;
 		} catch (error) {
 			console.error('Error in getGoodsSalesReport:', error);
@@ -1592,10 +1592,10 @@ class ReportsModel {
 			return { inserted: 0, message: 'No data to import' };
 		}
 		let inserted = 0;
-		
+
 		// Cache for category ID to name mapping
 		const categoryCache = new Map();
-		
+
 		// Get all menu items for goods-to-category mapping
 		const [menuItems] = await pool.execute(`
 			SELECT m.MENU_NAME, c.CAT_NAME
@@ -1603,7 +1603,7 @@ class ReportsModel {
 			LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
 			WHERE m.ACTIVE = 1 AND c.CAT_NAME IS NOT NULL
 		`);
-		
+
 		// Create mapping: goods name -> category name (normalized)
 		const goodsToCategoryMap = new Map();
 		menuItems.forEach(item => {
@@ -1614,12 +1614,12 @@ class ReportsModel {
 				goodsToCategoryMap.set(item.MENU_NAME.trim(), normalizedCategoryName);
 			}
 		});
-		
+
 		for (const row of rows) {
 			const goods = String(row.goods || row.product_name || '').trim();
 			if (!goods) continue;
 			let category = String(row.category || '').trim();
-			
+
 			// If category is empty, try to find it from goods name
 			if (!category) {
 				// First try: Exact match by goods name (case-sensitive)
@@ -1635,7 +1635,7 @@ class ReportsModel {
 					// Third try: Partial match (goods name contains menu name or vice versa)
 					else {
 						for (const [menuName, catName] of goodsToCategoryMap.entries()) {
-							if (normalizedGoodsName.includes(menuName.toLowerCase()) || 
+							if (normalizedGoodsName.includes(menuName.toLowerCase()) ||
 								menuName.toLowerCase().includes(normalizedGoodsName)) {
 								category = catName;
 								break;
@@ -1644,7 +1644,7 @@ class ReportsModel {
 					}
 				}
 			}
-			
+
 			// If category is numeric (ID), convert to category name
 			if (category && /^[0-9]+$/.test(category)) {
 				const categoryId = parseInt(category, 10);
@@ -1669,7 +1669,7 @@ class ReportsModel {
 			else if (category) {
 				category = category.trim().replace(/\s+/g, ' ').replace(/\s*-\s+/g, '-').replace(/\s+-\s*/g, '-');
 			}
-			
+
 			const salesQuantity = parseInt(row.sales_quantity || row.quantity || 0, 10) || 0;
 			const totalSales = parseFloat(row.total_sales || 0) || 0;
 			const refundQuantity = parseInt(row.refund_quantity || 0, 10) || 0;
@@ -1705,21 +1705,21 @@ class ReportsModel {
 						 unit_cost = ?,
 						 total_revenue = ?
 						 WHERE product_name = ?`,
-					[category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales, unitCost, totalRevenue, goods]
-				);
-			} else {
-				await pool.execute(
-					`INSERT INTO product_sales_summary (product_name, category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales, unit_cost, total_revenue) 
+						[category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales, unitCost, totalRevenue, goods]
+					);
+				} else {
+					await pool.execute(
+						`INSERT INTO product_sales_summary (product_name, category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales, unit_cost, total_revenue) 
 					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					[goods, category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales, unitCost, totalRevenue]
-				);
+						[goods, category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales, unitCost, totalRevenue]
+					);
+				}
+				inserted++;
+			} catch (err) {
+				console.error(`Error inserting/updating goods sales record for "${goods}":`, err);
 			}
-			inserted++;
-		} catch (err) {
-			console.error(`Error inserting/updating goods sales record for "${goods}":`, err);
 		}
-	}
-	return { inserted };
+		return { inserted };
 	}
 
 	// Validate imported data - check if totals tally across different tables
@@ -1793,7 +1793,7 @@ class ReportsModel {
 				hourlyParams.push(branchId);
 			}
 			const [hourlyRows] = await pool.execute(hourlyQuery, hourlyParams);
-			
+
 			// Also get totals from actual orders (paid orders only) to add to summary
 			const orderParamsForHourly = [];
 			let orderDateFilterForHourly = '';
@@ -1874,10 +1874,10 @@ class ReportsModel {
 				FROM sales_category_report
 			`);
 			const categorySummaryRefund = parseFloat(categoryRows[0]?.total_refund || 0);
-			
+
 			// Add refunds from receipts table (same as hourly summary)
 			const categoryTotalRefund = categorySummaryRefund + totalRefundFromReceipts;
-			
+
 			if (categoryRows && categoryRows.length > 0) {
 				results.sales_category_report = {
 					total_revenue: parseFloat(categoryRows[0].total_sales || 0), // Use total_sales as total_revenue for compatibility
@@ -1903,7 +1903,7 @@ class ReportsModel {
 				FROM product_sales_summary
 			`);
 			const goodsSummaryRefund = parseFloat(goodsRows[0]?.total_refund || 0);
-			
+
 			// Add refunds from receipts table (same as hourly summary)
 			const goodsTotalRefund = goodsSummaryRefund + totalRefundFromReceipts;
 
@@ -1993,7 +1993,7 @@ class ReportsModel {
 			`, refundParamsForValidation);
 			const receiptsRefundCount = parseInt(refundReportCountRows[0]?.record_count || 0);
 			const receiptsRefundAmount = totalRefundFromReceipts; // Use the same value as sales_hourly_summary
-			
+
 			// Get refund count from sales_hourly_summary (only records with refund > 0 for count)
 			const summaryRefundParams = [];
 			let summaryRefundBranchFilter = '';
@@ -2001,20 +2001,20 @@ class ReportsModel {
 				summaryRefundBranchFilter = ' AND (branch_id = ? OR branch_id IS NULL)';
 				summaryRefundParams.push(branchId);
 			}
-			
+
 			const [summaryRefundCountRows] = await pool.execute(`
 				SELECT COUNT(*) as record_count
 				FROM sales_hourly_summary
 				WHERE 1=1 ${summaryRefundBranchFilter} AND (refund > 0 OR refund IS NOT NULL)
 			`, summaryRefundParams);
 			const summaryRefundCount = parseInt(summaryRefundCountRows[0]?.record_count || 0);
-			
+
 			// Use the same summaryTotalRefund to ensure refund_report matches sales_hourly_summary
 			const summaryRefundAmount = summaryTotalRefund;
 			const finalReceiptsRefund = totalRefundFromReceipts > 0 ? totalRefundFromReceipts : receiptsRefundAmount;
 			const totalRefundReportAmount = finalReceiptsRefund + summaryRefundAmount;
 			const totalRefundReportCount = receiptsRefundCount + summaryRefundCount;
-			
+
 			results.refund_report = {
 				total_refund: totalRefundReportAmount,
 				record_count: totalRefundReportCount
@@ -2067,14 +2067,14 @@ class ReportsModel {
 			const hourlyDiscount = results.sales_hourly_summary.total_discount;
 			const goodsDiscount = results.product_sales_summary.total_discounts;
 			const discountReportDiscount = results.discount_report.total_discount;
-			
+
 			// Calculate expected total: discount_report + actual orders (if not already included)
 			// Since getDiscountReport now includes actual orders, discountReportDiscount should match totalDiscountFromOrders
 			// But we'll validate against all sources
 			const discountDiff1 = Math.abs(hourlyDiscount - goodsDiscount);
 			const discountDiff2 = Math.abs(hourlyDiscount - discountReportDiscount);
 			const discountDiff3 = Math.abs(goodsDiscount - discountReportDiscount);
-			
+
 			// Also check against actual orders total if available
 			let discountDiff4 = 0;
 			if (totalDiscountFromOrders > 0) {
@@ -2087,10 +2087,10 @@ class ReportsModel {
 			// Discounts match if all sources are within tolerance
 			// Allow discount_report to be slightly different if it doesn't include actual orders yet
 			const discountReportTolerance = totalDiscountFromOrders > 0 ? Math.max(tolerance, Math.abs(discountReportDiscount - totalDiscountFromOrders) * 0.1) : tolerance;
-			
-			results.validation.discounts_match = 
-				discountDiff1 <= tolerance && 
-				discountDiff2 <= discountReportTolerance && 
+
+			results.validation.discounts_match =
+				discountDiff1 <= tolerance &&
+				discountDiff2 <= discountReportTolerance &&
 				discountDiff3 <= discountReportTolerance &&
 				(totalDiscountFromOrders === 0 || discountDiff4 <= tolerance);
 
@@ -2114,15 +2114,15 @@ class ReportsModel {
 			const goodsRefund = results.product_sales_summary.total_refund || 0;
 			const summaryRefundOnly = summaryTotalRefund;
 			const receiptsRefundOnly = totalRefundFromReceipts;
-			
+
 			// Expected total: summary refunds + receipts refunds
 			const expectedRefundTotal = summaryRefundOnly + receiptsRefundOnly;
-			
+
 			// Check if all refund totals match expected total
 			const refundDiff1 = Math.abs(hourlyRefund - expectedRefundTotal);
 			const refundDiff2 = Math.abs(categoryRefund - expectedRefundTotal);
 			const refundDiff3 = Math.abs(goodsRefund - expectedRefundTotal);
-			
+
 			// Refunds match if all tables match expected total (summary + receipts)
 			results.validation.refunds_match = refundDiff1 <= tolerance && refundDiff2 <= tolerance && refundDiff3 <= tolerance;
 
@@ -2158,7 +2158,206 @@ class ReportsModel {
 			throw error;
 		}
 	}
+
+	// Get total sales per branch
+	// Aggregates from billing table + sales_hourly_summary
+	static async getSalesPerBranch(startDate = null, endDate = null, branchId = null) {
+		let dateFilterBilling = '';
+		let dateFilterSummary = '';
+		let branchFilterBilling = '';
+		let branchFilterSummary = '';
+		const billingParams = [];
+		const summaryParams = [];
+
+		if (startDate && endDate) {
+			dateFilterBilling = 'AND DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?';
+			billingParams.push(startDate, endDate);
+			dateFilterSummary = 'AND DATE(s.sale_datetime) >= ? AND DATE(s.sale_datetime) <= ?';
+			summaryParams.push(startDate, endDate);
+		}
+
+		if (branchId) {
+			branchFilterBilling = 'AND br.IDNo = ?';
+			billingParams.push(branchId);
+			branchFilterSummary = 'AND s.branch_id = ?';
+			summaryParams.push(branchId);
+		}
+
+		// Get sales from billing table grouped by branch
+		const billingQuery = `
+			SELECT 
+				br.IDNo as branch_id,
+				br.BRANCH_NAME as branch_name,
+				br.BRANCH_CODE as branch_code,
+				COALESCE(SUM(b.AMOUNT_PAID), 0) as total_sales,
+				COUNT(DISTINCT b.ORDER_ID) as order_count,
+				CASE 
+					WHEN COUNT(DISTINCT b.ORDER_ID) > 0 THEN COALESCE(SUM(b.AMOUNT_PAID), 0) / COUNT(DISTINCT b.ORDER_ID)
+					ELSE 0
+				END as avg_order_value
+			FROM branches br
+			LEFT JOIN billing b ON b.BRANCH_ID = br.IDNo AND b.STATUS IN (1, 2) ${dateFilterBilling}
+			WHERE br.ACTIVE = 1 ${branchFilterBilling}
+			GROUP BY br.IDNo, br.BRANCH_NAME, br.BRANCH_CODE
+			ORDER BY total_sales DESC
+		`;
+
+		const [billingRows] = await pool.execute(billingQuery, billingParams);
+
+		// Get sales from sales_hourly_summary grouped by branch
+		const summaryQuery = `
+			SELECT 
+				s.branch_id,
+				COALESCE(SUM(s.total_sales), 0) as total_sales
+			FROM sales_hourly_summary s
+			WHERE s.branch_id IS NOT NULL
+			${dateFilterSummary}
+			${branchFilterSummary}
+			GROUP BY s.branch_id
+		`;
+
+		const [summaryRows] = await pool.execute(summaryQuery, summaryParams);
+
+		// Merge summary data into billing rows
+		const summaryMap = new Map();
+		summaryRows.forEach(row => {
+			summaryMap.set(parseInt(row.branch_id), parseFloat(row.total_sales) || 0);
+		});
+
+		const result = billingRows.map(row => {
+			const summaryTotal = summaryMap.get(parseInt(row.branch_id)) || 0;
+			return {
+				branch_id: row.branch_id,
+				branch_name: row.branch_name,
+				branch_code: row.branch_code,
+				total_sales: parseFloat(row.total_sales) + summaryTotal,
+				order_count: parseInt(row.order_count) || 0,
+				avg_order_value: parseFloat(row.avg_order_value) || 0
+			};
+		});
+
+		// Re-sort after merging
+		result.sort((a, b) => b.total_sales - a.total_sales);
+
+		return result;
+	}
+
+	// Get least selling menu items (items with fewest orders, excluding zero)
+	// Uses BOTH product_sales_summary (imported/Loyverse data) AND actual orders
+	static async getLeastSellingItems(startDate = null, endDate = null, branchId = null, limit = 5) {
+		try {
+			// ── Source 1: product_sales_summary (imported / synced data) ──
+			// Note: No date filter here — created_at is the import date, not sale date.
+			// This table stores cumulative totals from Loyverse POS imports.
+			const summaryQuery = `
+				SELECT 
+					product_name as name,
+					category,
+					COALESCE(sales_quantity, 0) as total_quantity,
+					COALESCE(net_sales, 0) as total_revenue
+				FROM product_sales_summary
+				WHERE sales_quantity > 0
+				ORDER BY sales_quantity ASC
+			`;
+
+			const [summaryRows] = await pool.execute(summaryQuery);
+
+			// ── Source 2: actual orders (paid orders from billing) ──
+			let orderDateFilter = '';
+			let orderBranchFilter = '';
+			const orderParams = [];
+
+			if (startDate && endDate) {
+				orderDateFilter = 'AND DATE(o.ENCODED_DT) BETWEEN ? AND ?';
+				orderParams.push(startDate, endDate);
+			}
+			if (branchId) {
+				orderBranchFilter = 'AND o.BRANCH_ID = ?';
+				orderParams.push(branchId);
+			}
+
+			const ordersQuery = `
+				SELECT 
+					m.MENU_NAME as name,
+					COALESCE(c.CAT_NAME, 'Uncategorized') as category,
+					COALESCE(SUM(oi.QTY), 0) as total_quantity,
+					COALESCE(SUM(oi.LINE_TOTAL), 0) as total_revenue,
+					m.MENU_PRICE
+				FROM orders o
+				INNER JOIN billing b ON b.ORDER_ID = o.IDNo
+				INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+				INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+				LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+				WHERE b.STATUS = 1
+				${orderDateFilter}
+				${orderBranchFilter}
+				GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
+				HAVING total_quantity > 0
+			`;
+
+			const [orderRows] = await pool.execute(ordersQuery, orderParams);
+
+			// ── Merge both sources by product name ──
+			const dataMap = new Map();
+
+			// Add imported data first
+			summaryRows.forEach(row => {
+				const name = (row.name || '').trim();
+				if (!name) return;
+				if (!dataMap.has(name)) {
+					dataMap.set(name, {
+						name,
+						category: row.category || 'Uncategorized',
+						total_quantity: 0,
+						total_revenue: 0,
+						price: 0,
+					});
+				}
+				const data = dataMap.get(name);
+				data.total_quantity += parseInt(row.total_quantity) || 0;
+				data.total_revenue += parseFloat(row.total_revenue) || 0;
+			});
+
+			// Add/merge actual orders data
+			orderRows.forEach(row => {
+				const name = (row.name || '').trim();
+				if (!name) return;
+				if (!dataMap.has(name)) {
+					dataMap.set(name, {
+						name,
+						category: row.category || 'Uncategorized',
+						total_quantity: 0,
+						total_revenue: 0,
+						price: parseFloat(row.MENU_PRICE) || 0,
+					});
+				}
+				const data = dataMap.get(name);
+				data.total_quantity += parseInt(row.total_quantity) || 0;
+				data.total_revenue += parseFloat(row.total_revenue) || 0;
+				if (row.MENU_PRICE) data.price = parseFloat(row.MENU_PRICE) || data.price;
+			});
+
+			// Convert to array, filter > 0, sort by least quantity, limit
+			const result = Array.from(dataMap.values())
+				.filter(item => item.total_quantity > 0)
+				.sort((a, b) => a.total_quantity - b.total_quantity || a.total_revenue - b.total_revenue)
+				.slice(0, limit)
+				.map((item, idx) => ({
+					IDNo: idx + 1,
+					MENU_NAME: item.name,
+					MENU_PRICE: item.price,
+					category: item.category,
+					total_quantity: item.total_quantity,
+					order_count: item.total_quantity,
+					total_revenue: item.total_revenue,
+				}));
+
+			return result;
+		} catch (error) {
+			console.error('Error in getLeastSellingItems:', error);
+			throw error;
+		}
+	}
 }
 
 module.exports = ReportsModel;
-

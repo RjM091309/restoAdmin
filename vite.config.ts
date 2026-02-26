@@ -31,6 +31,9 @@ export default defineConfig(({ mode }) => {
         },
         '/branch': { target: 'http://localhost:2000', changeOrigin: true },
         '/uploads': { target: 'http://localhost:2000', changeOrigin: true },
+        '/user': { target: 'http://localhost:2000', changeOrigin: true },
+        '/audit-logs': { target: 'http://localhost:2000', changeOrigin: true },
+        '/reports': { target: 'http://localhost:2000', changeOrigin: true },
       },
     },
   };

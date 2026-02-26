@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -12,7 +12,9 @@ import {
   ArrowLeft,
   Camera,
   Mail,
-  Phone
+  Check,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -88,19 +90,76 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
   const { user, updateUser, logout } = useUser();
 
   // Form State
-  const [firstname, setFirstname] = useState(user?.firstname || '');
-  const [lastname, setLastname] = useState(user?.lastname || '');
-  const [username, setUsername] = useState(user?.username || '');
+  const [firstname, setFirstname] = useState('');
+  const [lastname, setLastname] = useState('');
+  const [username, setUsername] = useState('');
+
+  // UI State
+  const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const displayName = user ? `${user.firstname} ${user.lastname}` : 'User';
   const displayRole = user?.permissions === 1 ? 'Administrator' : 'Staff';
   const avatarSrc = user?.avatar || 'https://picsum.photos/seed/user/100/100';
 
+  // Sync form fields when switching to edit view or when user data changes
+  useEffect(() => {
+    if (view === 'edit-profile' && user) {
+      setFirstname(user.firstname || '');
+      setLastname(user.lastname || '');
+      setUsername(user.username || '');
+    }
+  }, [view, user]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   const handleClose = () => {
     onClose();
-    // Reset view after animation finishes
-    setTimeout(() => setView('main'), 300);
+    // Reset view and toast after animation finishes
+    setTimeout(() => {
+      setView('main');
+      setToast(null);
+    }, 300);
   };
+
+  const handleSaveProfile = async () => {
+    // Basic validation
+    if (!firstname.trim() || !lastname.trim() || !username.trim()) {
+      setToast({ type: 'error', message: 'All fields are required.' });
+      return;
+    }
+
+    setIsSaving(true);
+    setToast(null);
+
+    try {
+      const result = await updateUser({ firstname: firstname.trim(), lastname: lastname.trim(), username: username.trim() });
+
+      if (result.success) {
+        setToast({ type: 'success', message: result.message });
+        // Return to main view after a short delay
+        setTimeout(() => setView('main'), 1200);
+      } else {
+        setToast({ type: 'error', message: result.message });
+      }
+    } catch {
+      setToast({ type: 'error', message: 'Something went wrong. Please try again.' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const hasChanges = user
+    ? firstname.trim() !== (user.firstname || '') ||
+    lastname.trim() !== (user.lastname || '') ||
+    username.trim() !== (user.username || '')
+    : false;
 
   return (
     <AnimatePresence>
@@ -223,8 +282,12 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   <div className="p-6 border-b border-gray-100">
                     <div className="flex items-center gap-4 mb-8">
                       <button
-                        onClick={() => setView('main')}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer"
+                        onClick={() => {
+                          setView('main');
+                          setToast(null);
+                        }}
+                        disabled={isSaving}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer disabled:opacity-50"
                       >
                         <ArrowLeft size={20} />
                       </button>
@@ -252,6 +315,30 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                     </div>
                   </div>
 
+                  {/* Toast Message */}
+                  <AnimatePresence>
+                    {toast && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className={cn(
+                          "mx-6 mt-4 px-4 py-3 rounded-xl flex items-center gap-3 text-sm font-medium",
+                          toast.type === 'success'
+                            ? "bg-green-50 text-green-700 border border-green-200"
+                            : "bg-red-50 text-red-700 border border-red-200"
+                        )}
+                      >
+                        {toast.type === 'success' ? (
+                          <Check size={16} className="shrink-0" />
+                        ) : (
+                          <AlertCircle size={16} className="shrink-0" />
+                        )}
+                        <span>{toast.message}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {/* Edit Form */}
                   <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
                     <div className="space-y-1.5">
@@ -264,7 +351,8 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                           type="text"
                           value={firstname}
                           onChange={(e) => setFirstname(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                          disabled={isSaving}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -279,7 +367,8 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                           type="text"
                           value={lastname}
                           onChange={(e) => setLastname(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                          disabled={isSaving}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -294,7 +383,8 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                           type="text"
                           value={username}
                           onChange={(e) => setUsername(e.target.value)}
-                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                          disabled={isSaving}
+                          className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 pr-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all disabled:opacity-50"
                         />
                       </div>
                     </div>
@@ -315,19 +405,33 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
                   {/* Actions */}
                   <div className="p-6 border-t border-gray-100 flex gap-3">
                     <button
-                      onClick={() => setView('main')}
-                      className="flex-1 py-3 bg-gray-100 text-brand-text rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors cursor-pointer"
+                      onClick={() => {
+                        setView('main');
+                        setToast(null);
+                      }}
+                      disabled={isSaving}
+                      className="flex-1 py-3 bg-gray-100 text-brand-text rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Cancel
                     </button>
                     <button
-                      className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer"
-                      onClick={() => {
-                        updateUser({ firstname, lastname, username });
-                        setView('main');
-                      }}
+                      disabled={isSaving || !hasChanges}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl font-bold text-sm transition-all cursor-pointer flex items-center justify-center gap-2",
+                        hasChanges && !isSaving
+                          ? "bg-brand-primary text-white shadow-lg shadow-brand-primary/20 hover:opacity-90"
+                          : "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
+                      )}
+                      onClick={handleSaveProfile}
                     >
-                      Save Changes
+                      {isSaving ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save Changes'
+                      )}
                     </button>
                   </div>
                 </motion.div>
@@ -339,3 +443,4 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
     </AnimatePresence>
   );
 };
+

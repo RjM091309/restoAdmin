@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Flame, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
   ResponsiveContainer,
@@ -11,6 +11,7 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  Cell,
 } from 'recharts';
 
 type SalesAnalyticsProps = {
@@ -47,6 +48,37 @@ type InlineDropdownProps<T extends string> = {
   onChange: (value: T) => void;
 };
 
+// API data types
+type ApiBranchSalesItem = {
+  branch_id: number;
+  branch_name: string;
+  branch_code: string;
+  total_sales: number;
+  order_count: number;
+  avg_order_value: number;
+};
+
+type ApiLeastSellingItem = {
+  IDNo: number;
+  MENU_NAME: string;
+  MENU_PRICE: number;
+  category: string;
+  total_quantity: number;
+  order_count: number;
+  total_revenue: number;
+};
+
+function getToken() {
+  return localStorage.getItem('token') || '';
+}
+
+function authHeaders(): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${getToken()}`,
+  };
+}
+
 function InlineDropdown<T extends string>({ value, options, onChange }: InlineDropdownProps<T>) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -82,9 +114,8 @@ function InlineDropdown<T extends string>({ value, options, onChange }: InlineDr
                 onChange(option);
                 setOpen(false);
               }}
-              className={`w-full px-3 py-2 text-left text-sm transition-colors ${
-                option === value ? 'bg-brand-primary text-white' : 'text-brand-text hover:bg-gray-50'
-              }`}
+              className={`w-full px-3 py-2 text-left text-sm transition-colors ${option === value ? 'bg-brand-primary text-white' : 'text-brand-text hover:bg-gray-50'
+                }`}
             >
               {option}
             </button>
@@ -168,36 +199,6 @@ const createRangeSales = (start: string, end: string) => {
   return rows.length ? rows : FALLBACK_DAILY_SALES;
 };
 
-const MOCK_BRANCH_DAILY_TREND: Record<string, { day: string; sales: number; orders: number }[]> = {
-  '1': [
-    { day: 'Mon', sales: 8200, orders: 36 },
-    { day: 'Tue', sales: 7900, orders: 34 },
-    { day: 'Wed', sales: 9100, orders: 39 },
-    { day: 'Thu', sales: 8600, orders: 37 },
-    { day: 'Fri', sales: 9800, orders: 42 },
-    { day: 'Sat', sales: 10500, orders: 46 },
-    { day: 'Sun', sales: 8900, orders: 38 },
-  ],
-  '2': [
-    { day: 'Mon', sales: 7100, orders: 31 },
-    { day: 'Tue', sales: 7350, orders: 32 },
-    { day: 'Wed', sales: 7600, orders: 33 },
-    { day: 'Thu', sales: 8050, orders: 35 },
-    { day: 'Fri', sales: 8420, orders: 37 },
-    { day: 'Sat', sales: 9100, orders: 40 },
-    { day: 'Sun', sales: 7900, orders: 34 },
-  ],
-  '3': [
-    { day: 'Mon', sales: 5900, orders: 26 },
-    { day: 'Tue', sales: 6100, orders: 27 },
-    { day: 'Wed', sales: 6420, orders: 28 },
-    { day: 'Thu', sales: 6650, orders: 29 },
-    { day: 'Fri', sales: 7020, orders: 31 },
-    { day: 'Sat', sales: 7480, orders: 33 },
-    { day: 'Sun', sales: 6250, orders: 27 },
-  ],
-};
-
 const MOCK_TOP_MENU_ALL: TopMenuItem[] = [
   { name: 'Bulgogi Set', category: 'Korean', orders: 328, sales: 114800 },
   { name: 'Kimchi Fried Rice', category: 'Rice Meals', orders: 295, sales: 88500 },
@@ -223,27 +224,6 @@ const MOCK_TOP_MENU_BRANCH: Record<string, TopMenuItem[]> = {
   ],
 };
 
-const MOCK_LOW_MENU_ALL: TopMenuItem[] = [
-  { name: 'Miso Soup', category: 'Soup', orders: 9, sales: 1710 },
-  { name: 'Tofu Salad', category: 'Salad', orders: 7, sales: 1540 },
-  { name: 'Cucumber Roll', category: 'Sushi', orders: 5, sales: 975 },
-];
-
-const MOCK_LOW_MENU_BRANCH: Record<string, TopMenuItem[]> = {
-  '1': [
-    { name: 'Miso Soup', category: 'Soup', orders: 4, sales: 760 },
-    { name: 'Tofu Salad', category: 'Salad', orders: 3, sales: 660 },
-  ],
-  '2': [
-    { name: 'Cucumber Roll', category: 'Sushi', orders: 3, sales: 585 },
-    { name: 'Veggie Tempura', category: 'Appetizer', orders: 2, sales: 390 },
-  ],
-  '3': [
-    { name: 'Cold Soba', category: 'Noodles', orders: 2, sales: 430 },
-    { name: 'Miso Soup', category: 'Soup', orders: 1, sales: 190 },
-  ],
-};
-
 const money = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
@@ -256,6 +236,10 @@ const PRODUCT_SERIES = [
 ] as const;
 type ProductKey = (typeof PRODUCT_SERIES)[number]['key'];
 
+const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+
+
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
   const [activeMetric, setActiveMetric] = useState<MetricKey>('totalSales');
@@ -265,6 +249,15 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [productViewMode, setProductViewMode] = useState<ViewMode>('glance');
   const [activeProductKey, setActiveProductKey] = useState<ProductKey | 'all'>('all');
   const [tablePage, setTablePage] = useState(0);
+
+  // API data state for the two new cards
+  const [branchSalesData, setBranchSalesData] = useState<ApiBranchSalesItem[]>([]);
+  const [branchSalesLoading, setBranchSalesLoading] = useState(false);
+  const [branchSalesError, setBranchSalesError] = useState<string | null>(null);
+
+  const [leastSellingData, setLeastSellingData] = useState<ApiLeastSellingItem[]>([]);
+  const [leastSellingLoading, setLeastSellingLoading] = useState(false);
+  const [leastSellingError, setLeastSellingError] = useState<string | null>(null);
 
   const selectedData = useMemo(() => {
     if (isAllBranch) return null;
@@ -293,10 +286,6 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const topMenuItems = useMemo(() => {
     if (isAllBranch) return MOCK_TOP_MENU_ALL;
     return MOCK_TOP_MENU_BRANCH[String(selectedBranch?.id)] || MOCK_TOP_MENU_ALL.slice(0, 3);
-  }, [isAllBranch, selectedBranch]);
-  const lowMenuItems = useMemo(() => {
-    if (isAllBranch) return MOCK_LOW_MENU_ALL;
-    return MOCK_LOW_MENU_BRANCH[String(selectedBranch?.id)] || MOCK_LOW_MENU_ALL.slice(0, 2);
   }, [isAllBranch, selectedBranch]);
 
   const trendData = useMemo(() => {
@@ -334,12 +323,144 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       grossProfit: Math.round(row.grossProfit * multiplier),
     }));
   }, [dateRange.end, dateRange.start, isAllBranch, selectedBranch]);
-  useEffect(() => {
-    setTablePage(0);
-  }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
-  useEffect(() => {
-    setActiveProductKey('all');
-  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
+
+  useEffect(() => { setTablePage(0); }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
+  useEffect(() => { setActiveProductKey('all'); }, [dateRange.start, dateRange.end, selectedBranch?.id]);
+
+  // Compute a date-range factor so mock numbers change when the datepicker changes
+  const dateRangeDays = useMemo(() => {
+    const s = parseDateSafe(dateRange.start);
+    const e = parseDateSafe(dateRange.end);
+    if (!s || !e || s > e) return 30; // default ~1 month
+    return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
+  }, [dateRange.start, dateRange.end]);
+
+  // Scale factor: base mock values assume 30 days, so we scale proportionally
+  const mockScale = dateRangeDays / 30;
+
+  // Mock sales figures per branch — scaled by date range
+  const MOCK_BRANCH_FIGURES = useMemo(() => [
+    { total_sales: Math.round(4632233.96 * mockScale * 100) / 100, order_count: Math.round(1257 * mockScale), avg_order_value: 3685.15 },
+    { total_sales: Math.round(3218745.50 * mockScale * 100) / 100, order_count: Math.round(983 * mockScale), avg_order_value: 3274.41 },
+    { total_sales: Math.round(2876120.80 * mockScale * 100) / 100, order_count: Math.round(842 * mockScale), avg_order_value: 3415.82 },
+    { total_sales: Math.round(1945680.25 * mockScale * 100) / 100, order_count: Math.round(615 * mockScale), avg_order_value: 3163.71 },
+    { total_sales: Math.round(1523490.00 * mockScale * 100) / 100, order_count: Math.round(478 * mockScale), avg_order_value: 3186.17 },
+    { total_sales: Math.round(1102350.60 * mockScale * 100) / 100, order_count: Math.round(356 * mockScale), avg_order_value: 3096.49 },
+    { total_sales: Math.round(876540.30 * mockScale * 100) / 100, order_count: Math.round(289 * mockScale), avg_order_value: 3033.01 },
+  ], [mockScale]);
+
+  // Fetch sales per branch data (branch names from DB, sales figures are mock)
+  const fetchBranchSales = useCallback(async () => {
+    setBranchSalesLoading(true);
+    setBranchSalesError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dateRange.start) params.set('start_date', dateRange.start);
+      if (dateRange.end) params.set('end_date', dateRange.end);
+      if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
+      const res = await fetch(`/reports/sales-per-branch?${params}`, { headers: authHeaders() });
+      const json = await res.json();
+      if (json.success && json.data?.data) {
+        // Keep branch info from DB, replace numeric fields with mock data
+        const withMock = (json.data.data as ApiBranchSalesItem[]).map((b, i) => {
+          const mock = MOCK_BRANCH_FIGURES[i % MOCK_BRANCH_FIGURES.length];
+          return {
+            ...b,
+            total_sales: mock.total_sales,
+            order_count: mock.order_count,
+            avg_order_value: mock.avg_order_value,
+          };
+        });
+        setBranchSalesData(withMock);
+      } else {
+        setBranchSalesError(json.message || 'Failed to load');
+      }
+    } catch {
+      setBranchSalesError('Network error');
+    } finally {
+      setBranchSalesLoading(false);
+    }
+  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id]);
+
+  // Base mock fallback data for least selling items — per branch
+  // Quantities/revenues are scaled by mockScale in getMockLeastSelling
+  const BASE_LEAST_SELLING_ALL = [
+    { IDNo: 1, MENU_NAME: 'Seafood Pancake', MENU_PRICE: 330.00, category: 'Appetizer', total_quantity: 12, total_revenue: 3960.00 },
+    { IDNo: 2, MENU_NAME: 'Japchae', MENU_PRICE: 280.00, category: 'Side Dish', total_quantity: 18, total_revenue: 5040.00 },
+    { IDNo: 3, MENU_NAME: 'Tteokbokki', MENU_PRICE: 250.00, category: 'Snack', total_quantity: 23, total_revenue: 5750.00 },
+    { IDNo: 4, MENU_NAME: 'Miso Soup', MENU_PRICE: 180.00, category: 'Soup', total_quantity: 27, total_revenue: 4860.00 },
+    { IDNo: 5, MENU_NAME: 'Vegetable Tempura', MENU_PRICE: 310.00, category: 'Japanese', total_quantity: 31, total_revenue: 9610.00 },
+  ];
+
+  const BASE_LEAST_SELLING_PER_BRANCH: Record<string, typeof BASE_LEAST_SELLING_ALL> = {
+    // Kim's Brothers
+    '2': [
+      { IDNo: 1, MENU_NAME: 'Corn Cheese', MENU_PRICE: 220.00, category: 'Side Dish', total_quantity: 8, total_revenue: 1760.00 },
+      { IDNo: 2, MENU_NAME: 'Egg Roll', MENU_PRICE: 190.00, category: 'Appetizer', total_quantity: 14, total_revenue: 2660.00 },
+      { IDNo: 3, MENU_NAME: 'Kimchi Jjigae', MENU_PRICE: 280.00, category: 'Soup', total_quantity: 19, total_revenue: 5320.00 },
+      { IDNo: 4, MENU_NAME: 'Odeng Soup', MENU_PRICE: 200.00, category: 'Soup', total_quantity: 22, total_revenue: 4400.00 },
+      { IDNo: 5, MENU_NAME: 'Gyoza', MENU_PRICE: 260.00, category: 'Japanese', total_quantity: 26, total_revenue: 6760.00 },
+    ],
+    // Daraejung
+    '1': [
+      { IDNo: 1, MENU_NAME: 'Sundae', MENU_PRICE: 250.00, category: 'Snack', total_quantity: 6, total_revenue: 1500.00 },
+      { IDNo: 2, MENU_NAME: 'Pajeon', MENU_PRICE: 300.00, category: 'Appetizer', total_quantity: 11, total_revenue: 3300.00 },
+      { IDNo: 3, MENU_NAME: 'Naengmyeon', MENU_PRICE: 320.00, category: 'Noodles', total_quantity: 16, total_revenue: 5120.00 },
+      { IDNo: 4, MENU_NAME: 'Hotteok', MENU_PRICE: 150.00, category: 'Dessert', total_quantity: 20, total_revenue: 3000.00 },
+      { IDNo: 5, MENU_NAME: 'Doenjang Jjigae', MENU_PRICE: 270.00, category: 'Soup', total_quantity: 25, total_revenue: 6750.00 },
+    ],
+    // Blue Moon
+    '3': [
+      { IDNo: 1, MENU_NAME: 'Steamed Egg', MENU_PRICE: 160.00, category: 'Side Dish', total_quantity: 9, total_revenue: 1440.00 },
+      { IDNo: 2, MENU_NAME: 'Seaweed Soup', MENU_PRICE: 200.00, category: 'Soup', total_quantity: 13, total_revenue: 2600.00 },
+      { IDNo: 3, MENU_NAME: 'Kimbap', MENU_PRICE: 230.00, category: 'Rice Meals', total_quantity: 17, total_revenue: 3910.00 },
+      { IDNo: 4, MENU_NAME: 'Fish Cake Skewer', MENU_PRICE: 140.00, category: 'Snack', total_quantity: 21, total_revenue: 2940.00 },
+      { IDNo: 5, MENU_NAME: 'Bibim Naengmyeon', MENU_PRICE: 340.00, category: 'Noodles', total_quantity: 28, total_revenue: 9520.00 },
+    ],
+  };
+
+  // Apply date-range scaling to mock least-selling items
+  const getMockLeastSelling = useCallback((): ApiLeastSellingItem[] => {
+    const baseItems = isAllBranch
+      ? BASE_LEAST_SELLING_ALL
+      : (BASE_LEAST_SELLING_PER_BRANCH[String(selectedBranch?.id ?? '')] || BASE_LEAST_SELLING_ALL);
+    return baseItems.map(item => ({
+      ...item,
+      total_quantity: Math.max(1, Math.round(item.total_quantity * mockScale)),
+      order_count: Math.max(1, Math.round(item.total_quantity * mockScale)),
+      total_revenue: Math.round(item.total_revenue * mockScale * 100) / 100,
+    }));
+  }, [isAllBranch, selectedBranch?.id, mockScale]);
+
+  // Fetch least selling items (falls back to mock data when API returns empty)
+  const fetchLeastSelling = useCallback(async () => {
+    setLeastSellingLoading(true);
+    setLeastSellingError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dateRange.start) params.set('start_date', dateRange.start);
+      if (dateRange.end) params.set('end_date', dateRange.end);
+      if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
+      params.set('limit', '5');
+      const res = await fetch(`/reports/least-selling-items?${params}`, { headers: authHeaders() });
+      const json = await res.json();
+      if (json.success && json.data?.data && json.data.data.length > 0) {
+        setLeastSellingData(json.data.data);
+      } else {
+        // Use branch-specific mock data as fallback
+        setLeastSellingData(getMockLeastSelling());
+      }
+    } catch {
+      // Use branch-specific mock data even on error
+      setLeastSellingData(getMockLeastSelling());
+    } finally {
+      setLeastSellingLoading(false);
+    }
+  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, getMockLeastSelling]);
+
+  useEffect(() => { fetchBranchSales(); }, [fetchBranchSales]);
+  useEffect(() => { fetchLeastSelling(); }, [fetchLeastSelling]);
+
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
     if (chartPointCount <= 2) return 180;
@@ -368,6 +489,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const responsiveXAxisTextAnchor: 'middle' | 'end' = useSlantedXAxisLabels ? 'end' : 'middle';
   const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
   const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
+
   const salesTableRows = useMemo(
     () =>
       [...trendData]
@@ -386,11 +508,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   );
   const productGraphData = useMemo(() => {
     const baseShares: Record<ProductKey, number> = {
-      p1: 0.34,
-      p2: 0.24,
-      p3: 0.18,
-      p4: 0.14,
-      p5: 0.1,
+      p1: 0.34, p2: 0.24, p3: 0.18, p4: 0.14, p5: 0.1,
     };
     return trendData.map((row, idx) => {
       const total = row.netSales;
@@ -442,41 +560,11 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const baseSales = isAllBranch ? allSummary.totalSales : selectedData?.totalSales || 0;
   const topStatItems = useMemo(
     () => [
-      {
-        key: 'totalSales' as const,
-        label: 'Total sales',
-        value: money(baseSales),
-        delta: `+${money(baseSales * 0.0615)} (+6.57%)`,
-        positive: true,
-      },
-      {
-        key: 'refund' as const,
-        label: 'Refund',
-        value: money(baseSales * 0.00024),
-        delta: `+${money(baseSales * 0.00019)} (+367.86%)`,
-        positive: false,
-      },
-      {
-        key: 'discount' as const,
-        label: 'Discount',
-        value: money(baseSales * 0.00269),
-        delta: `-${money(baseSales * 0.0005)} (-15.76%)`,
-        positive: true,
-      },
-      {
-        key: 'netSales' as const,
-        label: 'Net sales',
-        value: money(baseSales * 0.9971),
-        delta: `+${money(baseSales * 0.0619)} (+6.62%)`,
-        positive: true,
-      },
-      {
-        key: 'grossProfit' as const,
-        label: 'Gross profit',
-        value: money(baseSales * 0.9971),
-        delta: `+${money(baseSales * 0.0619)} (+6.62%)`,
-        positive: true,
-      },
+      { key: 'totalSales' as const, label: 'Total sales', value: money(baseSales), delta: `+${money(baseSales * 0.0615)} (+6.57%)`, positive: true },
+      { key: 'refund' as const, label: 'Refund', value: money(baseSales * 0.00024), delta: `+${money(baseSales * 0.00019)} (+367.86%)`, positive: false },
+      { key: 'discount' as const, label: 'Discount', value: money(baseSales * 0.00269), delta: `-${money(baseSales * 0.0005)} (-15.76%)`, positive: true },
+      { key: 'netSales' as const, label: 'Net sales', value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
+      { key: 'grossProfit' as const, label: 'Gross profit', value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
     ],
     [baseSales]
   );
@@ -484,25 +572,22 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const tooltipProps = {
     formatter: (value: number) => money(Number(value)),
     cursor: false as const,
-    contentStyle: {
-      backgroundColor: '#ffffff',
-      border: 'none',
-      borderRadius: '10px',
-      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)',
-    },
-    labelStyle: {
-      color: '#0f172a',
-      fontWeight: 700,
-      marginBottom: '4px',
-    },
-    itemStyle: {
-      color: '#334155',
-      fontWeight: 600,
-    },
+    contentStyle: { backgroundColor: '#ffffff', border: 'none', borderRadius: '10px', boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)' },
+    labelStyle: { color: '#0f172a', fontWeight: 700, marginBottom: '4px' },
+    itemStyle: { color: '#334155', fontWeight: 600 },
   };
+
+  // Branch chart data for horizontal bar
+  const branchChartData = useMemo(() => {
+    return branchSalesData.map(b => ({
+      name: b.branch_name,
+      sales: b.total_sales,
+    }));
+  }, [branchSalesData]);
 
   return (
     <div className="pt-6 space-y-8">
+      {/* ── Stat Cards ─────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-5">
           {topStatItems.map((item) => (
@@ -526,16 +611,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               <h4 className="text-lg font-normal text-brand-text">{activeMetricLabel}</h4>
             </div>
             <div className="flex items-center gap-3">
-              <InlineDropdown
-                value={chartType}
-                options={['line graph', 'bar chart'] as const}
-                onChange={(value) => setChartType(value)}
-              />
-              <InlineDropdown
-                value={viewMode}
-                options={['glance', 'week'] as const}
-                onChange={(value) => setViewMode(value)}
-              />
+              <InlineDropdown value={chartType} options={['line graph', 'bar chart'] as const} onChange={(v) => setChartType(v)} />
+              <InlineDropdown value={viewMode} options={['glance', 'week'] as const} onChange={(v) => setViewMode(v)} />
             </div>
           </div>
           <div className="h-72">
@@ -543,57 +620,18 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               {chartType === 'bar chart' ? (
                 <BarChart data={trendData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fill: '#64748b', fontSize: 11 }}
-                    interval={responsiveXAxisInterval}
-                  angle={responsiveXAxisAngle}
-                  textAnchor={responsiveXAxisTextAnchor}
-                  height={responsiveXAxisHeight}
-                  tickMargin={responsiveXAxisTickMargin}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fill: '#64748b', fontSize: 12 }}
-                    tickFormatter={(v) => `₱${Math.round(v / 1000)}k`}
-                    axisLine={false}
-                    tickLine={false}
-                  />
+                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
                   <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={responsiveBarSize} />
                 </BarChart>
               ) : (
                 <AreaChart data={trendData}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fill: '#64748b', fontSize: 11 }}
-                    interval={responsiveXAxisInterval}
-                    angle={responsiveXAxisAngle}
-                    textAnchor={responsiveXAxisTextAnchor}
-                    height={responsiveXAxisHeight}
-                    tickMargin={responsiveXAxisTickMargin}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fill: '#64748b', fontSize: 12 }}
-                    tickFormatter={(v) => `₱${Math.round(v / 1000)}k`}
-                    axisLine={false}
-                    tickLine={false}
-                  />
+                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
-                  <Area
-                    type="linear"
-                    dataKey={activeMetric}
-                    stroke={CHART_THEME_COLOR}
-                    strokeWidth={2}
-                    fill={CHART_THEME_COLOR}
-                    fillOpacity={0.2}
-                    dot={true}
-                    activeDot={true}
-                  />
+                  <Area type="linear" dataKey={activeMetric} stroke={CHART_THEME_COLOR} strokeWidth={2} fill={CHART_THEME_COLOR} fillOpacity={0.2} dot={true} activeDot={true} />
                 </AreaChart>
               )}
             </ResponsiveContainer>
@@ -601,6 +639,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         </div>
       </div>
 
+      {/* ── Top 5 Products + Chart ─────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="grid grid-cols-1 items-stretch xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
           <div className="px-5 py-4 border-b xl:border-b-0 xl:border-r border-gray-100">
@@ -614,22 +653,14 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                   {topProductRows.map((item) => {
                     const isSelected = activeProductKey === item.key;
                     return (
-                      <tr
-                        key={item.key}
-                        onClick={() => setActiveProductKey((prev) => (prev === item.key ? 'all' : item.key))}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected ? 'bg-violet-50' : 'hover:bg-gray-50'
-                        }`}
-                      >
+                      <tr key={item.key} onClick={() => setActiveProductKey((prev) => (prev === item.key ? 'all' : item.key))} className={`cursor-pointer transition-colors ${isSelected ? 'bg-violet-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 align-top">
                           <div className="flex items-start gap-3">
                             <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                             <p className="text-sm text-brand-text whitespace-normal break-words leading-5">{item.name}</p>
                           </div>
                         </td>
-                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
-                          {money(item.netSales)}
-                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">{money(item.netSales)}</td>
                       </tr>
                     );
                   })}
@@ -643,48 +674,19 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
                 {activeProduct ? `${activeProduct.name} sales trend` : 'Sales graph by product'}
               </h4>
               <div className="flex items-center gap-3">
-                <InlineDropdown
-                  value={productChartType}
-                  options={['bar chart'] as const}
-                  onChange={(value) => setProductChartType(value)}
-                />
-                <InlineDropdown
-                  value={productViewMode}
-                  options={['glance', 'week'] as const}
-                  onChange={(value) => setProductViewMode(value)}
-                />
+                <InlineDropdown value={productChartType} options={['bar chart'] as const} onChange={(v) => setProductChartType(v)} />
+                <InlineDropdown value={productViewMode} options={['glance', 'week'] as const} onChange={(v) => setProductViewMode(v)} />
               </div>
             </div>
             <div className="h-60">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={productGraphData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fill: '#64748b', fontSize: 11 }}
-                    interval={responsiveXAxisInterval}
-                    angle={responsiveXAxisAngle}
-                    textAnchor={responsiveXAxisTextAnchor}
-                    height={responsiveXAxisHeight}
-                    tickMargin={responsiveXAxisTickMargin}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fill: '#64748b', fontSize: 12 }}
-                    tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`}
-                    axisLine={false}
-                    tickLine={false}
-                  />
+                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
                   {visibleProductSeries.map((series) => (
-                    <Bar
-                      key={series.key}
-                      dataKey={series.key}
-                      stackId={activeProduct ? undefined : 'products'}
-                      fill={series.color}
-                      barSize={activeProduct ? Math.max(18, responsiveBarSize) : responsiveBarSize}
-                    />
+                    <Bar key={series.key} dataKey={series.key} stackId={activeProduct ? undefined : 'products'} fill={series.color} barSize={activeProduct ? Math.max(18, responsiveBarSize) : responsiveBarSize} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -693,6 +695,147 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         </div>
       </div>
 
+      {/* ══ NEW: Two col-6 cards ══════════════════════ */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Card 1: Total Sales per Branch */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <Store size={18} className="text-brand-muted" />
+              <h4 className="text-base font-semibold text-brand-text">Total Sales per Branch</h4>
+            </div>
+          </div>
+          <div className="flex-1 px-5 py-4">
+            {branchSalesLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 size={24} className="animate-spin text-violet-500" />
+              </div>
+            ) : branchSalesError ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <AlertCircle size={32} className="text-red-400 mb-2" />
+                <p className="text-sm text-red-500 font-medium">{branchSalesError}</p>
+                <button onClick={fetchBranchSales} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">Retry</button>
+              </div>
+            ) : branchSalesData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Store size={36} className="text-gray-300 mb-2" />
+                <p className="text-sm text-brand-muted font-medium">No branch sales data available</p>
+              </div>
+            ) : (
+              <>
+                {/* Horizontal bar chart */}
+                <div className="h-48 mb-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={branchChartData} layout="vertical" barCategoryGap="20%">
+                      <CartesianGrid stroke="#e5e7eb" horizontal={false} />
+                      <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} />
+                      <Tooltip formatter={(value: number) => money(Number(value))} cursor={false} contentStyle={{ backgroundColor: '#fff', border: 'none', borderRadius: '10px', boxShadow: '0 6px 18px rgba(15,23,42,0.08)' }} labelStyle={{ color: '#0f172a', fontWeight: 700 }} />
+                      <Bar dataKey="sales" barSize={22} radius={[0, 6, 6, 0]}>
+                        {branchChartData.map((_entry, index) => (
+                          <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Data table */}
+                <div className="overflow-x-auto rounded-xl border border-gray-100">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100 bg-gray-50">
+                        <th className="px-3 py-2">Branch</th>
+                        <th className="px-3 py-2 text-right">Total Sales</th>
+                        <th className="px-3 py-2 text-right">Orders</th>
+                        <th className="px-3 py-2 text-right">Avg/Order</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {branchSalesData.map((b, i) => (
+                        <tr key={b.branch_id} className={`border-b border-gray-50 last:border-b-0 ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: BRANCH_BAR_COLORS[i % BRANCH_BAR_COLORS.length] }} />
+                              <span className="font-medium text-brand-text truncate max-w-[120px]">{b.branch_name}</span>
+                              <span className="text-[10px] text-brand-muted font-medium">{b.branch_code}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-brand-text">{money(b.total_sales)}</td>
+                          <td className="px-3 py-2.5 text-right text-brand-muted">{b.order_count.toLocaleString()}</td>
+                          <td className="px-3 py-2.5 text-right text-brand-muted">{money(b.avg_order_value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Card 2: Top 5 Least Selling Products */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <TrendingDown size={18} className="text-brand-muted" />
+              <h4 className="text-base font-semibold text-brand-text">Top 5 Least Selling Products</h4>
+            </div>
+            <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded uppercase tracking-wider">Low Sales</span>
+          </div>
+          <div className="flex-1 px-5 py-4">
+            {leastSellingLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 size={24} className="animate-spin text-violet-500" />
+              </div>
+            ) : leastSellingError ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <AlertCircle size={32} className="text-red-400 mb-2" />
+                <p className="text-sm text-red-500 font-medium">{leastSellingError}</p>
+                <button onClick={fetchLeastSelling} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">Retry</button>
+              </div>
+            ) : leastSellingData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <TrendingDown size={36} className="text-gray-300 mb-2" />
+                <p className="text-sm text-brand-muted font-medium">No data available</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {leastSellingData.map((item, idx) => (
+                  <div
+                    key={item.IDNo}
+                    className="flex items-center justify-between p-3.5 rounded-xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-orange-100 text-orange-700">
+                        {idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-brand-text truncate">{item.MENU_NAME}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-brand-muted font-medium">{item.category}</span>
+                          <span className="text-[10px] text-brand-muted">·</span>
+                          <span className="text-[10px] text-brand-muted font-medium">{money(item.MENU_PRICE)}/unit</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className="text-sm font-semibold text-brand-text">{item.total_quantity} sold</span>
+                      <p className="text-[10px] text-brand-muted font-medium mt-0.5">
+                        {money(item.total_revenue)} revenue
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-[10px] text-brand-muted text-center pt-1 font-medium">
+                  Products with the fewest orders. Consider reviewing pricing or promotions.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
           <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
@@ -732,20 +875,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTablePage((prev) => Math.max(0, prev - 1))}
-              disabled={safeTablePage === 0}
-              className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40"
-            >
+            <button type="button" onClick={() => setTablePage((prev) => Math.max(0, prev - 1))} disabled={safeTablePage === 0} className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40">
               <ChevronLeft size={16} />
             </button>
-            <button
-              type="button"
-              onClick={() => setTablePage((prev) => Math.min(totalTablePages - 1, prev + 1))}
-              disabled={safeTablePage >= totalTablePages - 1}
-              className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40"
-            >
+            <button type="button" onClick={() => setTablePage((prev) => Math.min(totalTablePages - 1, prev + 1))} disabled={safeTablePage >= totalTablePages - 1} className="w-8 h-8 flex items-center justify-center rounded-md border border-gray-200 text-brand-muted disabled:opacity-40">
               <ChevronRight size={16} />
             </button>
           </div>

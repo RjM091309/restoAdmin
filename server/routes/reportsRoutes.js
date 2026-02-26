@@ -78,6 +78,14 @@ router.get("/reports/goods-sales", authenticate, ReportsController.getGoodsSales
 // Body: { data: [{ goods, category, sales_quantity, discounts, net_sales, unit_cost, total_revenue }, ...] }
 router.post("/reports/goods-sales/import", authenticate, ReportsController.importGoodsSalesReport);
 
+// GET - Sales per branch (total sales aggregated by branch)
+// Query: ?start_date=...&end_date=...
+router.get("/reports/sales-per-branch", authenticate, ReportsController.getSalesPerBranch);
+
+// GET - Least selling / zero-sales items
+// Query: ?start_date=...&end_date=...&branch_id=...&limit=5
+router.get("/reports/least-selling-items", authenticate, ReportsController.getLeastSellingItems);
+
 // GET - Validate imported data (check if totals tally across tables)
 // Query: ?branch_id=...&start_date=...&end_date=...
 router.get("/reports/validate-imported-data", authenticate, ReportsController.validateImportedData);
