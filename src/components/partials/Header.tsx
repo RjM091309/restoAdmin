@@ -84,6 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
       'Sales Report': 'sidebar.sales_report',
       'Sales Analytics': 'sidebar.sales_analytics',
       Menu: 'sidebar.menu',
+      'Menu Management': 'sidebar.menu_management',
       Category: 'sidebar.category',
       'Payment type': 'sidebar.payment_type',
       Receipt: 'sidebar.receipt',
@@ -108,6 +109,7 @@ export const Header: React.FC<HeaderProps> = ({
     const keyByTab: Record<string, string> = {
       Orders: 'header.subtitle_orders',
       Menu: 'header.subtitle_menu',
+      'Menu Management': 'header.subtitle_menu_management',
       Inventory: 'header.subtitle_inventory',
       'User Info': 'header.subtitle_user_info',
       'User Role': 'header.subtitle_user_role',
@@ -286,8 +288,8 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center gap-2">
                 <MapPin size={20} className="text-brand-muted" />
                 <span className="text-sm text-brand-muted">
-                  {selectedBranch 
-                    ? (selectedBranch.id === 'all' ? t('header.all_branches') : selectedBranch.name) 
+                  {selectedBranch
+                    ? (selectedBranch.id === 'all' ? t('header.all_branches') : selectedBranch.name)
                     : t('header.select_branch')}
                 </span>
               </div>

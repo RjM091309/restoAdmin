@@ -373,6 +373,7 @@ export default function App() {
 
   // Create breadcrumb array
   const breadcrumbs = pathParts.map(part => {
+    if (part === 'menu-management') return 'Menu Management';
     if (part === 'users') return 'User Management';
     if (part === 'sales-report') return 'Sales Report';
     if (part === 'info') return 'User Info';
@@ -418,6 +419,7 @@ export default function App() {
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
       case 'Sales Analytics': navigate(`/sales-report/sales-analytics${suffix}`); break;
+      case 'Menu Management': navigate(`/menu-management${suffix}`); break;
       case 'Menu': navigate(`/sales-report/menu${suffix}`); break;
       case 'Category': navigate(`/sales-report/category${suffix}`); break;
       case 'Payment type': navigate(`/sales-report/payment-type${suffix}`); break;
@@ -495,6 +497,17 @@ export default function App() {
                   )
                 } />
 
+                <Route path="/menu-management" element={
+                  selectedBranch && String(selectedBranch.id) !== 'all' ? (
+                    <Menu
+                      key={selectedBranch.id}
+                      selectedBranch={selectedBranch}
+                    />
+                  ) : (
+                    <Navigate to="/dashboard" replace />
+                  )
+                } />
+
                 <Route path="/menu" element={
                   selectedBranch && String(selectedBranch.id) !== 'all' ? (
                     <Menu
@@ -512,9 +525,9 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Categories 
+                    <Categories
                       selectedBranch={selectedBranch}
-                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}${location.search || ''}`)} 
+                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}${location.search || ''}`)}
                     />
                   </motion.div>
                 } />

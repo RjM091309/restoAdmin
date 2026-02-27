@@ -96,7 +96,7 @@ export const UserRole: React.FC = () => {
       });
 
       if (!res.ok) throw new Error(t('user_roles.toast.delete_failed'));
-      
+
       toast.success(t('user_roles.toast.deleted_success', { role: roleToDelete?.role }));
       setIsDeleteModalOpen(false);
       fetchRoles();
@@ -114,7 +114,7 @@ export const UserRole: React.FC = () => {
     setIsSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      const url = editingRole 
+      const url = editingRole
         ? `/api/user-management/roles/${editingRole.id}`
         : '/api/user-management/roles';
       const method = editingRole ? 'PUT' : 'POST';
@@ -151,7 +151,7 @@ export const UserRole: React.FC = () => {
     <div className="space-y-8 pt-6">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="skeleton"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -180,7 +180,7 @@ export const UserRole: React.FC = () => {
             </div>
           </motion.div>
         ) : error ? (
-          <motion.div 
+          <motion.div
             key="error"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -190,7 +190,7 @@ export const UserRole: React.FC = () => {
             <p className="text-red-500 text-lg">{error}</p>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="content"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -204,7 +204,7 @@ export const UserRole: React.FC = () => {
                   <input
                     type="text"
                     placeholder={t('user_roles.search_placeholder')}
-                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -221,28 +221,28 @@ export const UserRole: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
               {filteredRoles.map((role) => (
-                <div 
+                <div
                   key={role.id}
                   className="group relative bg-white rounded-2xl p-1 shadow-sm hover:shadow-xl hover:shadow-brand-text/5 transition-all duration-500 border border-gray-100 hover:border-brand-text/10 overflow-hidden"
                 >
                   {/* Background Decoration */}
-                  <div className="absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 bg-brand-text/5 rounded-full blur-2xl group-hover:bg-brand-orange/5 transition-colors duration-500" />
-                  
+                  <div className="absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 bg-brand-text/5 rounded-full blur-2xl group-hover:bg-brand-primary/5 transition-colors duration-500" />
+
                   <div className="relative p-4 space-y-4">
                     <div className="flex items-center justify-between">
-                      <div className="w-12 h-12 rounded-xl bg-[rgb(100,116,139)] group-hover:bg-brand-orange flex items-center justify-center text-white shadow-lg shadow-brand-text/10 group-hover:scale-110 transition-all duration-500">
+                      <div className="w-12 h-12 rounded-xl bg-[rgb(100,116,139)] group-hover:bg-brand-primary flex items-center justify-center text-white shadow-lg shadow-brand-text/10 group-hover:scale-110 transition-all duration-500">
                         <Shield size={22} strokeWidth={2.5} />
                       </div>
 
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-500">
-                        <button 
+                        <button
                           onClick={() => handleOpenEditModal(role)}
                           className="p-2.5 bg-white text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-xl transition-all shadow-sm border border-gray-50"
                           title={t('user_roles.edit_role')}
                         >
                           <Edit2 size={18} />
                         </button>
-                        <button 
+                        <button
                           onClick={() => handleOpenDeleteModal(role)}
                           className="p-2.5 bg-white text-brand-muted hover:text-red-500 hover:bg-red-50 rounded-xl transition-all shadow-sm border border-gray-50"
                           title={t('user_roles.delete_role')}
@@ -251,33 +251,33 @@ export const UserRole: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                    
+
                     <div>
-                      <h3 className="text-base font-black text-brand-text tracking-tight group-hover:text-brand-orange transition-colors duration-300">
+                      <h3 className="text-base font-black text-brand-text tracking-tight group-hover:text-brand-primary transition-colors duration-300">
                         {role.role}
                       </h3>
                       <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-0.5">
                         {t('user_roles.access_level_profile')}
                       </p>
                     </div>
-                    
+
                     <div className="flex items-center justify-between pt-3 border-t border-gray-50/50">
                       <div className="flex -space-x-2">
-                         {[1,2,3].map(i => (
-                           <div key={i} className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 flex items-center justify-center">
-                             <UserIcon size={10} className="text-gray-400" />
-                           </div>
-                         ))}
-                         <div className="w-6 h-6 rounded-full border-2 border-white bg-brand-orange/10 flex items-center justify-center text-[8px] font-bold text-brand-orange">
-                           +5
-                         </div>
+                        {[1, 2, 3].map(i => (
+                          <div key={i} className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 flex items-center justify-center">
+                            <UserIcon size={10} className="text-gray-400" />
+                          </div>
+                        ))}
+                        <div className="w-6 h-6 rounded-full border-2 border-white bg-brand-primary/10 flex items-center justify-center text-[8px] font-bold text-brand-primary">
+                          +5
+                        </div>
                       </div>
 
                       <span
                         className={cn(
                           "text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl flex items-center gap-2 shadow-sm transition-all duration-500",
-                          role.status === 'Active' 
-                            ? "bg-green-50 text-green-600 border border-green-100/50 group-hover:bg-green-500 group-hover:text-white" 
+                          role.status === 'Active'
+                            ? "bg-green-50 text-green-600 border border-green-100/50 group-hover:bg-green-500 group-hover:text-white"
                             : "bg-red-50 text-red-600 border border-red-100/50 group-hover:bg-red-500 group-hover:text-white"
                         )}
                       >
@@ -291,7 +291,7 @@ export const UserRole: React.FC = () => {
                   </div>
                 </div>
               ))}
-              
+
               {filteredRoles.length === 0 && (
                 <div className="col-span-full py-12 text-center bg-white rounded-2xl shadow-sm">
                   <Shield size={48} className="mx-auto text-brand-muted/20 mb-4" />
@@ -336,7 +336,7 @@ export const UserRole: React.FC = () => {
               type="text"
               required
               placeholder={t('user_roles.role_name_placeholder')}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
               autoFocus

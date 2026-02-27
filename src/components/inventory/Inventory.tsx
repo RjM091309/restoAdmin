@@ -4,6 +4,7 @@ import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2, Package 
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useParams } from 'react-router-dom';
@@ -349,9 +350,9 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   : 'bg-red-100 text-red-600'
             )}
           >
-            {status === 'In Stock' ? t('inventory_page.status.in_stock') : 
-             status === 'Low Stock' ? t('inventory_page.status.low_stock') : 
-             t('inventory_page.status.out_of_stock')}
+            {status === 'In Stock' ? t('inventory_page.status.in_stock') :
+              status === 'Low Stock' ? t('inventory_page.status.low_stock') :
+                t('inventory_page.status.out_of_stock')}
           </span>
         );
       },
@@ -392,7 +393,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     <div className="pt-6">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="skeleton"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -407,7 +408,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
             </div>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="content"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -417,12 +418,12 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {onBack && (
-                  <button 
+                  <button
                     onClick={onBack}
-                    className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-orange/30 transition-all group"
+                    className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-primary/30 transition-all group"
                     title={t('inventory_page.back_to_categories')}
                   >
-                    <ArrowLeft size={18} className="text-brand-muted group-hover:text-brand-orange transition-colors" />
+                    <ArrowLeft size={18} className="text-brand-muted group-hover:text-brand-primary transition-colors" />
                   </button>
                 )}
                 <div className="bg-white p-3 rounded-xl shadow-sm">
@@ -435,11 +436,11 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                     placeholder={t('inventory_page.search_placeholder')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                   />
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   resetForm();
                   setIsModalOpen(true);
@@ -492,10 +493,10 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
           resetForm();
         }}
         title={
-          isRestockMode 
-            ? t('inventory_page.modal.restock_title') 
-            : editingId 
-              ? t('inventory_page.modal.edit_title') 
+          isRestockMode
+            ? t('inventory_page.modal.restock_title')
+            : editingId
+              ? t('inventory_page.modal.edit_title')
               : t('inventory_page.modal.add_title')
         }
         maxWidth="3xl"
@@ -514,10 +515,10 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               onClick={handleSave}
               className="px-5 sm:px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
             >
-              {isRestockMode 
-                ? t('inventory_page.modal.save_restock') 
-                : editingId 
-                  ? t('inventory_page.modal.update_item') 
+              {isRestockMode
+                ? t('inventory_page.modal.save_restock')
+                : editingId
+                  ? t('inventory_page.modal.update_item')
                   : t('inventory_page.modal.save_item')}
             </button>
           </div>
@@ -532,7 +533,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 placeholder={t('inventory_page.modal.add_stock_placeholder')}
                 value={restockQtyInput}
                 onChange={(e) => setRestockQtyInput(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
               />
               <p className="mt-2 text-xs text-brand-muted">
                 {t('inventory_page.modal.current_stock', { qty: formData.stockQty, unit: formData.unit })}
@@ -547,14 +548,14 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 placeholder={t('inventory_page.modal.new_unit_cost_placeholder')}
                 value={restockUnitCostInput}
                 onChange={(e) => setRestockUnitCostInput(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
               />
               <p className="mt-2 text-xs text-brand-muted">
-                {t('inventory_page.modal.current_cost', { 
-                  cost: Number(formData.unitCost || 0).toLocaleString(undefined, { 
-                    minimumFractionDigits: 2, 
-                    maximumFractionDigits: 2 
-                  }) 
+                {t('inventory_page.modal.current_cost', {
+                  cost: Number(formData.unitCost || 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                  })
                 })}
               </p>
             </div>
@@ -568,7 +569,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                 placeholder={t('inventory_page.modal.item_name_placeholder')}
                 value={formData.itemName}
                 onChange={(e) => setFormData((prev) => ({ ...prev, itemName: e.target.value }))}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
               />
             </div>
 
@@ -586,19 +587,17 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                         stockQty: Number(e.target.value || 0),
                       }))
                     }
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                   />
-                  <select
+                  <Select2
+                    options={UNIT_OPTIONS.map((unit) => ({
+                      value: unit,
+                      label: t(`inventory_page.units.${unit}`),
+                    }))}
                     value={formData.unit}
-                    onChange={(e) => handleUnitChange(e.target.value)}
-                    className="w-24 sm:w-28 bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none shrink-0"
-                  >
-                    {UNIT_OPTIONS.map((unit) => (
-                      <option key={unit} value={unit}>
-                        {t(`inventory_page.units.${unit}`)}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => handleUnitChange(String(val || 'kg'))}
+                    className="w-28 sm:w-32 shrink-0"
+                  />
                 </div>
               </div>
               <div>
@@ -615,7 +614,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                       unitCost: Number(e.target.value || 0),
                     }))
                   }
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                 />
               </div>
               <div>
@@ -630,7 +629,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                       reorderLevel: Number(e.target.value || 0),
                     }))
                   }
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                 />
               </div>
             </div>

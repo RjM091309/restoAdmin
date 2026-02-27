@@ -67,7 +67,7 @@ export const Select2: React.FC<Select2Props> = ({
         isSearchable
         // @ts-ignore - passing custom prop to components
         leftIcon={leftIcon}
-        components={{ 
+        components={{
           Control,
           SingleValue
         }}
@@ -79,26 +79,26 @@ export const Select2: React.FC<Select2Props> = ({
           menu: () => '!rounded-xl !border !border-gray-100 !shadow-xl !mt-2 !overflow-hidden',
           option: ({ isSelected, isFocused }) => cn(
             '!py-2.5 !px-4 !text-sm !cursor-pointer !transition-colors',
-            isSelected ? '!bg-brand-orange/10 !text-brand-orange !font-bold' : 
-            isFocused ? '!bg-brand-orange/5 !text-brand-text' : '!text-brand-text'
+            isSelected ? '!bg-brand-primary/10 !text-brand-primary !font-bold' :
+              isFocused ? '!bg-brand-primary/5 !text-brand-text' : '!text-brand-text'
           ),
           valueContainer: () => '!px-2',
           clearIndicator: () => '!text-gray-400 hover:!text-red-500 !p-1',
           dropdownIndicator: () => '!text-gray-400 !p-1',
         }}
-            menuPortalTarget={document.body}
-            styles={{
-              control: (base, state) => ({
-                ...base,
-                borderColor: state.isFocused ? 'var(--color-brand-orange)' : 'rgb(226 232 240)',
-                boxShadow: state.isFocused ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none',
-                '&:hover': {
-                  borderColor: state.isFocused ? 'var(--color-brand-orange)' : 'rgb(203 213 225)',
-                }
-              }),
-              menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-            }}
-          />
+        menuPortalTarget={document.body}
+        styles={{
+          control: (base, state) => ({
+            ...base,
+            borderColor: state.isFocused ? 'var(--color-brand-primary)' : 'rgb(226 232 240)',
+            boxShadow: state.isFocused ? '0 0 0 2px rgba(79, 70, 229, 0.2)' : 'none',
+            '&:hover': {
+              borderColor: state.isFocused ? 'var(--color-brand-primary)' : 'rgb(203 213 225)',
+            }
+          }),
+          menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+        }}
+      />
     </div>
   );
 };

@@ -215,7 +215,7 @@ export const Users: React.FC = () => {
     setIsSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      const url = editingUser 
+      const url = editingUser
         ? `/api/user-management/users/${editingUser.id}`
         : '/api/user-management/users';
       const method = editingUser ? 'PUT' : 'POST';
@@ -278,7 +278,7 @@ export const Users: React.FC = () => {
       });
 
       if (!res.ok) throw new Error(t('manage_users.toast.delete_failed'));
-      
+
       toast.success(t('manage_users.toast.deleted_success', { name: userToDelete?.fullName }));
       setIsDeleteModalOpen(false);
       fetchUsers();
@@ -351,7 +351,7 @@ export const Users: React.FC = () => {
     <div className="space-y-8 pt-6">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="skeleton"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -366,7 +366,7 @@ export const Users: React.FC = () => {
             </div>
           </motion.div>
         ) : error ? (
-          <motion.div 
+          <motion.div
             key="error"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -376,7 +376,7 @@ export const Users: React.FC = () => {
             <p className="text-red-500 text-lg">{error}</p>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="content"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -390,7 +390,7 @@ export const Users: React.FC = () => {
                   <input
                     type="text"
                     placeholder={t('manage_users.search_placeholder')}
-                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
@@ -516,7 +516,7 @@ export const Users: React.FC = () => {
                   type="text"
                   required
                   placeholder={t('manage_users.enter_first_name')}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                   autoComplete="off"
@@ -530,7 +530,7 @@ export const Users: React.FC = () => {
                   type="text"
                   required
                   placeholder={t('manage_users.enter_last_name')}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                   autoComplete="off"
@@ -546,7 +546,7 @@ export const Users: React.FC = () => {
                 type="text"
                 required
                 placeholder={t('manage_users.enter_username')}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 autoComplete="off"
@@ -564,7 +564,7 @@ export const Users: React.FC = () => {
                   type="password"
                   required={!editingUser}
                   placeholder="••••••••"
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   autoComplete="new-password"
@@ -578,7 +578,7 @@ export const Users: React.FC = () => {
                   type="password"
                   required={!editingUser || !!formData.password}
                   placeholder="••••••••"
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                   autoComplete="new-password"

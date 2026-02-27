@@ -53,6 +53,7 @@ class ExpenseController {
 			const rows = await ExpenseModel.getAll(branchId);
 			return ApiResponse.success(res, rows, 'Expenses retrieved successfully');
 		} catch (error) {
+			console.error('[ExpenseController.getAll] error:', error);
 			return ApiResponse.error(res, 'Failed to fetch expenses', 500, error.message);
 		}
 	}

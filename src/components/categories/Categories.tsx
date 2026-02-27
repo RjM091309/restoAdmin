@@ -4,15 +4,16 @@ import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { type Branch } from '../partials/Header';
-import { 
-  getInventoryCategories, 
-  createInventoryCategory, 
-  updateInventoryCategory, 
+import {
+  getInventoryCategories,
+  createInventoryCategory,
+  updateInventoryCategory,
   deleteInventoryCategory,
-  type InventoryCategory 
+  type InventoryCategory
 } from '../../services/inventoryService';
 import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
 import { toast } from 'sonner';
@@ -79,7 +80,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -150,7 +151,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
 
   const handleDelete = async (id: string) => {
     if (!window.confirm(t('categories.delete_confirm'))) return;
-    
+
     try {
       await deleteInventoryCategory(id);
       toast.success(t('categories.messages.delete_success'));
@@ -176,7 +177,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     setIsModalOpen(true);
   };
 
-  const filteredCategories = categories.filter(cat => 
+  const filteredCategories = categories.filter(cat =>
     cat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     cat.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -237,7 +238,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         const IconFromKey = getIconFromKey(category.icon);
         const IconComponent = IconFromKey || getIconForCategory(category.name);
         return (
-          <div 
+          <div
             className="flex items-center gap-4 cursor-pointer group"
             onClick={() => onCategoryClick(category.name)}
           >
@@ -265,10 +266,10 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
           { totalItems: 0, totalValue: 0 };
         return (
-        <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">{metric.totalItems}</span>
-          <span className="text-xs text-brand-muted">{t('categories.products')}</span>
-        </div>
+          <div className="flex flex-col items-center justify-center">
+            <span className="text-sm font-bold text-brand-text">{metric.totalItems}</span>
+            <span className="text-xs text-brand-muted">{t('categories.products')}</span>
+          </div>
         );
       },
     },
@@ -281,10 +282,10 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
           { totalItems: 0, totalValue: 0 };
         return (
-        <div className="flex flex-col items-center justify-center">
-          <span className="text-sm font-bold text-brand-text">{formatValue(metric.totalValue)}</span>
-          <span className="text-xs text-brand-muted">{t('categories.asset_value')}</span>
-        </div>
+          <div className="flex flex-col items-center justify-center">
+            <span className="text-sm font-bold text-brand-text">{formatValue(metric.totalValue)}</span>
+            <span className="text-xs text-brand-muted">{t('categories.asset_value')}</span>
+          </div>
         );
       },
     },
@@ -315,7 +316,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       className: 'text-right',
       render: (category) => (
         <div className="flex justify-end items-center gap-2">
-          <button 
+          <button
             className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
             onClick={(e) => {
               e.stopPropagation();
@@ -325,7 +326,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           >
             <Edit2 size={16} />
           </button>
-          <button 
+          <button
             className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
             onClick={(e) => {
               e.stopPropagation();
@@ -344,7 +345,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     <div className="pt-6">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="skeleton"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -359,7 +360,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
             </div>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="content"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -382,7 +383,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
                   />
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => {
                   resetForm();
                   setIsModalOpen(true);
@@ -454,8 +455,8 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         <div className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_name')}</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder={t('categories.form_name_placeholder')}
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -464,25 +465,22 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_type')}</label>
-            <select
+            <Select2
+              options={CATEGORY_TYPE_OPTIONS.map((type) => ({
+                value: type,
+                label: type === 'Inventory' ? t('categories.types.inventory') :
+                  type === 'Maintenance' ? t('categories.types.maintenance') :
+                    type === 'Utilities / Bills' ? t('categories.types.utilities_bills') :
+                      type === 'Salary & Rent' ? t('categories.types.salary_rent') :
+                        t('categories.types.others'),
+              }))}
               value={formData.categoryType}
-              onChange={(e) => setFormData({ ...formData, categoryType: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
-            >
-              {CATEGORY_TYPE_OPTIONS.map((type) => (
-                <option key={type} value={type}>
-                  {type === 'Inventory' ? t('categories.types.inventory') :
-                   type === 'Maintenance' ? t('categories.types.maintenance') :
-                   type === 'Utilities / Bills' ? t('categories.types.utilities_bills') :
-                   type === 'Salary & Rent' ? t('categories.types.salary_rent') :
-                   t('categories.types.others')}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setFormData({ ...formData, categoryType: String(val || 'Inventory') })}
+            />
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_description')}</label>
-            <textarea 
+            <textarea
               rows={3}
               placeholder={t('categories.form_description_placeholder')}
               value={formData.description}
@@ -492,19 +490,19 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           </div>
           <div>
             <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_icon')}</label>
-            <select 
+            <Select2
+              options={[
+                { value: 'package', label: t('categories.icons.default_box') },
+                { value: 'beef', label: t('categories.icons.beef_meat') },
+                { value: 'fish', label: t('categories.icons.fish_seafood') },
+                { value: 'leaf', label: t('categories.icons.vegetables_produce') },
+                { value: 'droplets', label: t('categories.icons.dairy') },
+                { value: 'wheat', label: t('categories.icons.grains') },
+                { value: 'coffee', label: t('categories.icons.beverages') },
+              ]}
               value={formData.icon}
-              onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all text-brand-text cursor-pointer appearance-none"
-            >
-              <option value="package">{t('categories.icons.default_box')}</option>
-              <option value="beef">{t('categories.icons.beef_meat')}</option>
-              <option value="fish">{t('categories.icons.fish_seafood')}</option>
-              <option value="leaf">{t('categories.icons.vegetables_produce')}</option>
-              <option value="droplets">{t('categories.icons.dairy')}</option>
-              <option value="wheat">{t('categories.icons.grains')}</option>
-              <option value="coffee">{t('categories.icons.beverages')}</option>
-            </select>
+              onChange={(val) => setFormData({ ...formData, icon: String(val || 'package') })}
+            />
           </div>
         </div>
       </Modal>

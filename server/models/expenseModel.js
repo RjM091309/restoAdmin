@@ -43,6 +43,40 @@ class ExpenseModel {
 
 			await pool.execute(createTableWithFk);
 
+			// --- Migration: add ALL missing columns if table existed before they were introduced ---
+			try {
+				const [cols] = await pool.execute(
+					`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expenses'`
+				);
+				const existing = new Set(cols.map(c => c.COLUMN_NAME));
+
+				// Each migration is independent with its own try/catch so one failure doesn't block others
+				const migrations = [
+					{ col: 'MASTER_CAT_ID', sql: `ALTER TABLE expenses ADD COLUMN MASTER_CAT_ID INT NULL` },
+					{ col: 'EXP_DESC', sql: `ALTER TABLE expenses ADD COLUMN EXP_DESC VARCHAR(100) NULL` },
+					{ col: 'EXP_AMOUNT', sql: `ALTER TABLE expenses ADD COLUMN EXP_AMOUNT DECIMAL(12,2) NULL` },
+					{ col: 'EXP_SOURCE', sql: `ALTER TABLE expenses ADD COLUMN EXP_SOURCE VARCHAR(100) NULL` },
+					{ col: 'ACTIVE', sql: `ALTER TABLE expenses ADD COLUMN ACTIVE TINYINT(1) NOT NULL DEFAULT 1` },
+					{ col: 'ENCODED_BY', sql: `ALTER TABLE expenses ADD COLUMN ENCODED_BY VARCHAR(100) NULL` },
+					{ col: 'ENCODED_DT', sql: `ALTER TABLE expenses ADD COLUMN ENCODED_DT TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
+					{ col: 'EDITED_BY', sql: `ALTER TABLE expenses ADD COLUMN EDITED_BY VARCHAR(100) NULL` },
+					{ col: 'EDITED_DT', sql: `ALTER TABLE expenses ADD COLUMN EDITED_DT TIMESTAMP NULL` },
+				];
+
+				for (const m of migrations) {
+					if (!existing.has(m.col)) {
+						try {
+							await pool.execute(m.sql);
+							console.log(`[ExpenseModel] Migration: added ${m.col} column to expenses table`);
+						} catch (colErr) {
+							console.warn(`[ExpenseModel] Migration warning for ${m.col}:`, colErr.message);
+						}
+					}
+				}
+			} catch (migrationErr) {
+				console.warn('[ExpenseModel] Migration check warning:', migrationErr.message);
+			}
+
 			ExpenseModel._schemaReady = true;
 			ExpenseModel._schemaPromise = null;
 		})().catch((error) => {

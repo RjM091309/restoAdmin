@@ -311,7 +311,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
                         placeholder={t('menu_page.modal.item_name_placeholder')}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                     />
                 </div>
                 <div>
@@ -323,7 +323,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         placeholder={t('menu_page.modal.price_placeholder')}
                         min="0"
                         step="0.01"
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                     />
                 </div>
             </div>
@@ -360,7 +360,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     onChange={(e) => setFormDesc(e.target.value)}
                     placeholder={t('menu_page.modal.description_placeholder')}
                     rows={2}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 resize-none"
                 />
             </div>
 
@@ -375,7 +375,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         )}
                     </div>
                     <div>
-                        <input type="file" accept="image/*" onChange={handleImageChange} className="text-sm text-brand-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-orange/10 file:text-brand-orange hover:file:bg-brand-orange/20 file:cursor-pointer cursor-pointer" />
+                        <input type="file" accept="image/*" onChange={handleImageChange} className="text-sm text-brand-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-primary/10 file:text-brand-primary hover:file:bg-brand-primary/20 file:cursor-pointer cursor-pointer" />
                         <p className="text-[10px] text-brand-muted mt-1">{t('menu_page.modal.image_hint')}</p>
                     </div>
                 </div>
