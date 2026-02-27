@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as XLSX from 'xlsx';
 import { Search } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -167,6 +168,47 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
     },
   ];
 
+  // --- Export Function ---
+  const handleExport = () => {
+    // 1. Create data rows for Excel
+    const data = filteredRows.map(row => {
+      const pmLabel = row.paymentMethod.toLowerCase() === 'total' ? t('payment_report.total') : row.paymentMethod;
+      return {
+        [t('payment_report.columns.payment_method')]: pmLabel,
+        [t('payment_report.columns.payment_transaction')]: row.paymentTransaction.toLocaleString(),
+        [t('payment_report.columns.payment_amount')]: money(row.paymentAmount),
+        [t('payment_report.columns.refund_transaction')]: row.refundTransaction.toLocaleString(),
+        [t('payment_report.columns.refund_amount')]: money(row.refundAmount),
+        [t('payment_report.columns.net_amount')]: money(row.netAmount),
+      };
+    });
+
+    // 2. Create worksheet
+    const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // 3. Set column widths
+    worksheet['!cols'] = [
+      { wch: 25 }, // Payment Method
+      { wch: 20 }, // Payment Transaction
+      { wch: 20 }, // Payment Amount
+      { wch: 20 }, // Refund Transaction
+      { wch: 20 }, // Refund Amount
+      { wch: 20 }, // Net Amount
+    ];
+
+    // 4. Create workbook and add worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payment Report');
+
+    // 5. Generate descriptive filename
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `payment_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+
+    // 6. Download the file
+    XLSX.writeFile(workbook, filename);
+  };
+
   return (
     <div className="pt-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -180,7 +222,8 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
-        <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
+        <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           {t('payment_report.export')}
         </button>
       </div>

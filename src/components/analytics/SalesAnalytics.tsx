@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as XLSX from 'xlsx';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
@@ -588,6 +589,46 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     }));
   }, [branchSalesData]);
 
+  // --- Export Function ---
+  const handleExport = useCallback(() => {
+    // 1. Create data rows for Excel
+    const data = salesTableRows.map(row => ({
+      [t('sales_analytics.date')]: row.date,
+      [t('sales_analytics.total_sales')]: money(row.totalSales),
+      [t('sales_analytics.refund')]: money(row.refund),
+      [t('sales_analytics.discount')]: money(row.discount),
+      [t('sales_analytics.net_sales')]: money(row.netSales),
+      [t('sales_analytics.product_unit_price')]: money(row.productUnitPrice),
+      [t('sales_analytics.gross_profit')]: money(row.grossProfit),
+    }));
+
+    // 2. Create worksheet
+    const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // 3. Set column widths
+    worksheet['!cols'] = [
+      { wch: 18 }, // Date
+      { wch: 18 }, // Total Sales
+      { wch: 15 }, // Refund
+      { wch: 15 }, // Discount
+      { wch: 18 }, // Net Sales
+      { wch: 18 }, // Product Unit Price
+      { wch: 18 }, // Gross Profit
+    ];
+
+    // 4. Create workbook and append worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales Analytics');
+
+    // 5. Generate descriptive filename with .xlsx extension
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+
+    // 6. Download the file
+    XLSX.writeFile(workbook, filename);
+  }, [salesTableRows, selectedBranch, dateRange, t]);
+
   return (
     <div className="pt-6 space-y-8">
       {/* ── Stat Cards ─────────────────────────────── */}
@@ -841,7 +882,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-          <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
+          <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             {t('sales_analytics.export')}
           </button>
           <button type="button" className="text-brand-muted hover:text-brand-text transition-colors">

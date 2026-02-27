@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
+import * as XLSX from 'xlsx';
 import { Search, X } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -211,6 +212,47 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     },
   ];
 
+  // --- Export Function ---
+  const handleExport = () => {
+    // 1. Create data rows for Excel
+    const data = filteredRows.map(row => {
+      const typeLabel = row.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale');
+      return {
+        [t('receipt_report.columns.receipt_number')]: row.receiptNumber,
+        [t('receipt_report.columns.date')]: row.date,
+        [t('receipt_report.columns.employee')]: row.employee,
+        [t('receipt_report.columns.customer')]: row.customer,
+        [t('receipt_report.columns.type')]: typeLabel,
+        [t('receipt_report.columns.total')]: money(row.total),
+      };
+    });
+
+    // 2. Create worksheet
+    const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // 3. Set column widths
+    worksheet['!cols'] = [
+      { wch: 18 }, // Receipt Number
+      { wch: 20 }, // Date
+      { wch: 20 }, // Employee
+      { wch: 18 }, // Customer
+      { wch: 15 }, // Type
+      { wch: 18 }, // Total
+    ];
+
+    // 4. Create workbook and add worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Receipt Report');
+
+    // 5. Generate descriptive filename
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `receipt_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+
+    // 6. Download the file
+    XLSX.writeFile(workbook, filename);
+  };
+
   return (
     <div className="pt-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -224,7 +266,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
-        <button type="button" className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors">
+        <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           {t('receipt_report.export')}
         </button>
       </div>
@@ -232,11 +275,10 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
         <button
           type="button"
           onClick={() => setActiveFilter('all')}
-          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${
-            activeFilter === 'all'
-              ? 'bg-brand-primary/5 border-brand-primary/40'
-              : 'bg-white border-gray-100 hover:bg-gray-50'
-          }`}
+          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${activeFilter === 'all'
+            ? 'bg-brand-primary/5 border-brand-primary/40'
+            : 'bg-white border-gray-100 hover:bg-gray-50'
+            }`}
         >
           <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_all_receipts')}</p>
           <p className="text-2xl font-bold text-brand-text">{allReceiptsCount.toLocaleString()}</p>
@@ -244,11 +286,10 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
         <button
           type="button"
           onClick={() => setActiveFilter('sale')}
-          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${
-            activeFilter === 'sale'
-              ? 'bg-brand-primary/5 border-brand-primary/40'
-              : 'bg-white border-gray-100 hover:bg-gray-50'
-          }`}
+          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${activeFilter === 'sale'
+            ? 'bg-brand-primary/5 border-brand-primary/40'
+            : 'bg-white border-gray-100 hover:bg-gray-50'
+            }`}
         >
           <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_sale')}</p>
           <p className="text-2xl font-bold text-brand-text">{money(salesAmount)}</p>
@@ -256,11 +297,10 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
         <button
           type="button"
           onClick={() => setActiveFilter('refund')}
-          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${
-            activeFilter === 'refund'
-              ? 'bg-brand-primary/5 border-brand-primary/40'
-              : 'bg-white border-gray-100 hover:bg-gray-50'
-          }`}
+          className={`text-left rounded-2xl px-5 py-4 border shadow-sm transition-colors ${activeFilter === 'refund'
+            ? 'bg-brand-primary/5 border-brand-primary/40'
+            : 'bg-white border-gray-100 hover:bg-gray-50'
+            }`}
         >
           <p className="text-sm text-brand-muted mb-1">{t('receipt_report.filter_refund_amount')}</p>
           <p className="text-2xl font-bold text-brand-text">{money(refundAmountTotal)}</p>
