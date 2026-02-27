@@ -277,10 +277,11 @@ export async function deleteMenu(id: string): Promise<void> {
     }
 }
 
-/** Resolve a menu image URL to a full absolute URL. */
+
+/** Resolve a menu image URL for display. Uses relative path so requests go through the same origin (Vite proxy forwards /uploads to backend). */
 export function resolveImageUrl(imageUrl: string | null): string | null {
     if (!imageUrl) return null;
     if (imageUrl.startsWith('http')) return imageUrl;
-    // Use the API server's base URL
-    return `http://localhost:2000${imageUrl}`;
+    // Use relative path - browser requests from same origin, proxy forwards to backend
+    return imageUrl.startsWith('/') ? imageUrl : `/${imageUrl}`;
 }
