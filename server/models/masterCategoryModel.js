@@ -44,7 +44,7 @@ class MasterCategoryModel {
 		return MasterCategoryModel._schemaPromise;
 	}
 
-	static async getAll(branchId = null) {
+	static async getAll(branchId = null, categoryType = 'Inventory') {
 		await MasterCategoryModel.ensureSchema();
 		let query = `
 			SELECT
@@ -60,13 +60,17 @@ class MasterCategoryModel {
 				EDITED_BY,
 				EDITED_DT
 			FROM master_categories
-			WHERE ACTIVE = 1 AND CATEGORY_TYPE = 'Inventory'
+			WHERE ACTIVE = 1
 		`;
 		const params = [];
 
 		if (branchId !== null && branchId !== undefined) {
 			query += ` AND BRANCH_ID = ?`;
 			params.push(branchId);
+		}
+		if (categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '') {
+			query += ` AND CATEGORY_TYPE = ?`;
+			params.push(String(categoryType).trim());
 		}
 
 		query += ` ORDER BY IDNo DESC`;

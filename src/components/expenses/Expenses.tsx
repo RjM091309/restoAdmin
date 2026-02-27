@@ -17,7 +17,7 @@ import {
   type ExpenseRecord,
 } from '../../services/expenseService';
 import {
-  getInventoryCategories,
+  getAllMasterCategories,
   createInventoryCategory,
   updateInventoryCategory,
   deleteInventoryCategory,
@@ -135,7 +135,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
       setLoading(true);
       const [expenseRows, categoryRows] = await Promise.all([
         getExpenses(branchId),
-        getInventoryCategories(branchId),
+        getAllMasterCategories(branchId),
       ]);
       setExpenses(expenseRows);
       setMasterCategories(categoryRows);
@@ -148,7 +148,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
 
   const refreshCategories = async () => {
     if (!canManage) return;
-    const rows = await getInventoryCategories(branchId);
+    const rows = await getAllMasterCategories(branchId);
     setMasterCategories(rows);
   };
 

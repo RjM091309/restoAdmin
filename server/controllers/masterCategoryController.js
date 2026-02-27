@@ -27,7 +27,14 @@ class MasterCategoryController {
 	static async getAll(req, res) {
 		try {
 			const branchId = MasterCategoryController._resolveBranchId(req);
-			const rows = await MasterCategoryModel.getAll(branchId);
+			const scope = String(req.query?.scope || '').trim().toLowerCase();
+			const requestedType = String(req.query?.category_type || '').trim();
+			let categoryType = requestedType || 'Inventory';
+			if (scope === 'all' || requestedType.toLowerCase() === 'all') {
+				categoryType = null;
+			}
+
+			const rows = await MasterCategoryModel.getAll(branchId, categoryType);
 			return ApiResponse.success(res, rows, 'Inventory categories retrieved successfully');
 		} catch (error) {
 			return ApiResponse.error(res, 'Failed to fetch inventory categories', 500, error.message);

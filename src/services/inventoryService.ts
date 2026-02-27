@@ -75,6 +75,20 @@ const mapCategoryRecord = (row: InventoryCategoryApiRecord): InventoryCategory =
 export const getInventoryCategories = async (branchId?: string): Promise<InventoryCategory[]> => {
     const params: Record<string, string> = {
         branch_id: branchId && branchId !== 'all' ? branchId : '',
+        category_type: 'Inventory',
+    };
+    const response = await fetch(buildUrl('/inventory/categories', params), {
+        credentials: 'include',
+        headers: authHeaders(),
+    });
+    const data = await handleResponse<InventoryCategoryApiRecord[]>(response);
+    return data.map(mapCategoryRecord);
+};
+
+export const getAllMasterCategories = async (branchId?: string): Promise<InventoryCategory[]> => {
+    const params: Record<string, string> = {
+        branch_id: branchId && branchId !== 'all' ? branchId : '',
+        scope: 'all',
     };
     const response = await fetch(buildUrl('/inventory/categories', params), {
         credentials: 'include',
