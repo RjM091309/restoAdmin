@@ -9,6 +9,7 @@ import { Modal } from '../ui/Modal';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { type Branch } from '../partials/Header';
 import { cn } from '../../lib/utils';
+import { useUser } from '../../context/UserContext';
 import {
   getExpenses,
   createExpense,
@@ -95,6 +96,7 @@ const isExcludedExpenseType = (value: string | null | undefined) =>
 
 export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
   const { t } = useTranslation();
+  const { user } = useUser();
 
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [masterCategories, setMasterCategories] = useState<InventoryCategory[]>([]);
@@ -126,8 +128,10 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
   const [quickAddAmount, setQuickAddAmount] = useState('');
   const [quickAddSaving, setQuickAddSaving] = useState(false);
 
-  const canManage = Boolean(selectedBranch && String(selectedBranch.id) !== 'all');
-  const branchId = canManage ? String(selectedBranch?.id) : '';
+  const isAdmin = user?.permissions === 1;
+  const canManage = Boolean(selectedBranch && (String(selectedBranch.id) !== 'all' || isAdmin));
+  const branchId =
+    !selectedBranch ? '' : String(selectedBranch.id) === 'all' ? '' : String(selectedBranch.id);
 
   const fetchData = async () => {
     if (!canManage) return;

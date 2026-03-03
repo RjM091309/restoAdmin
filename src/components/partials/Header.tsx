@@ -148,6 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
     const fetchBranches = async () => {
       try {
         const token = localStorage.getItem('token');
+        const isAdmin = user?.permissions === 1;
         const res = await fetch('/branch', {
           headers: {
             'Content-Type': 'application/json',
@@ -166,13 +167,18 @@ export const Header: React.FC<HeaderProps> = ({
             const params = new URLSearchParams(window.location.search);
             const branchIdFromUrl = params.get('branchId');
             if (!branchIdFromUrl) {
-              const userBranchId = user?.branch_id ? String(user.branch_id) : '';
-              const resolved =
-                userBranchId && userBranchId !== 'all'
-                  ? allBranches.find((b) => String(b.id) === userBranchId) || null
-                  : null;
-              const firstSpecific = allBranches.find((b) => String(b.id) !== 'all') || null;
-              onBranchChange(resolved || firstSpecific || allBranches[0]);
+              if (isAdmin) {
+                const allOption = allBranches.find((b) => String(b.id) === 'all') || allBranches[0];
+                onBranchChange(allOption);
+              } else {
+                const userBranchId = user?.branch_id ? String(user.branch_id) : '';
+                const resolved =
+                  userBranchId && userBranchId !== 'all'
+                    ? allBranches.find((b) => String(b.id) === userBranchId) || null
+                    : null;
+                const firstSpecific = allBranches.find((b) => String(b.id) !== 'all') || null;
+                onBranchChange(resolved || firstSpecific || allBranches[0]);
+              }
             }
           }
         }
@@ -182,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
 
     fetchBranches();
-  }, [onBranchChange, selectedBranch, t, user?.branch_id]);
+  }, [onBranchChange, selectedBranch, t, user?.branch_id, user?.permissions]);
 
   const startDate = toDate(dateRange.start);
   const endDate = toDate(dateRange.end);
