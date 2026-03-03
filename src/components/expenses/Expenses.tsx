@@ -27,6 +27,10 @@ import {
 
 type ExpensesProps = {
   selectedBranch: Branch | null;
+  dateRange: {
+    start: string;
+    end: string;
+  };
 };
 
 const formatCurrency = (value: number) =>
@@ -94,7 +98,7 @@ const EXCLUDED_EXPENSE_TYPES = new Set(['Inventory']);
 const isExcludedExpenseType = (value: string | null | undefined) =>
   EXCLUDED_EXPENSE_TYPES.has(String(value || '').trim()) || normalizeForMatch(value) === 'inventory';
 
-export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
+export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const { user } = useUser();
 
@@ -205,38 +209,56 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
     return categoryNamesForSelectedType.filter((opt) => String(opt.name).toLowerCase().includes(needle));
   }, [categoryNamesForSelectedType, formData.expName]);
 
+  // Apply date-range filtering once so both summary cards and table are consistent
+  const dateRangeFilteredExpenses = useMemo(() => {
+    const hasRange = Boolean(dateRange.start && dateRange.end);
+    if (!hasRange) return expenses;
+
+    const start = new Date(`${dateRange.start}T00:00:00`);
+    const end = new Date(`${dateRange.end}T23:59:59.999`);
+
+    return expenses.filter((e) => {
+      if (!e.encodedDt) return false;
+      const encoded = new Date(e.encodedDt);
+      if (Number.isNaN(encoded.getTime())) return false;
+      return encoded >= start && encoded <= end;
+    });
+  }, [expenses, dateRange.start, dateRange.end]);
+
   const filteredExpenses = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return expenses.filter((e) => {
+
+    return dateRangeFilteredExpenses.filter((e) => {
       if (activeParentCategory && String(e.expCat) !== String(activeParentCategory)) return false;
       if (activeParentCategory && selectedCategoryNameFilter && selectedCategoryNameFilter !== 'All Data') {
         if (String(e.expName) !== String(selectedCategoryNameFilter)) return false;
       }
+
       if (!q) return true;
       const hay = [e.expCat, e.expName, e.expDesc || '', e.expSource || '', e.branchName || '']
         .join(' ')
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [expenses, searchQuery, activeParentCategory, selectedCategoryNameFilter]);
+  }, [dateRangeFilteredExpenses, searchQuery, activeParentCategory, selectedCategoryNameFilter]);
 
   const summaryByType = useMemo(() => {
     const totals = new Map<string, number>();
-    expenses.forEach((e) => {
+    dateRangeFilteredExpenses.forEach((e) => {
       const key = String(e.expCat || '').trim();
       if (!key) return;
       totals.set(key, (totals.get(key) || 0) + Number(e.expAmount || 0));
     });
-    const totalAmount = expenses.reduce((sum, e) => sum + Number(e.expAmount || 0), 0);
+    const totalAmount = dateRangeFilteredExpenses.reduce((sum, e) => sum + Number(e.expAmount || 0), 0);
     return { totalAmount, totals };
-  }, [expenses]);
+  }, [dateRangeFilteredExpenses]);
 
   const inventoryTotal = useMemo(
     () =>
-      expenses
+      dateRangeFilteredExpenses
         .filter((e) => isExcludedExpenseType(e.expCat))
         .reduce((sum, e) => sum + Number(e.expAmount || 0), 0),
-    [expenses],
+    [dateRangeFilteredExpenses],
   );
 
   const filterChips = useMemo(() => {
@@ -260,7 +282,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
       const v = String(c.categoryType || '').trim();
       if (v) set.add(v);
     });
-    expenses.forEach((e) => {
+    dateRangeFilteredExpenses.forEach((e) => {
       const v = String(e.expCat || '').trim();
       if (v) set.add(v);
     });
@@ -278,7 +300,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch }) => {
         label: displayLabel(typeValue),
         amount: summaryByType.totals.get(typeValue) || 0,
       }));
-  }, [masterCategories, expenses, summaryByType.totals]);
+  }, [masterCategories, dateRangeFilteredExpenses, summaryByType.totals]);
 
   const ringClassesForType = (typeValue: string) => {
     if (typeValue === 'Maintenance') {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -30,6 +30,62 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = data.slice(startIndex, endIndex);
+
+  // Build compact page list with ellipsis when there are many pages
+  type PageItem =
+    | { type: 'page'; page: number }
+    | { type: 'ellipsis'; key: string };
+
+  const pageItems: PageItem[] = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => ({
+        type: 'page' as const,
+        page: i + 1,
+      }));
+    }
+
+    const items: PageItem[] = [];
+    const addPage = (p: number) => items.push({ type: 'page', page: p });
+    const addEllipsis = (key: string) =>
+      items.push({ type: 'ellipsis', key });
+
+    const firstPage = 1;
+    const lastPage = totalPages;
+
+    addPage(firstPage);
+
+    const neighbours = 1; // pages to show on each side of current
+    let start = Math.max(currentPage - neighbours, 2);
+    let end = Math.min(currentPage + neighbours, lastPage - 1);
+
+    // Adjust window when close to the start
+    if (currentPage <= 3) {
+      start = 2;
+      end = 4;
+    }
+
+    // Adjust window when close to the end
+    if (currentPage >= lastPage - 2) {
+      start = lastPage - 3;
+      end = lastPage - 1;
+    }
+
+    if (start > 2) {
+      addEllipsis('left');
+    }
+
+    for (let p = start; p <= end; p += 1) {
+      addPage(p);
+    }
+
+    if (end < lastPage - 1) {
+      addEllipsis('right');
+    }
+
+    addPage(lastPage);
+
+    return items;
+  }, [currentPage, totalPages]);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm overflow-hidden w-full">
@@ -157,20 +213,29 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
             </button>
 
             <div className="flex items-center gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center font-medium transition-all",
-                    currentPage === page
-                      ? "bg-brand-primary text-white shadow-md shadow-brand-primary/20"
-                      : "text-brand-muted hover:bg-gray-100 hover:text-brand-text"
-                  )}
-                >
-                  {page}
-                </button>
-              ))}
+              {pageItems.map((item) =>
+                item.type === 'ellipsis' ? (
+                  <span
+                    key={item.key}
+                    className="w-8 h-8 flex items-center justify-center text-xs text-brand-muted"
+                  >
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item.page}
+                    onClick={() => setCurrentPage(item.page)}
+                    className={cn(
+                      "min-w-8 h-8 px-2 rounded-lg flex items-center justify-center font-medium transition-all text-xs",
+                      currentPage === item.page
+                        ? "bg-brand-primary text-white shadow-md shadow-brand-primary/20"
+                        : "text-brand-muted hover:bg-gray-100 hover:text-brand-text"
+                    )}
+                  >
+                    {item.page}
+                  </button>
+                )
+              )}
             </div>
 
             <button

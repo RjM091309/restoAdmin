@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'resto-backend',
+      name: 'resto-nodeserver',
       cwd: './server',
       script: 'app.js',
       instances: 1,
@@ -21,6 +21,18 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 3000,
+      },
+    },
+    {
+      name: 'resto-pyserver',
+      cwd: './pyserver',
+      script: 'py',
+      args: '-3 -m uvicorn main:app --host 0.0.0.0 --port 2100 --no-access-log',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        PYTHONUNBUFFERED: '1',
+        PORT: 2100,
       },
     },
   ],

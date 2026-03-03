@@ -491,6 +491,7 @@ export default function App() {
                     <Orders
                       key={selectedBranch.id}
                       selectedBranch={selectedBranch}
+                      dateRange={dateRange}
                     />
                   ) : (
                     <Navigate to="/dashboard" replace />
@@ -583,7 +584,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    <Expenses selectedBranch={selectedBranch} />
+                    <Expenses selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
 

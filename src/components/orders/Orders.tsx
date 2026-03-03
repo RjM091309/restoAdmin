@@ -36,6 +36,10 @@ import { type Branch } from '../partials/Header';
 // ---- Props & types ----
 interface OrdersProps {
     selectedBranch: Branch | null;
+    dateRange: {
+        start: string;
+        end: string;
+    };
 }
 
 type SwalState = {
@@ -55,7 +59,7 @@ type NewOrderItem = {
     qty: number;
 };
 
-export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
+export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => {
     const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
 
@@ -121,14 +125,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch }) => {
     }, [loadOrders]);
 
     // ==================== Filtering ====================
+    const isWithinDateRange = (encoded: string | null | undefined) => {
+        if (!encoded) return true;
+        if (!dateRange.start || !dateRange.end) return true;
+        const encodedDate = new Date(encoded);
+        if (Number.isNaN(encodedDate.getTime())) return true;
+        const start = new Date(`${dateRange.start}T00:00:00`);
+        const end = new Date(`${dateRange.end}T23:59:59.999`);
+        return encodedDate >= start && encodedDate <= end;
+    };
+
     const filteredOrders = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
         return orders.filter((order) => {
             const matchStatus = statusFilter === 'all' || String(order.STATUS) === statusFilter;
             const matchSearch = !term || order.ORDER_NO.toLowerCase().includes(term) || (order.TABLE_NUMBER && order.TABLE_NUMBER.toString().includes(term));
-            return matchStatus && matchSearch;
+            const matchDate = isWithinDateRange(order.ENCODED_DT as unknown as string | null | undefined);
+            return matchStatus && matchSearch && matchDate;
         });
-    }, [orders, searchTerm, statusFilter]);
+    }, [orders, searchTerm, statusFilter, dateRange.start, dateRange.end]);
 
     // ==================== Stats ====================
     const stats = useMemo(() => {

@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const http = require('http');
 const routes = require('./routes');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
@@ -208,6 +209,31 @@ const server = app.listen(app.get('port'), function () {
   console.log('Server started on port ' + app.get('port'));
   console.log('API Server running at http://localhost:' + app.get('port'));
   console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
+
+  // Try to log response from Python analytics sample endpoint on startup
+  const options = {
+    hostname: 'localhost',
+    port: 8000,
+    path: '/api/analytics/sample',
+    method: 'GET',
+  };
+
+  const req = http.request(options, (res) => {
+    let data = '';
+    res.on('data', (chunk) => {
+      data += chunk;
+    });
+    res.on('end', () => {
+      console.log('[PyServer] status:', res.statusCode);
+      console.log('[PyServer] response:', data);
+    });
+  });
+
+  req.on('error', (err) => {
+    console.error('[PyServer] Could not reach http://localhost:8000/api/analytics/sample:', err.message);
+  });
+
+  req.end();
 
   // Optional: auto-start Loyverse polling sync on boot
   const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';

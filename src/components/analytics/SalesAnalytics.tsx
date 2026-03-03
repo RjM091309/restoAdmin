@@ -362,7 +362,9 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       if (dateRange.start) params.set('start_date', dateRange.start);
       if (dateRange.end) params.set('end_date', dateRange.end);
       if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
-      const res = await fetch(`/reports/sales-per-branch?${params}`, { headers: authHeaders() });
+
+      // TEMP: call Python analytics service (mock data) instead of Node
+      const res = await fetch(`http://localhost:8000/api/analytics/branch-sales?${params.toString()}`);
       const json = await res.json();
       if (json.success && json.data?.data) {
         // Keep branch info from DB, replace numeric fields with mock data
@@ -446,7 +448,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       if (dateRange.end) params.set('end_date', dateRange.end);
       if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
       params.set('limit', '5');
-      const res = await fetch(`/reports/least-selling-items?${params}`, { headers: authHeaders() });
+      // TEMP: call Python analytics service (mock data) instead of Node
+      const res = await fetch(`http://localhost:8000/api/analytics/least-selling?${params.toString()}`);
       const json = await res.json();
       if (json.success && json.data?.data && json.data.data.length > 0) {
         setLeastSellingData(json.data.data);
