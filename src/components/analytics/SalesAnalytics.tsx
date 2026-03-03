@@ -6,9 +6,11 @@ import { type Branch } from '../partials/Header';
 import {
   fetchBranchSalesApi,
   fetchLeastSellingApi,
+  fetchTopSellingApi,
   fetchDailySalesApi,
   type ApiBranchSalesItem,
   type ApiLeastSellingItem,
+  type ApiTopSellingItem,
   type ApiDailySalesItem,
 } from '../../services/analyticsService';
 import {
@@ -116,14 +118,6 @@ const formatDateLabel = (date: Date) =>
 const money = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
-const PRODUCT_SERIES = [
-  { key: 'p1', name: 'S2 Premium Set B (4Pax)', color: '#6366f1' },
-  { key: 'p2', name: 'I1 Iberico Kkot Moksal', color: '#10b981' },
-  { key: 'p3', name: 'S1 Premium Set A (2Pax)', color: '#f59e0b' },
-  { key: 'p4', name: 'K1 Handon KKotsamgyeopsal', color: '#ef4444' },
-  { key: 'p5', name: 'Chamisul', color: '#8b5cf6' },
-] as const;
-type ProductKey = (typeof PRODUCT_SERIES)[number]['key'];
 
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
@@ -137,7 +131,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [viewMode, setViewMode] = useState<ViewMode>('glance');
   const [productChartType, setProductChartType] = useState<'bar chart'>('bar chart');
   const [productViewMode, setProductViewMode] = useState<ViewMode>('glance');
-  const [activeProductKey, setActiveProductKey] = useState<ProductKey | 'all'>('all');
+  const [activeProductKey, setActiveProductKey] = useState<string | 'all'>('all');
   const [tablePage, setTablePage] = useState(0);
 
   // API data state for the two new cards
@@ -148,6 +142,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [leastSellingData, setLeastSellingData] = useState<ApiLeastSellingItem[]>([]);
   const [leastSellingLoading, setLeastSellingLoading] = useState(false);
   const [leastSellingError, setLeastSellingError] = useState<string | null>(null);
+
+  const [topSellingData, setTopSellingData] = useState<ApiTopSellingItem[]>([]);
+  const [topSellingLoading, setTopSellingLoading] = useState(false);
+  const [topSellingError, setTopSellingError] = useState<string | null>(null);
 
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
   const [dailySalesPrevious, setDailySalesPrevious] = useState<ApiDailySalesItem[]>([]);
@@ -302,9 +300,32 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     }
   }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, t]);
 
+  // Fetch top-selling items (Top 5 Products card)
+  const fetchTopSelling = useCallback(async () => {
+    setTopSellingLoading(true);
+    setTopSellingError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dateRange.start) params.set('start_date', dateRange.start);
+      if (dateRange.end) params.set('end_date', dateRange.end);
+      if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
+      params.set('limit', '5');
+
+      const apiData = await fetchTopSellingApi(params);
+      setTopSellingData(apiData);
+    } catch (err) {
+      console.error(err);
+      setTopSellingError(t('sales_analytics.network_error'));
+      setTopSellingData([]);
+    } finally {
+      setTopSellingLoading(false);
+    }
+  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, t]);
+
   useEffect(() => { fetchBranchSales(); }, [fetchBranchSales]);
   useEffect(() => { fetchLeastSelling(); }, [fetchLeastSelling]);
   useEffect(() => { fetchDailySales(); }, [fetchDailySales]);
+  useEffect(() => { fetchTopSelling(); }, [fetchTopSelling]);
 
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
@@ -351,48 +372,88 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         })),
     [trendData]
   );
-  const productGraphData = useMemo(() => {
-    const baseShares: Record<ProductKey, number> = {
-      p1: 0.34, p2: 0.24, p3: 0.18, p4: 0.14, p5: 0.1,
-    };
-    return trendData.map((row, idx) => {
-      const total = row.netSales;
-      const dynamic = {
-        p1: baseShares.p1 + Math.sin(idx / 4) * 0.02,
-        p2: baseShares.p2 + Math.cos(idx / 5) * 0.015,
-        p3: baseShares.p3 + Math.sin(idx / 6) * 0.012,
-        p4: baseShares.p4 + Math.cos(idx / 3) * 0.01,
-        p5: baseShares.p5 + Math.sin(idx / 2.5) * 0.008,
-      } as Record<ProductKey, number>;
-      const totalShare = Object.values(dynamic).reduce((sum, value) => sum + value, 0);
-      const normalized = Object.fromEntries(
-        Object.entries(dynamic).map(([key, value]) => [key, value / totalShare])
-      ) as Record<ProductKey, number>;
-      return {
-        label: row.label,
-        p1: Math.round(total * normalized.p1),
-        p2: Math.round(total * normalized.p2),
-        p3: Math.round(total * normalized.p3),
-        p4: Math.round(total * normalized.p4),
-        p5: Math.round(total * normalized.p5),
-      };
-    });
-  }, [trendData]);
-  const topProductRows = useMemo(
+
+  // Dynamic Top 5 products (base from API)
+  const baseTopProducts = useMemo(
     () =>
-      PRODUCT_SERIES.map((series) => ({
-        ...series,
-        netSales: productGraphData.reduce((sum, row) => sum + Number(row[series.key] || 0), 0),
-      })).sort((a, b) => b.netSales - a.netSales),
-    [productGraphData]
+      topSellingData.map((item, index) => ({
+        key: String(item.IDNo ?? index),
+        name: item.MENU_NAME,
+        color: BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length],
+        // Use API net sales as initial total; this will be
+        // recomputed from the chart data so the list matches the graph.
+        netSales: item.total_revenue,
+      })),
+    [topSellingData]
   );
+
+  // Compute per-product share based on overall revenue, then
+  // distribute each day's netSales using those shares (stacked per date).
+  const productShares = useMemo(() => {
+    if (!baseTopProducts.length) return {} as Record<string, number>;
+    const totalRevenue = baseTopProducts.reduce((sum, p) => sum + (p.netSales || 0), 0);
+    if (totalRevenue <= 0) {
+      const equalShare = 1 / baseTopProducts.length;
+      return Object.fromEntries(baseTopProducts.map((p) => [p.key, equalShare])) as Record<string, number>;
+    }
+    return Object.fromEntries(
+      baseTopProducts.map((p) => [p.key, (p.netSales || 0) / totalRevenue])
+    ) as Record<string, number>;
+  }, [baseTopProducts]);
+
+  const productGraphData = useMemo(() => {
+    if (!baseTopProducts.length || !trendData.length) return [];
+
+    // Normalize shares so total = 1
+    const totalShare = Object.values(productShares).reduce((sum, v) => sum + v, 0) || 1;
+    const normalizedShares: Record<string, number> = {};
+    baseTopProducts.forEach((p) => {
+      const raw = productShares[p.key] ?? 0;
+      normalizedShares[p.key] = raw / totalShare;
+    });
+
+    return trendData.map((row) => {
+      const total = row.netSales || 0;
+      const entry: Record<string, number | string> = { label: row.label };
+
+      baseTopProducts.forEach((p) => {
+        const share = normalizedShares[p.key] ?? (1 / topProductRows.length);
+        entry[p.key] = Math.round(total * share);
+      });
+
+      return entry;
+    });
+  }, [trendData, baseTopProducts, productShares]);
+
+  // Final Top 5 rows for the list, with totals computed
+  // from the stacked chart so they always match visually.
+  const topProductRows = useMemo(() => {
+    if (!baseTopProducts.length || !productGraphData.length) return baseTopProducts;
+
+    const totals: Record<string, number> = {};
+    productGraphData.forEach((day) => {
+      baseTopProducts.forEach((p) => {
+        const value = Number((day as any)[p.key] || 0);
+        totals[p.key] = (totals[p.key] || 0) + value;
+      });
+    });
+
+    // Keep original order (which already reflects Top 5 ranking from API)
+    // so colors, list, chart stacks, and tooltip stay aligned.
+    return baseTopProducts.map((p) => ({
+      ...p,
+      netSales: totals[p.key] || 0,
+    }));
+  }, [baseTopProducts, productGraphData]);
+
   const activeProduct = useMemo(
-    () => PRODUCT_SERIES.find((series) => series.key === activeProductKey) || null,
-    [activeProductKey]
+    () => (activeProductKey === 'all' ? null : topProductRows.find((row) => row.key === activeProductKey) || null),
+    [activeProductKey, topProductRows]
   );
+
   const visibleProductSeries = useMemo(
-    () => (activeProduct ? [activeProduct] : PRODUCT_SERIES),
-    [activeProduct]
+    () => (activeProduct ? [activeProduct] : topProductRows),
+    [activeProduct, topProductRows]
   );
   const TABLE_PAGE_SIZE = 10;
   const totalTablePages = Math.max(1, Math.ceil(salesTableRows.length / TABLE_PAGE_SIZE));
@@ -586,32 +647,71 @@ const metricConfig = {
       </div>
 
       {/* ── Top 5 Products + Chart ─────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden pt-4">
         <div className="grid grid-cols-1 items-stretch xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
           <div className="px-5 py-4 border-b xl:border-b-0 xl:border-r border-gray-100">
             <div className="flex items-center justify-between text-sm font-normal text-brand-text mb-3.5">
               <span>{t('sales_analytics.top_5_products')}</span>
               <span className="text-brand-muted">{t('sales_analytics.net_sales')}</span>
             </div>
-            <div className="overflow-hidden rounded-xl">
-              <table className="w-full table-auto">
-                <tbody>
-                  {topProductRows.map((item) => {
-                    const isSelected = activeProductKey === item.key;
-                    return (
-                      <tr key={item.key} onClick={() => setActiveProductKey((prev) => (prev === item.key ? 'all' : item.key))} className={`cursor-pointer transition-colors ${isSelected ? 'bg-violet-50' : 'hover:bg-gray-50'}`}>
-                        <td className="px-3 py-3 align-top">
-                          <div className="flex items-start gap-3">
-                            <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                            <p className="text-sm text-brand-text whitespace-normal break-words leading-5">{item.name}</p>
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">{money(item.netSales)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="overflow-hidden rounded-xl min-h-[120px] flex items-stretch justify-center">
+              {topSellingLoading ? (
+                <div className="flex items-center justify-center py-10 w-full">
+                  <Loader2 size={20} className="animate-spin text-violet-500" />
+                </div>
+              ) : topSellingError ? (
+                <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
+                  <AlertCircle size={24} className="text-red-400 mb-1.5" />
+                  <p className="text-xs text-red-500 font-medium mb-1">{topSellingError}</p>
+                  <button
+                    onClick={fetchTopSelling}
+                    className="mt-1 text-[11px] text-violet-600 font-bold hover:underline cursor-pointer"
+                  >
+                    {t('sales_analytics.retry')}
+                  </button>
+                </div>
+              ) : topProductRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
+                  <Store size={26} className="text-gray-300 mb-1.5" />
+                  <p className="text-xs text-brand-muted font-medium">
+                    {t('sales_analytics.no_data_available')}
+                  </p>
+                </div>
+              ) : (
+                <table className="w-full table-auto">
+                  <tbody>
+                    {topProductRows.map((item) => {
+                      const isSelected = activeProductKey === item.key;
+                      return (
+                        <tr
+                          key={item.key}
+                          onClick={() =>
+                            setActiveProductKey((prev) => (prev === item.key ? 'all' : item.key))
+                          }
+                          className={`cursor-pointer transition-colors ${
+                            isSelected ? 'bg-violet-50' : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          <td className="px-3 py-3 align-top">
+                            <div className="flex items-start gap-3">
+                              <span
+                                className="w-5 h-5 rounded-full shrink-0"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <p className="text-sm text-brand-text whitespace-normal break-words leading-5">
+                                {item.name}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
+                            {money(item.netSales)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
           <div className="px-5 py-4">
@@ -628,11 +728,32 @@ const metricConfig = {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={productGraphData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`} axisLine={false} tickLine={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    interval={responsiveXAxisInterval}
+                    angle={responsiveXAxisAngle}
+                    textAnchor={responsiveXAxisTextAnchor}
+                    height={responsiveXAxisHeight}
+                    tickMargin={responsiveXAxisTickMargin}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: '#64748b', fontSize: 12 }}
+                    tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`}
+                    axisLine={false}
+                    tickLine={false}
+                  />
                   <Tooltip {...tooltipProps} />
-                  {visibleProductSeries.map((series) => (
-                    <Bar key={series.key} dataKey={series.key} stackId={activeProduct ? undefined : 'products'} fill={series.color} barSize={activeProduct ? Math.max(18, responsiveBarSize) : responsiveBarSize} />
+                  {[...visibleProductSeries].reverse().map((series) => (
+                    <Bar
+                      key={series.key}
+                      dataKey={series.key}
+                      stackId={activeProduct ? undefined : 'products'}
+                      fill={series.color}
+                      barSize={activeProduct ? Math.max(18, responsiveBarSize) : responsiveBarSize}
+                    />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
@@ -721,12 +842,21 @@ const metricConfig = {
 
         {/* Card 2: Top 5 Least Selling Products */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60">
             <div className="flex items-center gap-2">
-              <TrendingDown size={18} className="text-brand-muted" />
-              <h4 className="text-base font-semibold text-brand-text">{t('sales_analytics.top_least_selling_products')}</h4>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-600">
+                <TrendingDown size={18} />
+              </span>
+              <div className="flex flex-col">
+                <h4 className="text-base font-semibold text-slate-900">{t('sales_analytics.top_least_selling_products')}</h4>
+                <p className="text-[11px] font-medium text-slate-500">
+                  {t('sales_analytics.low_sales')}
+                </p>
+              </div>
             </div>
-            <span className="px-2 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded uppercase tracking-wider">{t('sales_analytics.low_sales')}</span>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] bg-violet-50 text-violet-700 border border-violet-100">
+              {t('sales_analytics.insight')}
+            </span>
           </div>
           <div className="flex-1 px-5 py-4">
             {leastSellingLoading ? (
@@ -749,30 +879,36 @@ const metricConfig = {
                 {leastSellingData.map((item, idx) => (
                   <div
                     key={item.IDNo}
-                    className="flex items-center justify-between p-3.5 rounded-xl border border-gray-100 bg-gray-50/50 hover:bg-gray-50 transition-colors"
+                    className="flex items-center justify-between p-3.5 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:shadow-sm hover:border-violet-100 transition-all"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-orange-100 text-orange-700">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-violet-100 text-violet-700">
                         {idx + 1}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-brand-text truncate">{item.MENU_NAME}</p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] text-brand-muted font-medium">{item.category}</span>
-                          <span className="text-[10px] text-brand-muted">·</span>
-                          <span className="text-[10px] text-brand-muted font-medium">{money(item.MENU_PRICE)}/{t('sales_analytics.unit')}</span>
+                        <p className="text-sm font-semibold text-slate-900 truncate">{item.MENU_NAME}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
+                            {item.category}
+                          </span>
+                          <span className="text-[11px] text-slate-400">·</span>
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            {money(item.MENU_PRICE)}/{t('sales_analytics.unit')}
+                          </span>
                         </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <span className="text-sm font-semibold text-brand-text">{item.total_quantity} {t('sales_analytics.sold')}</span>
-                      <p className="text-[10px] text-brand-muted font-medium mt-0.5">
+                      <span className="text-sm font-semibold text-slate-900">
+                        {item.total_quantity} {t('sales_analytics.sold')}
+                      </span>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                         {money(item.total_revenue)} {t('sales_analytics.revenue')}
                       </p>
                     </div>
                   </div>
                 ))}
-                <p className="text-[10px] text-brand-muted text-center pt-1 font-medium">
+                <p className="text-[10px] text-slate-500 text-center pt-1 font-medium">
                   {t('sales_analytics.least_selling_hint')}
                 </p>
               </div>

@@ -109,14 +109,34 @@ class LoyverseService {
 	 */
 	async findMenuItemByNameOrSku(itemName, sku, branchId) {
 		try {
-			// First try to find by SKU if available
+			// 1) Prefer exact SKU match when available and the menu table has a SKU column.
+			//    This allows branch‑specific mappings even when names differ across branches.
 			if (sku) {
-				// Note: Your menu table doesn't have SKU field, so we'll match by name
-				// You may want to add a SKU field to menu table later
+				const skuQuery = `
+					SELECT IDNo, MENU_NAME, MENU_PRICE, BRANCH_ID
+					FROM menu
+					WHERE ACTIVE = 1
+					AND BRANCH_ID = ?
+					AND SKU = ?
+					LIMIT 1
+				`;
+
+				try {
+					const [skuRows] = await pool.execute(skuQuery, [branchId, sku]);
+					if (skuRows && skuRows.length > 0) {
+						return skuRows[0];
+					}
+				} catch (err) {
+					// If the SKU column does not exist yet, fall back silently to name-based matching.
+					// This keeps backward compatibility for databases that haven't been migrated.
+					if (!String(err.message || '').includes('Unknown column')) {
+						console.error(`Error querying menu by SKU: ${err.message}`);
+					}
+				}
 			}
 
-			// Find by menu name (case-insensitive, partial match)
-			const query = `
+			// 2) Fallback: Find by menu name (case-insensitive, partial match)
+			const nameQuery = `
 				SELECT IDNo, MENU_NAME, MENU_PRICE, BRANCH_ID
 				FROM menu
 				WHERE ACTIVE = 1 
@@ -125,11 +145,7 @@ class LoyverseService {
 				LIMIT 1
 			`;
 
-			const [rows] = await pool.execute(query, [
-				branchId,
-				itemName,
-				`%${itemName}%`
-			]);
+			const [rows] = await pool.execute(nameQuery, [branchId, itemName, `%${itemName}%`]);
 
 			return rows[0] || null;
 		} catch (error) {
@@ -403,8 +419,89 @@ class LoyverseService {
 			const price = lineItem.price || 0;
 			const totalMoney = lineItem.total_money || (quantity * price);
 
-			// Find matching menu item
-			const menuItem = await this.findMenuItemByNameOrSku(itemName, sku, branchId);
+			// Find or auto-create matching menu item scoped to this branch
+			let menuItem = await this.findMenuItemByNameOrSku(itemName, sku, branchId);
+
+			if (!menuItem) {
+				try {
+					// Auto-create a menu entry for this branch so we don't need manual DB edits
+					const unitPrice = price || (quantity ? (totalMoney / quantity) : 0);
+					const encodedDt = new Date();
+
+					// Base params shared by both insert variants (with/without SKU column)
+					const baseParams = [
+						branchId,      // BRANCH_ID
+						null,          // CATEGORY_ID (unknown, can be reassigned later)
+						itemName,      // MENU_NAME
+						null,          // MENU_DESCRIPTION
+						null,          // MENU_IMG
+						unitPrice,     // MENU_PRICE
+						1,             // IS_AVAILABLE
+						1,             // ACTIVE
+						0,             // ENCODED_BY (system)
+						encodedDt,     // ENCODED_DT
+					];
+
+					try {
+						// Prefer insert that includes SKU column when it exists
+						const [result] = await connection.execute(
+							`INSERT INTO menu (
+								BRANCH_ID,
+								CATEGORY_ID,
+								MENU_NAME,
+								MENU_DESCRIPTION,
+								MENU_IMG,
+								MENU_PRICE,
+								IS_AVAILABLE,
+								ACTIVE,
+								ENCODED_BY,
+								ENCODED_DT,
+								SKU
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+							[...baseParams, sku || null]
+						);
+						const insertedId = result.insertId;
+						menuItem = {
+							IDNo: insertedId,
+							MENU_NAME: itemName,
+							MENU_PRICE: unitPrice,
+							BRANCH_ID: branchId,
+						};
+						console.log(`[Loyverse Sync] Auto-created menu item "${itemName}" for branch ${branchId} with SKU ${sku || 'NULL'}`);
+					} catch (err) {
+						// If SKU column does not exist yet, retry without it to keep backward compatibility
+						if (String(err.message || '').includes('Unknown column') && String(err.message || '').includes('SKU')) {
+							const [resultFallback] = await connection.execute(
+								`INSERT INTO menu (
+									BRANCH_ID,
+									CATEGORY_ID,
+									MENU_NAME,
+									MENU_DESCRIPTION,
+									MENU_IMG,
+									MENU_PRICE,
+									IS_AVAILABLE,
+									ACTIVE,
+									ENCODED_BY,
+									ENCODED_DT
+								) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+								baseParams
+							);
+							const insertedId = resultFallback.insertId;
+							menuItem = {
+								IDNo: insertedId,
+								MENU_NAME: itemName,
+								MENU_PRICE: unitPrice,
+								BRANCH_ID: branchId,
+							};
+							console.log(`[Loyverse Sync] Auto-created menu item "${itemName}" for branch ${branchId} (no SKU column)`);
+						} else {
+							throw err;
+						}
+					}
+				} catch (createErr) {
+					console.error(`[Loyverse Sync] Failed to auto-create menu item "${itemName}" (SKU: ${sku}):`, createErr.message);
+				}
+			}
 
 			if (menuItem) {
 				itemsToInsert.push([

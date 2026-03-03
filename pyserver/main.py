@@ -115,6 +115,12 @@ class LeastSellingItem(BaseModel):
     total_revenue: float
 
 
+class TopSellingItem(LeastSellingItem):
+    """
+    Top-selling menu item. Shape is identical to LeastSellingItem.
+    """
+    pass
+
 class DailySalesItem(BaseModel):
     sale_date: str
     total_sales: float
@@ -352,17 +358,161 @@ def least_selling(
         if row.get("MENU_PRICE") is not None:
             data["price"] = float(row.get("MENU_PRICE") or data["price"])
 
-    # Convert to list, filter, sort by least quantity, then limit
+    # Convert to list, filter, sort by least total revenue (then quantity), then limit
     merged_items: List[LeastSellingItem] = []
     for idx, item in enumerate(
         sorted(
-            (v for v in data_map.values() if (v.get("total_quantity") or 0) > 0),
-            key=lambda x: (x["total_quantity"], x["total_revenue"]),
+            (
+                v
+                for v in data_map.values()
+                if (v.get("total_quantity") or 0) > 0 and (v.get("total_revenue") or 0.0) > 0.0
+            ),
+            key=lambda x: (x["total_revenue"], x["total_quantity"]),
         )[:effective_limit],
         start=1,
     ):
         merged_items.append(
             LeastSellingItem(
+                IDNo=idx,
+                MENU_NAME=item["name"],
+                MENU_PRICE=float(item.get("price") or 0.0),
+                category=str(item.get("category") or "Uncategorized"),
+                total_quantity=int(item.get("total_quantity") or 0),
+                order_count=int(item.get("total_quantity") or 0),
+                total_revenue=float(item.get("total_revenue") or 0.0),
+            )
+        )
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in merged_items]}}
+
+
+@app.get("/api/analytics/top-selling")
+def top_selling(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+    limit: int = 5,
+) -> dict:
+    """
+    Top-selling menu items.
+    Mirrors least_selling aggregation but sorts by highest quantity instead of lowest.
+    """
+    try:
+        effective_limit = max(1, min(int(limit or 5), 50))
+
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        # Source 1: product_sales_summary (imported / synced data)
+        summary_query = """
+            SELECT 
+                product_name as name,
+                category,
+                COALESCE(sales_quantity, 0) as total_quantity,
+                COALESCE(net_sales, 0) as total_revenue
+            FROM product_sales_summary
+            WHERE sales_quantity > 0
+            ORDER BY sales_quantity DESC
+        """
+        cur.execute(summary_query)
+        summary_rows = cur.fetchall()
+
+        # Source 2: actual orders (paid orders from billing)
+        order_date_filter = ""
+        order_branch_filter = ""
+        order_params: List[object] = []
+
+        if start_date and end_date:
+            order_date_filter = "AND DATE(o.ENCODED_DT) BETWEEN %s AND %s"
+            order_params.extend([start_date, end_date])
+        if branch_id:
+            order_branch_filter = "AND o.BRANCH_ID = %s"
+            order_params.append(branch_id)
+
+        orders_query = f"""
+            SELECT 
+                m.MENU_NAME as name,
+                COALESCE(c.CAT_NAME, 'Uncategorized') as category,
+                COALESCE(SUM(oi.QTY), 0) as total_quantity,
+                COALESCE(SUM(oi.LINE_TOTAL), 0) as total_revenue,
+                m.MENU_PRICE
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo
+            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+            INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+            LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            WHERE b.STATUS = 1
+            {order_date_filter}
+            {order_branch_filter}
+            GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
+            HAVING total_quantity > 0
+        """
+
+        cur.execute(orders_query, order_params)
+        order_rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] top-selling query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch top selling items",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    # Merge both sources by product name
+    data_map = {}
+
+    for row in summary_rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if name not in data_map:
+            data_map[name] = {
+                "name": name,
+                "category": row.get("category") or "Uncategorized",
+                "total_quantity": 0,
+                "total_revenue": 0.0,
+                "price": 0.0,
+            }
+        data = data_map[name]
+        data["total_quantity"] += int(row.get("total_quantity") or 0)
+        data["total_revenue"] += float(row.get("total_revenue") or 0.0)
+
+    for row in order_rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if name not in data_map:
+            data_map[name] = {
+                "name": name,
+                "category": row.get("category") or "Uncategorized",
+                "total_quantity": 0,
+                "total_revenue": 0.0,
+                "price": float(row.get("MENU_PRICE") or 0.0),
+            }
+        data = data_map[name]
+        data["total_quantity"] += int(row.get("total_quantity") or 0)
+        data["total_revenue"] += float(row.get("total_revenue") or 0.0)
+        if row.get("MENU_PRICE") is not None:
+            data["price"] = float(row.get("MENU_PRICE") or data["price"])
+
+    # Convert to list, filter, sort by highest revenue (then quantity), then limit
+    merged_items: List[TopSellingItem] = []
+    for idx, item in enumerate(
+        sorted(
+            (
+                v
+                for v in data_map.values()
+                if (v.get("total_quantity") or 0) > 0 and (v.get("total_revenue") or 0.0) > 0.0
+            ),
+            key=lambda x: (-x["total_revenue"], -x["total_quantity"]),
+        )[:effective_limit],
+        start=1,
+    ):
+        merged_items.append(
+            TopSellingItem(
                 IDNo=idx,
                 MENU_NAME=item["name"],
                 MENU_PRICE=float(item.get("price") or 0.0),

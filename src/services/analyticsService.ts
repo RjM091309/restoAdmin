@@ -34,6 +34,9 @@ export type ApiLeastSellingItem = {
   total_revenue: number;
 };
 
+// Top-selling items share the same shape as least-selling items
+export type ApiTopSellingItem = ApiLeastSellingItem;
+
 export type ApiDailySalesItem = {
   sale_date: string;
   total_sales: number;
@@ -65,6 +68,19 @@ export async function fetchLeastSellingApi(params: URLSearchParams): Promise<Api
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiLeastSellingItem[];
+  }
+  return [];
+}
+
+export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTopSellingItem[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/top-selling?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics top-selling failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiTopSellingItem[];
   }
   return [];
 }
