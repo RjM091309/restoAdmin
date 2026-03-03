@@ -46,6 +46,71 @@ export type ApiDailySalesItem = {
   gross_profit: number;
 };
 
+export type ApiMenuReportRow = {
+  id: number;
+  goods: string;
+  category: string;
+  salesQty: number;
+  totalSales: number;
+  refundQty: number;
+  refundAmount: number;
+  discounts: number;
+  netSales: number;
+  unitCost: number;
+  totalRevenue: number;
+};
+
+export type ApiCategoryReportRow = {
+  id: number;
+  category: string;
+  salesQty: number;
+  totalSales: number;
+  refundQty: number;
+  refundAmount: number;
+  discounts: number;
+  netSales: number;
+  unitCost: number;
+  totalRevenue: number;
+};
+
+export type ApiPaymentReportRow = {
+  id: number;
+  paymentMethod: string;
+  paymentTransaction: number;
+  paymentAmount: number;
+  refundTransaction: number;
+  refundAmount: number;
+  netAmount: number;
+};
+
+export type ApiReceiptReportRow = {
+  id: number;
+  receiptNumber: string;
+  date: string;
+  employee: string;
+  customer: string;
+  type: string;
+  total: number;
+};
+
+export type ApiReceiptDetailItem = {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  amount: number;
+  note?: string | null;
+};
+
+export type ApiReceiptDetail = {
+  orderLabel: string;
+  staff: string;
+  pos: string;
+  serviceType: string;
+  paymentMethod: string;
+  transactionNo: string;
+  items: ApiReceiptDetailItem[];
+};
+
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
   const res = await fetch(`${baseUrl}/api/analytics/branch-sales?${params.toString()}`);
@@ -96,5 +161,70 @@ export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDa
     return json.data.data as ApiDailySalesItem[];
   }
   return [];
+}
+
+export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMenuReportRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/menu-report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics menu-report failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiMenuReportRow[];
+  }
+  return [];
+}
+
+export async function fetchCategoryReportApi(params: URLSearchParams): Promise<ApiCategoryReportRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/category-report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics category-report failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiCategoryReportRow[];
+  }
+  return [];
+}
+
+export async function fetchPaymentReportApi(params: URLSearchParams): Promise<ApiPaymentReportRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/payment-report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics payment-report failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiPaymentReportRow[];
+  }
+  return [];
+}
+
+export async function fetchReceiptReportApi(params: URLSearchParams): Promise<ApiReceiptReportRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/receipt-report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics receipt-report failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiReceiptReportRow[];
+  }
+  return [];
+}
+
+export async function fetchReceiptDetailApi(orderId: number | string): Promise<ApiReceiptDetail> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/receipt-detail?order_id=${encodeURIComponent(String(orderId))}`);
+  if (!res.ok) {
+    throw new Error(`Analytics receipt-detail failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data) {
+    return json.data as ApiReceiptDetail;
+  }
+  throw new Error(json.message || 'Failed to load receipt detail');
 }
 

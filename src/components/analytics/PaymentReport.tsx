@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as XLSX from 'xlsx';
 import { Search } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
+import { fetchPaymentReportApi, type ApiPaymentReportRow } from '../../services/analyticsService';
 
 type PaymentReportProps = {
   selectedBranch: Branch | null;
@@ -23,15 +24,12 @@ type PaymentReportRow = {
   netAmount: number;
 };
 
-const MOCK_PAYMENT_REPORT_BASE: Omit<PaymentReportRow, 'id'>[] = [
-  { paymentMethod: 'Gcash', paymentTransaction: 247, paymentAmount: 841544, refundTransaction: 0, refundAmount: 0, netAmount: 841544 },
-  { paymentMethod: 'Debt', paymentTransaction: 3, paymentAmount: 17120, refundTransaction: 0, refundAmount: 0, netAmount: 17120 },
-  { paymentMethod: 'Cash', paymentTransaction: 1261, paymentAmount: 4659163.2, refundTransaction: 5, refundAmount: 1310, netAmount: 4657853.2 },
-];
+const MOCK_PAYMENT_REPORT_BASE: Omit<PaymentReportRow, 'id'>[] = [];
 
 export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
+  const [rows, setRows] = useState<PaymentReportRow[]>([]);
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -41,56 +39,57 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
   const methodHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
   const methodBodyClass = 'text-sm text-brand-text font-medium bg-violet-50 group-hover:bg-violet-100';
 
-  const rows = useMemo(() => {
-    const branchMultiplierById: Record<string, number> = {
-      all: 1,
-      '1': 1,
-      '2': 0.91,
-      '3': 0.84,
+  useEffect(() => {
+    const load = async () => {
+      const params = new URLSearchParams();
+      if (dateRange.start) params.set('start_date', dateRange.start);
+      if (dateRange.end) params.set('end_date', dateRange.end);
+      if (selectedBranch && String(selectedBranch.id) !== 'all') {
+        params.set('branch_id', String(selectedBranch.id));
+      }
+      try {
+        const apiRows: ApiPaymentReportRow[] = await fetchPaymentReportApi(params);
+        const computedRows: PaymentReportRow[] = apiRows.map((row) => ({
+          id: String(row.id),
+          paymentMethod: row.paymentMethod,
+          paymentTransaction: row.paymentTransaction,
+          paymentAmount: row.paymentAmount,
+          refundTransaction: row.refundTransaction,
+          refundAmount: row.refundAmount,
+          netAmount: row.netAmount,
+        }));
+
+        const total = computedRows.reduce(
+          (acc, row) => ({
+            paymentTransaction: acc.paymentTransaction + row.paymentTransaction,
+            paymentAmount: Number((acc.paymentAmount + row.paymentAmount).toFixed(2)),
+            refundTransaction: acc.refundTransaction + row.refundTransaction,
+            refundAmount: Number((acc.refundAmount + row.refundAmount).toFixed(2)),
+            netAmount: Number((acc.netAmount + row.netAmount).toFixed(2)),
+          }),
+          { paymentTransaction: 0, paymentAmount: 0, refundTransaction: 0, refundAmount: 0, netAmount: 0 }
+        );
+
+        setRows([
+          ...computedRows,
+          {
+            id: 'total',
+            paymentMethod: 'total',
+            paymentTransaction: total.paymentTransaction,
+            paymentAmount: total.paymentAmount,
+            refundTransaction: total.refundTransaction,
+            refundAmount: total.refundAmount,
+            netAmount: total.netAmount,
+          },
+        ]);
+      } catch (err) {
+        console.error('Failed to load payment report', err);
+        setRows([]);
+      }
     };
-    const multiplier = branchMultiplierById[String(selectedBranch?.id || 'all')] || 0.88;
 
-    const computedRows = MOCK_PAYMENT_REPORT_BASE.map((row, index) => {
-      const paymentTransaction = Math.max(0, Math.round(row.paymentTransaction * multiplier));
-      const paymentAmount = Math.max(0, Number((row.paymentAmount * multiplier).toFixed(2)));
-      const refundTransaction = Math.max(0, Math.round(row.refundTransaction * multiplier));
-      const refundAmount = Math.max(0, Number((row.refundAmount * multiplier).toFixed(2)));
-      const netAmount = Math.max(0, Number((paymentAmount - refundAmount).toFixed(2)));
-      return {
-        id: `${String(selectedBranch?.id || 'all')}-${index + 1}`,
-        paymentMethod: row.paymentMethod,
-        paymentTransaction,
-        paymentAmount,
-        refundTransaction,
-        refundAmount,
-        netAmount,
-      };
-    });
-
-    const total = computedRows.reduce(
-      (acc, row) => ({
-        paymentTransaction: acc.paymentTransaction + row.paymentTransaction,
-        paymentAmount: Number((acc.paymentAmount + row.paymentAmount).toFixed(2)),
-        refundTransaction: acc.refundTransaction + row.refundTransaction,
-        refundAmount: Number((acc.refundAmount + row.refundAmount).toFixed(2)),
-        netAmount: Number((acc.netAmount + row.netAmount).toFixed(2)),
-      }),
-      { paymentTransaction: 0, paymentAmount: 0, refundTransaction: 0, refundAmount: 0, netAmount: 0 }
-    );
-
-    return [
-      ...computedRows,
-      {
-        id: `${String(selectedBranch?.id || 'all')}-total`,
-        paymentMethod: 'total',
-        paymentTransaction: total.paymentTransaction,
-        paymentAmount: total.paymentAmount,
-        refundTransaction: total.refundTransaction,
-        refundAmount: total.refundAmount,
-        netAmount: total.netAmount,
-      },
-    ];
-  }, [selectedBranch?.id, dateRange.end, dateRange.start]);
+    void load();
+  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();

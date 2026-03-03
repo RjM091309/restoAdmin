@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,12 @@ import * as XLSX from 'xlsx';
 import { Search, X } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
+import {
+  fetchReceiptReportApi,
+  fetchReceiptDetailApi,
+  type ApiReceiptReportRow,
+  type ApiReceiptDetail,
+} from '../../services/analyticsService';
 
 type ReceiptReportProps = {
   selectedBranch: Branch | null;
@@ -43,41 +49,16 @@ type ReceiptDetail = {
   items: ReceiptLineItem[];
 };
 
-const MOCK_RECEIPT_BASE: Omit<ReceiptReportRow, 'id'>[] = [
-  { receiptNumber: '1-37301', date: '26 Feb 2026 14:06', employee: 'Operator', customer: '—', type: 'sale', total: 1860 },
-  { receiptNumber: '1-37300', date: '26 Feb 2026 14:04', employee: 'Operator', customer: '—', type: 'sale', total: 1900 },
-  { receiptNumber: '1-37299', date: '26 Feb 2026 13:54', employee: 'Operator', customer: '—', type: 'sale', total: 380 },
-  { receiptNumber: '1-37298', date: '26 Feb 2026 13:30', employee: 'Operator', customer: '—', type: 'sale', total: 3040 },
-  { receiptNumber: '1-37297', date: '26 Feb 2026 13:03', employee: 'Operator', customer: '—', type: 'sale', total: 5240 },
-  { receiptNumber: '1-37296', date: '26 Feb 2026 12:10', employee: 'Operator', customer: '—', type: 'sale', total: 1480 },
-  { receiptNumber: '1-37295', date: '26 Feb 2026 09:33', employee: 'Operator', customer: '—', type: 'refund', total: 6700 },
-  { receiptNumber: '1-37294', date: '26 Feb 2026 09:00', employee: 'Operator', customer: '—', type: 'refund', total: 8030 },
-  { receiptNumber: '1-37293', date: '26 Feb 2026 07:33', employee: 'Operator', customer: '—', type: 'sale', total: 32900 },
-  { receiptNumber: '1-37292', date: '26 Feb 2026 07:27', employee: 'Operator', customer: '—', type: 'sale', total: 380 },
-];
-
-const MOCK_RECEIPT_DETAIL_MAP: Record<string, ReceiptDetail> = {
-  '1-37300': {
-    orderLabel: 'order: Table 9',
-    staff: 'Operator',
-    pos: 'POS 1',
-    serviceType: 'Dine in',
-    paymentMethod: 'Gcash',
-    transactionNo: '№ 1-37300',
-    items: [
-      { name: 'Basic Meat Setting 1', qty: 1, unitPrice: 0, amount: 0 },
-      { name: 'B1 Galbi살', qty: 1, unitPrice: 800, amount: 800 },
-      { name: 'B2 LA Galbi', qty: 1, unitPrice: 950, amount: 950 },
-      { name: 'A2 Gyeran jjim(steam egg)', qty: 1, unitPrice: 150, amount: 150, note: 'No salt just pepper' },
-    ],
-  },
-};
+const MOCK_RECEIPT_BASE: Omit<ReceiptReportRow, 'id'>[] = [];
 
 export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'sale' | 'refund'>('all');
   const [selectedReceipt, setSelectedReceipt] = useState<ReceiptReportRow | null>(null);
+  const [receiptDetail, setReceiptDetail] = useState<ReceiptDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -87,25 +68,40 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
   const receiptHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
   const receiptBodyClass = 'text-sm text-brand-text bg-violet-50 group-hover:bg-violet-100';
 
-  const rows = useMemo(() => {
-    const branchMultiplierById: Record<string, number> = {
-      all: 1,
-      '1': 1,
-      '2': 0.91,
-      '3': 0.84,
-    };
-    const multiplier = branchMultiplierById[String(selectedBranch?.id || 'all')] || 0.88;
+  const [rows, setRows] = useState<ReceiptReportRow[]>([]);
 
-    return MOCK_RECEIPT_BASE.map((row, index) => ({
-      id: `${String(selectedBranch?.id || 'all')}-${index + 1}`,
-      receiptNumber: row.receiptNumber,
-      date: row.date,
-      employee: row.employee,
-      customer: row.customer,
-      type: row.type,
-      total: Number((row.total * multiplier).toFixed(2)),
-    }));
-  }, [selectedBranch?.id, dateRange.end, dateRange.start]);
+  useEffect(() => {
+    const load = async () => {
+      const params = new URLSearchParams();
+      if (dateRange.start) params.set('start_date', dateRange.start);
+      if (dateRange.end) params.set('end_date', dateRange.end);
+      if (selectedBranch && String(selectedBranch.id) !== 'all') {
+        params.set('branch_id', String(selectedBranch.id));
+      }
+      if (activeFilter !== 'all') {
+        params.set('type', activeFilter);
+      }
+      try {
+        const apiRows: ApiReceiptReportRow[] = await fetchReceiptReportApi(params);
+        setRows(
+          apiRows.map((row) => ({
+            id: String(row.id),
+            receiptNumber: row.receiptNumber,
+            date: row.date,
+            employee: row.employee,
+            customer: row.customer,
+            type: row.type,
+            total: row.total,
+          }))
+        );
+      } catch (err) {
+        console.error('Failed to load receipt report', err);
+        setRows([]);
+      }
+    };
+
+    void load();
+  }, [dateRange.start, dateRange.end, selectedBranch?.id, activeFilter]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
@@ -145,26 +141,9 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     [rows]
   );
   const activeDetail = useMemo(() => {
-    if (!selectedReceipt) return null;
-    const byNumber = MOCK_RECEIPT_DETAIL_MAP[selectedReceipt.receiptNumber];
-    if (byNumber) return byNumber;
-    return {
-      orderLabel: 'order: Table 1',
-      staff: selectedReceipt.employee,
-      pos: 'POS 1',
-      serviceType: 'Dine in',
-      paymentMethod: 'Cash',
-      transactionNo: `№ ${selectedReceipt.receiptNumber}`,
-      items: [
-        {
-          name: 'Sample Item',
-          qty: 1,
-          unitPrice: selectedReceipt.total,
-          amount: selectedReceipt.total,
-        },
-      ],
-    } as ReceiptDetail;
-  }, [selectedReceipt]);
+    if (!selectedReceipt || !receiptDetail) return null;
+    return receiptDetail;
+  }, [selectedReceipt, receiptDetail]);
 
   const columns: ColumnDef<ReceiptReportRow>[] = [
     {
@@ -310,7 +289,35 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
         data={filteredRows}
         columns={columns}
         keyExtractor={(item) => item.id}
-        onRowClick={(row) => setSelectedReceipt(row)}
+        onRowClick={async (row) => {
+          setSelectedReceipt(row);
+          setReceiptDetail(null);
+          setDetailError(null);
+          setDetailLoading(true);
+          try {
+            const detail: ApiReceiptDetail = await fetchReceiptDetailApi(row.id);
+            setReceiptDetail({
+              orderLabel: detail.orderLabel,
+              staff: detail.staff,
+              pos: detail.pos,
+              serviceType: detail.serviceType,
+              paymentMethod: detail.paymentMethod,
+              transactionNo: detail.transactionNo,
+              items: detail.items.map((item) => ({
+                name: item.name,
+                qty: item.qty,
+                unitPrice: item.unitPrice,
+                amount: item.amount,
+                note: item.note ?? undefined,
+              })),
+            });
+          } catch (error) {
+            console.error('Failed to load receipt detail', error);
+            setDetailError(t('receipt_report.detail_error'));
+          } finally {
+            setDetailLoading(false);
+          }
+        }}
       />
       {typeof document !== 'undefined' &&
         createPortal(
@@ -346,39 +353,57 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                       <p className="text-sm text-brand-muted mt-1">{t('receipt_report.detail_aggregate')}</p>
                     </div>
 
-                    <div className="py-3 border-b border-gray-200 text-sm leading-6">
-                      <p>{activeDetail.orderLabel}</p>
-                      <p>{t('receipt_report.detail_staff')}: {activeDetail.staff}</p>
-                      <p>{t('receipt_report.detail_pos')}: {activeDetail.pos}</p>
-                    </div>
-
-                    <div className="py-3 border-b border-gray-200">
-                      <p className="text-sm font-semibold">{activeDetail.serviceType}</p>
-                      <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
-                        {activeDetail.items.map((item, idx) => (
-                          <div key={`${item.name}-${idx}`}>
-                            <div className="flex items-center justify-between text-sm">
-                              <span>{item.name}</span>
-                              <span>{money(item.amount)}</span>
-                            </div>
-                            <p className="text-xs text-brand-muted">
-                              {item.qty} x {money(item.unitPrice)}
-                            </p>
-                            {item.note && <p className="text-xs italic text-brand-muted">{item.note}</p>}
-                          </div>
-                        ))}
+                    {!detailLoading && !activeDetail && (
+                      <div className="py-6 text-center text-sm text-brand-muted">
+                        {t('receipt_report.detail_no_items')}
                       </div>
-                    </div>
+                    )}
+
+                    {detailLoading && (
+                      <div className="py-6 text-center text-sm text-brand-muted">
+                        {t('receipt_report.detail_loading')}
+                      </div>
+                    )}
+
+                    {!detailLoading && activeDetail && (
+                      <>
+                        <div className="py-3 border-b border-gray-200 text-sm leading-6">
+                          <p>{activeDetail.orderLabel}</p>
+                          <p>{t('receipt_report.detail_staff')}: {activeDetail.staff}</p>
+                          <p>{t('receipt_report.detail_pos')}: {activeDetail.pos}</p>
+                        </div>
+
+                        <div className="py-3 border-b border-gray-200">
+                          <p className="text-sm font-semibold">{activeDetail.serviceType}</p>
+                          <div className="mt-2 pt-2 border-t border-gray-200 space-y-2">
+                            {activeDetail.items.map((item, idx) => (
+                              <div key={`${item.name}-${idx}`}>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span>{item.name}</span>
+                                  <span>{money(item.amount)}</span>
+                                </div>
+                                <p className="text-xs text-brand-muted">
+                                  {item.qty} x {money(item.unitPrice)}
+                                </p>
+                                {item.note && <p className="text-xs italic text-brand-muted">{item.note}</p>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
 
                     <div className="py-3 border-b border-gray-200 space-y-1.5">
                       <div className="flex items-center justify-between text-sm font-semibold">
                         <span>{t('receipt_report.columns.total')}</span>
                         <span>{money(selectedReceipt.total)}</span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span>{activeDetail.paymentMethod}</span>
-                        <span>{money(selectedReceipt.total)}</span>
-                      </div>
+                      {activeDetail && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span>{activeDetail.paymentMethod}</span>
+                          <span>{money(selectedReceipt.total)}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="pt-3 flex items-center justify-between text-sm text-brand-muted">

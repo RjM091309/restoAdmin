@@ -678,3 +678,9 @@ def daily_sales(
     items.sort(key=lambda x: x.sale_date)
 
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+# Attach analytics report routes (menu, category, payment, receipt)
+import reports  # noqa: E402
+
+app.include_router(reports.router)
