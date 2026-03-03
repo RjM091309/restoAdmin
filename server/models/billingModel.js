@@ -160,8 +160,16 @@ class BillingModel {
 	}
 
 	static async updateRefundForOrder(orderId, refundAmount, refundDt, refundReason) {
-		// Only update the refund columns. We keep AMOUNT_PAID as the gross amount received.
-		const query = `
+		// Debug: log intent before applying refund
+		console.log('[BillingModel.updateRefundForOrder] Incoming refund payload:', {
+			orderId,
+			refundAmount,
+			refundDt,
+			refundReason
+		});
+
+		// Try to update existing billing row first
+		const updateQuery = `
 			UPDATE billing SET
 				REFUND = ?,
 				REFUND_DT = ?,
@@ -169,8 +177,56 @@ class BillingModel {
 			WHERE ORDER_ID = ?
 		`;
 
-		const [result] = await pool.execute(query, [refundAmount, refundDt, refundReason, orderId]);
-		return result.affectedRows > 0;
+		const [updateResult] = await pool.execute(updateQuery, [refundAmount, refundDt, refundReason, orderId]);
+		console.log('[BillingModel.updateRefundForOrder] UPDATE result.affectedRows =', updateResult.affectedRows);
+		if (updateResult.affectedRows > 0) {
+			return true;
+		}
+
+		// If no billing row exists for this order yet, create one so refunds are not lost
+		const [orderRows] = await pool.execute(
+			`SELECT BRANCH_ID, GRAND_TOTAL, ENCODED_DT FROM orders WHERE IDNo = ? LIMIT 1`,
+			[orderId]
+		);
+		const order = orderRows[0];
+		if (!order) {
+			console.warn('[BillingModel.updateRefundForOrder] Order not found for refund, orderId=', orderId);
+			return false;
+		}
+
+		const insertQuery = `
+			INSERT INTO billing (
+				BRANCH_ID,
+				ORDER_ID,
+				PAYMENT_METHOD,
+				AMOUNT_DUE,
+				AMOUNT_PAID,
+				REFUND,
+				REFUND_DT,
+				REFUND_REASON,
+				STATUS,
+				ENCODED_BY,
+				ENCODED_DT
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`;
+
+		await pool.execute(insertQuery, [
+			order.BRANCH_ID || null,
+			orderId,
+			'CASH',
+			order.GRAND_TOTAL || 0,
+			0,
+			refundAmount,
+			refundDt,
+			refundReason,
+			1,
+			0,
+			order.ENCODED_DT || new Date()
+		]);
+
+		console.log('[BillingModel.updateRefundForOrder] INSERTED billing row with refund for orderId=', orderId);
+
+		return true;
 	}
 }
 

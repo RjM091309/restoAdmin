@@ -209,21 +209,8 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
     return categoryNamesForSelectedType.filter((opt) => String(opt.name).toLowerCase().includes(needle));
   }, [categoryNamesForSelectedType, formData.expName]);
 
-  // Apply date-range filtering once so both summary cards and table are consistent
-  const dateRangeFilteredExpenses = useMemo(() => {
-    const hasRange = Boolean(dateRange.start && dateRange.end);
-    if (!hasRange) return expenses;
-
-    const start = new Date(`${dateRange.start}T00:00:00`);
-    const end = new Date(`${dateRange.end}T23:59:59.999`);
-
-    return expenses.filter((e) => {
-      if (!e.encodedDt) return false;
-      const encoded = new Date(e.encodedDt);
-      if (Number.isNaN(encoded.getTime())) return false;
-      return encoded >= start && encoded <= end;
-    });
-  }, [expenses, dateRange.start, dateRange.end]);
+  // Date-range filtering temporarily disabled: always use full expenses list
+  const dateRangeFilteredExpenses = useMemo(() => expenses, [expenses]);
 
   const filteredExpenses = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

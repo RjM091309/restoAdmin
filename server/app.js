@@ -213,7 +213,7 @@ const server = app.listen(app.get('port'), function () {
   // Try to log response from Python analytics sample endpoint on startup
   const options = {
     hostname: 'localhost',
-    port: 8000,
+    port: 2100,
     path: '/api/analytics/sample',
     method: 'GET',
   };
@@ -230,7 +230,7 @@ const server = app.listen(app.get('port'), function () {
   });
 
   req.on('error', (err) => {
-    console.error('[PyServer] Could not reach http://localhost:8000/api/analytics/sample:', err.message);
+    console.error('[PyServer] Could not reach http://localhost:2100/api/analytics/sample:', err.message);
   });
 
   req.end();

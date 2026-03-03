@@ -197,6 +197,7 @@ class LoyverseService {
 
 	/**
 	 * Sync a single receipt from Loyverse to local database
+	 * Adds lightweight logging of raw payload for debugging.
 	 */
 	async syncReceipt(receipt, branchId = null) {
 		const connection = await pool.getConnection();
@@ -206,33 +207,58 @@ class LoyverseService {
 
 			const targetBranchId = branchId || this.defaultBranchId;
 			const receiptNumber = receipt.receipt_number;
+
+			// Debug: log key fields from raw receipt so we can verify how data maps into DB
+			console.log('[Loyverse Sync][RAW RECEIPT]', JSON.stringify({
+				receipt_number: receipt.receipt_number,
+				receipt_type: receipt.receipt_type,
+				transaction_type: receipt.transaction_type,
+				refund_for: receipt.refund_for,
+				total_money: receipt.total_money,
+				total_tax: receipt.total_tax,
+				total_discount: receipt.total_discount,
+				receipt_date: receipt.receipt_date,
+				created_at: receipt.created_at,
+			}));
 			let orderNo;
 			let existingOrderId;
+			const receiptType = String(receipt.receipt_type || '').toUpperCase();
+			const transactionType = receipt.transaction_type; // some payloads may use numeric transaction_type
+			const isRefund =
+				receiptType === 'REFUND' ||
+				transactionType === 2 ||
+				(receipt.total_money || 0) < 0;
 
-			if (receipt.receipt_type === 'REFUND') {
-				// For refunds, we need to find the original order being refunded
-				const originalReceiptNumber = receipt.refund_for; // This is the key to the original order
-				if (!originalReceiptNumber) {
-					console.warn(`[Loyverse Sync] Skipping refund sync: 'refund_for' not found in refund receipt ${receipt.receipt_number}`);
-					await connection.rollback();
-					return { action: 'skipped', reason: 'original_receipt_number_missing' };
+			if (isRefund) {
+				// Prefer linking to original order when refund_for is present
+				const originalReceiptNumber = receipt.refund_for;
+				if (originalReceiptNumber) {
+					orderNo = `LOY-${originalReceiptNumber}`;
+					existingOrderId = await this.orderExists(orderNo);
 				}
-				orderNo = `LOY-${originalReceiptNumber}`;
-				existingOrderId = await this.orderExists(orderNo);
 
 				if (!existingOrderId) {
-					console.warn(`[Loyverse Sync] Skipping refund sync: Original order (ORDER_NO: ${orderNo}) not found for refund receipt ${receipt.receipt_number}`);
-					await connection.rollback();
-					return { action: 'skipped', reason: 'original_order_not_found' };
+					// Fall back to matching by this refund receipt's own number (in case original receipt was not imported yet)
+					orderNo = `LOY-${receiptNumber}`;
+					existingOrderId = await this.orderExists(orderNo);
 				}
+
+				if (!existingOrderId) {
+					console.warn(
+						`[Loyverse Sync] Refund receipt ${receipt.receipt_number} could not be matched to an existing order (refund_for=${originalReceiptNumber || 'N/A'})`
+					);
+					await connection.rollback();
+					return { action: 'skipped', reason: 'order_not_found_for_refund' };
+				}
+
 				const refundResult = await this.syncRefundReceipt(receipt, existingOrderId, targetBranchId);
 				await connection.commit();
 				return refundResult;
-			} else {
-				// For regular sales receipts or other types
-				orderNo = `LOY-${receiptNumber}`; // Prefix to identify Loyverse orders
-				existingOrderId = await this.orderExists(orderNo);
 			}
+
+			// For regular sales receipts or other types
+			orderNo = `LOY-${receiptNumber}`; // Prefix to identify Loyverse orders
+			existingOrderId = await this.orderExists(orderNo);
 
 			if (existingOrderId && receipt.cancelled_at) {
 				// Handle cancellation
@@ -427,6 +453,18 @@ class LoyverseService {
 		const refundDt = new Date(receipt.receipt_date || receipt.created_at);
 		const refundReason = receipt.receipt_type_reason || 'Loyverse Refund'; // Assuming a reason field
 
+		// Debug: log raw refund mapping before writing to billing
+		console.log('[Loyverse Sync][REFUND MAP]', JSON.stringify({
+			existingOrderId,
+			branchId: targetBranchId,
+			receipt_number: receipt.receipt_number,
+			refund_for: receipt.refund_for,
+			total_money: receipt.total_money,
+			refundAmount,
+			refundDt,
+			refundReason,
+		}));
+
 		if (!existingOrderId) {
 			console.warn(`[Loyverse Sync] Skipping refund sync: Original order not found for receipt ${receipt.receipt_number}`);
 			return { action: 'skipped', reason: 'order_not_found' };
@@ -616,6 +654,11 @@ class LoyverseService {
 
 		this.autoSyncInterval = setInterval(async () => {
 			try {
+				// If a sync is already running (manual or previous auto run), skip this tick quietly
+				if (this.isSyncing) {
+					return;
+				}
+
 				await this.syncAllReceipts(branchId, this.autoSyncLimit, { incremental: true });
 				// console.log(`[Loyverse Sync] Auto-sync completed at ${new Date().toISOString()}`);
 			} catch (error) {

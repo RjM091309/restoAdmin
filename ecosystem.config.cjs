@@ -26,8 +26,8 @@ module.exports = {
     {
       name: 'resto-pyserver',
       cwd: './pyserver',
-      script: 'py',
-      args: '-3 -m uvicorn main:app --host 0.0.0.0 --port 2100 --no-access-log',
+      script: './.venv/bin/python',
+      args: '-m uvicorn main:app --host 0.0.0.0 --port 2100 --no-access-log',
       instances: 1,
       exec_mode: 'fork',
       env: {

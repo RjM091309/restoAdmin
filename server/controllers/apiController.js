@@ -56,7 +56,7 @@ class ApiController {
 				}
 
 				if (isValid) {
-					const allowedPermissions = [1, 2, 14, 15, 16]; 
+					const allowedPermissions = [1, 2, 3, 14, 15, 16]; 
 					const userPermissions = parseInt(user.PERMISSIONS, 10);
 					
 					console.log(`[${timestamp}] [LOGIN CHECK] ${username} - PERMISSIONS: ${user.PERMISSIONS}, parsed: ${userPermissions}, allowed: [${allowedPermissions.join(', ')}]`);

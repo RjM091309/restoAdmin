@@ -4,6 +4,14 @@ import * as XLSX from 'xlsx';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import {
+  fetchBranchSalesApi,
+  fetchLeastSellingApi,
+  fetchDailySalesApi,
+  type ApiBranchSalesItem,
+  type ApiLeastSellingItem,
+  type ApiDailySalesItem,
+} from '../../services/analyticsService';
+import {
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -24,22 +32,6 @@ type SalesAnalyticsProps = {
   };
 };
 
-type BranchSales = {
-  id: string;
-  name: string;
-  totalSales: number;
-  orders: number;
-  avgSales: number;
-  growth: number;
-};
-
-type TopMenuItem = {
-  name: string;
-  category: string;
-  orders: number;
-  sales: number;
-};
-
 type MetricKey = 'totalSales' | 'refund' | 'discount' | 'netSales' | 'grossProfit';
 type ChartType = 'bar chart' | 'line graph';
 type ViewMode = 'glance' | 'week';
@@ -52,24 +44,7 @@ type InlineDropdownProps<T extends string> = {
 };
 
 // API data types
-type ApiBranchSalesItem = {
-  branch_id: number;
-  branch_name: string;
-  branch_code: string;
-  total_sales: number;
-  order_count: number;
-  avg_order_value: number;
-};
-
-type ApiLeastSellingItem = {
-  IDNo: number;
-  MENU_NAME: string;
-  MENU_PRICE: number;
-  category: string;
-  total_quantity: number;
-  order_count: number;
-  total_revenue: number;
-};
+// API types now imported from analyticsService
 
 function getToken() {
   return localStorage.getItem('token') || '';
@@ -129,45 +104,6 @@ function InlineDropdown<T extends string>({ value, options, onChange, formatOpti
   );
 }
 
-const MOCK_BRANCH_SALES: BranchSales[] = [
-  { id: '1', name: 'Daraejung', totalSales: 286450, orders: 1240, avgSales: 9548.33, growth: 8.4 },
-  { id: '2', name: "Kim's Brothers", totalSales: 241900, orders: 1088, avgSales: 8063.33, growth: 6.1 },
-  { id: '3', name: 'Main Branch', totalSales: 198730, orders: 903, avgSales: 6624.33, growth: 4.7 },
-];
-
-const FALLBACK_DAILY_SALES = [
-  { label: '28 Jan', tableDate: '28 Jan 2026', sales: 82000 },
-  { label: '29 Jan', tableDate: '29 Jan 2026', sales: 128000 },
-  { label: '30 Jan', tableDate: '30 Jan 2026', sales: 167000 },
-  { label: '31 Jan', tableDate: '31 Jan 2026', sales: 189000 },
-  { label: '01 Feb', tableDate: '01 Feb 2026', sales: 228000 },
-  { label: '02 Feb', tableDate: '02 Feb 2026', sales: 136000 },
-  { label: '03 Feb', tableDate: '03 Feb 2026', sales: 149000 },
-  { label: '04 Feb', tableDate: '04 Feb 2026', sales: 142000 },
-  { label: '05 Feb', tableDate: '05 Feb 2026', sales: 178000 },
-  { label: '06 Feb', tableDate: '06 Feb 2026', sales: 236000 },
-  { label: '07 Feb', tableDate: '07 Feb 2026', sales: 258000 },
-  { label: '08 Feb', tableDate: '08 Feb 2026', sales: 231000 },
-  { label: '09 Feb', tableDate: '09 Feb 2026', sales: 121000 },
-  { label: '10 Feb', tableDate: '10 Feb 2026', sales: 124000 },
-  { label: '11 Feb', tableDate: '11 Feb 2026', sales: 160000 },
-  { label: '12 Feb', tableDate: '12 Feb 2026', sales: 137000 },
-  { label: '13 Feb', tableDate: '13 Feb 2026', sales: 166000 },
-  { label: '14 Feb', tableDate: '14 Feb 2026', sales: 341000 },
-  { label: '15 Feb', tableDate: '15 Feb 2026', sales: 315000 },
-  { label: '16 Feb', tableDate: '16 Feb 2026', sales: 239000 },
-  { label: '17 Feb', tableDate: '17 Feb 2026', sales: 221000 },
-  { label: '18 Feb', tableDate: '18 Feb 2026', sales: 229000 },
-  { label: '19 Feb', tableDate: '19 Feb 2026', sales: 181000 },
-  { label: '20 Feb', tableDate: '20 Feb 2026', sales: 227000 },
-  { label: '21 Feb', tableDate: '21 Feb 2026', sales: 273000 },
-  { label: '22 Feb', tableDate: '22 Feb 2026', sales: 205000 },
-  { label: '23 Feb', tableDate: '23 Feb 2026', sales: 161000 },
-  { label: '24 Feb', tableDate: '24 Feb 2026', sales: 152000 },
-  { label: '25 Feb', tableDate: '25 Feb 2026', sales: 131000 },
-  { label: '26 Feb', tableDate: '26 Feb 2026', sales: 61000 },
-];
-
 const parseDateSafe = (value: string) => {
   if (!value) return null;
   const parsed = new Date(`${value}T00:00:00`);
@@ -176,56 +112,6 @@ const parseDateSafe = (value: string) => {
 
 const formatDateLabel = (date: Date) =>
   date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
-
-const createRangeSales = (start: string, end: string) => {
-  const startDate = parseDateSafe(start);
-  const endDate = parseDateSafe(end);
-  if (!startDate || !endDate || startDate > endDate) return FALLBACK_DAILY_SALES;
-
-  const rows: { label: string; tableDate: string; sales: number }[] = [];
-  const cursor = new Date(startDate);
-  let index = 0;
-
-  while (cursor <= endDate && rows.length < 180) {
-    const seasonal = Math.round(Math.sin(index / 2.8) * 18000);
-    const trend = (index % 7) * 6500;
-    const sales = Math.max(50000, 120000 + seasonal + trend);
-    rows.push({
-      label: formatDateLabel(cursor),
-      tableDate: cursor.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }),
-      sales,
-    });
-    cursor.setDate(cursor.getDate() + 1);
-    index += 1;
-  }
-
-  return rows.length ? rows : FALLBACK_DAILY_SALES;
-};
-
-const MOCK_TOP_MENU_ALL: TopMenuItem[] = [
-  { name: 'Bulgogi Set', category: 'Korean', orders: 328, sales: 114800 },
-  { name: 'Kimchi Fried Rice', category: 'Rice Meals', orders: 295, sales: 88500 },
-  { name: 'Spicy Ramen', category: 'Noodles', orders: 264, sales: 76560 },
-  { name: 'Seafood Pancake', category: 'Appetizer', orders: 188, sales: 62040 },
-];
-
-const MOCK_TOP_MENU_BRANCH: Record<string, TopMenuItem[]> = {
-  '1': [
-    { name: 'Bulgogi Set', category: 'Korean', orders: 126, sales: 44100 },
-    { name: 'Seafood Soup', category: 'Soup', orders: 108, sales: 36720 },
-    { name: 'Kimchi Fried Rice', category: 'Rice Meals', orders: 95, sales: 28500 },
-  ],
-  '2': [
-    { name: 'Spicy Ramen', category: 'Noodles', orders: 116, sales: 33640 },
-    { name: 'Katsu Set', category: 'Japanese', orders: 102, sales: 35700 },
-    { name: 'Kimchi Fried Rice', category: 'Rice Meals', orders: 88, sales: 26400 },
-  ],
-  '3': [
-    { name: 'Chicken Teriyaki', category: 'Japanese', orders: 93, sales: 31620 },
-    { name: 'Spicy Ramen', category: 'Noodles', orders: 86, sales: 24940 },
-    { name: 'Seafood Pancake', category: 'Appetizer', orders: 74, sales: 24420 },
-  ],
-};
 
 const money = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -263,43 +149,40 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [leastSellingLoading, setLeastSellingLoading] = useState(false);
   const [leastSellingError, setLeastSellingError] = useState<string | null>(null);
 
-  const selectedData = useMemo(() => {
-    if (isAllBranch) return null;
-    const byId = MOCK_BRANCH_SALES.find((row) => row.id === String(selectedBranch?.id));
-    if (byId) return byId;
-    return {
-      id: String(selectedBranch?.id || '0'),
-      name: selectedBranch?.name || 'Selected Branch',
-      totalSales: 172350,
-      orders: 780,
-      avgSales: 5745,
-      growth: 5.2,
-    };
-  }, [isAllBranch, selectedBranch]);
-
-  const allSummary = useMemo(() => {
-    const totalSales = MOCK_BRANCH_SALES.reduce((sum, row) => sum + row.totalSales, 0);
-    const totalOrders = MOCK_BRANCH_SALES.reduce((sum, row) => sum + row.orders, 0);
-    const avgSales =
-      MOCK_BRANCH_SALES.length > 0
-        ? MOCK_BRANCH_SALES.reduce((sum, row) => sum + row.avgSales, 0) / MOCK_BRANCH_SALES.length
-        : 0;
-    return { totalSales, totalOrders, avgSales };
-  }, []);
-
-  const topMenuItems = useMemo(() => {
-    if (isAllBranch) return MOCK_TOP_MENU_ALL;
-    return MOCK_TOP_MENU_BRANCH[String(selectedBranch?.id)] || MOCK_TOP_MENU_ALL.slice(0, 3);
-  }, [isAllBranch, selectedBranch]);
+  const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
+  const [dailySalesPrevious, setDailySalesPrevious] = useState<ApiDailySalesItem[]>([]);
+  const [dailySalesLoading, setDailySalesLoading] = useState(false);
+  const [dailySalesError, setDailySalesError] = useState<string | null>(null);
 
   const trendData = useMemo(() => {
-    const baseData = createRangeSales(dateRange.start, dateRange.end);
+    const baseData =
+      dailySalesCurrent.length > 0
+        ? dailySalesCurrent.map((item) => {
+            const parsed = parseDateSafe(item.sale_date);
+            const label = parsed ? formatDateLabel(parsed) : item.sale_date;
+            const tableDate = parsed
+              ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+              : item.sale_date;
+            return {
+              label,
+              tableDate,
+              sales: item.total_sales,
+              refund: (item as any).refund ?? 0,
+              discount: (item as any).discount ?? 0,
+              netSales: (item as any).net_sales ?? item.total_sales,
+              grossProfit: (item as any).gross_profit ?? (item as any).net_sales ?? item.total_sales,
+            };
+          })
+        : [];
+
     const withMetrics = baseData.map((row, idx) => {
       const totalSales = row.sales;
-      const refund = Math.round(totalSales * 0.00024 * (1 + Math.sin(idx / 3) * 0.1));
-      const discount = Math.round(totalSales * 0.00269 * (1 + Math.cos(idx / 4) * 0.08));
-      const netSales = Math.max(0, totalSales - refund - discount);
-      const grossProfit = Math.round(netSales * 0.995);
+      const refund = Number(row.refund || 0);
+      const discount = Number(row.discount || 0);
+      const netSalesRaw = (row.netSales ?? totalSales) as number;
+      const grossProfitRaw = (row.grossProfit ?? netSalesRaw) as number;
+      const netSales = Math.max(0, netSalesRaw);
+      const grossProfit = Math.max(0, grossProfitRaw);
       return {
         label: row.label,
         tableDate: row.tableDate,
@@ -311,49 +194,13 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       };
     });
 
-    if (isAllBranch) return withMetrics;
-    const branchMultiplierById: Record<string, number> = {
-      '1': 1,
-      '2': 0.84,
-      '3': 0.72,
-    };
-    const multiplier = branchMultiplierById[String(selectedBranch?.id)] || 0.78;
-    return withMetrics.map((row) => ({
-      ...row,
-      totalSales: Math.round(row.totalSales * multiplier),
-      refund: Math.round(row.refund * multiplier),
-      discount: Math.round(row.discount * multiplier),
-      netSales: Math.round(row.netSales * multiplier),
-      grossProfit: Math.round(row.grossProfit * multiplier),
-    }));
-  }, [dateRange.end, dateRange.start, isAllBranch, selectedBranch]);
+    return withMetrics;
+  }, [dailySalesCurrent]);
 
   useEffect(() => { setTablePage(0); }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
   useEffect(() => { setActiveProductKey('all'); }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
-  // Compute a date-range factor so mock numbers change when the datepicker changes
-  const dateRangeDays = useMemo(() => {
-    const s = parseDateSafe(dateRange.start);
-    const e = parseDateSafe(dateRange.end);
-    if (!s || !e || s > e) return 30; // default ~1 month
-    return Math.max(1, Math.round((e.getTime() - s.getTime()) / 86400000) + 1);
-  }, [dateRange.start, dateRange.end]);
-
-  // Scale factor: base mock values assume 30 days, so we scale proportionally
-  const mockScale = dateRangeDays / 30;
-
-  // Mock sales figures per branch — scaled by date range
-  const MOCK_BRANCH_FIGURES = useMemo(() => [
-    { total_sales: Math.round(4632233.96 * mockScale * 100) / 100, order_count: Math.round(1257 * mockScale), avg_order_value: 3685.15 },
-    { total_sales: Math.round(3218745.50 * mockScale * 100) / 100, order_count: Math.round(983 * mockScale), avg_order_value: 3274.41 },
-    { total_sales: Math.round(2876120.80 * mockScale * 100) / 100, order_count: Math.round(842 * mockScale), avg_order_value: 3415.82 },
-    { total_sales: Math.round(1945680.25 * mockScale * 100) / 100, order_count: Math.round(615 * mockScale), avg_order_value: 3163.71 },
-    { total_sales: Math.round(1523490.00 * mockScale * 100) / 100, order_count: Math.round(478 * mockScale), avg_order_value: 3186.17 },
-    { total_sales: Math.round(1102350.60 * mockScale * 100) / 100, order_count: Math.round(356 * mockScale), avg_order_value: 3096.49 },
-    { total_sales: Math.round(876540.30 * mockScale * 100) / 100, order_count: Math.round(289 * mockScale), avg_order_value: 3033.01 },
-  ], [mockScale]);
-
-  // Fetch sales per branch data (branch names from DB, sales figures are mock)
+  // Fetch sales per branch data (real data from backend)
   const fetchBranchSales = useCallback(async () => {
     setBranchSalesLoading(true);
     setBranchSalesError(null);
@@ -363,82 +210,77 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       if (dateRange.end) params.set('end_date', dateRange.end);
       if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
 
-      // TEMP: call Python analytics service (mock data) instead of Node
-      const res = await fetch(`http://localhost:8000/api/analytics/branch-sales?${params.toString()}`);
-      const json = await res.json();
-      if (json.success && json.data?.data) {
-        // Keep branch info from DB, replace numeric fields with mock data
-        const withMock = (json.data.data as ApiBranchSalesItem[]).map((b, i) => {
-          const mock = MOCK_BRANCH_FIGURES[i % MOCK_BRANCH_FIGURES.length];
-          return {
-            ...b,
-            total_sales: mock.total_sales,
-            order_count: mock.order_count,
-            avg_order_value: mock.avg_order_value,
-          };
-        });
-        setBranchSalesData(withMock);
-      } else {
-        setBranchSalesError(json.message || t('sales_analytics.failed_to_load'));
-      }
-    } catch {
+      const rawData = await fetchBranchSalesApi(params);
+      setBranchSalesData(rawData);
+    } catch (err) {
+      console.error(err);
       setBranchSalesError(t('sales_analytics.network_error'));
     } finally {
       setBranchSalesLoading(false);
     }
   }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id]);
 
-  // Base mock fallback data for least selling items — per branch
-  // Quantities/revenues are scaled by mockScale in getMockLeastSelling
-  const BASE_LEAST_SELLING_ALL = [
-    { IDNo: 1, MENU_NAME: 'Seafood Pancake', MENU_PRICE: 330.00, category: 'Appetizer', total_quantity: 12, total_revenue: 3960.00 },
-    { IDNo: 2, MENU_NAME: 'Japchae', MENU_PRICE: 280.00, category: 'Side Dish', total_quantity: 18, total_revenue: 5040.00 },
-    { IDNo: 3, MENU_NAME: 'Tteokbokki', MENU_PRICE: 250.00, category: 'Snack', total_quantity: 23, total_revenue: 5750.00 },
-    { IDNo: 4, MENU_NAME: 'Miso Soup', MENU_PRICE: 180.00, category: 'Soup', total_quantity: 27, total_revenue: 4860.00 },
-    { IDNo: 5, MENU_NAME: 'Vegetable Tempura', MENU_PRICE: 310.00, category: 'Japanese', total_quantity: 31, total_revenue: 9610.00 },
-  ];
+  // Compute previous-period date range for comparison (same length immediately before current range)
+  const previousRange = useMemo(() => {
+    const start = parseDateSafe(dateRange.start);
+    const end = parseDateSafe(dateRange.end);
+    if (!start || !end || start > end) {
+      return { previousStart: null as string | null, previousEnd: null as string | null };
+    }
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+    const prevEnd = new Date(start);
+    prevEnd.setDate(prevEnd.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - (days - 1));
 
-  const BASE_LEAST_SELLING_PER_BRANCH: Record<string, typeof BASE_LEAST_SELLING_ALL> = {
-    // Kim's Brothers
-    '2': [
-      { IDNo: 1, MENU_NAME: 'Corn Cheese', MENU_PRICE: 220.00, category: 'Side Dish', total_quantity: 8, total_revenue: 1760.00 },
-      { IDNo: 2, MENU_NAME: 'Egg Roll', MENU_PRICE: 190.00, category: 'Appetizer', total_quantity: 14, total_revenue: 2660.00 },
-      { IDNo: 3, MENU_NAME: 'Kimchi Jjigae', MENU_PRICE: 280.00, category: 'Soup', total_quantity: 19, total_revenue: 5320.00 },
-      { IDNo: 4, MENU_NAME: 'Odeng Soup', MENU_PRICE: 200.00, category: 'Soup', total_quantity: 22, total_revenue: 4400.00 },
-      { IDNo: 5, MENU_NAME: 'Gyoza', MENU_PRICE: 260.00, category: 'Japanese', total_quantity: 26, total_revenue: 6760.00 },
-    ],
-    // Daraejung
-    '1': [
-      { IDNo: 1, MENU_NAME: 'Sundae', MENU_PRICE: 250.00, category: 'Snack', total_quantity: 6, total_revenue: 1500.00 },
-      { IDNo: 2, MENU_NAME: 'Pajeon', MENU_PRICE: 300.00, category: 'Appetizer', total_quantity: 11, total_revenue: 3300.00 },
-      { IDNo: 3, MENU_NAME: 'Naengmyeon', MENU_PRICE: 320.00, category: 'Noodles', total_quantity: 16, total_revenue: 5120.00 },
-      { IDNo: 4, MENU_NAME: 'Hotteok', MENU_PRICE: 150.00, category: 'Dessert', total_quantity: 20, total_revenue: 3000.00 },
-      { IDNo: 5, MENU_NAME: 'Doenjang Jjigae', MENU_PRICE: 270.00, category: 'Soup', total_quantity: 25, total_revenue: 6750.00 },
-    ],
-    // Blue Moon
-    '3': [
-      { IDNo: 1, MENU_NAME: 'Steamed Egg', MENU_PRICE: 160.00, category: 'Side Dish', total_quantity: 9, total_revenue: 1440.00 },
-      { IDNo: 2, MENU_NAME: 'Seaweed Soup', MENU_PRICE: 200.00, category: 'Soup', total_quantity: 13, total_revenue: 2600.00 },
-      { IDNo: 3, MENU_NAME: 'Kimbap', MENU_PRICE: 230.00, category: 'Rice Meals', total_quantity: 17, total_revenue: 3910.00 },
-      { IDNo: 4, MENU_NAME: 'Fish Cake Skewer', MENU_PRICE: 140.00, category: 'Snack', total_quantity: 21, total_revenue: 2940.00 },
-      { IDNo: 5, MENU_NAME: 'Bibim Naengmyeon', MENU_PRICE: 340.00, category: 'Noodles', total_quantity: 28, total_revenue: 9520.00 },
-    ],
-  };
+    const toIso = (d: Date) => d.toISOString().slice(0, 10);
+    return { previousStart: toIso(prevStart), previousEnd: toIso(prevEnd) };
+  }, [dateRange.start, dateRange.end]);
 
-  // Apply date-range scaling to mock least-selling items
-  const getMockLeastSelling = useCallback((): ApiLeastSellingItem[] => {
-    const baseItems = isAllBranch
-      ? BASE_LEAST_SELLING_ALL
-      : (BASE_LEAST_SELLING_PER_BRANCH[String(selectedBranch?.id ?? '')] || BASE_LEAST_SELLING_ALL);
-    return baseItems.map(item => ({
-      ...item,
-      total_quantity: Math.max(1, Math.round(item.total_quantity * mockScale)),
-      order_count: Math.max(1, Math.round(item.total_quantity * mockScale)),
-      total_revenue: Math.round(item.total_revenue * mockScale * 100) / 100,
-    }));
-  }, [isAllBranch, selectedBranch?.id, mockScale]);
+  // Fetch daily sales data for main chart/stat cards (current + previous period)
+  const fetchDailySales = useCallback(async () => {
+    setDailySalesLoading(true);
+    setDailySalesError(null);
+    try {
+      const hasRange = dateRange.start && dateRange.end;
+      if (!hasRange) {
+        setDailySalesCurrent([]);
+        setDailySalesPrevious([]);
+        return;
+      }
 
-  // Fetch least selling items (falls back to mock data when API returns empty)
+      const paramsCurrent = new URLSearchParams();
+      paramsCurrent.set('start_date', dateRange.start);
+      paramsCurrent.set('end_date', dateRange.end);
+      if (!isAllBranch && selectedBranch?.id) paramsCurrent.set('branch_id', String(selectedBranch.id));
+
+      const { previousStart, previousEnd } = previousRange;
+      let paramsPrevious: URLSearchParams | null = null;
+      if (previousStart && previousEnd) {
+        paramsPrevious = new URLSearchParams();
+        paramsPrevious.set('start_date', previousStart);
+        paramsPrevious.set('end_date', previousEnd);
+        if (!isAllBranch && selectedBranch?.id) paramsPrevious.set('branch_id', String(selectedBranch.id));
+      }
+
+      const [currentData, prevData] = await Promise.all([
+        fetchDailySalesApi(paramsCurrent),
+        paramsPrevious ? fetchDailySalesApi(paramsPrevious) : Promise.resolve([]),
+      ]);
+
+      setDailySalesCurrent(currentData);
+      setDailySalesPrevious(prevData);
+    } catch (err) {
+      console.error(err);
+      setDailySalesError(t('sales_analytics.network_error'));
+      setDailySalesCurrent([]);
+      setDailySalesPrevious([]);
+    } finally {
+      setDailySalesLoading(false);
+    }
+  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, previousRange, t]);
+
+  // Fetch least selling items (uses real data; shows empty state when none)
   const fetchLeastSelling = useCallback(async () => {
     setLeastSellingLoading(true);
     setLeastSellingError(null);
@@ -448,25 +290,21 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       if (dateRange.end) params.set('end_date', dateRange.end);
       if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
       params.set('limit', '5');
-      // TEMP: call Python analytics service (mock data) instead of Node
-      const res = await fetch(`http://localhost:8000/api/analytics/least-selling?${params.toString()}`);
-      const json = await res.json();
-      if (json.success && json.data?.data && json.data.data.length > 0) {
-        setLeastSellingData(json.data.data);
-      } else {
-        // Use branch-specific mock data as fallback
-        setLeastSellingData(getMockLeastSelling());
-      }
-    } catch {
-      // Use branch-specific mock data even on error
-      setLeastSellingData(getMockLeastSelling());
+
+      const apiData = await fetchLeastSellingApi(params);
+      setLeastSellingData(apiData);
+    } catch (err) {
+      console.error(err);
+      setLeastSellingError(t('sales_analytics.network_error'));
+      setLeastSellingData([]);
     } finally {
       setLeastSellingLoading(false);
     }
-  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, getMockLeastSelling]);
+  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, t]);
 
   useEffect(() => { fetchBranchSales(); }, [fetchBranchSales]);
   useEffect(() => { fetchLeastSelling(); }, [fetchLeastSelling]);
+  useEffect(() => { fetchDailySales(); }, [fetchDailySales]);
 
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
@@ -564,17 +402,78 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     safeTablePage * TABLE_PAGE_SIZE + TABLE_PAGE_SIZE
   );
 
-  const baseSales = isAllBranch ? allSummary.totalSales : selectedData?.totalSales || 0;
-  const topStatItems = useMemo(
-    () => [
-      { key: 'totalSales' as const, label: t('sales_analytics.total_sales'), value: money(baseSales), delta: `+${money(baseSales * 0.0615)} (+6.57%)`, positive: true },
-      { key: 'refund' as const, label: t('sales_analytics.refund'), value: money(baseSales * 0.00024), delta: `+${money(baseSales * 0.00019)} (+367.86%)`, positive: false },
-      { key: 'discount' as const, label: t('sales_analytics.discount'), value: money(baseSales * 0.00269), delta: `-${money(baseSales * 0.0005)} (-15.76%)`, positive: true },
-      { key: 'netSales' as const, label: t('sales_analytics.net_sales'), value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
-      { key: 'grossProfit' as const, label: t('sales_analytics.gross_profit'), value: money(baseSales * 0.9971), delta: `+${money(baseSales * 0.0619)} (+6.62%)`, positive: true },
-    ],
-    [baseSales, t]
+  const baseSales = useMemo(
+    () => trendData.reduce((sum, row) => sum + row.totalSales, 0),
+    [trendData]
   );
+
+  const baseSalesPrevious = useMemo(
+    () =>
+      dailySalesPrevious.reduce((sum, item) => {
+        return sum + (Number(item.total_sales) || 0);
+      }, 0),
+    [dailySalesPrevious]
+  );
+
+const metricConfig = {
+  totalSales: { positiveIsGood: true },
+  refund: { positiveIsGood: false },
+  discount: { positiveIsGood: true },
+  netSales: { positiveIsGood: true },
+  grossProfit: { positiveIsGood: true },
+} as const;
+  const topStatItems = useMemo(() => {
+    const makeItem = (key: MetricKey, label: string) => {
+      const cfg = metricConfig[key];
+      // Aggregate totals from daily series (current vs previous period)
+      const aggregateMetric = (items: ApiDailySalesItem[], metricKey: MetricKey) => {
+        return items.reduce((sum, item) => {
+          switch (metricKey) {
+            case 'totalSales':
+              return sum + (Number(item.total_sales) || 0);
+            case 'refund':
+              return sum + (Number((item as any).refund ?? 0) || 0);
+            case 'discount':
+              return sum + (Number((item as any).discount ?? 0) || 0);
+            case 'netSales':
+              return sum + (Number((item as any).net_sales ?? 0) || 0);
+            case 'grossProfit':
+              return sum + (Number((item as any).gross_profit ?? 0) || 0);
+            default:
+              return sum;
+          }
+        }, 0);
+      };
+
+      const current = aggregateMetric(dailySalesCurrent, key);
+      const previous = aggregateMetric(dailySalesPrevious, key);
+      const diff = current - previous;
+      const hasPrev = previous > 0;
+      const percent = hasPrev ? (diff / previous) * 100 : 0;
+      const isIncrease = diff >= 0;
+      const positive = cfg.positiveIsGood ? isIncrease : !isIncrease;
+      const sign = diff >= 0 ? '+' : '-';
+      const absDiff = Math.abs(diff);
+      const absPercent = Math.abs(percent);
+      const delta = `${sign}${money(absDiff)} (${absPercent.toFixed(2)}%)`;
+
+      return {
+        key,
+        label,
+        value: money(current),
+        delta,
+        positive,
+      } as const;
+    };
+
+    return [
+      makeItem('totalSales', t('sales_analytics.total_sales')),
+      makeItem('refund', t('sales_analytics.refund')),
+      makeItem('discount', t('sales_analytics.discount')),
+      makeItem('netSales', t('sales_analytics.net_sales')),
+      makeItem('grossProfit', t('sales_analytics.gross_profit')),
+    ];
+  }, [baseSales, baseSalesPrevious, metricConfig, t]);
   const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || t('sales_analytics.total_sales');
   const tooltipProps = {
     formatter: (value: number) => money(Number(value)),
