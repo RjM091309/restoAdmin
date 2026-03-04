@@ -817,10 +817,10 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
               </button>
             </div>
 
-            <div className="grid grid-flow-col auto-cols-[minmax(0,1fr)] gap-4">
-              <div className="bg-white p-5 rounded-2xl shadow-sm min-w-0">
-                <p className="text-brand-muted text-xs sm:text-sm font-medium mb-1 truncate">{t('expenses_page.total_expenses')}</p>
-                <h3 className="text-xl sm:text-2xl xl:text-3xl font-bold text-brand-text truncate">{formatCurrency(summaryByType.totalAmount)}</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+              <div className="bg-brand-primary text-white p-5 rounded-2xl shadow-sm min-w-0">
+                <p className="text-xs sm:text-sm font-medium mb-1 truncate opacity-80">{t('expenses_page.total_expenses')}</p>
+                <h3 className="text-xl sm:text-2xl xl:text-3xl font-bold truncate">{formatCurrency(summaryByType.totalAmount)}</h3>
               </div>
 
               <div className="bg-white p-5 rounded-2xl shadow-sm min-w-0">
