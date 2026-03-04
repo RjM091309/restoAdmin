@@ -477,10 +477,11 @@ class LoyverseService {
 					const unitPrice = price || (quantity ? (totalMoney / quantity) : 0);
 					const encodedDt = new Date();
 
-					// Base params shared by both insert variants (with/without SKU column)
+					// Base params shared by both insert variants (with/without SKU column).
+					// Use 0 as fallback CATEGORY_ID to satisfy NOT NULL constraints on some servers.
 					const baseParams = [
 						branchId,      // BRANCH_ID
-						null,          // CATEGORY_ID (unknown, can be reassigned later)
+						0,             // CATEGORY_ID (unknown, can be reassigned later; 0 = "Uncategorized")
 						itemName,      // MENU_NAME
 						null,          // MENU_DESCRIPTION
 						null,          // MENU_IMG
