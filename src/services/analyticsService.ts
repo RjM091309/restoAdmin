@@ -1,18 +1,12 @@
-const ENV_BASE_URL = (import.meta as any)?.env?.VITE_ANALYTICS_BASE_URL as string | undefined;
+// Frontend analytics talk directly to the Python service.
+// In production we require an explicit base URL via VITE_ANALYTICS_BASE_URL.
+const ENV_BASE_URL = (import.meta as any).env?.VITE_ANALYTICS_BASE_URL as string | undefined;
 
-// Resolve analytics API base URL:
-// - Prefer VITE_ANALYTICS_BASE_URL when set (e.g. http://45.32.119.62:2100)
-// - Otherwise use current host + :2100 (Python uvicorn)
-// - Fallback to localhost:2100 for non-browser environments
 const getAnalyticsBaseUrl = () => {
-  if (ENV_BASE_URL) {
-    return ENV_BASE_URL;
+  if (!ENV_BASE_URL) {
+    throw new Error('VITE_ANALYTICS_BASE_URL is not configured');
   }
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:2100`;
-  }
-  return 'http://localhost:2100';
+  return ENV_BASE_URL;
 };
 
 export type ApiBranchSalesItem = {
@@ -109,6 +103,10 @@ export type ApiReceiptDetail = {
   paymentMethod: string;
   transactionNo: string;
   items: ApiReceiptDetailItem[];
+};
+
+export type ApiExpenseSummary = {
+  total_expense: number;
 };
 
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
@@ -226,5 +224,20 @@ export async function fetchReceiptDetailApi(orderId: number | string): Promise<A
     return json.data as ApiReceiptDetail;
   }
   throw new Error(json.message || 'Failed to load receipt detail');
+}
+
+export async function fetchExpenseSummaryApi(params: URLSearchParams): Promise<ApiExpenseSummary> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/expense-summary?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics expense-summary failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data) {
+    return {
+      total_expense: Number(json.data.total_expense ?? 0),
+    };
+  }
+  return { total_expense: 0 };
 }
 

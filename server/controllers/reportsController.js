@@ -8,6 +8,11 @@
 const ReportsModel = require('../models/reportsModel');
 const ApiResponse = require('../utils/apiResponse');
 
+// Python analytics service (PyServer) base URL - internal only
+const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
+// node-fetch v3 is ESM-only; use dynamic import bridge for CommonJS
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 class ReportsController {
 	// Get revenue report
 	static async getRevenueReport(req, res) {
@@ -378,6 +383,534 @@ class ReportsController {
 		} catch (error) {
 			console.error('Error fetching least selling items:', error);
 			return ApiResponse.error(res, 'Failed to fetch least selling items', 500, error.message);
+		}
+	}
+
+	// ============================================
+	// PYTHON ANALYTICS (PyServer) PROXY ENDPOINTS
+	// ============================================
+
+	// Daily sales time series (proxied to PyServer)
+	static async getAnalyticsDailySales(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/daily-sales', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] daily-sales HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] daily-sales JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] daily-sales error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const series = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: series
+				},
+				'Daily sales analytics retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics daily sales from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics daily sales', 500, error.message);
+		}
+	}
+
+	// Branch-level sales (proxied to PyServer)
+	static async getAnalyticsBranchSales(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/branch-sales', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] branch-sales HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] branch-sales JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] branch-sales error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: rows
+				},
+				'Branch sales analytics retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics branch sales from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics branch sales', 500, error.message);
+		}
+	}
+
+	// Expense summary (proxied to PyServer)
+	static async getAnalyticsExpenseSummary(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/expense-summary', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] expense-summary HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] expense-summary JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] expense-summary error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const summary = json?.data || { total_expense: 0 };
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: summary
+				},
+				'Expense summary retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics expense summary from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics expense summary', 500, error.message);
+		}
+	}
+
+	// Menu-level sales report (proxied to PyServer)
+	static async getAnalyticsMenuReport(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/menu-report', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] menu-report HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] menu-report JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] menu-report error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: rows
+				},
+				'Menu report retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics menu report from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics menu report', 500, error.message);
+		}
+	}
+
+	// Category-level sales report (proxied to PyServer)
+	static async getAnalyticsCategoryReport(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/category-report', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] category-report HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] category-report JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] category-report error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: rows
+				},
+				'Category report retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics category report from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics category report', 500, error.message);
+		}
+	}
+
+	// Payment method breakdown report (proxied to PyServer)
+	static async getAnalyticsPaymentReport(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/payment-report', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] payment-report HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] payment-report JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] payment-report error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: rows
+				},
+				'Payment report retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics payment report from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics payment report', 500, error.message);
+		}
+	}
+
+	// Top-selling menu items (proxied to PyServer)
+	static async getAnalyticsTopSelling(req, res) {
+		try {
+			const { start_date, end_date, limit = 5 } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/top-selling', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+			if (limit) url.searchParams.set('limit', String(limit));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] top-selling HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] top-selling JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] top-selling error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					limit: parseInt(limit, 10) || 5,
+					data: rows
+				},
+				'Top-selling items retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics top-selling items from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics top-selling items', 500, error.message);
+		}
+	}
+
+	// Least-selling / zero-sales menu items (proxied to PyServer)
+	static async getAnalyticsLeastSelling(req, res) {
+		try {
+			const { start_date, end_date, limit = 5 } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/least-selling', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+			if (limit) url.searchParams.set('limit', String(limit));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] least-selling HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] least-selling JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] least-selling error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					limit: parseInt(limit, 10) || 5,
+					data: rows
+				},
+				'Least-selling items retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics least-selling items from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics least-selling items', 500, error.message);
+		}
+	}
+
+	// Receipt-level report (proxied to PyServer)
+	static async getAnalyticsReceiptReport(req, res) {
+		try {
+			const { start_date, end_date, type } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/receipt-report', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+			if (type) url.searchParams.set('type', String(type));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] receipt-report HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] receipt-report JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] receipt-report error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					type: type || null,
+					data: rows
+				},
+				'Receipt report retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics receipt report from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics receipt report', 500, error.message);
+		}
+	}
+
+	// Single receipt detail (proxied to PyServer)
+	static async getAnalyticsReceiptDetail(req, res) {
+		try {
+			const { order_id } = req.query;
+			if (!order_id) {
+				return ApiResponse.badRequest(res, 'order_id is required');
+			}
+
+			const url = new URL('/api/analytics/receipt-detail', PYSERVER_BASE_URL);
+			url.searchParams.set('order_id', String(order_id));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] receipt-detail HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] receipt-detail JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] receipt-detail error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const detail = json?.data || null;
+
+			return ApiResponse.success(
+				res,
+				{
+					order_id,
+					data: detail
+				},
+				'Receipt detail retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics receipt detail from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics receipt detail', 500, error.message);
 		}
 	}
 }

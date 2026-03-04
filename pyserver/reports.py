@@ -75,6 +75,10 @@ class ReceiptDetail(BaseModel):
     items: List[ReceiptDetailItem]
 
 
+class ExpenseSummary(BaseModel):
+    total_expense: float
+
+
 @router.get("/menu-report")
 def menu_report(
     start_date: Optional[str] = None,
@@ -538,4 +542,61 @@ def receipt_report(
         )
 
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+@router.get("/expense-summary")
+def expense_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Expense summary for a given period/branch.
+    Mirrors Node ExpenseModel.getSummary:
+    - Sums EXP_AMOUNT from expenses table
+    - Optional filters: branch_id, start_date/end_date on ENCODED_DT
+    - Excludes Inventory category type to match existing reports
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        where_clauses: List[str] = ["e.ACTIVE = 1"]
+        params: List[object] = []
+
+        if branch_id:
+            where_clauses.append("e.BRANCH_ID = %s")
+            params.append(branch_id)
+
+        if start_date and end_date:
+            where_clauses.append("DATE(e.ENCODED_DT) >= %s")
+            where_clauses.append("DATE(e.ENCODED_DT) <= %s")
+            params.extend([start_date, end_date])
+
+        # Match Node ExpenseModel.getSummary semantics as closely as possible:
+        # - Sum EXP_AMOUNT from expenses
+        # - Only ACTIVE rows
+        where_sql = " AND ".join(where_clauses)
+
+        query = f"""
+            SELECT
+                COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
+            FROM expenses e
+            WHERE {where_sql}
+        """
+
+        cur.execute(query, params)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] expense-summary query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch expense summary",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    summary = ExpenseSummary(total_expense=float(row.get("total_expense") or 0.0))
+    return {"success": True, "data": summary.model_dump()}
 

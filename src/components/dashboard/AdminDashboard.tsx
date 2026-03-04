@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
@@ -7,29 +7,27 @@ import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown } from 'luc
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-
-// Mock Data for Pie Chart
-const branchRevenueDistribution = [
-  { name: 'Branch A', value: 40000 },
-  { name: 'Branch B', value: 30000 },
-  { name: 'Branch C', value: 20000 },
-  { name: 'Branch D', value: 10000 },
-];
+import {
+  fetchBranchSalesApi,
+  fetchTopSellingApi,
+  fetchDailySalesApi,
+  fetchExpenseSummaryApi,
+  type ApiBranchSalesItem,
+  type ApiTopSellingItem,
+  type ApiDailySalesItem,
+  type ApiExpenseSummary,
+} from '../../services/analyticsService';
+import { useUser } from '../../context/UserContext';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-// Mock Data for Horizontal Bar Chart
-const topProductsData = [
-  { name: 'Product A', sales: 4000 },
-  { name: 'Product B', sales: 3000 },
-  { name: 'Product C', sales: 2000 },
-  { name: 'Product D', sales: 2780 },
-  { name: 'Product E', sales: 1890 },
-];
 import { motion, AnimatePresence } from 'framer-motion';
 
 type AdminDashboardProps = {
   selectedBranch: Branch | null;
+  dateRange: {
+    start: string;
+    end: string;
+  };
 };
 
 type SummaryData = {
@@ -116,10 +114,14 @@ const getCurrentMonthRange = (): DateRange => {
   };
 };
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
+  const { user } = useUser();
+  const isAdmin = user?.permissions === 1;
+  const hasLoggedBranchBreakdownPyRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
+  const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
@@ -128,6 +130,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
   const [isComparePanelLoading, setIsComparePanelLoading] = useState(false);
   const [isCompareDateOpen, setIsCompareDateOpen] = useState(false);
   const [compareDateRange, setCompareDateRange] = useState<DateRange>(getCurrentMonthRange);
+
+  // Analytics-based data for pie chart (revenue distribution) and top products
+  const [branchRevenueDistribution, setBranchRevenueDistribution] = useState<{ name: string; value: number }[]>([]);
+  const [topProductsData, setTopProductsData] = useState<{ name: string; sales: number }[]>([]);
+  const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>([]);
+  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(0);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
@@ -159,7 +168,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
         const perfJson = await perfRes.json();
         if (perfJson.success) {
           setPerformanceData(perfJson.data.branches);
-          setSummaryData(perfJson.data.summary);
         }
 
         const monthlyJson = await monthlyRes.json();
@@ -173,9 +181,152 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
         setLoading(false);
       }
     };
-    
+
     fetchData();
   }, [activeBranchId]);
+
+  // Keep internal compareDateRange in sync with global dateRange from Header
+  useEffect(() => {
+    if (dateRange.start || dateRange.end) {
+      setCompareDateRange({
+        start: dateRange.start,
+        end: dateRange.end,
+      });
+    }
+  }, [dateRange.start, dateRange.end]);
+
+  // Load analytics data (branch revenue distribution + top-selling products + daily sales for cards)
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      setAnalyticsLoading(true);
+      try {
+        const currentRange = getCurrentMonthRange();
+        const start = compareDateRange.start || currentRange.start;
+        const end = compareDateRange.end || currentRange.end;
+
+        // Analytics params (sales) respect date range
+        const params = new URLSearchParams();
+        params.set('start_date', start);
+        params.set('end_date', end);
+        // For non-admin users, filter by active branch.
+        // For admin, always aggregate across all branches.
+        if (!isAdmin && activeBranchId) {
+          params.set('branch_id', String(activeBranchId));
+        }
+
+        const [branchSales, topSelling, dailySales]: [ApiBranchSalesItem[], ApiTopSellingItem[], ApiDailySalesItem[]] =
+          await Promise.all([
+            fetchBranchSalesApi(params),
+            fetchTopSellingApi(
+              new URLSearchParams({
+                start_date: start,
+                end_date: end,
+                ...(!isAdmin && activeBranchId ? { branch_id: String(activeBranchId) } : {}),
+                limit: '5',
+              } as any),
+            ),
+            fetchDailySalesApi(params),
+          ]);
+
+        // Build real per-branch cards data from Python analytics (sales + expenses)
+        if (branchSales.length > 0) {
+          const cards = await Promise.all(
+            branchSales.map(async (b) => {
+              const p = new URLSearchParams();
+              p.set('branch_id', String(b.branch_id));
+              p.set('start_date', start);
+              p.set('end_date', end);
+              try {
+                const s = await fetchExpenseSummaryApi(p);
+                return {
+                  id: b.branch_id,
+                  name: b.branch_name,
+                  totalSales: b.total_sales,
+                  totalExpenses: s.total_expense,
+                  totalOrders: b.order_count,
+                } as BranchPerformanceData;
+              } catch (err: any) {
+                return {
+                  id: b.branch_id,
+                  name: b.branch_name,
+                  totalSales: b.total_sales,
+                  totalExpenses: 0,
+                  totalOrders: b.order_count,
+                } as BranchPerformanceData;
+              }
+            }),
+          );
+
+          setBranchCardsData(cards);
+
+          if (!hasLoggedBranchBreakdownPyRef.current) {
+            hasLoggedBranchBreakdownPyRef.current = true;
+            // eslint-disable-next-line no-console
+            console.log(
+              '[AdminDashboard] branch breakdown (py)',
+              cards.map((c) => ({
+                id: c.id,
+                name: c.name,
+                total_sales_py: c.totalSales,
+                total_expense_py: c.totalExpenses,
+              })),
+            );
+          }
+        }
+
+        setBranchRevenueDistribution(
+          branchSales.map((b) => ({
+            name: b.branch_name,
+            value: b.total_sales,
+          })),
+        );
+
+        setTopProductsData(
+          topSelling.map((item) => ({
+            name: item.MENU_NAME,
+            sales: item.total_quantity,
+          })),
+        );
+
+        setDailySalesForCards(dailySales);
+      } catch (error) {
+        console.error('Failed to load dashboard analytics data:', error);
+        setBranchRevenueDistribution([]);
+        setTopProductsData([]);
+        setDailySalesForCards([]);
+      } finally {
+        setAnalyticsLoading(false);
+      }
+    };
+
+    void loadAnalytics();
+  }, [activeBranchId, compareDateRange.start, compareDateRange.end]);
+
+  // Load expense summary from Python analytics (expense-summary)
+  useEffect(() => {
+    const loadExpensesFromPython = async () => {
+      try {
+        const params = new URLSearchParams();
+        // Admin: aggregate all branches (no branch_id filter)
+        // Non-admin: filter by activeBranchId
+        if (!isAdmin && activeBranchId && Number.isFinite(activeBranchId)) {
+          params.set('branch_id', String(activeBranchId));
+        }
+        // Respect global/compare date range like SalesAnalytics
+        if (compareDateRange.start) params.set('start_date', compareDateRange.start);
+        if (compareDateRange.end) params.set('end_date', compareDateRange.end);
+
+        const summary: ApiExpenseSummary = await fetchExpenseSummaryApi(params);
+        setExpenseSummaryTotal(summary.total_expense);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Error loading expense summary from Python analytics:', error);
+        setExpenseSummaryTotal(null);
+      }
+    };
+
+    void loadExpensesFromPython();
+  }, [activeBranchId, isAdmin, compareDateRange.start, compareDateRange.end]);
 
   useEffect(() => {
     if (!isComparePanelOpen) {
@@ -201,10 +352,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
     });
   };
 
+  const sourceForCompare = branchCardsData.length > 0 ? branchCardsData : performanceData;
+
   const selectedCompareBranches = compareBranchIds
-    .map((id) => performanceData.find((branch) => branch.id === id))
+    .map((id) => sourceForCompare.find((branch) => branch.id === id))
     .filter((branch): branch is BranchPerformanceData => Boolean(branch));
   const canCompare = selectedCompareBranches.length >= 2;
+
+  // Recompute summary cards (total revenue, sales, expenses) from Python daily sales + Node expenses
+  useEffect(() => {
+    // If neither sales nor expenses are loaded yet, keep cards hidden
+    if ((!dailySalesForCards || dailySalesForCards.length === 0) && expenseSummaryTotal == null) {
+      setSummaryData(null);
+      return;
+    }
+
+    let totalSales = 0;
+    let netSalesTotal = 0;
+
+    for (const item of dailySalesForCards) {
+      const totalSalesDay = Number(item.total_sales || 0);
+      const refund = Number((item as any).refund ?? 0);
+      const discount = Number((item as any).discount ?? 0);
+      const netSales = Math.max(0, totalSalesDay - refund - discount);
+
+      totalSales += totalSalesDay;
+      netSalesTotal += netSales;
+    }
+
+    const totalExpenses = expenseSummaryTotal ?? 0;
+    const totalRevenue = netSalesTotal - totalExpenses;
+
+    setSummaryData({
+      totalRevenue,
+      totalSales,
+      totalExpenses,
+    });
+  }, [dailySalesForCards, expenseSummaryTotal]);
 
   const formatCurrency = (value: number) =>
     `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -558,75 +742,95 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Pie Chart: Revenue Distribution */}
+              {/* Pie Chart: Revenue Distribution (real data) */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.revenue_distribution')}</h3>
                 <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={branchRevenueDistribution}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {branchRevenueDistribution.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        formatter={(value) => `₱${Number(value).toLocaleString()}`}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: 'none',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                        }}
-                      />
-                      <Legend iconType="circle" layout="horizontal" verticalAlign="bottom" align="center" />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Skeleton className="h-40 w-40 rounded-full" />
+                    </div>
+                  ) : branchRevenueDistribution.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-sm text-slate-500">
+                      {t('admin_dashboard.no_revenue_data')}
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={branchRevenueDistribution}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {branchRevenueDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value) => `₱${Number(value).toLocaleString()}`}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: 'none',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                        />
+                        <Legend iconType="circle" layout="horizontal" verticalAlign="bottom" align="center" />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 
-              {/* Horizontal Bar Chart: Top Selling Products */}
+              {/* Horizontal Bar Chart: Top Selling Products (real data) */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.top_selling_products')}</h3>
                 <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      layout="vertical"
-                      data={topProductsData}
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <XAxis type="number" hide />
-                      <YAxis 
-                        dataKey="name" 
-                        type="category" 
-                        tick={{ fontSize: 12, fill: '#64748b' }} 
-                        width={100}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Tooltip 
-                         formatter={(value) => [`${value} Sales`, 'Sales']}
-                         cursor={{ fill: 'transparent' }}
-                         contentStyle={{
-                           borderRadius: '12px',
-                           border: 'none',
-                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                         }}
-                      />
-                      <Bar dataKey="sales" fill="#8884d8" radius={[0, 6, 6, 0]} barSize={32}>
-                        {topProductsData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {analyticsLoading ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Skeleton className="h-40 w-full rounded-2xl" />
+                    </div>
+                  ) : topProductsData.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-sm text-slate-500">
+                      {t('admin_dashboard.no_products_data')}
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        layout="vertical"
+                        data={topProductsData}
+                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                      >
+                        <XAxis type="number" hide />
+                        <YAxis 
+                          dataKey="name" 
+                          type="category" 
+                          tick={{ fontSize: 12, fill: '#64748b' }} 
+                          width={120}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip 
+                          formatter={(value) => [`${value} ${t('admin_dashboard.units_sold')}`, t('admin_dashboard.sales')]}
+                          cursor={{ fill: 'transparent' }}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: 'none',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                        />
+                        <Bar dataKey="sales" fill="#8884d8" radius={[0, 6, 6, 0]} barSize={32}>
+                          {topProductsData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             </div>
@@ -649,7 +853,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch }
                 </p>
               </div>
             )}
-            {performanceData
+            {(branchCardsData.length > 0 ? branchCardsData : performanceData)
+              .slice()
               .sort((a, b) => (b.totalSales - b.totalExpenses) - (a.totalSales - a.totalExpenses))
               .map((branch) => (
                 <BranchPerformanceCard 

@@ -11,7 +11,7 @@ require('dotenv').config();
 // JWT Configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your_jwt_refresh_secret_key_change_in_production';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m'; // Access token expires in 15 minutes
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'; // Access token expires in 15 minutes
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d'; // Refresh token expires in 7 days
 
 /**
