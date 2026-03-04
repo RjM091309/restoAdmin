@@ -281,39 +281,70 @@ class LoyverseService {
 					// even if the original sale was outside the imported date range.
 					const refundDt = new Date(receipt.receipt_date || receipt.created_at);
 					const stubOrderNo = `LOY-R-${receiptNumber}`;
+					const stubValues = [
+						targetBranchId,
+						stubOrderNo,
+						null,
+						'DINE_IN', // ORDER_TYPE: use allowed value; stub is for refund tracking only (ORDER_NO = LOY-R-...)
+						1,
+						0,
+						0,
+						0,
+						0,
+						0,
+						0,
+						refundDt
+					];
 
-					const [stubOrderResult] = await connection.execute(
-						`INSERT INTO orders (
-							BRANCH_ID,
-							ORDER_NO,
-							TABLE_ID,
-							ORDER_TYPE,
-							STATUS,
-							SUBTOTAL,
-							TAX_AMOUNT,
-							SERVICE_CHARGE,
-							DISCOUNT_AMOUNT,
-							GRAND_TOTAL,
-							ENCODED_BY,
-							ENCODED_DT
-						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-						[
-							targetBranchId,
-							stubOrderNo,
-							null,
-							'REFUND',
-							1,
-							0,
-							0,
-							0,
-							0,
-							0,
-							0,
-							refundDt
-						]
-					);
-
-					existingOrderId = stubOrderResult.insertId;
+					try {
+						const [stubOrderResult] = await connection.execute(
+							`INSERT INTO orders (
+								BRANCH_ID,
+								ORDER_NO,
+								TABLE_ID,
+								ORDER_TYPE,
+								STATUS,
+								SUBTOTAL,
+								TAX_AMOUNT,
+								SERVICE_CHARGE,
+								DISCOUNT_AMOUNT,
+								GRAND_TOTAL,
+								ENCODED_BY,
+								ENCODED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+							stubValues
+						);
+						existingOrderId = stubOrderResult.insertId;
+					} catch (stubErr) {
+						const msg = String(stubErr.message || '');
+						if (msg.includes("IDNo") && msg.includes("default")) {
+							const [nextIdRows] = await connection.execute(
+								`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders`
+							);
+							const nextId = Number(nextIdRows[0]?.nextId ?? nextIdRows[0]?.nextid ?? 1) || 1;
+							await connection.execute(
+								`INSERT INTO orders (
+									IDNo,
+									BRANCH_ID,
+									ORDER_NO,
+									TABLE_ID,
+									ORDER_TYPE,
+									STATUS,
+									SUBTOTAL,
+									TAX_AMOUNT,
+									SERVICE_CHARGE,
+									DISCOUNT_AMOUNT,
+									GRAND_TOTAL,
+									ENCODED_BY,
+									ENCODED_DT
+								) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+								[nextId, ...stubValues]
+							);
+							existingOrderId = nextId;
+						} else {
+							throw stubErr;
+						}
+					}
 				}
 
 				const refundResult = await this.syncRefundReceipt(receipt, existingOrderId, targetBranchId);
@@ -373,38 +404,72 @@ class LoyverseService {
 			const orderType = this.mapOrderType(receipt.receipt_type, receipt.dining_option);
 			const subtotal = receipt.total_money - (receipt.total_tax || 0) - (receipt.total_discount || 0);
 
-			const [orderResult] = await connection.execute(
-				`INSERT INTO orders (
-					BRANCH_ID,
-					ORDER_NO,
-					TABLE_ID,
-					ORDER_TYPE,
-					STATUS,
-					SUBTOTAL,
-					TAX_AMOUNT,
-					SERVICE_CHARGE,
-					DISCOUNT_AMOUNT,
-					GRAND_TOTAL,
-					ENCODED_BY,
-					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				[
-					targetBranchId,
-					orderNo,
-					null, // TABLE_ID - not available from Loyverse
-					orderType,
-					1, // STATUS: 1=SETTLED (since it's already paid in Loyverse)
-					subtotal,
-					receipt.total_tax || 0,
-					0, // SERVICE_CHARGE
-					receipt.total_discount || 0,
-					receipt.total_money || 0,
-					0, // ENCODED_BY: System user
-					new Date(receipt.receipt_date || receipt.created_at)
-				]
-			);
+			const orderValues = [
+				targetBranchId,
+				orderNo,
+				null, // TABLE_ID - not available from Loyverse
+				orderType,
+				1, // STATUS: 1=SETTLED (since it's already paid in Loyverse)
+				subtotal,
+				receipt.total_tax || 0,
+				0, // SERVICE_CHARGE
+				receipt.total_discount || 0,
+				receipt.total_money || 0,
+				0, // ENCODED_BY: System user
+				new Date(receipt.receipt_date || receipt.created_at)
+			];
 
-			const orderId = orderResult.insertId;
+			let orderId;
+			try {
+				const [orderResult] = await connection.execute(
+					`INSERT INTO orders (
+						BRANCH_ID,
+						ORDER_NO,
+						TABLE_ID,
+						ORDER_TYPE,
+						STATUS,
+						SUBTOTAL,
+						TAX_AMOUNT,
+						SERVICE_CHARGE,
+						DISCOUNT_AMOUNT,
+						GRAND_TOTAL,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					orderValues
+				);
+				orderId = orderResult.insertId;
+			} catch (orderInsertErr) {
+				// Fallback when IDNo has no default/AUTO_INCREMENT (run server/migrations/fix_orders_idno_autoincrement.sql to fix schema)
+				const msg = String(orderInsertErr.message || '');
+				if (msg.includes("IDNo") && msg.includes("default")) {
+					const [nextIdRows] = await connection.execute(
+						`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders`
+					);
+					const nextId = Number(nextIdRows[0]?.nextId ?? nextIdRows[0]?.nextid ?? 1) || 1;
+					await connection.execute(
+						`INSERT INTO orders (
+							IDNo,
+							BRANCH_ID,
+							ORDER_NO,
+							TABLE_ID,
+							ORDER_TYPE,
+							STATUS,
+							SUBTOTAL,
+							TAX_AMOUNT,
+							SERVICE_CHARGE,
+							DISCOUNT_AMOUNT,
+							GRAND_TOTAL,
+							ENCODED_BY,
+							ENCODED_DT
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						[nextId, ...orderValues]
+					);
+					orderId = nextId;
+				} else {
+					throw orderInsertErr;
+				}
+			}
 
 			// Insert order items
 			if (receipt.line_items && receipt.line_items.length > 0) {
@@ -415,29 +480,55 @@ class LoyverseService {
 			if (receipt.payments && receipt.payments.length > 0) {
 				const totalPaid = receipt.payments.reduce((sum, payment) => sum + (payment.money_amount || 0), 0);
 				const paymentMethod = this.mapPaymentMethod(receipt.payments[0]?.type);
-
-				await connection.execute(
-					`INSERT INTO billing (
-						BRANCH_ID,
-						ORDER_ID,
-						PAYMENT_METHOD,
-						AMOUNT_DUE,
-						AMOUNT_PAID,
-						STATUS,
-						ENCODED_BY,
-						ENCODED_DT
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-					[
-						targetBranchId,
-						orderId,
-						paymentMethod,
-						receipt.total_money || 0,
-						totalPaid,
-						1, // STATUS: 1=PAID
-						0, // ENCODED_BY: System user
-						new Date(receipt.receipt_date || receipt.created_at)
-					]
-				);
+				const billingValues = [
+					targetBranchId,
+					orderId,
+					paymentMethod,
+					receipt.total_money || 0,
+					totalPaid,
+					1, // STATUS: 1=PAID
+					0, // ENCODED_BY: System user
+					new Date(receipt.receipt_date || receipt.created_at)
+				];
+				try {
+					await connection.execute(
+						`INSERT INTO billing (
+							BRANCH_ID,
+							ORDER_ID,
+							PAYMENT_METHOD,
+							AMOUNT_DUE,
+							AMOUNT_PAID,
+							STATUS,
+							ENCODED_BY,
+							ENCODED_DT
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+						billingValues
+					);
+				} catch (billingErr) {
+					const msg = String(billingErr.message || '');
+					if (msg.includes("IDNo") && msg.includes("default")) {
+						const [rows] = await connection.execute(
+							`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing`
+						);
+						const nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
+						await connection.execute(
+							`INSERT INTO billing (
+								IDNo,
+								BRANCH_ID,
+								ORDER_ID,
+								PAYMENT_METHOD,
+								AMOUNT_DUE,
+								AMOUNT_PAID,
+								STATUS,
+								ENCODED_BY,
+								ENCODED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+							[nextId, ...billingValues]
+						);
+					} else {
+						throw billingErr;
+					}
+				}
 			}
 
 			await connection.commit();
@@ -574,19 +665,46 @@ class LoyverseService {
 		}
 
 		if (itemsToInsert.length > 0) {
-			await connection.query(
-				`INSERT INTO order_items (
-					ORDER_ID,
-					MENU_ID,
-					QTY,
-					UNIT_PRICE,
-					LINE_TOTAL,
-					STATUS,
-					ENCODED_BY,
-					ENCODED_DT
-				) VALUES ?`,
-				[itemsToInsert]
-			);
+			try {
+				await connection.query(
+					`INSERT INTO order_items (
+						ORDER_ID,
+						MENU_ID,
+						QTY,
+						UNIT_PRICE,
+						LINE_TOTAL,
+						STATUS,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES ?`,
+					[itemsToInsert]
+				);
+			} catch (orderItemsErr) {
+				const msg = String(orderItemsErr.message || '');
+				if (msg.includes("IDNo") && msg.includes("default")) {
+					const [rows] = await connection.execute(
+						`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM order_items`
+					);
+					let nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
+					const rowsWithId = itemsToInsert.map((row) => [nextId++, ...row]);
+					await connection.query(
+						`INSERT INTO order_items (
+							IDNo,
+							ORDER_ID,
+							MENU_ID,
+							QTY,
+							UNIT_PRICE,
+							LINE_TOTAL,
+							STATUS,
+							ENCODED_BY,
+							ENCODED_DT
+						) VALUES ?`,
+						[rowsWithId]
+					);
+				} else {
+					throw orderItemsErr;
+				}
+			}
 		}
 	}
 
@@ -641,8 +759,11 @@ class LoyverseService {
 			totalInserted: 0,
 			totalUpdated: 0,
 			totalErrors: 0,
-			lastError: null
+			lastError: null,
+			cancelled: false
 		};
+
+		const abortedCheck = options.abortedCheck || (() => false);
 
 		try {
 			let cursor = null;
@@ -689,6 +810,12 @@ class LoyverseService {
 			let maxUpdatedAtSeen = lastUpdatedAt;
 
 			while (hasMore) {
+				if (abortedCheck()) {
+					this.syncStats.cancelled = true;
+					console.log('[Loyverse Sync] Sync cancelled by client (request aborted).');
+					hasMore = false;
+					break;
+				}
 				pageCount += 1;
 				const result = await this.fetchReceipts(limit, cursor, dateFilter);
 				const receipts = result.receipts || [];
@@ -697,6 +824,12 @@ class LoyverseService {
 				let skippedOldInPage = 0;
 
 				for (const receipt of receipts) {
+					if (abortedCheck()) {
+						this.syncStats.cancelled = true;
+						console.log('[Loyverse Sync] Sync cancelled by client (request aborted).');
+						hasMore = false;
+						break;
+					}
 					try {
 						const receiptUpdatedAt = this.parseReceiptUpdatedAt(receipt);
 						if (receiptUpdatedAt && (!maxUpdatedAtSeen || receiptUpdatedAt > maxUpdatedAtSeen)) {
@@ -756,6 +889,8 @@ class LoyverseService {
 						console.error(`[Loyverse Sync] Error syncing receipt ${receipt.receipt_number}:`, error.message);
 					}
 				}
+
+				if (this.syncStats.cancelled) break;
 
 				cursor = result.cursor;
 				hasMore = result.hasMore;
@@ -845,14 +980,19 @@ class LoyverseService {
 	}
 
 	/**
-	 * Get sync status
+	 * Get sync status (shape matches frontend: status.autoSync.running, status.lastSync)
 	 */
 	getSyncStatus() {
 		return {
 			isSyncing: this.isSyncing,
 			lastSyncTime: this.lastSyncTime,
 			stats: this.syncStats,
-			autoSyncActive: !!this.autoSyncInterval
+			autoSyncActive: !!this.autoSyncInterval,
+			autoSync: {
+				running: !!this.autoSyncInterval,
+				intervalMs: this.syncInterval
+			},
+			lastSync: this.lastSyncTime ? this.lastSyncTime.toISOString() : null
 		};
 	}
 

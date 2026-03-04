@@ -74,6 +74,7 @@ class LoyverseController {
 	 * Sync only a date range (e.g. Feb 1 – today). Does not reset checkpoint.
 	 * POST /api/loyverse/sync-range
 	 * Body: { created_at_min?, created_at_max?, branch_id?, limit? }
+	 * When client aborts the request (e.g. Stop button), server stops the sync loop.
 	 */
 	static async syncRange(req, res) {
 		try {
@@ -86,11 +87,27 @@ class LoyverseController {
 				return ApiResponse.error(res, 'created_at_min and created_at_max are required', 400);
 			}
 
+			let cancelled = false;
+			const onAborted = () => { cancelled = true; };
+			req.on('aborted', onAborted);
+			req.on('close', onAborted);
+
 			const stats = await loyverseService.syncDateRange(branchId, limit, {
 				created_at_min,
-				created_at_max
+				created_at_max,
+				abortedCheck: () => cancelled
 			});
-			
+
+			req.removeListener('aborted', onAborted);
+			req.removeListener('close', onAborted);
+
+			if (stats.cancelled) {
+				return ApiResponse.success(res, {
+					stats,
+					message: 'Sync cancelled by user.'
+				}, 'Sync cancelled');
+			}
+
 			return ApiResponse.success(res, {
 				stats,
 				message: `Sync completed: ${stats.totalInserted} inserted, ${stats.totalUpdated} updated, ${stats.totalErrors} errors`

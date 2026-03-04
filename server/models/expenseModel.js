@@ -162,29 +162,58 @@ class ExpenseModel {
 		await ExpenseModel.ensureSchema();
 		const encodedBy = String(data.ENCODED_BY ?? data.user_id ?? 'system').trim() || 'system';
 		const masterCatId = Number(data.MASTER_CAT_ID);
-		const [result] = await pool.execute(
-			`
-			INSERT INTO expenses (
-				BRANCH_ID,
-				MASTER_CAT_ID,
-				EXP_DESC,
-				EXP_AMOUNT,
-				EXP_SOURCE,
-				ACTIVE,
-				ENCODED_BY,
-				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-			`,
-			[
-				Number(data.BRANCH_ID),
-				masterCatId,
-				data.EXP_DESC || null,
-				Number(data.EXP_AMOUNT),
-				data.EXP_SOURCE || null,
-				encodedBy,
-			]
-		);
-		return result.insertId;
+		const values = [
+			Number(data.BRANCH_ID),
+			masterCatId,
+			data.EXP_DESC || null,
+			Number(data.EXP_AMOUNT),
+			data.EXP_SOURCE || null,
+			encodedBy,
+		];
+		try {
+			const [result] = await pool.execute(
+				`
+				INSERT INTO expenses (
+					BRANCH_ID,
+					MASTER_CAT_ID,
+					EXP_DESC,
+					EXP_AMOUNT,
+					EXP_SOURCE,
+					ACTIVE,
+					ENCODED_BY,
+					ENCODED_DT
+				) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+				`,
+				values
+			);
+			return result.insertId;
+		} catch (err) {
+			const msg = String(err.message || '');
+			if (msg.includes('IDNo') && msg.includes('default')) {
+				const [rows] = await pool.execute(
+					`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM expenses`
+				);
+				const nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
+				await pool.execute(
+					`
+					INSERT INTO expenses (
+						IDNo,
+						BRANCH_ID,
+						MASTER_CAT_ID,
+						EXP_DESC,
+						EXP_AMOUNT,
+						EXP_SOURCE,
+						ACTIVE,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+					`,
+					[nextId, ...values]
+				);
+				return nextId;
+			}
+			throw err;
+		}
 	}
 
 	static async update(id, data) {

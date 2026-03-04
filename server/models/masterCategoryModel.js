@@ -45,7 +45,12 @@ class MasterCategoryModel {
 	}
 
 	static async getAll(branchId = null, categoryType = 'Inventory') {
-		await MasterCategoryModel.ensureSchema();
+		try {
+			await MasterCategoryModel.ensureSchema();
+		} catch (schemaErr) {
+			console.warn('[MasterCategoryModel.getAll] ensureSchema failed:', schemaErr?.message);
+			// Table may already exist; continue with query
+		}
 		let query = `
 			SELECT
 				IDNo,
@@ -74,8 +79,18 @@ class MasterCategoryModel {
 		}
 
 		query += ` ORDER BY IDNo DESC`;
-		const [rows] = await pool.execute(query, params);
-		return rows;
+		try {
+			const [rows] = await pool.execute(query, params);
+			return rows;
+		} catch (selectErr) {
+			// If explicit columns fail (e.g. missing columns), try SELECT *
+			if (selectErr.message && (selectErr.message.includes('Unknown column') || selectErr.message.includes("doesn't exist"))) {
+				const fallbackQuery = `SELECT * FROM master_categories WHERE ACTIVE = 1${branchId !== null && branchId !== undefined ? ' AND BRANCH_ID = ?' : ''}${categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '' ? ' AND CATEGORY_TYPE = ?' : ''} ORDER BY IDNo DESC`;
+				const [fallbackRows] = await pool.execute(fallbackQuery, params);
+				return fallbackRows;
+			}
+			throw selectErr;
+		}
 	}
 
 	static async getById(id) {
@@ -137,28 +152,55 @@ class MasterCategoryModel {
 	static async create(data) {
 		await MasterCategoryModel.ensureSchema();
 		const currentDate = new Date();
-		const [result] = await pool.execute(
-			`INSERT INTO master_categories (
-				BRANCH_ID,
-				CATEGORY_NAME,
-				CATEGORY_TYPE,
-				DESCRIPTION,
-				ICON,
-				ACTIVE,
-				ENCODED_BY,
-				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-			[
-				Number(data.BRANCH_ID),
-				String(data.CATEGORY_NAME).trim(),
-				String(data.CATEGORY_TYPE || 'Inventory'),
-				data.DESCRIPTION || null,
-				data.ICON || null,
-				data.user_id || null,
-				currentDate,
-			]
-		);
-		return result.insertId;
+		const values = [
+			Number(data.BRANCH_ID),
+			String(data.CATEGORY_NAME).trim(),
+			String(data.CATEGORY_TYPE || 'Inventory'),
+			data.DESCRIPTION || null,
+			data.ICON || null,
+			data.user_id || null,
+			currentDate,
+		];
+		try {
+			const [result] = await pool.execute(
+				`INSERT INTO master_categories (
+					BRANCH_ID,
+					CATEGORY_NAME,
+					CATEGORY_TYPE,
+					DESCRIPTION,
+					ICON,
+					ACTIVE,
+					ENCODED_BY,
+					ENCODED_DT
+				) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+				values
+			);
+			return result.insertId;
+		} catch (err) {
+			const msg = String(err.message || '');
+			if (msg.includes('IDNo') && msg.includes('default')) {
+				const [rows] = await pool.execute(
+					`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM master_categories`
+				);
+				const nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
+				await pool.execute(
+					`INSERT INTO master_categories (
+						IDNo,
+						BRANCH_ID,
+						CATEGORY_NAME,
+						CATEGORY_TYPE,
+						DESCRIPTION,
+						ICON,
+						ACTIVE,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+					[nextId, ...values]
+				);
+				return nextId;
+			}
+			throw err;
+		}
 	}
 
 	static async update(id, data) {

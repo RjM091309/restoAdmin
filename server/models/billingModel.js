@@ -161,7 +161,20 @@ class BillingModel {
 
 	static async resetRefundsInRange(startDate, endDate, branchId = null) {
 		// Reset refunds for a given date window so that range re-syncs can recompute from scratch.
-		// Uses REFUND_DT as the date for grouping (same as analytics daily-sales).
+		// Normalize to YYYY-MM-DD; avoid DATE(b.REFUND_DT) so we don't hit "Truncated incorrect datetime"
+		// when the column holds ISO strings (e.g. 2025-12-31T16:00:00.000Z).
+		const toDateOnly = (v) => {
+			if (v == null || v === '') return null;
+			if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+			const d = new Date(v);
+			if (Number.isNaN(d.getTime())) return null;
+			return d.toISOString().slice(0, 10);
+		};
+		const start = toDateOnly(startDate);
+		const end = toDateOnly(endDate);
+		if (!start || !end) return;
+
+		// Compare date part only (LEFT 10 chars) so we never parse ISO in column — avoids "Truncated incorrect datetime"
 		let query = `
 			UPDATE billing b
 			INNER JOIN orders o ON o.IDNo = b.ORDER_ID
@@ -171,10 +184,11 @@ class BillingModel {
 				b.REFUND_REASON = NULL
 			WHERE
 				b.REFUND IS NOT NULL
-				AND DATE(b.REFUND_DT) BETWEEN DATE(?) AND DATE(?)
+				AND LEFT(CAST(b.REFUND_DT AS CHAR), 10) >= ?
+				AND LEFT(CAST(b.REFUND_DT AS CHAR), 10) <= ?
 		`;
 
-		const params = [startDate, endDate];
+		const params = [start, end];
 
 		if (branchId) {
 			query += ' AND o.BRANCH_ID = ?';

@@ -535,7 +535,7 @@ def daily_sales(
     """
     Daily total sales time series aligned with Loyverse data:
     - total_sales: SUM of billing.AMOUNT_PAID for paid orders (same base as before)
-    - refund: SUM of receipts.total_amount where transaction_type = 2 (refund receipts)
+    - refund: SUM of billing.REFUND (synced from Loyverse refunds)
     - discount: SUM of orders.DISCOUNT_AMOUNT for paid orders
     - net_sales: total_sales - refund - discount
     - gross_profit: same as net_sales (simplified)
@@ -544,13 +544,28 @@ def daily_sales(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
+        # Align grouping/filtering to PH local time (UTC+8) to match Loyverse UI/export.
+        # MySQL DATETIME is timezone-naive; conversion must be applied consistently at query time.
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+        orders_local_dt = """COALESCE(
+            CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+        refund_local_dt = """COALESCE(
+            CONVERT_TZ(b.REFUND_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.REFUND_DT, INTERVAL 8 HOUR)
+        )"""
+
         # 1) Billing-based daily totals
         billing_date_filter = ""
         billing_branch_filter = ""
         billing_params: List[object] = []
 
         if start_date and end_date:
-            billing_date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
+            billing_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
             billing_params.extend([start_date, end_date])
         if branch_id:
             billing_branch_filter = "AND b.BRANCH_ID = %s"
@@ -558,13 +573,13 @@ def daily_sales(
 
         billing_query = f"""
             SELECT 
-                DATE(b.ENCODED_DT) AS sale_date,
+                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(b.AMOUNT_PAID), 0) AS total_sales
             FROM billing b
             WHERE b.STATUS IN (1, 2)
             {billing_date_filter}
             {billing_branch_filter}
-            GROUP BY DATE(b.ENCODED_DT)
+            GROUP BY DATE({billing_local_dt})
         """
 
         cur.execute(billing_query, billing_params)
@@ -576,7 +591,7 @@ def daily_sales(
         discount_params: List[object] = []
 
         if start_date and end_date:
-            discount_date_filter = "AND DATE(o.ENCODED_DT) BETWEEN %s AND %s"
+            discount_date_filter = f"AND DATE({orders_local_dt}) BETWEEN %s AND %s"
             discount_params.extend([start_date, end_date])
         if branch_id:
             discount_branch_filter = "AND o.BRANCH_ID = %s"
@@ -584,14 +599,14 @@ def daily_sales(
 
         discount_query = f"""
             SELECT 
-                DATE(o.ENCODED_DT) AS sale_date,
+                DATE_FORMAT({orders_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount
             FROM orders o
             INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             WHERE 1=1
             {discount_date_filter}
             {discount_branch_filter}
-            GROUP BY DATE(o.ENCODED_DT)
+            GROUP BY DATE({orders_local_dt})
         """
 
         cur.execute(discount_query, discount_params)
@@ -603,7 +618,7 @@ def daily_sales(
         refund_params: List[object] = []
 
         if start_date and end_date:
-            refund_date_filter = "AND DATE(b.REFUND_DT) BETWEEN %s AND %s"
+            refund_date_filter = f"AND DATE({refund_local_dt}) BETWEEN %s AND %s"
             refund_params.extend([start_date, end_date])
         if branch_id:
             # Use order's branch to filter refunds
@@ -612,14 +627,14 @@ def daily_sales(
 
         refund_query = f"""
             SELECT
-                DATE(b.REFUND_DT) AS sale_date,
+                DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(b.REFUND), 0) AS refund
             FROM billing b
             INNER JOIN orders o ON o.IDNo = b.ORDER_ID
             WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
             {refund_date_filter}
             {refund_branch_filter}
-            GROUP BY DATE(b.REFUND_DT)
+            GROUP BY DATE({refund_local_dt})
         """
 
         cur.execute(refund_query, refund_params)
@@ -652,14 +667,23 @@ def daily_sales(
 
     # Merge into final daily series
     items: List[DailySalesItem] = []
+    billing_map = {}
     for row in billing_rows:
         sale_date = row.get("sale_date")
         if sale_date is None:
             continue
-        key = str(sale_date)
-        discount = discount_map.get(key, 0.0)
-        refund = refund_map.get(key, 0.0)
-        total_sales = float(row.get("total_sales") or 0.0) + discount
+        billing_map[str(sale_date)] = float(row.get("total_sales") or 0.0)
+
+    all_dates = set(billing_map.keys()) | set(discount_map.keys()) | set(refund_map.keys())
+    for key in sorted(all_dates):
+        discount = float(discount_map.get(key, 0.0) or 0.0)
+        refund = float(refund_map.get(key, 0.0) or 0.0)
+        paid_total = float(billing_map.get(key, 0.0) or 0.0)
+
+        # Loyverse daily export uses:
+        # total_sales (gross) = paid_total + discount
+        # net_sales = total_sales - discount - refund
+        total_sales = paid_total + discount
         net_sales = total_sales - discount - refund
         gross_profit = net_sales
 

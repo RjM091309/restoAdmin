@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -19,6 +19,7 @@ import {
     Check,
     AlertCircle,
     Loader2,
+    Square,
     MapPin,
     Phone,
     Hash,
@@ -114,7 +115,7 @@ const SubViewHeader: React.FC<{
                 <button
                     onClick={onBack}
                     disabled={disabled}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors text-brand-muted cursor-pointer disabled:opacity-50"
+                    className={cn("p-2 rounded-lg transition-colors text-brand-muted", disabled ? "cursor-not-allowed opacity-50" : "hover:bg-gray-100 cursor-pointer")}
                 >
                     <ArrowLeft size={20} />
                 </button>
@@ -516,6 +517,7 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     const [fullSyncLoading, setFullSyncLoading] = useState(false);
     const [rangeSyncLoading, setRangeSyncLoading] = useState(false);
     const [toast, setToast] = useState<Toast>(null);
+    const rangeSyncAbortRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); }
@@ -540,7 +542,11 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             const res = await fetch('/api/loyverse/sync', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ incremental: true }) });
             const data = await res.json();
             if (data.success) {
-                setToast({ type: 'success', message: data.data?.message || 'Sync complete!' });
+                const s = data.data?.stats;
+                const msg = s
+                    ? `${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
+                    : (data.data?.message || 'Sync complete!');
+                setToast({ type: 'success', message: msg });
                 fetchStatus();
             } else {
                 setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
@@ -575,8 +581,11 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         }
     };
 
-    /** Sync only from Jan 1 (current year) through today — no checkpoint reset */
+    /** Sync only from Jan 1 (current year) through today — no checkpoint reset. Supports abort via Stop. */
     const handleSyncFeb1ToToday = async () => {
+        if (rangeSyncLoading) return;
+        const ac = new AbortController();
+        rangeSyncAbortRef.current = ac;
         setRangeSyncLoading(true);
         try {
             const now = new Date();
@@ -590,22 +599,34 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                     created_at_max: now.toISOString(),
                     limit: 250,
                 }),
+                signal: ac.signal,
             });
             const data = await res.json();
             if (data.success) {
                 const s = data.data?.stats;
                 const msg = s
-                    ? `Sync Feb 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
+                    ? `Sync Jan 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
                     : (data.data?.message || 'Sync completed.');
                 setToast({ type: 'success', message: msg });
                 fetchStatus();
             } else {
                 setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
             }
-        } catch {
-            setToast({ type: 'error', message: 'Network error during sync' });
+        } catch (err: any) {
+            if (err?.name === 'AbortError') {
+                setToast({ type: 'success', message: 'Sync cancelled.' });
+            } else {
+                setToast({ type: 'error', message: 'Network error during sync' });
+            }
         } finally {
+            rangeSyncAbortRef.current = null;
             setRangeSyncLoading(false);
+        }
+    };
+
+    const handleStopRangeSync = () => {
+        if (rangeSyncAbortRef.current) {
+            rangeSyncAbortRef.current.abort();
         }
     };
 
@@ -616,7 +637,18 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             const data = await res.json();
             if (data.success) {
                 setToast({ type: 'success', message: start ? 'Auto-sync started!' : 'Auto-sync stopped.' });
-                fetchStatus();
+                // Optimistic update so UI shows Active/Stop immediately (in case refetch hits another server instance)
+                setStatus((prev: any) => ({
+                    ...prev,
+                    autoSyncActive: start,
+                    autoSync: {
+                        ...prev?.autoSync,
+                        running: start,
+                        intervalMs: start ? (data.data?.interval ?? prev?.autoSync?.intervalMs ?? 10000) : (prev?.autoSync?.intervalMs ?? 10000),
+                    },
+                    lastSync: start ? new Date().toISOString() : prev?.lastSync,
+                }));
+                fetchStatus(); // still refetch to get latest from server
             } else {
                 setToast({ type: 'error', message: data.message || data.error || 'Action failed' });
             }
@@ -625,7 +657,7 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
 
     return (
         <div className="flex flex-col h-full">
-            <SubViewHeader title={t('system_settings.data_sync')} onBack={onBack} />
+            <SubViewHeader title={t('system_settings.data_sync')} onBack={onBack} disabled={rangeSyncLoading} />
             <ToastMessage toast={toast} />
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
                 {loading ? (
@@ -634,42 +666,48 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                     </div>
                 ) : (
                     <>
-                        {/* Status Card */}
-                        <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    {status?.autoSync?.running ? (
-                                        <Wifi size={16} className="text-green-500" />
-                                    ) : (
-                                        <WifiOff size={16} className="text-gray-400" />
+                        {/* Status Card — support both status.autoSync.running and status.autoSyncActive (backend) */}
+                        {(() => {
+                            const isActive = status?.autoSync?.running ?? status?.autoSyncActive === true;
+                            const lastSync = status?.lastSync ?? status?.lastSyncTime;
+                            return (
+                                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            {isActive ? (
+                                                <Wifi size={16} className="text-green-500" />
+                                            ) : (
+                                                <WifiOff size={16} className="text-gray-400" />
+                                            )}
+                                            <span className="text-sm font-bold text-brand-text">
+                                                {t('system_settings.auto_sync')}: {isActive ? t('system_settings.active') : t('system_settings.inactive')}
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => handleToggleAutoSync(!isActive)}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer",
+                                                isActive
+                                                    ? "bg-red-100 text-red-600 hover:bg-red-200"
+                                                    : "bg-green-100 text-green-600 hover:bg-green-200"
+                                            )}
+                                        >
+                                            {isActive ? t('system_settings.stop') : t('system_settings.start')}
+                                        </button>
+                                    </div>
+                                    {status?.autoSync?.intervalMs != null && (
+                                        <p className="text-xs text-brand-muted"><Clock size={12} className="inline mr-1" />
+                                            Interval: {status.autoSync.intervalMs >= 60000 ? `${Math.round(status.autoSync.intervalMs / 60000)} min` : `${Math.round(status.autoSync.intervalMs / 1000)} sec`}
+                                        </p>
                                     )}
-                                    <span className="text-sm font-bold text-brand-text">
-                                        {t('system_settings.auto_sync')}: {status?.autoSync?.running ? t('system_settings.active') : t('system_settings.inactive')}
-                                    </span>
+                                    {lastSync != null && (
+                                        <p className="text-xs text-brand-muted"><RefreshCw size={12} className="inline mr-1" />
+                                            Last sync: {new Date(lastSync).toLocaleString()}
+                                        </p>
+                                    )}
                                 </div>
-                                <button
-                                    onClick={() => handleToggleAutoSync(!status?.autoSync?.running)}
-                                    className={cn(
-                                        "px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer",
-                                        status?.autoSync?.running
-                                            ? "bg-red-100 text-red-600 hover:bg-red-200"
-                                            : "bg-green-100 text-green-600 hover:bg-green-200"
-                                    )}
-                                >
-                                    {status?.autoSync?.running ? t('system_settings.stop') : t('system_settings.start')}
-                                </button>
-                            </div>
-                            {status?.autoSync?.intervalMs && (
-                                <p className="text-xs text-brand-muted"><Clock size={12} className="inline mr-1" />
-                                    Interval: {Math.round(status.autoSync.intervalMs / 60000)} minutes
-                                </p>
-                            )}
-                            {status?.lastSync && (
-                                <p className="text-xs text-brand-muted"><RefreshCw size={12} className="inline mr-1" />
-                                    Last sync: {new Date(status.lastSync).toLocaleString()}
-                                </p>
-                            )}
-                        </div>
+                            );
+                        })()}
 
                         {/* Manual Sync Button */}
                         <button
@@ -680,16 +718,34 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             {syncing ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.syncing')}...</> : <><RefreshCw size={16} /> {t('system_settings.sync_now')}</>}
                         </button>
 
-                        {/* Sync this year (Jan 1 – today, no full reset) */}
-                        <button
-                            onClick={handleSyncFeb1ToToday}
-                            disabled={rangeSyncLoading || syncing || fullSyncLoading}
-                            className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {rangeSyncLoading ? <><Loader2 size={16} className="animate-spin" /> Syncing...</> : <>Sync this year (Jan 1 – today)</>}
-                        </button>
+                        {/* Sync this year (Jan 1 – today, no full reset); show Stop when syncing */}
+                        {rangeSyncLoading ? (
+                            <div className="flex gap-2">
+                                <button
+                                    disabled
+                                    className="flex-1 py-3 bg-emerald-500/80 text-white rounded-xl font-bold text-sm cursor-wait flex items-center justify-center gap-2"
+                                >
+                                    <Loader2 size={16} className="animate-spin" /> Syncing...
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleStopRangeSync}
+                                    className="px-5 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-colors cursor-pointer flex items-center justify-center gap-2"
+                                >
+                                    <Square size={16} /> Stop
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleSyncFeb1ToToday}
+                                disabled={syncing || fullSyncLoading}
+                                className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                            >
+                                <RefreshCw size={16} /> Sync this year (Jan 1 – today)
+                            </button>
+                        )}
                         <p className="text-xs text-emerald-800/80 text-center font-medium">
-                            Syncs only receipts from Feb 1 (this year) to now. Does not reset checkpoint.
+                            Syncs only receipts from Jan 1 (this year) to now. Does not reset checkpoint.
                         </p>
 
                         {/* Full re-sync (after DB wipe) */}

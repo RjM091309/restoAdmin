@@ -37,6 +37,7 @@ class MasterCategoryController {
 			const rows = await MasterCategoryModel.getAll(branchId, categoryType);
 			return ApiResponse.success(res, rows, 'Inventory categories retrieved successfully');
 		} catch (error) {
+			console.error('[MasterCategoryController.getAll]', error?.message || error);
 			return ApiResponse.error(res, 'Failed to fetch inventory categories', 500, error.message);
 		}
 	}

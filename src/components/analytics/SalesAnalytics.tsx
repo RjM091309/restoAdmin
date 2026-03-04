@@ -164,14 +164,13 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           })
         : [];
 
-    const withMetrics = baseData.map((row, idx) => {
-      const totalSales = row.sales;
+    // Loyverse-style computation: Net sales = Total sales - Refund - Discount; Gross profit = Net sales
+    const withMetrics = baseData.map((row) => {
+      const totalSales = Number(row.sales || 0);
       const refund = Number(row.refund || 0);
       const discount = Number(row.discount || 0);
-      const netSalesRaw = (row.netSales ?? totalSales) as number;
-      const grossProfitRaw = (row.grossProfit ?? netSalesRaw) as number;
-      const netSales = Math.max(0, netSalesRaw);
-      const grossProfit = Math.max(0, grossProfitRaw);
+      const netSales = Math.max(0, totalSales - refund - discount);
+      const grossProfit = netSales;
       return {
         label: row.label,
         tableDate: row.tableDate,
