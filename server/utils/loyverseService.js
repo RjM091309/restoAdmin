@@ -73,13 +73,26 @@ class LoyverseService {
 
 	/**
 	 * Fetch all receipts from Loyverse API with pagination
+	 * @param {number} limit
+	 * @param {string|null} cursor
+	 * @param {{ created_at_min?: string|Date, created_at_max?: string|Date }} dateFilter - optional; ISO or Date for filtering by receipt creation
 	 */
-	async fetchReceipts(limit = 50, cursor = null) {
+	async fetchReceipts(limit = 50, cursor = null, dateFilter = {}) {
 		try {
 			// Loyverse API limits can vary; keep it sane.
 			const safeLimit = Math.max(1, Math.min(parseInt(limit) || 50, 250));
 			let url = `${this.baseURL}/receipts?limit=${safeLimit}`;
 			if (cursor) url += `&cursor=${cursor}`;
+
+			const toIso = (v) => {
+				if (!v) return null;
+				const d = v instanceof Date ? v : new Date(v);
+				return Number.isNaN(d.getTime()) ? null : d.toISOString();
+			};
+			const min = toIso(dateFilter.created_at_min);
+			const max = toIso(dateFilter.created_at_max);
+			if (min) url += `&created_at_min=${encodeURIComponent(min)}`;
+			if (max) url += `&created_at_max=${encodeURIComponent(max)}`;
 
 			const response = await axios.get(url, {
 				headers: this.getAuthHeaders(),
@@ -261,10 +274,46 @@ class LoyverseService {
 
 				if (!existingOrderId) {
 					console.warn(
-						`[Loyverse Sync] Refund receipt ${receipt.receipt_number} could not be matched to an existing order (refund_for=${originalReceiptNumber || 'N/A'})`
+						`[Loyverse Sync] Refund receipt ${receipt.receipt_number} could not be matched to an existing order (refund_for=${originalReceiptNumber || 'N/A'}). Creating stub order for refund tracking.`
 					);
-					await connection.rollback();
-					return { action: 'skipped', reason: 'order_not_found_for_refund' };
+
+					// Create a lightweight stub order so refunds are never lost,
+					// even if the original sale was outside the imported date range.
+					const refundDt = new Date(receipt.receipt_date || receipt.created_at);
+					const stubOrderNo = `LOY-R-${receiptNumber}`;
+
+					const [stubOrderResult] = await connection.execute(
+						`INSERT INTO orders (
+							BRANCH_ID,
+							ORDER_NO,
+							TABLE_ID,
+							ORDER_TYPE,
+							STATUS,
+							SUBTOTAL,
+							TAX_AMOUNT,
+							SERVICE_CHARGE,
+							DISCOUNT_AMOUNT,
+							GRAND_TOTAL,
+							ENCODED_BY,
+							ENCODED_DT
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+						[
+							targetBranchId,
+							stubOrderNo,
+							null,
+							'REFUND',
+							1,
+							0,
+							0,
+							0,
+							0,
+							0,
+							0,
+							refundDt
+						]
+					);
+
+					existingOrderId = stubOrderResult.insertId;
 				}
 
 				const refundResult = await this.syncRefundReceipt(receipt, existingOrderId, targetBranchId);
@@ -617,6 +666,15 @@ class LoyverseService {
 				this.maxSyncPages ||
 				0;
 
+			const toIso = (v) => {
+				if (v == null || v === '') return null;
+				const d = v instanceof Date ? v : new Date(v);
+				return Number.isNaN(d.getTime()) ? null : d.toISOString();
+			};
+			const dateFilter = {};
+			if (options.created_at_min != null) dateFilter.created_at_min = toIso(options.created_at_min);
+			if (options.created_at_max != null) dateFilter.created_at_max = toIso(options.created_at_max);
+
 			const rawSince = options.since || options.from || options.start || null;
 			const forcedSince = rawSince ? new Date(rawSince) : null;
 			const validForcedSince = forcedSince && !Number.isNaN(forcedSince.getTime()) ? forcedSince : null;
@@ -631,7 +689,7 @@ class LoyverseService {
 
 			while (hasMore) {
 				pageCount += 1;
-				const result = await this.fetchReceipts(limit, cursor);
+				const result = await this.fetchReceipts(limit, cursor, dateFilter);
 				const receipts = result.receipts || [];
 				this.syncStats.totalFetched += receipts.length;
 
@@ -795,6 +853,39 @@ class LoyverseService {
 			stats: this.syncStats,
 			autoSyncActive: !!this.autoSyncInterval
 		};
+	}
+
+	/**
+	 * Full re-sync from Loyverse (e.g. after DB wipe).
+	 * Resets checkpoint then syncs all receipts without incremental skip.
+	 */
+	async fullResync(branchId = null, limit = 50, options = {}) {
+		await LoyverseSyncStateModel.resetLastUpdatedAt(branchId || this.defaultBranchId);
+		const opts = { ...options, incremental: false };
+		return this.syncAllReceipts(branchId, limit, opts);
+	}
+
+	/**
+	 * Sync only receipts within a date range (does not reset checkpoint).
+	 * Use e.g. created_at_min = Jan 1, created_at_max = now to sync "this year – today".
+	 */
+	async syncDateRange(branchId = null, limit = 50, options = {}) {
+		const targetBranchId = branchId || this.defaultBranchId;
+		const createdMin = options.created_at_min;
+		const createdMax = options.created_at_max;
+
+		// When recomputing a range, clear existing refunds in that date window first
+		// so that multiple runs stay idempotent even though we accumulate per order.
+		if (createdMin && createdMax) {
+			try {
+				await BillingModel.resetRefundsInRange(createdMin, createdMax, targetBranchId);
+			} catch (err) {
+				console.error('[Loyverse Sync] Failed to reset refunds in range:', err.message);
+			}
+		}
+
+		const opts = { ...options, incremental: false };
+		return this.syncAllReceipts(targetBranchId, limit, opts);
 	}
 }
 

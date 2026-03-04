@@ -25,6 +25,12 @@ router.get('/api/loyverse/status', authenticate, requireAdmin, LoyverseControlle
 // - max_receipts, max_pages (safety)
 router.post('/api/loyverse/sync', authenticate, requireAdmin, LoyverseController.syncReceipts);
 
+// POST /api/loyverse/full-sync — reset checkpoint then sync all from Loyverse (use after DB wipe)
+router.post('/api/loyverse/full-sync', authenticate, requireAdmin, LoyverseController.fullSync);
+
+// POST /api/loyverse/sync-range — sync only receipts in date range (e.g. Feb 1 – today), no checkpoint reset
+router.post('/api/loyverse/sync-range', authenticate, requireAdmin, LoyverseController.syncRange);
+
 // POST /api/loyverse/auto-sync/start
 router.post('/api/loyverse/auto-sync/start', authenticate, requireAdmin, LoyverseController.startAutoSync);
 

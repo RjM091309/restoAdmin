@@ -657,9 +657,9 @@ def daily_sales(
         if sale_date is None:
             continue
         key = str(sale_date)
-        total_sales = float(row.get("total_sales") or 0.0)
         discount = discount_map.get(key, 0.0)
         refund = refund_map.get(key, 0.0)
+        total_sales = float(row.get("total_sales") or 0.0) + discount
         net_sales = total_sales - discount - refund
         gross_profit = net_sales
 

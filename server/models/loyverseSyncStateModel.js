@@ -43,6 +43,24 @@ class LoyverseSyncStateModel {
 		);
 		return true;
 	}
+
+	/**
+	 * Reset checkpoint so next incremental sync will process from start.
+	 * Use after DB wipe for full re-sync from Loyverse.
+	 * @param {number|null} branchId - If null, resets all branches.
+	 */
+	static async resetLastUpdatedAt(branchId) {
+		await this.ensureTable();
+		if (branchId != null) {
+			await pool.execute(
+				`UPDATE loyverse_sync_state SET last_updated_at = NULL WHERE branch_id = ?`,
+				[branchId]
+			);
+		} else {
+			await pool.execute(`UPDATE loyverse_sync_state SET last_updated_at = NULL`);
+		}
+		return true;
+	}
 }
 
 module.exports = LoyverseSyncStateModel;

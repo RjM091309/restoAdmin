@@ -1,10 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as XLSX from 'xlsx';
-import { Search } from 'lucide-react';
+import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+} from 'recharts';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
-import { fetchMenuReportApi, type ApiMenuReportRow } from '../../services/analyticsService';
+import {
+  fetchDailySalesApi,
+  fetchMenuReportApi,
+  fetchTopSellingApi,
+  type ApiDailySalesItem,
+  type ApiMenuReportRow,
+  type ApiTopSellingItem,
+} from '../../services/analyticsService';
 
 type MenuReportProps = {
   selectedBranch: Branch | null;
@@ -30,13 +46,40 @@ type MenuReportRow = {
 
 const MOCK_MENU_REPORT_BASE: Omit<MenuReportRow, 'id'>[] = [];
 
+const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+type TopProductRow = {
+  key: string;
+  name: string;
+  color: string;
+  netSales: number;
+};
+
+const parseDateSafe = (value: string) => {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatDateLabel = (date: Date) =>
+  date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+
 export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<MenuReportRow[]>([]);
 
+  const [topSellingData, setTopSellingData] = useState<ApiTopSellingItem[]>([]);
+  const [topSellingLoading, setTopSellingLoading] = useState(false);
+  const [topSellingError, setTopSellingError] = useState<string | null>(null);
+
+  const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
+
   const money = (value: number) =>
-    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `${t('common.currency_symbol')}${value.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   useEffect(() => {
     const load = async () => {
@@ -70,6 +113,59 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     };
 
     void load();
+  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
+
+  useEffect(() => {
+    const loadTopSelling = async () => {
+      setTopSellingLoading(true);
+      setTopSellingError(null);
+      try {
+        const params = new URLSearchParams();
+        if (dateRange.start) params.set('start_date', dateRange.start);
+        if (dateRange.end) params.set('end_date', dateRange.end);
+        if (selectedBranch && String(selectedBranch.id) !== 'all') {
+          params.set('branch_id', String(selectedBranch.id));
+        }
+        params.set('limit', '5');
+
+        const apiData = await fetchTopSellingApi(params);
+        setTopSellingData(apiData);
+      } catch (err) {
+        console.error(err);
+        setTopSellingError(t('sales_analytics.network_error'));
+        setTopSellingData([]);
+      } finally {
+        setTopSellingLoading(false);
+      }
+    };
+
+    void loadTopSelling();
+  }, [dateRange.start, dateRange.end, selectedBranch?.id, t]);
+
+  useEffect(() => {
+    const loadDailySales = async () => {
+      try {
+        if (!dateRange.start || !dateRange.end) {
+          setDailySalesCurrent([]);
+          return;
+        }
+
+        const paramsCurrent = new URLSearchParams();
+        paramsCurrent.set('start_date', dateRange.start);
+        paramsCurrent.set('end_date', dateRange.end);
+        if (selectedBranch && String(selectedBranch.id) !== 'all') {
+          paramsCurrent.set('branch_id', String(selectedBranch.id));
+        }
+
+        const currentData = await fetchDailySalesApi(paramsCurrent);
+        setDailySalesCurrent(currentData);
+      } catch (err) {
+        console.error(err);
+        setDailySalesCurrent([]);
+      }
+    };
+
+    void loadDailySales();
   }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   const filteredRows = useMemo(() => {
@@ -135,8 +231,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
   // --- Export Function ---
   const handleExport = () => {
-    // 1. Create data rows for Excel
-    const data = filteredRows.map(row => ({
+    const data = filteredRows.map((row) => ({
       [t('menu_report.columns.goods')]: row.goods,
       [t('menu_report.columns.category')]: row.category,
       [t('menu_report.columns.sales_quantity')]: row.salesQty.toLocaleString(),
@@ -149,41 +244,162 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       [t('menu_report.columns.total_revenue')]: money(row.totalRevenue),
     }));
 
-    // 2. Create worksheet
     const worksheet = XLSX.utils.json_to_sheet(data);
 
-    // 3. Set column widths
     worksheet['!cols'] = [
-      { wch: 30 }, // Goods
-      { wch: 25 }, // Category
-      { wch: 18 }, // Sales Quantity
-      { wch: 18 }, // Total Sales
-      { wch: 18 }, // Refund Quantity
-      { wch: 18 }, // Refund Amount
-      { wch: 18 }, // Discounts
-      { wch: 18 }, // Net Sales
-      { wch: 18 }, // Unit Cost
-      { wch: 20 }, // Total Revenue
+      { wch: 30 },
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 20 },
     ];
 
-    // 4. Create workbook and add worksheet
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Menu Report');
 
-    // 5. Generate descriptive filename
     const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
     const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
     const filename = `menu_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
 
-    // 6. Download the file
     XLSX.writeFile(workbook, filename);
+  };
+
+  const trendData = useMemo(
+    () =>
+      dailySalesCurrent.map((item) => {
+        const parsed = parseDateSafe(item.sale_date);
+        const label = parsed ? formatDateLabel(parsed) : item.sale_date;
+        return {
+          label,
+          netSales: (item as any).net_sales ?? item.total_sales,
+        };
+      }),
+    [dailySalesCurrent]
+  );
+
+  const chartPointCount = trendData.length;
+  const responsiveBarSize = useMemo(() => {
+    if (chartPointCount <= 2) return 180;
+    if (chartPointCount <= 4) return 120;
+    if (chartPointCount <= 7) return 72;
+    if (chartPointCount <= 14) return 42;
+    if (chartPointCount <= 31) return 24;
+    if (chartPointCount <= 62) return 16;
+    return 10;
+  }, [chartPointCount]);
+
+  const responsiveBarCategoryGap = useMemo(() => {
+    if (chartPointCount <= 2) return '0%';
+    if (chartPointCount <= 4) return '4%';
+    if (chartPointCount <= 7) return '8%';
+    if (chartPointCount <= 14) return '12%';
+    return '18%';
+  }, [chartPointCount]);
+
+  const responsiveXAxisInterval = useMemo(() => {
+    if (chartPointCount <= 14) return 0;
+    if (chartPointCount <= 31) return 1;
+    if (chartPointCount <= 62) return 3;
+    return 6;
+  }, [chartPointCount]);
+
+  const useSlantedXAxisLabels = chartPointCount > 31;
+  const responsiveXAxisAngle: 0 | -35 = useSlantedXAxisLabels ? -35 : 0;
+  const responsiveXAxisTextAnchor: 'middle' | 'end' = useSlantedXAxisLabels ? 'end' : 'middle';
+  const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
+  const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
+
+  const baseTopProducts: TopProductRow[] = useMemo(
+    () =>
+      topSellingData.map((item, index) => ({
+        key: String(item.IDNo ?? index),
+        name: item.MENU_NAME,
+        color: BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length],
+        netSales: item.total_revenue,
+      })),
+    [topSellingData]
+  );
+
+  const productShares = useMemo(() => {
+    if (!baseTopProducts.length) return {} as Record<string, number>;
+    const totalRevenue = baseTopProducts.reduce((sum, p) => sum + (p.netSales || 0), 0);
+    if (totalRevenue <= 0) {
+      const equalShare = 1 / baseTopProducts.length;
+      return Object.fromEntries(
+        baseTopProducts.map((p) => [p.key, equalShare])
+      ) as Record<string, number>;
+    }
+    return Object.fromEntries(
+      baseTopProducts.map((p) => [p.key, (p.netSales || 0) / totalRevenue])
+    ) as Record<string, number>;
+  }, [baseTopProducts]);
+
+  const productGraphData = useMemo(() => {
+    if (!baseTopProducts.length || !trendData.length) return [];
+
+    const totalShare = Object.values(productShares).reduce((sum, v) => sum + v, 0) || 1;
+    const normalizedShares: Record<string, number> = {};
+    baseTopProducts.forEach((p) => {
+      const raw = productShares[p.key] ?? 0;
+      normalizedShares[p.key] = raw / totalShare;
+    });
+
+    return trendData.map((row) => {
+      const total = row.netSales || 0;
+      const entry: Record<string, number | string> = { label: row.label };
+
+      baseTopProducts.forEach((p) => {
+        const share = normalizedShares[p.key] ?? 1 / baseTopProducts.length;
+        entry[p.key] = Math.round(total * share);
+      });
+
+      return entry;
+    });
+  }, [trendData, baseTopProducts, productShares]);
+
+  const topProductRows: TopProductRow[] = useMemo(() => {
+    if (!baseTopProducts.length || !productGraphData.length) return baseTopProducts;
+
+    const totals: Record<string, number> = {};
+    productGraphData.forEach((day) => {
+      baseTopProducts.forEach((p) => {
+        const value = Number((day as any)[p.key] || 0);
+        totals[p.key] = (totals[p.key] || 0) + value;
+      });
+    });
+
+    return baseTopProducts.map((p) => ({
+      ...p,
+      netSales: totals[p.key] || 0,
+    }));
+  }, [baseTopProducts, productGraphData]);
+
+  const tooltipProps = {
+    formatter: (value: number) => money(Number(value)),
+    cursor: false as const,
+    contentStyle: {
+      backgroundColor: '#ffffff',
+      border: 'none',
+      borderRadius: '10px',
+      boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)',
+    },
+    labelStyle: { color: '#0f172a', fontWeight: 700, marginBottom: '4px' },
+    itemStyle: { color: '#334155', fontWeight: 600 },
   };
 
   return (
     <div className="pt-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+          <Search
+            size={18}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
+          />
           <input
             type="text"
             value={searchTerm}
@@ -192,11 +408,137 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
-        <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        <button
+          type="button"
+          onClick={handleExport}
+          className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
           {t('menu_report.export')}
         </button>
       </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden pt-4">
+        <div className="grid grid-cols-1 items-stretch xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)]">
+          <div className="px-5 py-4 border-b xl:border-b-0 xl:border-r border-gray-100">
+            <div className="flex items-center justify-between text-sm font-normal text-brand-text mb-3.5">
+              <span>{t('sales_analytics.top_5_products')}</span>
+              <span className="text-brand-muted">{t('sales_analytics.net_sales')}</span>
+            </div>
+            <div className="overflow-hidden rounded-xl min-h-[120px] flex items-stretch justify-center">
+              {topSellingLoading ? (
+                <div className="flex items-center justify-center py-10 w-full">
+                  <Loader2 size={20} className="animate-spin text-violet-500" />
+                </div>
+              ) : topSellingError ? (
+                <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
+                  <AlertCircle size={24} className="text-red-400 mb-1.5" />
+                  <p className="text-xs text-red-500 font-medium mb-1">{topSellingError}</p>
+                  <button
+                    onClick={() => {
+                      // simple re-trigger by changing state dependency
+                      setTopSellingError(null);
+                    }}
+                    className="mt-1 text-[11px] text-violet-600 font-bold hover:underline cursor-pointer"
+                  >
+                    {t('sales_analytics.retry')}
+                  </button>
+                </div>
+              ) : topProductRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
+                  <Store size={26} className="text-gray-300 mb-1.5" />
+                  <p className="text-xs text-brand-muted font-medium">
+                    {t('sales_analytics.no_data_available')}
+                  </p>
+                </div>
+              ) : (
+                <table className="w-full table-auto">
+                  <tbody>
+                    {topProductRows.map((item) => (
+                      <tr key={item.key} className="transition-colors hover:bg-gray-50">
+                        <td className="px-3 py-3 align-top">
+                          <div className="flex items-start gap-3">
+                            <span
+                              className="w-5 h-5 rounded-full shrink-0"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <p className="text-sm text-brand-text whitespace-normal break-words leading-5">
+                              {item.name}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
+                          {money(item.netSales)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+          <div className="px-5 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-lg font-normal text-brand-text">
+                {t('sales_analytics.sales_graph_by_product')}
+              </h4>
+            </div>
+            <div className="h-60">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={productGraphData}
+                  barCategoryGap={responsiveBarCategoryGap}
+                  barGap={0}
+                >
+                  <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: '#64748b', fontSize: 11 }}
+                    interval={responsiveXAxisInterval}
+                    angle={responsiveXAxisAngle}
+                    textAnchor={responsiveXAxisTextAnchor}
+                    height={responsiveXAxisHeight}
+                    tickMargin={responsiveXAxisTickMargin}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: '#64748b', fontSize: 12 }}
+                    tickFormatter={(v) => `₱${Math.round(Number(v) / 1000)}k`}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip {...tooltipProps} />
+                  {topProductRows.map((series) => (
+                    <Bar
+                      key={series.key}
+                      dataKey={series.key}
+                      stackId="products"
+                      fill={series.color}
+                      barSize={responsiveBarSize}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />
     </div>
   );

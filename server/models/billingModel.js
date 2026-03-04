@@ -159,6 +159,31 @@ class BillingModel {
 		return rows;
 	}
 
+	static async resetRefundsInRange(startDate, endDate, branchId = null) {
+		// Reset refunds for a given date window so that range re-syncs can recompute from scratch.
+		// Uses REFUND_DT as the date for grouping (same as analytics daily-sales).
+		let query = `
+			UPDATE billing b
+			INNER JOIN orders o ON o.IDNo = b.ORDER_ID
+			SET
+				b.REFUND = 0,
+				b.REFUND_DT = NULL,
+				b.REFUND_REASON = NULL
+			WHERE
+				b.REFUND IS NOT NULL
+				AND DATE(b.REFUND_DT) BETWEEN DATE(?) AND DATE(?)
+		`;
+
+		const params = [startDate, endDate];
+
+		if (branchId) {
+			query += ' AND o.BRANCH_ID = ?';
+			params.push(branchId);
+		}
+
+		await pool.execute(query, params);
+	}
+
 	static async updateRefundForOrder(orderId, refundAmount, refundDt, refundReason) {
 		// Debug: log intent before applying refund
 		console.log('[BillingModel.updateRefundForOrder] Incoming refund payload:', {
@@ -168,10 +193,10 @@ class BillingModel {
 			refundReason
 		});
 
-		// Try to update existing billing row first
+		// Try to update existing billing row first: accumulate refunds per order
 		const updateQuery = `
 			UPDATE billing SET
-				REFUND = ?,
+				REFUND = COALESCE(REFUND, 0) + ?,
 				REFUND_DT = ?,
 				REFUND_REASON = ?
 			WHERE ORDER_ID = ?

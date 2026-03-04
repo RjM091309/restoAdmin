@@ -513,6 +513,8 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     const [status, setStatus] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
+    const [fullSyncLoading, setFullSyncLoading] = useState(false);
+    const [rangeSyncLoading, setRangeSyncLoading] = useState(false);
     const [toast, setToast] = useState<Toast>(null);
 
     useEffect(() => {
@@ -538,13 +540,73 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             const res = await fetch('/api/loyverse/sync', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ incremental: true }) });
             const data = await res.json();
             if (data.success) {
-                setToast({ type: 'success', message: `Sync complete! ${data.data?.receipts_synced || 0} receipts synced.` });
+                setToast({ type: 'success', message: data.data?.message || 'Sync complete!' });
                 fetchStatus();
             } else {
                 setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
             }
         } catch { setToast({ type: 'error', message: 'Network error during sync' }); }
         finally { setSyncing(false); }
+    };
+
+    const handleFullSync = async () => {
+        setFullSyncLoading(true);
+        try {
+            const res = await fetch('/api/loyverse/full-sync', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ limit: 250 }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                const s = data.data?.stats;
+                const msg = s
+                    ? `Full sync: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
+                    : (data.data?.message || 'Full sync completed.');
+                setToast({ type: 'success', message: msg });
+                fetchStatus();
+            } else {
+                setToast({ type: 'error', message: data.message || data.error || 'Full sync failed' });
+            }
+        } catch {
+            setToast({ type: 'error', message: 'Network error during full sync' });
+        } finally {
+            setFullSyncLoading(false);
+        }
+    };
+
+    /** Sync only from Jan 1 (current year) through today — no checkpoint reset */
+    const handleSyncFeb1ToToday = async () => {
+        setRangeSyncLoading(true);
+        try {
+            const now = new Date();
+            const year = now.getFullYear();
+            const jan1 = new Date(year, 0, 1, 0, 0, 0, 0); // Jan 1 this year
+            const res = await fetch('/api/loyverse/sync-range', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({
+                    created_at_min: jan1.toISOString(),
+                    created_at_max: now.toISOString(),
+                    limit: 250,
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                const s = data.data?.stats;
+                const msg = s
+                    ? `Sync Feb 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
+                    : (data.data?.message || 'Sync completed.');
+                setToast({ type: 'success', message: msg });
+                fetchStatus();
+            } else {
+                setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
+            }
+        } catch {
+            setToast({ type: 'error', message: 'Network error during sync' });
+        } finally {
+            setRangeSyncLoading(false);
+        }
     };
 
     const handleToggleAutoSync = async (start: boolean) => {
@@ -617,6 +679,30 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                         >
                             {syncing ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.syncing')}...</> : <><RefreshCw size={16} /> {t('system_settings.sync_now')}</>}
                         </button>
+
+                        {/* Sync this year (Jan 1 – today, no full reset) */}
+                        <button
+                            onClick={handleSyncFeb1ToToday}
+                            disabled={rangeSyncLoading || syncing || fullSyncLoading}
+                            className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {rangeSyncLoading ? <><Loader2 size={16} className="animate-spin" /> Syncing...</> : <>Sync this year (Jan 1 – today)</>}
+                        </button>
+                        <p className="text-xs text-emerald-800/80 text-center font-medium">
+                            Syncs only receipts from Feb 1 (this year) to now. Does not reset checkpoint.
+                        </p>
+
+                        {/* Full re-sync (after DB wipe) */}
+                        <button
+                            onClick={handleFullSync}
+                            disabled={fullSyncLoading || syncing}
+                            className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold text-sm hover:bg-amber-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {fullSyncLoading ? <><Loader2 size={16} className="animate-spin" /> Full re-sync...</> : <>Full re-sync (reset & sync all)</>}
+                        </button>
+                        <p className="text-xs text-amber-700/80 text-center font-medium">
+                            Use after DB wipe: resets checkpoint and pulls all receipts from Loyverse.
+                        </p>
 
                         <p className="text-xs text-brand-muted text-center font-medium">
                             {t('system_settings.sync_description')}
