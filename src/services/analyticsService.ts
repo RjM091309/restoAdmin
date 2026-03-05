@@ -109,6 +109,14 @@ export type ApiExpenseSummary = {
   total_expense: number;
 };
 
+export type ApiExpenseCategoryRow = {
+  branch_id: number;
+  exp_cat: string;
+  exp_name: string;
+  entry_count: number;
+  total_amount: number;
+};
+
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
   const res = await fetch(`${baseUrl}/api/analytics/branch-sales?${params.toString()}`);
@@ -239,5 +247,20 @@ export async function fetchExpenseSummaryApi(params: URLSearchParams): Promise<A
     };
   }
   return { total_expense: 0 };
+}
+
+export async function fetchExpenseCategoryBreakdownApi(
+  params: URLSearchParams,
+): Promise<ApiExpenseCategoryRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/expense-breakdown?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics expense-breakdown failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiExpenseCategoryRow[];
+  }
+  return [];
 }
 

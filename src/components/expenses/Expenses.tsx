@@ -817,15 +817,22 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-              <div className="bg-brand-primary text-white p-5 rounded-2xl shadow-sm min-w-0">
-                <p className="text-xs sm:text-sm font-medium mb-1 truncate opacity-80">{t('expenses_page.total_expenses')}</p>
-                <h3 className="text-xl sm:text-2xl xl:text-3xl font-bold truncate">{formatCurrency(summaryByType.totalAmount)}</h3>
+            <div className="max-h-[280px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+              <div className="bg-brand-primary text-white px-4 py-3 rounded-2xl shadow-sm min-w-0">
+                <p className="text-[11px] sm:text-xs font-medium mb-1 truncate opacity-80">
+                  {t('expenses_page.total_expenses')}
+                </p>
+                <h3 className="text-lg sm:text-xl xl:text-2xl font-bold truncate">
+                  {formatCurrency(summaryByType.totalAmount)}
+                </h3>
               </div>
 
-              <div className="bg-white p-5 rounded-2xl shadow-sm min-w-0">
-                <p className="text-brand-muted text-xs sm:text-sm font-medium mb-1 truncate">Inventory</p>
-                <h3 className="text-xl sm:text-2xl xl:text-3xl font-bold text-brand-text truncate">{formatCurrency(inventoryTotal)}</h3>
+              <div className="bg-white px-4 py-3 rounded-2xl shadow-sm min-w-0">
+                <p className="text-brand-muted text-[11px] sm:text-xs font-medium mb-1 truncate">Inventory</p>
+                <h3 className="text-lg sm:text-xl xl:text-2xl font-bold text-brand-text truncate">
+                  {formatCurrency(inventoryTotal)}
+                </h3>
               </div>
 
               {typeCards.map((card) => {
@@ -835,7 +842,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
                   <div
                     key={card.typeValue}
                     className={cn(
-                      'bg-white p-5 rounded-2xl shadow-sm cursor-pointer transition-all min-w-0',
+                      'bg-white px-4 py-3 rounded-2xl shadow-sm cursor-pointer transition-all min-w-0',
                       isActive ? ring.active : ring.hover,
                     )}
                     onClick={() => {
@@ -843,11 +850,16 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
                       setSelectedCategoryNameFilter('All Data');
                     }}
                   >
-                    <p className="text-brand-muted text-xs sm:text-sm font-medium mb-1 truncate">{card.label}</p>
-                    <h3 className="text-xl sm:text-2xl xl:text-3xl font-bold text-brand-text truncate">{formatCurrency(card.amount)}</h3>
+                    <p className="text-brand-muted text-[11px] sm:text-xs font-medium mb-1 truncate">
+                      {card.label}
+                    </p>
+                    <h3 className="text-lg sm:text-xl xl:text-2xl font-bold text-brand-text truncate">
+                      {formatCurrency(card.amount)}
+                    </h3>
                   </div>
                 );
               })}
+            </div>
             </div>
 
             {activeParentCategory && (

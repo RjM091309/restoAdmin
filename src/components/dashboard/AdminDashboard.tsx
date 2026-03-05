@@ -16,6 +16,8 @@ import {
   type ApiTopSellingItem,
   type ApiDailySalesItem,
   type ApiExpenseSummary,
+  fetchExpenseCategoryBreakdownApi,
+  type ApiExpenseCategoryRow,
 } from '../../services/analyticsService';
 import { useUser } from '../../context/UserContext';
 
@@ -137,6 +139,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>([]);
   const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<Record<number, Record<string, number>>>({});
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
@@ -204,45 +207,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         const start = compareDateRange.start || currentRange.start;
         const end = compareDateRange.end || currentRange.end;
 
-        // Analytics params (sales) respect date range
-        const params = new URLSearchParams();
-        params.set('start_date', start);
-        params.set('end_date', end);
-        // For non-admin users, filter by active branch.
-        // For admin, always aggregate across all branches.
-        if (!isAdmin && activeBranchId) {
-          params.set('branch_id', String(activeBranchId));
+        const analyticsParams = new URLSearchParams();
+        analyticsParams.set('start_date', start);
+        analyticsParams.set('end_date', end);
+        if (activeBranchId) {
+          analyticsParams.set('branch_id', String(activeBranchId));
         }
 
-        const [branchSales, topSelling, dailySales]: [ApiBranchSalesItem[], ApiTopSellingItem[], ApiDailySalesItem[]] =
-          await Promise.all([
-            fetchBranchSalesApi(params),
-            fetchTopSellingApi(
-              new URLSearchParams({
-                start_date: start,
-                end_date: end,
-                ...(!isAdmin && activeBranchId ? { branch_id: String(activeBranchId) } : {}),
-                limit: '5',
-              } as any),
-            ),
-            fetchDailySalesApi(params),
-          ]);
+        const branchSalesParams = new URLSearchParams();
+        branchSalesParams.set('start_date', start);
+        branchSalesParams.set('end_date', end);
+
+        const [branchSales, topSelling, dailySales, expenseBreakdown]: [
+          ApiBranchSalesItem[],
+          ApiTopSellingItem[],
+          ApiDailySalesItem[],
+          ApiExpenseCategoryRow[],
+        ] = await Promise.all([
+          fetchBranchSalesApi(branchSalesParams),
+          fetchTopSellingApi(
+            new URLSearchParams({
+              start_date: start,
+              end_date: end,
+              ...(activeBranchId ? { branch_id: String(activeBranchId) } : {}),
+              limit: '5',
+            } as any),
+          ),
+          fetchDailySalesApi(analyticsParams),
+          (() => {
+            const breakdownParams = new URLSearchParams();
+            breakdownParams.set('start_date', start);
+            breakdownParams.set('end_date', end);
+            if (activeBranchId) {
+              breakdownParams.set('branch_id', String(activeBranchId));
+            }
+            return fetchExpenseCategoryBreakdownApi(breakdownParams);
+          })(),
+        ]);
+
+        if (expenseBreakdown && expenseBreakdown.length > 0) {
+          const map: Record<number, Record<string, number>> = {};
+          const makeKey = (cat: string, name: string) =>
+            `${cat.trim().toLowerCase()}|${name.trim().toLowerCase()}`;
+
+          for (const row of expenseBreakdown) {
+            const bid = Number(row.branch_id);
+            if (!Number.isFinite(bid)) continue;
+            if (!map[bid]) map[bid] = {};
+            const key = makeKey(row.exp_cat, row.exp_name);
+            map[bid][key] = (map[bid][key] || 0) + Number(row.total_amount || 0);
+          }
+          setExpenseCategoryByBranch(map);
+        } else {
+          setExpenseCategoryByBranch({});
+        }
 
         // Build real per-branch cards data from Python analytics (sales + expenses)
         if (branchSales.length > 0) {
           const cards = await Promise.all(
             branchSales.map(async (b) => {
-              const p = new URLSearchParams();
-              p.set('branch_id', String(b.branch_id));
-              p.set('start_date', start);
-              p.set('end_date', end);
+              const baseParams = {
+                branch_id: String(b.branch_id),
+                start_date: start,
+                end_date: end,
+              };
+              const expenseParams = new URLSearchParams(baseParams);
+              const dailyParams = new URLSearchParams(baseParams);
               try {
-                const s = await fetchExpenseSummaryApi(p);
+                const [expenseSummary, branchDailySales] = await Promise.all([
+                  fetchExpenseSummaryApi(expenseParams),
+                  fetchDailySalesApi(dailyParams),
+                ]);
+
+                const totalSalesFromDaily = branchDailySales.reduce(
+                  (sum, item) => sum + Number(item.total_sales || 0),
+                  0,
+                );
+
                 return {
                   id: b.branch_id,
                   name: b.branch_name,
-                  totalSales: b.total_sales,
-                  totalExpenses: s.total_expense,
+                  // Align totalSales with SalesAnalytics (daily-sales based)
+                  totalSales: totalSalesFromDaily || b.total_sales,
+                  totalExpenses: expenseSummary.total_expense,
                   totalOrders: b.order_count,
                 } as BranchPerformanceData;
               } catch (err: any) {
@@ -307,9 +354,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const loadExpensesFromPython = async () => {
       try {
         const params = new URLSearchParams();
-        // Admin: aggregate all branches (no branch_id filter)
-        // Non-admin: filter by activeBranchId
-        if (!isAdmin && activeBranchId && Number.isFinite(activeBranchId)) {
+        if (activeBranchId && Number.isFinite(activeBranchId)) {
           params.set('branch_id', String(activeBranchId));
         }
         // Respect global/compare date range like SalesAnalytics
@@ -352,6 +397,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     });
   };
 
+  const handleBranchFocus = (branch: BranchPerformanceData) => {
+    const isCurrentlyActive = activeBranchId === branch.id;
+    if (isCurrentlyActive) {
+      setActiveBranchId(null);
+      return;
+    }
+    setActiveBranchId(branch.id);
+  };
+
   const sourceForCompare = branchCardsData.length > 0 ? branchCardsData : performanceData;
 
   const selectedCompareBranches = compareBranchIds
@@ -359,36 +413,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     .filter((branch): branch is BranchPerformanceData => Boolean(branch));
   const canCompare = selectedCompareBranches.length >= 2;
 
-  // Recompute summary cards (total revenue, sales, expenses) from Python daily sales + Node expenses
+  // Recompute summary cards (total revenue, sales, expenses)
   useEffect(() => {
-    // If neither sales nor expenses are loaded yet, keep cards hidden
+    // If a specific branch is focused, mirror that branch card exactly (per-branch view).
+    if (activeBranchId && (branchCardsData.length > 0 || performanceData.length > 0)) {
+      const source = branchCardsData.length > 0 ? branchCardsData : performanceData;
+      const branch = source.find((b) => b.id === activeBranchId);
+      if (!branch) {
+        return;
+      }
+      const totalExpenses = getEffectiveBranchTotalExpenses(branch);
+      const totalSales = branch.totalSales;
+      const totalRevenue = totalSales - totalExpenses;
+      setSummaryData({
+        totalRevenue,
+        totalSales,
+        totalExpenses,
+      });
+      return;
+    }
+
+    // Otherwise, show aggregated view using daily sales + expense summary (all branches or header filter).
     if ((!dailySalesForCards || dailySalesForCards.length === 0) && expenseSummaryTotal == null) {
       setSummaryData(null);
       return;
     }
 
     let totalSales = 0;
-    let netSalesTotal = 0;
 
     for (const item of dailySalesForCards) {
       const totalSalesDay = Number(item.total_sales || 0);
-      const refund = Number((item as any).refund ?? 0);
-      const discount = Number((item as any).discount ?? 0);
-      const netSales = Math.max(0, totalSalesDay - refund - discount);
-
       totalSales += totalSalesDay;
-      netSalesTotal += netSales;
     }
 
     const totalExpenses = expenseSummaryTotal ?? 0;
-    const totalRevenue = netSalesTotal - totalExpenses;
+    const totalRevenue = totalSales - totalExpenses;
 
     setSummaryData({
       totalRevenue,
       totalSales,
       totalExpenses,
     });
-  }, [dailySalesForCards, expenseSummaryTotal]);
+  }, [activeBranchId, branchCardsData, performanceData, dailySalesForCards, expenseSummaryTotal]);
 
   const formatCurrency = (value: number) =>
     `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -407,7 +473,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     {
       id: 'totalRevenue',
       label: t('admin_dashboard.total_revenue'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales - branch.totalExpenses),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const expensesFromBreakdown = branchMap
+          ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
+          : 0;
+        const totalExpenses = expensesFromBreakdown || branch.totalExpenses || 0;
+        return branch.totalSales - totalExpenses;
+      }),
       bestMode: 'max' as const,
     },
     {
@@ -419,7 +492,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     {
       id: 'totalExpenses',
       label: t('admin_dashboard.total_expenses'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const expensesFromBreakdown = branchMap
+          ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
+          : 0;
+        return expensesFromBreakdown || branch.totalExpenses || 0;
+      }),
       bestMode: 'min' as const,
     },
   ];
@@ -430,110 +509,202 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     {
       id: 'fresh Produce',
       label: t('admin_dashboard.sections.fresh_produce'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.2),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|fresh produce';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     {
       id: 'inv-beverages',
       label: t('admin_dashboard.sections.beverages'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.14),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|beverages';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     {
       id: 'inv-meat',
       label: t('admin_dashboard.sections.meat'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.24),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|meat';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     {
       id: 'inv-seafood',
       label: t('admin_dashboard.sections.seafood'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.17),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|seafood';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     {
       id: 'inv-dreammart',
       label: t('admin_dashboard.sections.dreammart'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.15),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|dreammart';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     {
       id: 'inv-rice',
       label: t('admin_dashboard.sections.rice'),
-      values: selectedCompareBranches.map((branch) => branch.totalSales * 0.38 * 0.1),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'inventory|rice';
+        const value = branchMap?.[key];
+        return value ?? 0;
+      }),
       bestMode: 'min',
     },
     { id: 'section-maintenance', rowType: 'section', label: t('admin_dashboard.sections.maintenance') },
     {
       id: 'maint-kitchen-equipment',
       label: t('admin_dashboard.sections.kitchen_equipment'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'maintenance|kitchen equipment';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.06;
+      }),
       bestMode: 'min',
     },
     {
       id: 'maint-supplies',
       label: t('admin_dashboard.sections.supplies'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.035),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'maintenance|supplies';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.035;
+      }),
       bestMode: 'min',
     },
     {
       id: 'maint-repair',
       label: t('admin_dashboard.sections.repair'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.025),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'maintenance|repair';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.025;
+      }),
       bestMode: 'min',
     },
     { id: 'section-utilities-bills', rowType: 'section', label: t('admin_dashboard.sections.utilities_bills') },
     {
       id: 'util-electricty',
       label: t('admin_dashboard.sections.electricity'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.17),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'utilities / bills|electricity';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.17;
+      }),
       bestMode: 'min',
     },
     {
       id: 'util-water',
       label: t('admin_dashboard.sections.water'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.06),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'utilities / bills|water';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.06;
+      }),
       bestMode: 'min',
     },
     {
       id: 'util-internet',
       label: t('admin_dashboard.sections.internet'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.05),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'utilities / bills|internet';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.05;
+      }),
       bestMode: 'min',
     },
     {
       id: 'util-gas',
       label: t('admin_dashboard.sections.gas'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.04),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'utilities / bills|gas';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.04;
+      }),
       bestMode: 'min',
     },
     {
       id: 'util-logistic-air-sea',
       label: t('admin_dashboard.sections.logistic_air_sea'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'utilities / bills|logistic air & sea';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.03;
+      }),
       bestMode: 'min',
     },
     { id: 'section-salary-rent', rowType: 'section', label: t('admin_dashboard.sections.salary_rent') },
     {
       id: 'salary-rent-salary',
       label: t('admin_dashboard.sections.salary'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.42),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'salary & rent|salary';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.42;
+      }),
       bestMode: 'min',
     },
     {
       id: 'salary-rent-rent',
       label: t('admin_dashboard.sections.rent'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.2),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'salary & rent|rent';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.2;
+      }),
       bestMode: 'min',
     },
     { id: 'section-others', rowType: 'section', label: t('admin_dashboard.sections.others') },
     {
       id: 'others',
       label: t('admin_dashboard.sections.others'),
-      values: selectedCompareBranches.map((branch) => branch.totalExpenses * 0.03),
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const key = 'others|others';
+        const value = branchMap?.[key];
+        return value ?? branch.totalExpenses * 0.03;
+      }),
       bestMode: 'min',
     },
   ];
+
+  const getEffectiveBranchTotalExpenses = (branch: BranchPerformanceData): number => {
+    const branchMap = expenseCategoryByBranch[branch.id];
+    if (!branchMap) return branch.totalExpenses;
+    const fromBreakdown = Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    return fromBreakdown || branch.totalExpenses;
+  };
 
   const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
     const [s, e] = update ?? [null, null];
@@ -656,7 +827,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             {summaryData && (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
               <SummaryCard 
-                title={t('admin_dashboard.total_revenue')}
+                title="Total Profit"
                 value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 icon={DollarSign}
                 color="bg-green-500"
@@ -844,7 +1015,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   onClick={() => {
                     setIsComparePanelOpen(true);
                   }}
-                  className="w-full rounded-xl bg-brand-primary text-white font-semibold py-2.5 px-4 transition-all duration-200 hover:bg-brand-primary/90 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                  className="w-full rounded-xl bg-brand-primary text-white font-semibold py-2.5 px-4 transition-all duration-200 hover:bg-brand-primary/90 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {t('admin_dashboard.compare')} ({selectedCompareBranches.length})
                 </button>
@@ -855,14 +1026,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             )}
             {(branchCardsData.length > 0 ? branchCardsData : performanceData)
               .slice()
-              .sort((a, b) => (b.totalSales - b.totalExpenses) - (a.totalSales - a.totalExpenses))
+              .sort((a, b) => {
+                const aExpenses = getEffectiveBranchTotalExpenses(a);
+                const bExpenses = getEffectiveBranchTotalExpenses(b);
+                return (b.totalSales - bExpenses) - (a.totalSales - aExpenses);
+              })
               .map((branch) => (
-                <BranchPerformanceCard 
-                  key={branch.id} 
-                  branch={branch} 
-                  onClick={() => handleBranchCompareToggle(branch.id)}
-                  isSelected={compareBranchIds.includes(branch.id)}
-                />
+                (() => {
+                  const effectiveExpenses = getEffectiveBranchTotalExpenses(branch);
+                  let branchForCard: BranchPerformanceData = {
+                    ...branch,
+                    totalExpenses: effectiveExpenses,
+                  };
+
+                  // If this branch is currently focused, mirror the top summary cards (total sales & revenue).
+                  if (activeBranchId === branch.id && summaryData) {
+                    branchForCard = {
+                      ...branchForCard,
+                      totalSales: summaryData.totalSales,
+                      totalExpenses: summaryData.totalExpenses,
+                    };
+                  }
+
+                  return (
+                    <BranchPerformanceCard
+                      key={branch.id}
+                      branch={branchForCard}
+                      onClick={() => handleBranchFocus(branchForCard)}
+                      onCompareToggle={() => handleBranchCompareToggle(branch.id)}
+                      isSelected={compareBranchIds.includes(branch.id)}
+                      isActive={activeBranchId === branch.id}
+                    />
+                  );
+                })()
               ))}
           </div>
         </motion.div>

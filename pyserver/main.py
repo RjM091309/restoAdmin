@@ -130,6 +130,18 @@ class DailySalesItem(BaseModel):
     gross_profit: float
 
 
+class ExpenseSummary(BaseModel):
+    total_expense: float
+
+
+class ExpenseCategoryRow(BaseModel):
+    branch_id: int
+    exp_cat: str
+    exp_name: str
+    entry_count: int
+    total_amount: float
+
+
 @app.get("/api/analytics/branch-sales")
 def branch_sales(
     start_date: Optional[str] = None,
@@ -702,6 +714,144 @@ def daily_sales(
     items.sort(key=lambda x: x.sale_date)
 
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+@app.get("/api/analytics/expense-summary")
+def expense_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Total expenses over a period, optionally filtered by branch.
+
+    Mirrors Node's ExpenseModel.getSummary (total_expense) semantics:
+    - Reads from expenses + master_categories
+    - Respects ACTIVE flag
+    - Optional branch/date filters
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        where = ["e.ACTIVE = 1"]
+        params: List[object] = []
+
+        if branch_id:
+            where.append("e.BRANCH_ID = %s")
+            params.append(branch_id)
+
+        if start_date:
+            where.append("DATE(e.ENCODED_DT) >= %s")
+            params.append(start_date)
+        if end_date:
+            where.append("DATE(e.ENCODED_DT) <= %s")
+            params.append(end_date)
+
+        where_sql = " AND ".join(where)
+
+        query = f"""
+            SELECT
+                COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
+            FROM expenses e
+            LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+            WHERE {where_sql}
+        """
+
+        cur.execute(query, params)
+        row = cur.fetchone() or {}
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] expense-summary query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch expense summary",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    summary = ExpenseSummary(total_expense=float(row.get("total_expense") or 0.0))
+    return {"success": True, "data": summary.model_dump()}
+
+
+@app.get("/api/analytics/expense-breakdown")
+def expense_breakdown(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Expense breakdown grouped by branch + (CATEGORY_TYPE, CATEGORY_NAME).
+
+    This is designed to power the Admin Dashboard comparison side panel.
+    It mirrors Node's ExpenseModel.getCategoryBreakdown but also returns branch_id.
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        where = ["e.ACTIVE = 1"]
+        params: List[object] = []
+
+        if branch_id:
+            where.append("e.BRANCH_ID = %s")
+            params.append(branch_id)
+
+        if start_date:
+            where.append("DATE(e.ENCODED_DT) >= %s")
+            params.append(start_date)
+        if end_date:
+            where.append("DATE(e.ENCODED_DT) <= %s")
+            params.append(end_date)
+
+        where_sql = " AND ".join(where)
+
+        query = f"""
+            SELECT
+                e.BRANCH_ID AS branch_id,
+                mc.CATEGORY_TYPE AS exp_cat,
+                mc.CATEGORY_NAME AS exp_name,
+                COUNT(*) AS entry_count,
+                COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_amount
+            FROM expenses e
+            LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+            WHERE {where_sql}
+            GROUP BY e.BRANCH_ID, mc.CATEGORY_TYPE, mc.CATEGORY_NAME
+            ORDER BY total_amount DESC, mc.CATEGORY_TYPE ASC, mc.CATEGORY_NAME ASC
+        """
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] expense-breakdown query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch expense breakdown",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    data: List[ExpenseCategoryRow] = []
+    for row in rows:
+        try:
+            bid_raw = row.get("branch_id")
+            if bid_raw is None:
+                continue
+            bid = int(bid_raw)
+        except Exception:
+            continue
+        data.append(
+            ExpenseCategoryRow(
+                branch_id=bid,
+                exp_cat=str(row.get("exp_cat") or ""),
+                exp_name=str(row.get("exp_name") or ""),
+                entry_count=int(row.get("entry_count") or 0),
+                total_amount=float(row.get("total_amount") or 0.0),
+            )
+        )
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in data]}}
 
 
 # Attach analytics report routes (menu, category, payment, receipt)
