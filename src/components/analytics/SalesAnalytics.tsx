@@ -147,7 +147,15 @@ const formatDateLabel = (date: Date) =>
   date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
 const money = (value: number) =>
-  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  `₱${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+const moneyTooltip = (value: number) =>
+  `₱${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
 
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -452,12 +460,29 @@ const metricConfig = {
     ];
   }, [baseSales, baseSalesPrevious, metricConfig, t]);
   const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || t('sales_analytics.total_sales');
+  const LoyverseTooltip: React.FC<{
+    active?: boolean;
+    payload?: { value: number }[];
+    label?: string;
+  }> = ({ active, payload, label }) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const rawValue = Number(payload[0]?.value ?? 0);
+    return (
+      <div className="rounded-md border border-slate-200 bg-white px-3 py-2 shadow-[0_4px_14px_rgba(15,23,42,0.16)]">
+        {label && (
+          <div className="mb-0.5 text-[11px] font-medium text-slate-500">
+            {label}
+          </div>
+        )}
+        <div className="text-sm font-semibold text-slate-900">
+          {moneyTooltip(rawValue)}
+        </div>
+      </div>
+    );
+  };
   const tooltipProps = {
-    formatter: (value: number) => money(Number(value)),
     cursor: false as const,
-    contentStyle: { backgroundColor: '#ffffff', border: 'none', borderRadius: '10px', boxShadow: '0 6px 18px rgba(15, 23, 42, 0.08)' },
-    labelStyle: { color: '#0f172a', fontWeight: 700, marginBottom: '4px' },
-    itemStyle: { color: '#334155', fontWeight: 600 },
+    content: <LoyverseTooltip />,
   };
 
   // Branch chart data for horizontal bar
@@ -673,7 +698,7 @@ const metricConfig = {
                       <CartesianGrid stroke="#e5e7eb" horizontal={false} />
                       <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} />
-                      <Tooltip formatter={(value: number) => money(Number(value))} cursor={false} contentStyle={{ backgroundColor: '#fff', border: 'none', borderRadius: '10px', boxShadow: '0 6px 18px rgba(15,23,42,0.08)' }} labelStyle={{ color: '#0f172a', fontWeight: 700 }} />
+                      <Tooltip cursor={false} content={<LoyverseTooltip />} />
                       <Bar dataKey="sales" barSize={22} radius={[0, 6, 6, 0]}>
                         {branchChartData.map((_entry, index) => (
                           <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />

@@ -808,7 +808,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             </div>
             <Skeleton className="h-[500px] rounded-2xl" />
           </div>
-          <div className="lg:col-span-1 space-y-4">
+          <div className="lg:col-span-1 space-y-3">
             <Skeleton className="h-8 w-48 mb-2 rounded-lg" />
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-56 rounded-2xl" />
