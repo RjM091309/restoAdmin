@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { Search } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
+import { Skeleton } from '../ui/Skeleton';
 import { fetchCategoryReportApi, type ApiCategoryReportRow } from '../../services/analyticsService';
 
 type CategoryReportProps = {
@@ -34,12 +36,14 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<CategoryReportRow[]>([]);
+  const [reportLoading, setReportLoading] = useState(true);
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   useEffect(() => {
     const load = async () => {
+      setReportLoading(true);
       const params = new URLSearchParams();
       if (dateRange.start) params.set('start_date', dateRange.start);
       if (dateRange.end) params.set('end_date', dateRange.end);
@@ -66,6 +70,8 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       } catch (err) {
         console.error('Failed to load category report', err);
         setRows([]);
+      } finally {
+        setReportLoading(false);
       }
     };
 
@@ -172,23 +178,55 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
 
   return (
     <div className="pt-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="relative">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder={t('category_report.search_placeholder')}
-            className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
-          />
-        </div>
-        <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          {t('category_report.export')}
-        </button>
-      </div>
-      <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />
+      <AnimatePresence mode="wait">
+        {reportLoading ? (
+          <motion.div
+            key="skeleton"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-10 w-80 rounded-xl" />
+              <Skeleton className="h-9 w-24 rounded-lg" />
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+              <Skeleton className="h-10 w-full rounded-lg mb-2" />
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg mb-1" />
+              ))}
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="content"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="relative">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder={t('category_report.search_placeholder')}
+                  className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
+                />
+              </div>
+              <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                {t('category_report.export')}
+              </button>
+            </div>
+            <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
