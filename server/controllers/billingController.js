@@ -17,8 +17,24 @@ class BillingController {
 
 	static async getAll(req, res) {
 		try {
-			// Prioritize session branch_id
-			const branchId = req.session?.branch_id || req.query.branch_id || req.body.branch_id || req.user?.branch_id || null;
+			let branchId = null;
+
+			// Admin (permissions = 1): by default can see ALL branches,
+			// but respect explicit branch_id when provided.
+			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
+			if (isAdmin) {
+				branchId = req.query.branch_id || req.body.branch_id || null;
+			} else {
+				// Non-admin: always scoped to their branch (session/user),
+				// optionally narrowed further by explicit branch_id if provided.
+				branchId =
+					req.query.branch_id ||
+					req.body.branch_id ||
+					req.session?.branch_id ||
+					req.user?.branch_id ||
+					null;
+			}
+
 			const billings = await BillingModel.getAll(branchId);
 			return ApiResponse.success(res, billings, 'Billing records retrieved successfully');
 		} catch (error) {
@@ -104,30 +120,6 @@ class BillingController {
 					await OrderModel.updateStatus(id, 1, req.session.user_id);
 					if (order.TABLE_ID) {
 						await TableModel.updateStatus(order.TABLE_ID, 1);
-					}
-					
-					// Sync order to sales_hourly_summary for dashboard charts
-					try {
-						await ReportsModel.syncOrderToSalesHourlySummary(id);
-					} catch (syncError) {
-						console.error('Error syncing order to sales_hourly_summary:', syncError);
-						// Don't fail the request if sync fails
-					}
-					
-					// Sync order to sales_category_report for Sales by Category
-					try {
-						await ReportsModel.syncOrderToSalesCategoryReport(id);
-					} catch (syncError) {
-						console.error('Error syncing order to sales_category_report:', syncError);
-						// Don't fail the request if sync fails
-					}
-					
-					// Sync order to goods_sales_report for Sales by Product
-					try {
-						await ReportsModel.syncOrderToGoodsSalesReport(id);
-					} catch (syncError) {
-						console.error('Error syncing order to goods_sales_report:', syncError);
-						// Don't fail the request if sync fails
 					}
 				} else if (newStatus === 2) {
 					// PARTIAL PAID: Mark Order as CONFIRMED (2)

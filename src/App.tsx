@@ -35,8 +35,10 @@ import { Expenses } from './components/expenses/Expenses';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Branches } from './components/users/Branches';
+import { Tables } from './components/users/Tables';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
+import { Billing } from './components/orders/Billing';
 import { SalesAnalytics } from './components/analytics/SalesAnalytics';
 import { MenuReport } from './components/analytics/MenuReport';
 import { CategoryReport } from './components/analytics/CategoryReport';
@@ -420,6 +422,7 @@ export default function App() {
       case 'User Role': navigate(`/users/role${suffix}`); break;
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'Branches': navigate(`/users/branches${suffix}`); break;
+      case 'Tables': navigate(`/users/tables${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
       case 'Sales Analytics': navigate(`/sales-report/sales-analytics${suffix}`); break;
       case 'Menu Management': navigate(`/menu-management${suffix}`); break;
@@ -501,6 +504,17 @@ export default function App() {
                   )
                 } />
 
+                <Route path="/billing" element={
+                  selectedBranch && String(selectedBranch.id) !== 'all' ? (
+                    <Billing
+                      key={selectedBranch.id}
+                      selectedBranch={selectedBranch}
+                    />
+                  ) : (
+                    <Navigate to="/dashboard" replace />
+                  )
+                } />
+
                 <Route path="/menu-management" element={
                   selectedBranch && String(selectedBranch.id) !== 'all' ? (
                     <Menu
@@ -574,6 +588,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Branches />
+                  </motion.div>
+                } />
+
+                <Route path="/users/tables" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Tables />
                   </motion.div>
                 } />
 

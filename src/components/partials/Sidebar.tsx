@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Circle,
   DollarSign,
+  CreditCard,
 } from 'lucide-react';
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
@@ -123,7 +124,8 @@ const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, selectedBranch }) => {
   // Menu tab is only visible when a specific branch is selected (not 'all' or null)
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
-  const { logout } = useUser();
+  const { logout, user } = useUser();
+  const isAdmin = user?.permissions === 1;
   const { t } = useTranslation();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
   const [salesReportExpanded, setSalesReportExpanded] = useState(false);
@@ -135,7 +137,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
     activeTab === 'Receipt';
 
   const isUserMgmtActive =
-    activeTab.startsWith('User') || activeTab === 'Branch Management';
+    activeTab.startsWith('User') ||
+    activeTab === 'Branch Management';
 
   useEffect(() => {
     setUserMgmtExpanded(isUserMgmtActive);
@@ -227,12 +230,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           />
         </SidebarItem>
         {isSpecificBranch && (
-          <SidebarItem
-            icon={ClipboardList}
-            label={t('sidebar.orders')}
-            active={activeTab === 'Orders'}
-            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
+          <>
+            <SidebarItem
+              icon={ClipboardList}
+              label={t('sidebar.orders')}
+              active={activeTab === 'Orders'}
+              onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+            />
+            <SidebarItem
+              icon={CreditCard}
+              label={t('Billing')}
+              active={activeTab === 'Billing'}
+              onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+            />
+          </>
         )}
         {isSpecificBranch && (
           <SidebarItem
@@ -242,35 +253,43 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
+        {isAdmin && !isSpecificBranch && (
+          <SidebarItem
+            icon={Users}
+            label={t('sidebar.user_management')}
+            active={isUserMgmtActive}
+            isExpandable
+            isExpanded={userMgmtExpanded}
+            onClick={handleUserMgmtToggle}
+          >
+            <SubItem
+              label={t('sidebar.user_info')}
+              active={activeTab === 'User Info'}
+              onClick={() => onTabChange('User Info')}
+            />
+            <SubItem
+              label={t('sidebar.user_role')}
+              active={activeTab === 'User Role'}
+              onClick={() => onTabChange('User Role')}
+            />
+            <SubItem
+              label={t('sidebar.user_access')}
+              active={activeTab === 'User Access'}
+              onClick={() => onTabChange('User Access')}
+            />
+            <SubItem
+              label={t('sidebar.branches')}
+              active={activeTab === 'Branch Management'}
+              onClick={() => onTabChange('Branches')}
+            />
+          </SidebarItem>
+        )}
         <SidebarItem
-          icon={Users}
-          label={t('sidebar.user_management')}
-          active={isUserMgmtActive}
-          isExpandable
-          isExpanded={userMgmtExpanded}
-          onClick={handleUserMgmtToggle}
-        >
-          <SubItem
-            label={t('sidebar.user_info')}
-            active={activeTab === 'User Info'}
-            onClick={() => onTabChange('User Info')}
-          />
-          <SubItem
-            label={t('sidebar.user_role')}
-            active={activeTab === 'User Role'}
-            onClick={() => onTabChange('User Role')}
-          />
-          <SubItem
-            label={t('sidebar.user_access')}
-            active={activeTab === 'User Access'}
-            onClick={() => onTabChange('User Access')}
-          />
-          <SubItem
-            label={t('sidebar.branches')}
-            active={activeTab === 'Branch Management'}
-            onClick={() => onTabChange('Branches')}
-          />
-        </SidebarItem>
+          icon={ClipboardList}
+          label="Table Settings"
+          active={activeTab === 'Tables'}
+          onClick={() => { onTabChange('Tables'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+        />
       </nav>
 
       <div className="mt-auto px-4">

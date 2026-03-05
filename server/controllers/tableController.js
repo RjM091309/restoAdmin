@@ -13,8 +13,23 @@ class TableController {
 	// Get all restaurant tables
 	static async getAll(req, res) {
 		try {
-			// Prioritize session branch_id
-			const branchId = req.session?.branch_id || req.query.branch_id || req.body.branch_id || req.user?.branch_id || null;
+			let branchId = null;
+
+			// Admin (permissions = 1): by default see ALL branches,
+			// but allow explicit ?branch_id=... override when provided.
+			if (req.user?.permissions === 1 || req.session?.permissions === 1) {
+				branchId = req.query.branch_id || req.body.branch_id || null;
+			} else {
+				// Non-admin: strictly scoped to their branch (session/user),
+				// optionally narrowed further by explicit branch_id if provided.
+				branchId =
+					req.query.branch_id ||
+					req.body.branch_id ||
+					req.session?.branch_id ||
+					req.user?.branch_id ||
+					null;
+			}
+
 			const tables = await TableModel.getAll(branchId);
 			return ApiResponse.success(res, tables, 'Tables retrieved successfully');
 		} catch (error) {
@@ -37,7 +52,14 @@ class TableController {
 			}
 
 			const user_id = req.session.user_id || req.user?.user_id;
-			const branchId = req.session?.branch_id || req.body.BRANCH_ID || req.query.branch_id || req.user?.branch_id;
+
+			// Prefer explicitly selected branch (from body/query) over session,
+			// so admins can manage tables for different branches.
+			const explicitBranchId = req.body.BRANCH_ID || req.query.branch_id;
+			const sessionBranchId = req.session?.branch_id;
+			const userBranchId = req.user?.branch_id;
+			const branchId = explicitBranchId || sessionBranchId || userBranchId;
+
 			if (!branchId) {
 				return ApiResponse.badRequest(res, 'Branch ID is required. Please select a branch first.');
 			}
