@@ -717,6 +717,44 @@
 			"search_placeholder": "검색..."
 		}
 	},
+	"manage_branches": {
+		"manage_branches": "지점 관리",
+		"code": "코드",
+		"name": "이름",
+		"address": "주소",
+		"phone": "전화",
+		"status": "상태",
+		"action": "행동",
+		"active": "활성",
+		"inactive": "비활성",
+		"search_placeholder": "지점 검색...",
+		"add_new_branch": "새 지점 추가",
+		"edit_branch": "지점 편집",
+		"delete_branch": "지점 삭제",
+		"cancel": "취소",
+		"update_branch": "지점 업데이트",
+		"save_branch": "지점 저장",
+		"total_branches": "총 지점",
+		"active_branches": "활성 지점",
+		"enter_code": "지점 코드 입력",
+		"enter_name": "지점 이름 입력",
+		"enter_address": "주소 입력",
+		"enter_phone": "전화 입력",
+		"code_and_name_required": "지점 코드와 이름은 필수입니다.",
+		"failed_to_load": "지점을 불러오지 못했습니다",
+		"admin_only": "관리자만 지점을 관리할 수 있습니다.",
+		"delete_confirm_title": "정말로 삭제하시겠습니까?",
+		"delete_confirm_text_prefix": "다음 지점을 비활성화하려고 합니다:",
+		"delete_confirm_text_suffix": ". 이 지점은 선택 목록에 더 이상 표시되지 않습니다.",
+		"toast": {
+			"updated_success": "지점이 성공적으로 업데이트되었습니다!",
+			"created_success": "지점이 성공적으로 생성되었습니다!",
+			"deleted_success": "지점 \"{{name}}\"이(가) 비활성화되었습니다!",
+			"save_error": "지점 저장 중 오류",
+			"delete_failed": "지점 삭제 실패",
+			"delete_error": "지점 삭제 중 오류"
+		}
+	},
 	"user_roles": {
 		"user_roles": "사용자 역할",
 		"new_role": "새 역할",
@@ -1563,6 +1601,7 @@
 		"user_info": "사용자 정보",
 		"user_role": "사용자 역할",
 		"user_access": "사용자 접근 권한",
+		"branches": "지점",
 		"logout": "로그아웃"
 	},
 	"datatable": {

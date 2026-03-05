@@ -34,6 +34,7 @@ import { Categories } from './components/categories/Categories';
 import { Expenses } from './components/expenses/Expenses';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
+import { Branches } from './components/users/Branches';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
 import { SalesAnalytics } from './components/analytics/SalesAnalytics';
@@ -375,6 +376,7 @@ export default function App() {
   const breadcrumbs = pathParts.map(part => {
     if (part === 'menu-management') return 'Menu Management';
     if (part === 'users') return 'User Management';
+    if (part === 'branches') return 'Branch Management';
     if (part === 'sales-report') return 'Sales Report';
     if (part === 'info') return 'User Info';
     if (part === 'role') return 'User Role';
@@ -417,6 +419,7 @@ export default function App() {
       case 'User Info': navigate(`/users/info${suffix}`); break;
       case 'User Role': navigate(`/users/role${suffix}`); break;
       case 'User Access': navigate(`/users/access${suffix}`); break;
+      case 'Branches': navigate(`/users/branches${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
       case 'Sales Analytics': navigate(`/sales-report/sales-analytics${suffix}`); break;
       case 'Menu Management': navigate(`/menu-management${suffix}`); break;
@@ -562,6 +565,15 @@ export default function App() {
                     className="flex items-center justify-center h-64 text-brand-muted font-bold"
                   >
                     User Access Management is coming soon...
+                  </motion.div>
+                } />
+                <Route path="/users/branches" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Branches />
                   </motion.div>
                 } />
 

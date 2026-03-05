@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as XLSX from 'xlsx';
+import { motion, AnimatePresence } from 'framer-motion';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
+import { Skeleton } from '../ui/Skeleton';
 import {
   fetchBranchSalesApi,
   fetchLeastSellingApi,
@@ -12,7 +14,6 @@ import {
   type ApiDailySalesItem,
 } from '../../services/analyticsService';
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   AreaChart,
@@ -23,6 +24,38 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
+
+/** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
+function ChartContainer({
+  className = '',
+  minHeight = 200,
+  render,
+}: {
+  className?: string;
+  minHeight?: number;
+  render: (size: { width: number; height: number }) => React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setSize({ width: w, height: h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} style={{ minHeight }}>
+      {size.width > 0 && size.height > 0 ? render(size) : null}
+    </div>
+  );
+}
 
 type SalesAnalyticsProps = {
   selectedBranch: Branch | null;
@@ -475,8 +508,80 @@ const metricConfig = {
     XLSX.writeFile(workbook, filename);
   }, [salesTableRows, selectedBranch, dateRange, t]);
 
+  const isPageLoading = dailySalesLoading;
+
   return (
     <div className="pt-6 space-y-8">
+      <AnimatePresence mode="wait">
+        {isPageLoading ? (
+          <motion.div
+            key="skeleton"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-8"
+          >
+            {/* Stat cards skeleton */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="grid grid-cols-1 md:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="p-5">
+                    <Skeleton className="h-4 w-20 mb-2 rounded-lg" />
+                    <Skeleton className="h-10 w-28 mb-2 rounded-lg" />
+                    <Skeleton className="h-3 w-24 rounded-lg" />
+                  </div>
+                ))}
+              </div>
+              <div className="p-6 border-t border-gray-200">
+                <div className="flex items-center justify-between mb-5">
+                  <Skeleton className="h-5 w-40 rounded-lg" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-8 w-24 rounded-lg" />
+                    <Skeleton className="h-8 w-20 rounded-lg" />
+                  </div>
+                </div>
+                <Skeleton className="h-72 w-full rounded-2xl" />
+              </div>
+            </div>
+            {/* Two col cards skeleton */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+                <Skeleton className="h-5 w-48 mb-4 rounded-lg" />
+                <Skeleton className="h-48 w-full rounded-xl mb-4" />
+                <Skeleton className="h-32 w-full rounded-xl" />
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+                <Skeleton className="h-8 w-56 mb-4 rounded-lg" />
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 w-full rounded-xl mb-3" />
+                ))}
+              </div>
+            </div>
+            {/* Table skeleton */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+              <div className="flex justify-between mb-4">
+                <Skeleton className="h-9 w-28 rounded-lg" />
+                <Skeleton className="h-9 w-9 rounded-lg" />
+              </div>
+              <Skeleton className="h-10 w-full rounded-lg mb-2" />
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg mb-1" />
+              ))}
+              <div className="flex justify-between mt-4 pt-4">
+                <Skeleton className="h-9 w-20 rounded-lg" />
+                <Skeleton className="h-5 w-24 rounded-lg" />
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="content"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="space-y-8"
+          >
       {/* ── Stat Cards ─────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-5">
@@ -505,10 +610,12 @@ const metricConfig = {
               <InlineDropdown value={viewMode} options={['glance', 'week'] as const} formatOption={(v) => t(`sales_analytics.${v}`)} onChange={(v) => setViewMode(v)} />
             </div>
           </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              {chartType === 'bar chart' ? (
-                <BarChart data={trendData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
+          <ChartContainer
+            className="w-full min-w-0 h-72 min-h-[288px]"
+            minHeight={288}
+            render={({ width, height }) =>
+              chartType === 'bar chart' ? (
+                <BarChart width={width} height={height} data={trendData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
@@ -516,16 +623,16 @@ const metricConfig = {
                   <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={responsiveBarSize} />
                 </BarChart>
               ) : (
-                <AreaChart data={trendData}>
+                <AreaChart width={width} height={height} data={trendData}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
                   <Area type="linear" dataKey={activeMetric} stroke={CHART_THEME_COLOR} strokeWidth={2} fill={CHART_THEME_COLOR} fillOpacity={0.2} dot={true} activeDot={true} />
                 </AreaChart>
-              )}
-            </ResponsiveContainer>
-          </div>
+              )
+            }
+          />
         </div>
       </div>
 
@@ -558,9 +665,11 @@ const metricConfig = {
             ) : (
               <>
                 {/* Horizontal bar chart */}
-                <div className="h-48 mb-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={branchChartData} layout="vertical" barCategoryGap="20%">
+                <ChartContainer
+                  className="w-full min-w-0 h-48 min-h-[192px] mb-4"
+                  minHeight={192}
+                  render={({ width, height }) => (
+                    <BarChart width={width} height={height} data={branchChartData} layout="vertical" barCategoryGap="20%">
                       <CartesianGrid stroke="#e5e7eb" horizontal={false} />
                       <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} />
@@ -571,8 +680,8 @@ const metricConfig = {
                         ))}
                       </Bar>
                     </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                  )}
+                />
                 {/* Data table */}
                 <div className="overflow-x-auto rounded-xl border border-gray-100">
                   <table className="w-full text-sm">
@@ -741,6 +850,9 @@ const metricConfig = {
         </div>
       </div>
 
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

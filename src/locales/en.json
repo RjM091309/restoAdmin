@@ -714,6 +714,44 @@
 			"search_placeholder": "Search..."
 		}
 	},
+	"manage_branches": {
+		"manage_branches": "Branch Management",
+		"code": "Code",
+		"name": "Name",
+		"address": "Address",
+		"phone": "Phone",
+		"status": "Status",
+		"action": "Action",
+		"active": "Active",
+		"inactive": "Inactive",
+		"search_placeholder": "Search branches...",
+		"add_new_branch": "Add New Branch",
+		"edit_branch": "Edit Branch",
+		"delete_branch": "Delete Branch",
+		"cancel": "Cancel",
+		"update_branch": "Update Branch",
+		"save_branch": "Save Branch",
+		"total_branches": "Total Branches",
+		"active_branches": "Active Branches",
+		"enter_code": "Enter branch code",
+		"enter_name": "Enter branch name",
+		"enter_address": "Enter address",
+		"enter_phone": "Enter phone",
+		"code_and_name_required": "Branch code and name are required.",
+		"failed_to_load": "Failed to load branches",
+		"admin_only": "Only administrators can manage branches.",
+		"delete_confirm_title": "Are you sure?",
+		"delete_confirm_text_prefix": "You are about to deactivate branch",
+		"delete_confirm_text_suffix": ". This branch will no longer appear in selection lists.",
+		"toast": {
+			"updated_success": "Branch updated successfully!",
+			"created_success": "Branch created successfully!",
+			"deleted_success": "Branch \"{{name}}\" deactivated successfully!",
+			"save_error": "Error saving branch",
+			"delete_failed": "Failed to delete branch",
+			"delete_error": "Error deleting branch"
+		}
+	},
 	"user_roles": {
 		"user_roles": "User Roles",
 		"new_role": "New Role",
@@ -1560,6 +1598,7 @@
 		"user_info": "User Info",
 		"user_role": "User Role",
 		"user_access": "User Access",
+		"branches": "Branches",
 		"logout": "Logout"
 	},
 	"datatable": {

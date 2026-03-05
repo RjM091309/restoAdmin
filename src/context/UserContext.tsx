@@ -47,6 +47,12 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsLoggedIn(false);
         localStorage.removeItem('user');
         localStorage.removeItem('token');
+
+        if (typeof window !== 'undefined') {
+            // Fully reload app on logout so that
+            // any branch filters or URL state are reset.
+            window.location.replace('/');
+        }
     };
 
     const updateUser = async (updates: Partial<User>): Promise<UpdateResult> => {

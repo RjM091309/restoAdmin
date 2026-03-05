@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { Search, Loader2, Shield, User as UserIcon, Plus, Edit2, Trash2, Key, MapPin, Tablet } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
@@ -8,6 +9,7 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPage, SkeletonStatCards, SkeletonPageHeader, SkeletonTable } from '../ui/Skeleton';
+import { useUser } from '../../context/UserContext';
 
 interface UserRow {
   id: string;
@@ -26,6 +28,16 @@ interface UserRow {
 
 export const Users: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useUser();
+  const location = useLocation();
+
+  const isAdmin = user?.permissions === 1;
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const branchIdFromHeader = searchParams.get('branchId');
+  const effectiveBranchId = isAdmin
+    ? null
+    : (branchIdFromHeader && branchIdFromHeader !== 'all' ? branchIdFromHeader : (user?.branch_id ?? null));
+
   const [users, setUsers] = useState<UserRow[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,7 +98,6 @@ export const Users: React.FC = () => {
         status: u.ACTIVE === 1 ? 'Active' : 'Inactive'
       }));
       setUsers(mappedData);
-      setFilteredUsers(mappedData);
     } catch (e: any) {
       console.error('Failed to fetch users', e);
       setError(e.message || t('manage_users.failed_to_load'));
@@ -153,15 +164,21 @@ export const Users: React.FC = () => {
     fetchOptions();
   }, [fetchUsers, fetchOptions]);
 
+  const branchFilteredUsers = useMemo(() => {
+    if (isAdmin) return users;
+    if (effectiveBranchId == null) return [];
+    return users.filter((u) => String(u.branchId) === String(effectiveBranchId));
+  }, [users, isAdmin, effectiveBranchId]);
+
   useEffect(() => {
-    const filtered = users.filter(user =>
-      (user.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.branch || '').toLowerCase().includes(searchQuery.toLowerCase())
+    const filtered = branchFilteredUsers.filter((u) =>
+      (u.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.branch || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
     setFilteredUsers(filtered);
-  }, [searchQuery, users]);
+  }, [searchQuery, branchFilteredUsers]);
 
   useEffect(() => {
     if (formData.confirmPassword && formData.password !== formData.confirmPassword) {
@@ -408,19 +425,19 @@ export const Users: React.FC = () => {
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.total_users')}</p>
-                <h3 className="text-3xl font-bold">{users.length}</h3>
+                <h3 className="text-3xl font-bold">{branchFilteredUsers.length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.active_users')}</p>
-                <h3 className="text-3xl font-bold text-green-600">{users.filter(u => u.status === 'Active').length}</h3>
+                <h3 className="text-3xl font-bold text-green-600">{branchFilteredUsers.filter(u => u.status === 'Active').length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.inactive_users')}</p>
-                <h3 className="text-3xl font-bold text-red-500">{users.filter(u => u.status === 'Inactive').length}</h3>
+                <h3 className="text-3xl font-bold text-red-500">{branchFilteredUsers.filter(u => u.status === 'Inactive').length}</h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('manage_users.user_roles_count')}</p>
-                <h3 className="text-3xl font-bold">{new Set(users.map(u => u.role)).size}</h3>
+                <h3 className="text-3xl font-bold">{new Set(branchFilteredUsers.map(u => u.role)).size}</h3>
               </div>
             </div>
 

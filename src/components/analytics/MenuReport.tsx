@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
+import { Skeleton } from '../ui/Skeleton';
 import {
-  ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
@@ -21,6 +22,36 @@ import {
   type ApiMenuReportRow,
   type ApiTopSellingItem,
 } from '../../services/analyticsService';
+
+/** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
+function ChartContainer({
+  className = '',
+  render,
+}: {
+  className?: string;
+  render: (size: { width: number; height: number }) => React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setSize({ width: w, height: h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} style={{ minHeight: 240 }}>
+      {size.width > 0 && size.height > 0 ? render(size) : null}
+    </div>
+  );
+}
 
 type MenuReportProps = {
   selectedBranch: Branch | null;
@@ -68,12 +99,15 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<MenuReportRow[]>([]);
+  const [reportLoading, setReportLoading] = useState(true);
 
   const [topSellingData, setTopSellingData] = useState<ApiTopSellingItem[]>([]);
   const [topSellingLoading, setTopSellingLoading] = useState(false);
   const [topSellingError, setTopSellingError] = useState<string | null>(null);
 
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
+  /** When set, chart shows only this product's bar; when null, shows stacked bars for all. */
+  const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null);
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, {
@@ -83,6 +117,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
   useEffect(() => {
     const load = async () => {
+      setReportLoading(true);
       const params = new URLSearchParams();
       if (dateRange.start) params.set('start_date', dateRange.start);
       if (dateRange.end) params.set('end_date', dateRange.end);
@@ -109,6 +144,8 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       } catch (err) {
         console.error('Failed to load menu report', err);
         setRows([]);
+      } finally {
+        setReportLoading(false);
       }
     };
 
@@ -269,15 +306,20 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     XLSX.writeFile(workbook, filename);
   };
 
+  // Same net sales computation as SalesAnalytics: net_sales = total_sales - refund - discount
   const trendData = useMemo(
     () =>
       dailySalesCurrent.map((item) => {
         const parsed = parseDateSafe(item.sale_date);
         const label = parsed ? formatDateLabel(parsed) : item.sale_date;
-        return {
-          label,
-          netSales: (item as any).net_sales ?? item.total_sales,
-        };
+        const totalSales = Number(item.total_sales || 0);
+        const refund = Number((item as any).refund ?? 0);
+        const discount = Number((item as any).discount ?? 0);
+        const netSales =
+          (item as any).net_sales != null
+            ? Number((item as any).net_sales)
+            : Math.max(0, totalSales - refund - discount);
+        return { label, netSales };
       }),
     [dailySalesCurrent]
   );
@@ -314,15 +356,20 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
   const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
 
+  // Net sales from menu report rows (same source as SalesAnalytics logic); match by product name
   const baseTopProducts: TopProductRow[] = useMemo(
     () =>
-      topSellingData.map((item, index) => ({
-        key: String(item.IDNo ?? index),
-        name: item.MENU_NAME,
-        color: BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length],
-        netSales: item.total_revenue,
-      })),
-    [topSellingData]
+      topSellingData.map((item, index) => {
+        const menuRow = rows.find((r) => r.goods === item.MENU_NAME);
+        const netSales = menuRow != null ? menuRow.netSales : item.total_revenue;
+        return {
+          key: String(item.IDNo ?? index),
+          name: item.MENU_NAME,
+          color: BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length],
+          netSales,
+        };
+      }),
+    [topSellingData, rows]
   );
 
   const productShares = useMemo(() => {
@@ -394,6 +441,52 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
   return (
     <div className="pt-6 space-y-4">
+      <AnimatePresence mode="wait">
+        {reportLoading ? (
+          <motion.div
+            key="skeleton"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-10 w-80 rounded-xl" />
+              <Skeleton className="h-9 w-24 rounded-lg" />
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+              <div className="grid grid-cols-1 xl:grid-cols-[430px_minmax(0,1fr)] 2xl:grid-cols-[470px_minmax(0,1fr)] gap-6">
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <Skeleton className="h-4 w-32 rounded-lg" />
+                    <Skeleton className="h-4 w-16 rounded-lg" />
+                  </div>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full rounded-xl" />
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-6 w-48 rounded-lg" />
+                  <Skeleton className="h-60 w-full min-h-[240px] rounded-2xl" />
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
+              <Skeleton className="h-10 w-full rounded-lg mb-2" />
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg mb-1" />
+              ))}
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="content"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="space-y-4"
+          >
       <div className="flex items-center justify-between">
         <div className="relative">
           <Search
@@ -468,24 +561,39 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
               ) : (
                 <table className="w-full table-auto">
                   <tbody>
-                    {topProductRows.map((item) => (
-                      <tr key={item.key} className="transition-colors hover:bg-gray-50">
-                        <td className="px-3 py-3 align-top">
-                          <div className="flex items-start gap-3">
-                            <span
-                              className="w-5 h-5 rounded-full shrink-0"
-                              style={{ backgroundColor: item.color }}
-                            />
-                            <p className="text-sm text-brand-text whitespace-normal break-words leading-5">
-                              {item.name}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
-                          {money(item.netSales)}
-                        </td>
-                      </tr>
-                    ))}
+                    {topProductRows.map((item) => {
+                      const isSelected = selectedProductKey === item.key;
+                      return (
+                        <tr
+                          key={item.key}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedProductKey((prev) => (prev === item.key ? null : item.key))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedProductKey((prev) => (prev === item.key ? null : item.key));
+                            }
+                          }}
+                          className={`transition-colors cursor-pointer hover:bg-gray-50 ${isSelected ? 'bg-violet-50 ring-1 ring-violet-200 ring-inset rounded-lg' : ''}`}
+                        >
+                          <td className="px-3 py-3 align-top">
+                            <div className="flex items-start gap-3">
+                              <span
+                                className="w-5 h-5 rounded-full shrink-0"
+                                style={{ backgroundColor: item.color }}
+                              />
+                              <p className="text-sm text-brand-text whitespace-normal break-words leading-5">
+                                {item.name}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 text-right text-sm font-medium text-brand-text whitespace-nowrap">
+                            {money(item.netSales)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -497,9 +605,12 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
                 {t('sales_analytics.sales_graph_by_product')}
               </h4>
             </div>
-            <div className="h-60">
-              <ResponsiveContainer width="100%" height="100%">
+            <ChartContainer
+              className="w-full min-w-0 h-60 min-h-[240px]"
+              render={({ width, height }) => (
                 <BarChart
+                  width={width}
+                  height={height}
                   data={productGraphData}
                   barCategoryGap={responsiveBarCategoryGap}
                   barGap={0}
@@ -523,23 +634,41 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
                     tickLine={false}
                   />
                   <Tooltip {...tooltipProps} />
-                  {topProductRows.map((series) => (
-                    <Bar
-                      key={series.key}
-                      dataKey={series.key}
-                      stackId="products"
-                      fill={series.color}
-                      barSize={responsiveBarSize}
-                    />
-                  ))}
+                  {selectedProductKey ? (
+                    (() => {
+                      const series = topProductRows.find((s) => s.key === selectedProductKey);
+                      if (!series) return null;
+                      return (
+                        <Bar
+                          key={series.key}
+                          dataKey={series.key}
+                          fill={series.color}
+                          barSize={responsiveBarSize}
+                        />
+                      );
+                    })()
+                  ) : (
+                    topProductRows.map((series) => (
+                      <Bar
+                        key={series.key}
+                        dataKey={series.key}
+                        stackId="products"
+                        fill={series.color}
+                        barSize={responsiveBarSize}
+                      />
+                    ))
+                  )}
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            />
           </div>
         </div>
       </div>
 
       <DataTable data={filteredRows} columns={columns} keyExtractor={(item) => item.id} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

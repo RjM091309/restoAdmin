@@ -717,6 +717,44 @@
 			"search_placeholder": "搜索..."
 		}
 	},
+	"manage_branches": {
+		"manage_branches": "分支管理",
+		"code": "代码",
+		"name": "名称",
+		"address": "地址",
+		"phone": "电话",
+		"status": "状态",
+		"action": "操作",
+		"active": "活跃",
+		"inactive": "非活跃",
+		"search_placeholder": "搜索分支...",
+		"add_new_branch": "添加新分支",
+		"edit_branch": "编辑分支",
+		"delete_branch": "删除分支",
+		"cancel": "取消",
+		"update_branch": "更新分支",
+		"save_branch": "保存分支",
+		"total_branches": "总分支数",
+		"active_branches": "活跃分支",
+		"enter_code": "输入分支代码",
+		"enter_name": "输入分支名称",
+		"enter_address": "输入地址",
+		"enter_phone": "输入电话",
+		"code_and_name_required": "分支代码和名称为必填项。",
+		"failed_to_load": "加载分支失败",
+		"admin_only": "仅管理员可管理分支。",
+		"delete_confirm_title": "您确定吗？",
+		"delete_confirm_text_prefix": "您即将停用分支",
+		"delete_confirm_text_suffix": "。该分支将不再出现在选择列表中。",
+		"toast": {
+			"updated_success": "分支更新成功！",
+			"created_success": "分支创建成功！",
+			"deleted_success": "分支\"{{name}}\"已停用！",
+			"save_error": "保存分支时出错",
+			"delete_failed": "删除分支失败",
+			"delete_error": "删除分支时出错"
+		}
+	},
 	"user_roles": {
 		"user_roles": "用户角色",
 		"new_role": "新角色",
@@ -1527,6 +1565,7 @@
 		"user_info": "用户信息",
 		"user_role": "用户角色",
 		"user_access": "用户访问权限",
+		"branches": "分支",
 		"logout": "注销"
 	},
 	"datatable": {

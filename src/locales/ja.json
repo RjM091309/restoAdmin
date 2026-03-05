@@ -716,6 +716,44 @@
 			"search_placeholder": "検索..."
 		}
 	},
+	"manage_branches": {
+		"manage_branches": "支店管理",
+		"code": "コード",
+		"name": "名前",
+		"address": "住所",
+		"phone": "電話",
+		"status": "ステータス",
+		"action": "アクション",
+		"active": "アクティブ",
+		"inactive": "非アクティブ",
+		"search_placeholder": "支店を検索...",
+		"add_new_branch": "新しい支店を追加",
+		"edit_branch": "支店を編集",
+		"delete_branch": "支店を削除",
+		"cancel": "キャンセル",
+		"update_branch": "支店を更新",
+		"save_branch": "支店を保存",
+		"total_branches": "総支店数",
+		"active_branches": "アクティブ支店",
+		"enter_code": "支店コードを入力",
+		"enter_name": "支店名を入力",
+		"enter_address": "住所を入力",
+		"enter_phone": "電話を入力",
+		"code_and_name_required": "支店コードと名前は必須です。",
+		"failed_to_load": "支店の読み込みに失敗しました",
+		"admin_only": "管理者のみ支店を管理できます。",
+		"delete_confirm_title": "本当によろしいですか？",
+		"delete_confirm_text_prefix": "次の支店を非アクティブにします：",
+		"delete_confirm_text_suffix": "。この支店は選択リストに表示されなくなります。",
+		"toast": {
+			"updated_success": "支店が正常に更新されました！",
+			"created_success": "支店が正常に作成されました！",
+			"deleted_success": "支店「{{name}}」が非アクティブになりました！",
+			"save_error": "支店の保存中にエラーが発生しました",
+			"delete_failed": "支店の削除に失敗しました",
+			"delete_error": "支店の削除中にエラーが発生しました"
+		}
+	},
 	"user_roles": {
 		"user_roles": "ユーザー役割",
 		"new_role": "新しいロール",
@@ -1526,6 +1564,7 @@
 		"user_info": "ユーザー情報",
 		"user_role": "ユーザー役割",
 		"user_access": "ユーザーアクセス",
+		"branches": "支店",
 		"logout": "ログアウト"
 	},
 	"datatable": {

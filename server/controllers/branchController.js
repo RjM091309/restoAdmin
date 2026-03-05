@@ -158,13 +158,17 @@ class BranchController {
 	// Create new branch
 	static async create(req, res) {
 		try {
-			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE } = req.body;
+			const body = req.body || {};
+			const BRANCH_CODE = body.BRANCH_CODE != null ? String(body.BRANCH_CODE).trim() : '';
+			const BRANCH_NAME = body.BRANCH_NAME != null ? String(body.BRANCH_NAME).trim() : '';
+			const ADDRESS = body.ADDRESS != null ? String(body.ADDRESS).trim() : null;
+			const PHONE = body.PHONE != null ? String(body.PHONE).trim() : null;
 
-			if (!BRANCH_CODE || BRANCH_CODE.trim() === '') {
+			if (!BRANCH_CODE) {
 				return ApiResponse.badRequest(res, 'Branch code is required');
 			}
 
-			if (!BRANCH_NAME || BRANCH_NAME.trim() === '') {
+			if (!BRANCH_NAME) {
 				return ApiResponse.badRequest(res, 'Branch name is required');
 			}
 
@@ -173,22 +177,25 @@ class BranchController {
 				return ApiResponse.error(res, 'Branch code already exists', 409);
 			}
 
-			const user_id = req.session.user_id || req.user?.user_id;
+			const user_id = req.session?.user_id || req.user?.user_id;
 			const branchId = await BranchModel.create({
 				BRANCH_CODE,
 				BRANCH_NAME,
-				ADDRESS,
-				PHONE
+				ADDRESS: ADDRESS || undefined,
+				PHONE: PHONE || undefined
 			});
 
-			// Log audit
-			await AuditLogModel.create({
-				user_id,
-				branch_id: branchId,
-				action: 'CREATE',
-				table_name: 'branches',
-				record_id: branchId
-			});
+			try {
+				await AuditLogModel.create({
+					user_id: user_id || null,
+					branch_id: branchId,
+					action: 'CREATE',
+					table_name: 'branches',
+					record_id: branchId
+				});
+			} catch (auditErr) {
+				console.error('Audit log create failed (branch create):', auditErr);
+			}
 
 			return ApiResponse.created(res, { id: branchId }, 'Branch created successfully');
 		} catch (error) {
@@ -201,6 +208,11 @@ class BranchController {
 	static async update(req, res) {
 		try {
 			const { id } = req.params;
+			const idNum = parseInt(id, 10);
+			if (isNaN(idNum)) {
+				return ApiResponse.badRequest(res, 'Invalid branch ID');
+			}
+
 			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE } = req.body;
 
 			if (!BRANCH_CODE || BRANCH_CODE.trim() === '') {
@@ -212,12 +224,12 @@ class BranchController {
 			}
 
 			const existing = await BranchModel.getByCode(BRANCH_CODE);
-			if (existing && existing.IDNo != id) {
+			if (existing && existing.IDNo !== idNum) {
 				return ApiResponse.error(res, 'Branch code already exists', 409);
 			}
 
-			const user_id = req.session.user_id || req.user?.user_id;
-			const updated = await BranchModel.update(id, {
+			const user_id = req.session?.user_id || req.user?.user_id;
+			const updated = await BranchModel.update(idNum, {
 				BRANCH_CODE,
 				BRANCH_NAME,
 				ADDRESS,
@@ -228,13 +240,17 @@ class BranchController {
 				return ApiResponse.notFound(res, 'Branch');
 			}
 
-			await AuditLogModel.create({
-				user_id,
-				branch_id: id,
-				action: 'UPDATE',
-				table_name: 'branches',
-				record_id: id
-			});
+			try {
+				await AuditLogModel.create({
+					user_id: user_id || null,
+					branch_id: idNum,
+					action: 'UPDATE',
+					table_name: 'branches',
+					record_id: idNum
+				});
+			} catch (auditErr) {
+				console.error('Audit log create failed (branch update):', auditErr);
+			}
 
 			return ApiResponse.success(res, null, 'Branch updated successfully');
 		} catch (error) {
@@ -247,21 +263,29 @@ class BranchController {
 	static async delete(req, res) {
 		try {
 			const { id } = req.params;
-			const user_id = req.session.user_id || req.user?.user_id;
+			const idNum = parseInt(id, 10);
+			if (isNaN(idNum)) {
+				return ApiResponse.badRequest(res, 'Invalid branch ID');
+			}
 
-			const deleted = await BranchModel.delete(id);
+			const user_id = req.session?.user_id || req.user?.user_id;
+			const deleted = await BranchModel.delete(idNum);
 
 			if (!deleted) {
 				return ApiResponse.notFound(res, 'Branch');
 			}
 
-			await AuditLogModel.create({
-				user_id,
-				branch_id: id,
-				action: 'DELETE',
-				table_name: 'branches',
-				record_id: id
-			});
+			try {
+				await AuditLogModel.create({
+					user_id: user_id || null,
+					branch_id: idNum,
+					action: 'DELETE',
+					table_name: 'branches',
+					record_id: idNum
+				});
+			} catch (auditErr) {
+				console.error('Audit log create failed (branch delete):', auditErr);
+			}
 
 			return ApiResponse.success(res, null, 'Branch deleted successfully');
 		} catch (error) {

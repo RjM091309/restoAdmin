@@ -23,6 +23,17 @@ class BranchModel {
 				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 			`);
 
+			// Fix existing table: ensure IDNo has AUTO_INCREMENT (if table was created without it)
+			try {
+				await pool.execute(`
+					ALTER TABLE branches
+					MODIFY COLUMN IDNo INT NOT NULL AUTO_INCREMENT
+				`);
+			} catch (alterErr) {
+				// Ignore if already correct or other benign failure
+				console.warn('[BranchModel] ensureSchema ALTER IDNo:', alterErr.message);
+			}
+
 			BranchModel._schemaReady = true;
 			BranchModel._schemaPromise = null;
 		})().catch((error) => {
@@ -66,6 +77,10 @@ class BranchModel {
 
 	static async create(data) {
 		await BranchModel.ensureSchema();
+		const code = data?.BRANCH_CODE != null ? String(data.BRANCH_CODE).trim() : null;
+		const name = data?.BRANCH_NAME != null ? String(data.BRANCH_NAME).trim() : '';
+		const address = data?.ADDRESS != null && String(data.ADDRESS).trim() !== '' ? String(data.ADDRESS).trim() : null;
+		const phone = data?.PHONE != null && String(data.PHONE).trim() !== '' ? String(data.PHONE).trim() : null;
 		const [result] = await pool.execute(
 			`
 			INSERT INTO branches (
@@ -77,12 +92,7 @@ class BranchModel {
 				CREATED_DT
 			) VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
 			`,
-			[
-				data.BRANCH_CODE ? String(data.BRANCH_CODE).trim() : null,
-				String(data.BRANCH_NAME).trim(),
-				data.ADDRESS ? String(data.ADDRESS).trim() : null,
-				data.PHONE ? String(data.PHONE).trim() : null,
-			]
+			[code, name, address, phone]
 		);
 		return result.insertId;
 	}

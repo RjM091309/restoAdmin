@@ -134,9 +134,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
     activeTab === 'Payment type' ||
     activeTab === 'Receipt';
 
+  const isUserMgmtActive =
+    activeTab.startsWith('User') || activeTab === 'Branch Management';
+
   useEffect(() => {
-    setUserMgmtExpanded(activeTab.startsWith('User'));
-  }, [activeTab]);
+    setUserMgmtExpanded(isUserMgmtActive);
+  }, [isUserMgmtActive]);
   useEffect(() => {
     setSalesReportExpanded(isSalesReportActive);
   }, [isSalesReportActive]);
@@ -242,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
         <SidebarItem
           icon={Users}
           label={t('sidebar.user_management')}
-          active={activeTab.startsWith('User')}
+          active={isUserMgmtActive}
           isExpandable
           isExpanded={userMgmtExpanded}
           onClick={handleUserMgmtToggle}
@@ -261,6 +264,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             label={t('sidebar.user_access')}
             active={activeTab === 'User Access'}
             onClick={() => onTabChange('User Access')}
+          />
+          <SubItem
+            label={t('sidebar.branches')}
+            active={activeTab === 'Branch Management'}
+            onClick={() => onTabChange('Branches')}
           />
         </SidebarItem>
       </nav>

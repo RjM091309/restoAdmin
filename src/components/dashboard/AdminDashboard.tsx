@@ -678,8 +678,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             
             <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
               <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.performance_trend')}</h3>
-              <div className="h-96">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="w-full min-w-0 h-96 min-h-[384px]">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={384}>
                   <BarChart
                     key={activeBranchId || 'all'}
                     data={monthlyData.map(d => ({ ...d, negativeExpenses: -d.totalExpenses }))}
@@ -745,7 +745,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               {/* Pie Chart: Revenue Distribution (real data) */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.revenue_distribution')}</h3>
-                <div className="h-72">
+                <div className="w-full min-w-0 h-72 min-h-[288px]">
                   {analyticsLoading ? (
                     <div className="flex items-center justify-center h-full">
                       <Skeleton className="h-40 w-40 rounded-full" />
@@ -755,7 +755,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       {t('admin_dashboard.no_revenue_data')}
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
                       <PieChart>
                         <Pie
                           data={branchRevenueDistribution}
@@ -789,7 +789,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               {/* Horizontal Bar Chart: Top Selling Products (real data) */}
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.top_selling_products')}</h3>
-                <div className="h-72">
+                <div className="w-full min-w-0 h-72 min-h-[288px]">
                   {analyticsLoading ? (
                     <div className="flex items-center justify-center h-full">
                       <Skeleton className="h-40 w-full rounded-2xl" />
@@ -799,7 +799,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       {t('admin_dashboard.no_products_data')}
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
                       <BarChart
                         layout="vertical"
                         data={topProductsData}
