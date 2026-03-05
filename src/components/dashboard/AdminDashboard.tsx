@@ -457,7 +457,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   }, [activeBranchId, branchCardsData, performanceData, dailySalesForCards, expenseSummaryTotal]);
 
   const formatCurrency = (value: number) =>
-    `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `₱${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
   const selectedCount = selectedCompareBranches.length;
   const compareStartDate = toDate(compareDateRange.start);
@@ -828,19 +828,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
               <SummaryCard 
                 title="Total Profit"
-                value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 icon={DollarSign}
                 color="bg-green-500"
               />
               <SummaryCard 
                 title={t('admin_dashboard.total_sales')}
-                value={`₱${summaryData.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                value={`₱${summaryData.totalSales.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 icon={TrendingUp}
                 color="bg-[rgb(139,92,246)]"
               />
               <SummaryCard 
                 title={t('admin_dashboard.total_expenses')}
-                value={`₱${summaryData.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                value={`₱${summaryData.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 icon={TrendingDown}
                 color="bg-[rgb(245,158,11)]"
               />
@@ -865,13 +865,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     />
                     <YAxis 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
-                      tickFormatter={(value) => `₱${Math.abs(value / 1000)}k`} 
+                      tickFormatter={(value) => `₱${Math.round(Math.abs(value / 1000))}k`} 
                       axisLine={false}
                       tickLine={false}
                     />
                     <Tooltip 
                       formatter={(value, name) => {
-                        const originalValue = `₱${Math.abs(Number(value)).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                        const originalValue = `₱${Math.abs(Number(value)).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}`;
                         if (name === 'totalSales') return [originalValue, t('admin_dashboard.total_sales')];
                         if (name === 'negativeExpenses') return [originalValue, t('admin_dashboard.total_expenses')];
                         return [originalValue, name];

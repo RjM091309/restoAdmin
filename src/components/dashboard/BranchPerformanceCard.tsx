@@ -92,8 +92,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
       <div className="my-3 text-center">
         <p className="text-[11px] text-brand-muted font-medium">Total Profit</p>
         <p className="text-2xl font-bold text-brand-text">
-          ₱
-          {netRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ₱{netRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
         </p>
       </div>
       
@@ -106,7 +105,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
           <div>
             <p className="text-[10px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
             <p className="font-bold text-[11px]">
-              ₱{branch.totalSales.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              ₱{branch.totalSales.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </p>
           </div>
         </div>
@@ -117,7 +116,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
           <div>
             <p className="text-[10px] text-brand-muted">{t('admin_dashboard.total_expenses')}</p>
             <p className="font-bold text-[11px]">
-              ₱{branch.totalExpenses.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              ₱{branch.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </p>
           </div>
         </div>
