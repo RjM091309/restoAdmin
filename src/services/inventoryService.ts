@@ -3,6 +3,7 @@
 export interface InventoryCategory {
     id: string;
     branchId: string;
+    opCategoryId: string | null;
     name: string;
     categoryType: string;
     description: string | null;
@@ -22,6 +23,7 @@ type ApiResponse<T> = {
 type InventoryCategoryApiRecord = {
     IDNo: number;
     BRANCH_ID: number;
+    OP_CAT_ID?: number | null;
     CATEGORY_NAME: string;
     CATEGORY_TYPE: string;
     DESCRIPTION: string | null;
@@ -63,6 +65,7 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
 const mapCategoryRecord = (row: InventoryCategoryApiRecord): InventoryCategory => ({
     id: String(row.IDNo),
     branchId: String(row.BRANCH_ID),
+    opCategoryId: row.OP_CAT_ID !== undefined && row.OP_CAT_ID !== null ? String(row.OP_CAT_ID) : null,
     name: row.CATEGORY_NAME,
     categoryType: row.CATEGORY_TYPE || 'Inventory',
     description: row.DESCRIPTION,

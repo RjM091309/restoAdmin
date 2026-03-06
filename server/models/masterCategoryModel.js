@@ -55,6 +55,7 @@ class MasterCategoryModel {
 			SELECT
 				IDNo,
 				BRANCH_ID,
+				OP_CAT_ID,
 				CATEGORY_NAME,
 				CATEGORY_TYPE,
 				DESCRIPTION,

@@ -844,6 +844,22 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
                     List View
                   </button>
                 </div>
+                {categoryViewMode === 'select' && (
+                  <div className="w-64 min-w-0">
+                    <Select2
+                      options={typeCards.map((c) => ({
+                        value: c.typeValue,
+                        label: `${c.label} — ${formatCurrency(c.amount)}`,
+                      }))}
+                      value={activeParentCategory || null}
+                      onChange={(val) => {
+                        setActiveParentCategory(val ? String(val) : null);
+                        setSelectedCategoryNameFilter('All Data');
+                      }}
+                      placeholder="Select category type..."
+                    />
+                  </div>
+                )}
               </div>
               <button
                 onClick={openCreate}
@@ -866,9 +882,9 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
               </div>
             </div>
 
-            {/* Category filter: cards row or Select2 (toggle is next to search) */}
+            {/* Category filter: cards row when Grid View; Select2 is in header when List View */}
             <div className="pt-4">
-              {categoryViewMode === 'cards' ? (
+              {categoryViewMode === 'cards' && (
                 <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 scroll-smooth custom-scrollbar">
                   <div className="flex gap-3 flex-nowrap min-w-0">
                     {typeCards.map((card) => {
@@ -909,21 +925,6 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
                       );
                     })}
                   </div>
-                </div>
-              ) : (
-                <div className="max-w-sm">
-                  <Select2
-                    options={typeCards.map((c) => ({
-                      value: c.typeValue,
-                      label: `${c.label} — ${formatCurrency(c.amount)}`,
-                    }))}
-                    value={activeParentCategory || null}
-                    onChange={(val) => {
-                      setActiveParentCategory(val ? String(val) : null);
-                      setSelectedCategoryNameFilter('All Data');
-                    }}
-                    placeholder="Select category type..."
-                  />
                 </div>
               )}
             </div>

@@ -12,6 +12,7 @@ module.exports = [
     require('./billingRoutes'),           // Billing routes
     // Note: branchRoutes is registered separately in app.js at /branch to avoid conflicts
     require('./categoryRoutes'),          // Category routes
+	require('./operationCategoryRoutes'), // Operation category routes
 	require('./masterCategoryRoutes'), // Inventory category routes
 	require('./inventoryRoutes'), // Inventory item routes
     require('./dashboardRoutes'),         // Dashboard routes

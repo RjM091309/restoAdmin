@@ -32,6 +32,7 @@ import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
 import { Expenses } from './components/expenses/Expenses';
+import { ExpensesMock } from './components/expenses/ExpensesMock';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Branches } from './components/users/Branches';
@@ -384,6 +385,7 @@ export default function App() {
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
     if (part === 'sales-analytics') return 'Sales Analytics';
+    if (part === 'expenses-mock') return 'Expenses Mock';
     return part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ');
   });
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
@@ -430,6 +432,7 @@ export default function App() {
       case 'Category': navigate(`/sales-report/category${suffix}`); break;
       case 'Payment type': navigate(`/sales-report/payment-type${suffix}`); break;
       case 'Receipt': navigate(`/sales-report/receipt${suffix}`); break;
+      case 'Expenses Mock': navigate(`/expenses-mock${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };
@@ -621,6 +624,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Expenses selectedBranch={selectedBranch} dateRange={dateRange} />
+                  </motion.div>
+                } />
+
+                <Route path="/expenses-mock" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <ExpensesMock selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
 

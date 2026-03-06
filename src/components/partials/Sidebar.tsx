@@ -187,6 +187,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           active={activeTab === 'Expenses'}
           onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
+        <SidebarItem
+          icon={DollarSign}
+          label="Expenses Mock"
+          active={activeTab === 'Expenses Mock'}
+          onClick={() => { onTabChange('Expenses Mock'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+        />
         {isSpecificBranch && (
           <SidebarItem
             icon={UtensilsCrossed}
