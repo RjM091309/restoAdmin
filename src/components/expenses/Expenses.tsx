@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Plus, Filter, Calendar, Tag, Edit2, Trash2, X, Settings } from 'lucide-react';
+import { Search, Plus, Filter, Calendar, Tag, Edit2, Trash2, X, Settings, LayoutGrid, List } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import Swal from 'sweetalert2';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { Select2 } from '../ui/Select2';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { type Branch } from '../partials/Header';
 import { cn } from '../../lib/utils';
@@ -131,6 +132,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
   const [quickAddExpenseId, setQuickAddExpenseId] = useState<string | null>(null);
   const [quickAddAmount, setQuickAddAmount] = useState('');
   const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [categoryViewMode, setCategoryViewMode] = useState<'cards' | 'select'>('cards');
 
   const isAdmin = user?.permissions === 1;
   const canManage = Boolean(selectedBranch && (String(selectedBranch.id) !== 'all' || isAdmin));
@@ -258,9 +260,10 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
 
   const typeCards = useMemo(() => {
     const preferredOrder = ['Inventory', 'Maintenance', 'Utilities / Bills', 'Salary & Rent', 'Others'];
+    // New types (not in list) go to the front (unahan); known types keep preferred order.
     const orderIndex = (value: string) => {
       const idx = preferredOrder.indexOf(value);
-      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+      return idx === -1 ? -1 : idx; // -1 = unknown = mauna
     };
     const displayLabel = (value: string) => (value === 'Utilities / Bills' ? 'Utilities' : value);
 
@@ -279,7 +282,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
       .sort((a, b) => {
         const ao = orderIndex(a);
         const bo = orderIndex(b);
-        if (ao !== bo) return ao - bo;
+        if (ao !== bo) return ao - bo; // -1 (new) first, then 0,1,2,...
         return a.localeCompare(b);
       })
       .map((typeValue) => ({
@@ -297,6 +300,12 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
       return { active: 'ring-2 ring-brand-utilities/30', hover: 'hover:ring-2 hover:ring-brand-utilities/30' };
     }
     return { active: 'ring-2 ring-brand-primary/20', hover: 'hover:ring-2 hover:ring-brand-primary/20' };
+  };
+
+  const accentBarClassForType = (typeValue: string) => {
+    if (typeValue === 'Maintenance') return 'bg-brand-maintenance';
+    if (typeValue === 'Utilities / Bills') return 'bg-brand-utilities';
+    return 'bg-brand-primary';
   };
 
   const buildNextMonthDescription = (expense: ExpenseRecord) => {
@@ -793,7 +802,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
             className="space-y-8"
           >
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <div className="bg-white p-3 rounded-xl shadow-sm">
                   <Filter size={18} className="text-brand-muted" />
                 </div>
@@ -807,6 +816,34 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
                     className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                   />
                 </div>
+                <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => setCategoryViewMode('cards')}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                      categoryViewMode === 'cards'
+                        ? 'bg-white text-brand-primary shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700',
+                    )}
+                  >
+                    <LayoutGrid size={16} />
+                    Grid View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryViewMode('select')}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                      categoryViewMode === 'select'
+                        ? 'bg-white text-brand-primary shadow-sm'
+                        : 'text-slate-500 hover:text-slate-700',
+                    )}
+                  >
+                    <List size={16} />
+                    List View
+                  </button>
+                </div>
               </div>
               <button
                 onClick={openCreate}
@@ -817,49 +854,78 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
               </button>
             </div>
 
-            <div className="max-h-[280px] overflow-y-auto pr-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-              <div className="bg-brand-primary text-white px-4 py-3 rounded-2xl shadow-sm min-w-0">
-                <p className="text-[11px] sm:text-xs font-medium mb-1 truncate opacity-80">
+            {/* Summary row: always visible */}
+            <div className="mb-4">
+              <div className="bg-brand-primary text-white px-4 py-4 rounded-2xl shadow-sm min-w-0 max-w-md">
+                <p className="text-[11px] sm:text-xs font-medium mb-1 truncate opacity-90">
                   {t('expenses_page.total_expenses')}
                 </p>
                 <h3 className="text-lg sm:text-xl xl:text-2xl font-bold truncate">
                   {formatCurrency(summaryByType.totalAmount)}
                 </h3>
               </div>
+            </div>
 
-              <div className="bg-white px-4 py-3 rounded-2xl shadow-sm min-w-0">
-                <p className="text-brand-muted text-[11px] sm:text-xs font-medium mb-1 truncate">Inventory</p>
-                <h3 className="text-lg sm:text-xl xl:text-2xl font-bold text-brand-text truncate">
-                  {formatCurrency(inventoryTotal)}
-                </h3>
-              </div>
-
-              {typeCards.map((card) => {
-                const ring = ringClassesForType(card.typeValue);
-                const isActive = activeParentCategory === card.typeValue;
-                return (
-                  <div
-                    key={card.typeValue}
-                    className={cn(
-                      'bg-white px-4 py-3 rounded-2xl shadow-sm cursor-pointer transition-all min-w-0',
-                      isActive ? ring.active : ring.hover,
-                    )}
-                    onClick={() => {
-                      setActiveParentCategory((prev) => (prev === card.typeValue ? null : card.typeValue));
+            {/* Category filter: cards row or Select2 (toggle is next to search) */}
+            <div className="pt-4">
+              {categoryViewMode === 'cards' ? (
+                <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 scroll-smooth custom-scrollbar">
+                  <div className="flex gap-3 flex-nowrap min-w-0">
+                    {typeCards.map((card) => {
+                      const ring = ringClassesForType(card.typeValue);
+                      const isActive = activeParentCategory === card.typeValue;
+                      return (
+                        <button
+                          type="button"
+                          key={card.typeValue}
+                          className={cn(
+                            'relative bg-white rounded-2xl cursor-pointer flex-shrink-0 w-[148px] sm:w-[168px] min-h-[80px] flex flex-col justify-center text-left py-3.5 transition-all duration-200 ease-out',
+                            'shadow-sm hover:shadow-md active:scale-[0.98]',
+                            'border border-slate-100/80 hover:border-slate-200',
+                            isActive && 'shadow-md border-brand-primary/30 bg-brand-primary/[0.04]',
+                            isActive ? 'pl-5 pr-4' : 'px-4',
+                            isActive ? ring.active : ring.hover,
+                          )}
+                          onClick={() => {
+                            setActiveParentCategory((prev) => (prev === card.typeValue ? null : card.typeValue));
+                            setSelectedCategoryNameFilter('All Data');
+                          }}
+                        >
+                          {isActive && (
+                            <span
+                              className={cn(
+                                'absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 rounded-full opacity-90',
+                                accentBarClassForType(card.typeValue),
+                              )}
+                            />
+                          )}
+                          <span className="text-slate-500 text-[11px] sm:text-xs font-semibold uppercase tracking-wider truncate">
+                            {card.label}
+                          </span>
+                          <span className="text-slate-900 text-base sm:text-lg font-bold tracking-tight truncate mt-0.5">
+                            {formatCurrency(card.amount)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="max-w-sm">
+                  <Select2
+                    options={typeCards.map((c) => ({
+                      value: c.typeValue,
+                      label: `${c.label} — ${formatCurrency(c.amount)}`,
+                    }))}
+                    value={activeParentCategory || null}
+                    onChange={(val) => {
+                      setActiveParentCategory(val ? String(val) : null);
                       setSelectedCategoryNameFilter('All Data');
                     }}
-                  >
-                    <p className="text-brand-muted text-[11px] sm:text-xs font-medium mb-1 truncate">
-                      {card.label}
-                    </p>
-                    <h3 className="text-lg sm:text-xl xl:text-2xl font-bold text-brand-text truncate">
-                      {formatCurrency(card.amount)}
-                    </h3>
-                  </div>
-                );
-              })}
-            </div>
+                    placeholder="Select category type..."
+                  />
+                </div>
+              )}
             </div>
 
             {activeParentCategory && (
