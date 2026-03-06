@@ -335,7 +335,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
         <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="text-sm font-black tracking-wide text-brand-text uppercase">Operation</div>
-          <div className="text-xs text-brand-muted mt-1">Operation muna, then categories.</div>
+          <div className="text-xs text-brand-muted mt-1">Operation first, then categories.</div>
         </div>
 
         <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
