@@ -79,3 +79,71 @@ export const getOperationCategories = async (branchId?: string | null): Promise<
   return rows.map(mapOperationCategory);
 };
 
+export type CreateOperationCategoryPayload = {
+  branchId?: string | null;
+  name: string;
+  description?: string | null;
+  active?: boolean;
+};
+
+export const createOperationCategory = async (
+  payload: CreateOperationCategoryPayload,
+): Promise<number> => {
+  const response = await fetch(buildUrl('/operation-category'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      BRANCH_ID: payload.branchId ?? null,
+      NAME: payload.name,
+      DESCRIPTION: payload.description ?? null,
+      ACTIVE: payload.active ?? true,
+    }),
+  });
+
+  const json = (await response.json()) as ApiResponse<{ id: number }>;
+  if (!response.ok || !json.success) {
+    throw new Error(json.error || 'Failed to create operation category');
+  }
+
+  return json.data?.id ?? 0;
+};
+
+export type UpdateOperationCategoryPayload = {
+  name: string;
+  description?: string | null;
+};
+
+export const updateOperationCategory = async (
+  id: string,
+  payload: UpdateOperationCategoryPayload,
+): Promise<void> => {
+  const response = await fetch(buildUrl(`/operation-category/${id}`), {
+    method: 'PUT',
+    credentials: 'include',
+    headers: authHeaders(),
+    body: JSON.stringify({
+      NAME: payload.name,
+      DESCRIPTION: payload.description ?? null,
+    }),
+  });
+
+  const json = (await response.json()) as ApiResponse<null>;
+  if (!response.ok || !json.success) {
+    throw new Error(json.error || 'Failed to update operation category');
+  }
+};
+
+export const deleteOperationCategory = async (id: string): Promise<void> => {
+  const response = await fetch(buildUrl(`/operation-category/${id}`), {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: authHeaders(),
+  });
+
+  const json = (await response.json()) as ApiResponse<null>;
+  if (!response.ok || !json.success) {
+    throw new Error(json.error || 'Failed to delete operation category');
+  }
+};
+

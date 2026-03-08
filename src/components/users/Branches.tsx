@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Search, Loader2, Plus, Edit2, Trash2, MapPin, Building2, Hash } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { SidePanel } from '../ui/SidePanel';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -36,7 +37,7 @@ export const Branches: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchRow | null>(null);
@@ -92,13 +93,13 @@ export const Branches: React.FC = () => {
     setFilteredBranches(filtered);
   }, [searchQuery, branches]);
 
-  const handleOpenAddModal = () => {
+  const handleOpenAddPanel = () => {
     setEditingBranch(null);
     setFormData({ code: '', name: '', address: '', phone: '' });
-    setIsModalOpen(true);
+    setIsPanelOpen(true);
   };
 
-  const handleOpenEditModal = (branch: BranchRow) => {
+  const handleOpenEditPanel = (branch: BranchRow) => {
     setEditingBranch(branch);
     setFormData({
       code: branch.code,
@@ -106,7 +107,7 @@ export const Branches: React.FC = () => {
       address: branch.address === '—' ? '' : branch.address,
       phone: branch.phone === '—' ? '' : branch.phone,
     });
-    setIsModalOpen(true);
+    setIsPanelOpen(true);
   };
 
   const handleOpenDeleteModal = (branch: BranchRow) => {
@@ -145,7 +146,7 @@ export const Branches: React.FC = () => {
         throw new Error(data?.error || data?.message || `Failed to ${editingBranch ? 'update' : 'create'} branch (${res.status})`);
       }
       toast.success(editingBranch ? t('manage_branches.toast.updated_success') : t('manage_branches.toast.created_success'));
-      setIsModalOpen(false);
+      setIsPanelOpen(false);
       fetchBranches();
     } catch (e: any) {
       toast.error(e?.message || t('manage_branches.toast.save_error'));
@@ -214,7 +215,7 @@ export const Branches: React.FC = () => {
       render: (b) => (
         <div className="flex justify-end items-center gap-2">
           <button
-            onClick={() => handleOpenEditModal(b)}
+            onClick={() => handleOpenEditPanel(b)}
             className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
             title={t('manage_branches.edit_branch')}
           >
@@ -290,7 +291,7 @@ export const Branches: React.FC = () => {
                 />
               </div>
               <button
-                onClick={handleOpenAddModal}
+                onClick={handleOpenAddPanel}
                 className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
               >
                 <Plus size={18} />
@@ -318,20 +319,19 @@ export const Branches: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <Modal
-        isOpen={isModalOpen}
+      <SidePanel
+        isOpen={isPanelOpen}
         onClose={() => {
           if (!isSubmitting) {
-            setIsModalOpen(false);
+            setIsPanelOpen(false);
             setFormData({ code: '', name: '', address: '', phone: '' });
           }
         }}
         title={editingBranch ? t('manage_branches.edit_branch') : t('manage_branches.add_new_branch')}
-        maxWidth="lg"
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => setIsPanelOpen(false)}
               disabled={isSubmitting}
               className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
             >
@@ -349,7 +349,7 @@ export const Branches: React.FC = () => {
         }
       >
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-5">
             <div className="space-y-3">
               <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
                 {t('manage_branches.code')} *
@@ -415,7 +415,7 @@ export const Branches: React.FC = () => {
             />
           </div>
         </form>
-      </Modal>
+      </SidePanel>
 
       <Modal
         isOpen={isDeleteModalOpen}

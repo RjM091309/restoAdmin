@@ -3,9 +3,20 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { type ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { type Branch } from '../partials/Header';
-import { getOperationCategories } from '../../services/operationCategoryService';
-import { getAllMasterCategories, type InventoryCategory } from '../../services/inventoryService';
-import { getExpenses, type ExpenseRecord } from '../../services/expenseService';
+import { toast } from 'sonner';
+import { getOperationCategories, createOperationCategory, updateOperationCategory, deleteOperationCategory } from '../../services/operationCategoryService';
+import {
+  getAllMasterCategories,
+  type InventoryCategory,
+  createInventoryCategory,
+  updateInventoryCategory,
+  deleteInventoryCategory,
+  type CreateInventoryCategoryPayload,
+} from '../../services/inventoryService';
+import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteExpense } from '../../services/expenseService';
+import { SidePanel } from '../ui/SidePanel';
+import { Modal } from '../ui/Modal';
+import { Edit2, Trash2, Plus, Loader2, Check, X } from 'lucide-react';
 
 type ExpensesMockProps = {
   selectedBranch: Branch | null;
@@ -18,12 +29,14 @@ type ExpensesMockProps = {
 type Operation = {
   id: string;
   name: string;
+  description?: string | null;
 };
 
 type Category = {
   id: string;
   operationId: string;
   name: string;
+  masterCategoryId?: string;
 };
 
 type ExpenseItem = {
@@ -38,7 +51,7 @@ type ExpenseItem = {
 const ITEMS_PER_PAGE = 50;
 
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(
+  new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(
     Number.isFinite(value) ? value : 0,
   );
 
@@ -87,12 +100,39 @@ const MOCK_ITEMS: ExpenseItem[] = [
   { id: 'it-24', categoryId: 'Seafood', date: '2026-03-04', item: 'Tilapia', amount: 680, category: 'Seafood' },
 ];
 
-export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
+export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) => {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [masterCategories, setMasterCategories] = useState<InventoryCategory[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [branchId, setBranchId] = useState<string | null>(null);
+
+  const [isOperationPanelOpen, setIsOperationPanelOpen] = useState(false);
+  const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingOperation, setEditingOperation] = useState<Operation | null>(null);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [operationToDelete, setOperationToDelete] = useState<Operation | null>(null);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+  const [isExpensePanelOpen, setIsExpensePanelOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
+  const [expenseToDelete, setExpenseToDelete] = useState<ExpenseRecord | null>(null);
+  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '' });
+  const [addingAmountForId, setAddingAmountForId] = useState<string | null>(null);
+  const [addingAmountValue, setAddingAmountValue] = useState('');
+
+  const [operationForm, setOperationForm] = useState<{ name: string; description: string }>({
+    name: '',
+    description: '',
+  });
+
+  const [categoryForm, setCategoryForm] = useState<{ name: string; description: string }>({
+    name: '',
+    description: '',
+  });
+
+  const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
   const grandTotalExpenses = useMemo(
     () => expenses.reduce((sum, row) => sum + row.expAmount, 0),
@@ -105,26 +145,53 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
 
     const loadOperations = async () => {
       try {
-        // Branch comes from URL via Header; for now rely on backend _resolveBranchId to read from session/query
-        const params = new URLSearchParams(window.location.search);
-        const branchIdFromUrl = params.get('branchId') || null;
+        if (!isSpecificBranch) {
+          setOperations([]);
+          setMasterCategories([]);
+          setExpenses([]);
+          return;
+        }
+        const resolvedBranchId =
+          !selectedBranch || String(selectedBranch.id) === 'all' ? '' : String(selectedBranch.id);
+
+        if (!resolvedBranchId) {
+          setOperations([]);
+          setMasterCategories([]);
+          setExpenses([]);
+          return;
+        }
+
+        if (isMounted) {
+          setBranchId(resolvedBranchId);
+        }
 
         const [apiOps, apiCats, apiExpenses] = await Promise.all([
-          getOperationCategories(branchIdFromUrl),
-          getAllMasterCategories(branchIdFromUrl || undefined),
-          getExpenses(branchIdFromUrl || undefined),
+          getOperationCategories(resolvedBranchId),
+          getAllMasterCategories(resolvedBranchId),
+          getExpenses(resolvedBranchId),
         ]);
         if (!isMounted) return;
 
-        // Directly use values from operation_category table
-        const mapped: Operation[] = apiOps.map((row) => ({
+        // Ensure data is strictly scoped to the currently selected branch
+        const filteredOps = apiOps.filter(
+          (row) => row.branchId != null && String(row.branchId) === resolvedBranchId,
+        );
+        const mapped: Operation[] = filteredOps.map((row) => ({
           id: String(row.id),
           name: row.name,
+          description: row.description ?? null,
         }));
 
+        const filteredCategories = apiCats.filter(
+          (cat) => String(cat.branchId) === resolvedBranchId,
+        );
+        const filteredExpenses = apiExpenses.filter(
+          (exp) => String(exp.branchId) === resolvedBranchId,
+        );
+
         setOperations(mapped);
-        setMasterCategories(apiCats);
-        setExpenses(apiExpenses);
+        setMasterCategories(filteredCategories);
+        setExpenses(filteredExpenses);
         setSelectedOperationId((prev) => prev && mapped.some((op) => op.id === prev) ? prev : null);
       } catch (error) {
         console.error('Failed to load operation categories:', error);
@@ -139,7 +206,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isSpecificBranch, selectedBranch?.id]);
 
   const selectedOperation = useMemo(() => {
     if (!selectedOperationId) return null;
@@ -152,7 +219,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
     const cats = masterCategories.filter(
       (cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId,
     );
-    const byType = new Map<string, { id: string; label: string }>();
+    const byType = new Map<string, { id: string; label: string; masterCategoryId: string }>();
 
     cats.forEach((cat) => {
       const typeLabel = (cat.categoryType || cat.name || '').trim();
@@ -161,6 +228,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
         byType.set(typeLabel, {
           id: typeLabel,
           label: typeLabel,
+          masterCategoryId: cat.id,
         });
       }
     });
@@ -169,6 +237,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
       id: entry.id,
       operationId: selectedOperationId,
       name: entry.label,
+      masterCategoryId: entry.masterCategoryId,
     }));
   }, [masterCategories, selectedOperationId]);
 
@@ -239,20 +308,89 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
       },
       {
         header: 'Amount',
-        render: (row) => <span className="font-semibold">{formatCurrency(row.expAmount)}</span>,
+        render: (row) => <span>{new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number.isFinite(row.expAmount) ? row.expAmount : 0)}</span>,
         className: 'text-right',
         headerClassName: 'text-right',
         cellClassName: 'text-right',
       },
       {
-        header: 'Category',
+        header: 'Action',
+        className: 'text-right',
+        headerClassName: 'text-right',
+        cellClassName: 'text-right',
         render: (row) => {
-          const cat = masterCategories.find((m) => m.id === row.masterCatId);
-          return <span>{cat ? (cat.categoryType || cat.name) : ''}</span>;
+          const isAdding = addingAmountForId === row.id;
+          return (
+            <div className="flex items-center justify-end gap-3">
+              {isAdding ? (
+                <>
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    value={addingAmountValue}
+                    onChange={(e) => setAddingAmountValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveSameItemAmount(row);
+                      if (e.key === 'Escape') handleCancelAddSameItemAmount();
+                    }}
+                    className="w-28 px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
+                    placeholder="Amount"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveSameItemAmount(row)}
+                    disabled={isSubmitting || addingAmountValue.trim() === '' || !Number.isFinite(Number(addingAmountValue))}
+                    className="p-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                    aria-label="Save"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelAddSameItemAmount}
+                    disabled={isSubmitting}
+                    className="p-1.5 rounded-lg text-brand-muted hover:bg-gray-100 cursor-pointer disabled:cursor-not-allowed"
+                    aria-label="Cancel"
+                  >
+                    <X size={14} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleStartAddSameItemAmount(row); }}
+                    className="p-1.5 rounded-lg text-brand-muted hover:text-green-600 hover:bg-green-50 transition-colors cursor-pointer"
+                    aria-label="Add same item with new amount"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleOpenEditExpense(row); }}
+                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                    aria-label="Edit expense"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setExpenseToDelete(row); }}
+                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                    aria-label="Delete expense"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          );
         },
       },
     ],
-    [masterCategories],
+    [masterCategories, addingAmountForId, addingAmountValue, isSubmitting],
   );
 
   const handleSelectOperation = (opId: string) => {
@@ -262,6 +400,301 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
 
   const handleSelectCategory = (catId: string) => {
     setSelectedCategoryId(catId);
+  };
+
+  const handleOpenAddOperation = () => {
+    setEditingOperation(null);
+    setOperationForm({ name: '', description: '' });
+    setIsOperationPanelOpen(true);
+  };
+
+  const handleOpenEditOperation = (e: React.MouseEvent, op: Operation) => {
+    e.stopPropagation();
+    setEditingOperation(op);
+    setOperationForm({ name: op.name, description: op.description ?? '' });
+    setIsOperationPanelOpen(true);
+  };
+
+  const handleOpenAddCategory = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '', description: '' });
+    setIsCategoryPanelOpen(true);
+  };
+
+  const handleOpenEditCategory = (e: React.MouseEvent, cat: Category) => {
+    e.stopPropagation();
+    if (!cat.masterCategoryId) return;
+    const mc = masterCategories.find((m) => m.id === cat.masterCategoryId);
+    setEditingCategory(cat);
+    setCategoryForm({
+      name: mc ? (mc.categoryType || mc.name || cat.name) : cat.name,
+      description: mc?.description ?? '',
+    });
+    setIsCategoryPanelOpen(true);
+  };
+
+  const handleCloseOperationPanel = () => {
+    if (!isSubmitting) {
+      setIsOperationPanelOpen(false);
+      setEditingOperation(null);
+      setOperationForm({ name: '', description: '' });
+    }
+  };
+
+  const handleCloseCategoryPanel = () => {
+    if (!isSubmitting) {
+      setIsCategoryPanelOpen(false);
+      setEditingCategory(null);
+      setCategoryForm({ name: '', description: '' });
+    }
+  };
+
+  const handleOpenAddExpense = () => {
+    setEditingExpense(null);
+    setExpenseForm({ expDesc: '', expAmount: '', expSource: '' });
+    setIsExpensePanelOpen(true);
+  };
+
+  const handleOpenEditExpense = (row: ExpenseRecord) => {
+    setEditingExpense(row);
+    setExpenseForm({
+      expDesc: row.expDesc ?? '',
+      expAmount: row.expAmount ? String(row.expAmount) : '',
+      expSource: row.expSource ?? '',
+    });
+    setIsExpensePanelOpen(true);
+  };
+
+  const handleCloseExpensePanel = () => {
+    if (!isSubmitting) {
+      setIsExpensePanelOpen(false);
+      setEditingExpense(null);
+      setExpenseForm({ expDesc: '', expAmount: '', expSource: '' });
+    }
+  };
+
+  const handleSubmitExpense = async () => {
+    if (!branchId || !selectedCategory?.masterCategoryId) return;
+    const amount = Number(expenseForm.expAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error('Enter a valid amount');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      if (editingExpense) {
+        await updateExpense(editingExpense.id, {
+          masterCatId: editingExpense.masterCatId ?? selectedCategory.masterCategoryId,
+          expDesc: expenseForm.expDesc.trim() || null,
+          expAmount: amount,
+          expSource: expenseForm.expSource.trim() || null,
+        });
+        const list = await getExpenses(branchId);
+        const filtered = list.filter((e) => String(e.branchId) === branchId);
+        setExpenses(filtered);
+        handleCloseExpensePanel();
+        toast.success('Expense updated');
+      } else {
+        await createExpense({
+          branchId,
+          masterCatId: selectedCategory.masterCategoryId,
+          expDesc: expenseForm.expDesc.trim() || null,
+          expAmount: amount,
+          expSource: expenseForm.expSource.trim() || null,
+        });
+        const list = await getExpenses(branchId);
+        const filtered = list.filter((e) => String(e.branchId) === branchId);
+        setExpenses(filtered);
+        handleCloseExpensePanel();
+        toast.success('Expense added');
+      }
+    } catch (error) {
+      console.error('Failed to save expense:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmDeleteExpense = async () => {
+    if (!expenseToDelete) return;
+    setIsSubmitting(true);
+    try {
+      await deleteExpense(expenseToDelete.id);
+      const list = await getExpenses(branchId || undefined);
+      const filtered = branchId ? list.filter((e) => String(e.branchId) === branchId) : list;
+      setExpenses(filtered);
+      setExpenseToDelete(null);
+      toast.success('Expense deleted');
+    } catch (error) {
+      console.error('Failed to delete expense:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStartAddSameItemAmount = (row: ExpenseRecord) => {
+    setAddingAmountForId(row.id);
+    setAddingAmountValue(String(row.expAmount ?? ''));
+  };
+
+  const handleCancelAddSameItemAmount = () => {
+    setAddingAmountForId(null);
+    setAddingAmountValue('');
+  };
+
+  const handleSaveSameItemAmount = async (row: ExpenseRecord) => {
+    const amount = Number(addingAmountValue);
+    if (!branchId || !selectedCategory?.masterCategoryId || !Number.isFinite(amount) || amount < 0) {
+      toast.error('Enter a valid amount');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await createExpense({
+        branchId,
+        masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
+        expDesc: row.expDesc ?? row.expName ?? null,
+        expAmount: amount,
+        expSource: row.expSource ?? null,
+      });
+      const list = await getExpenses(branchId);
+      const filtered = list.filter((e) => String(e.branchId) === branchId);
+      setExpenses(filtered);
+      setAddingAmountForId(null);
+      setAddingAmountValue('');
+      toast.success('Amount added');
+    } catch (error) {
+      console.error('Failed to add amount:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to add');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitOperation = async () => {
+    if (!operationForm.name.trim()) return;
+    setIsSubmitting(true);
+    try {
+      if (editingOperation) {
+        await updateOperationCategory(editingOperation.id, {
+          name: operationForm.name.trim(),
+          description: operationForm.description.trim() || null,
+        });
+        setOperations((prev) =>
+          prev.map((op) =>
+            op.id === editingOperation.id
+              ? { ...op, name: operationForm.name.trim(), description: operationForm.description.trim() || null }
+              : op,
+          ),
+        );
+        handleCloseOperationPanel();
+        toast.success('Operation updated');
+      } else {
+        const newId = await createOperationCategory({
+          branchId,
+          name: operationForm.name.trim(),
+          description: operationForm.description.trim() || null,
+          active: true,
+        });
+        setOperations((prev) => [
+          ...prev,
+          {
+            id: String(newId),
+            name: operationForm.name.trim(),
+            description: operationForm.description.trim() || null,
+          },
+        ]);
+        handleCloseOperationPanel();
+        toast.success('Operation created');
+      }
+    } catch (error) {
+      console.error('Failed to save operation category:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmitCategory = async () => {
+    if (!categoryForm.name.trim() || !branchId) return;
+
+    setIsSubmitting(true);
+    try {
+      if (editingCategory?.masterCategoryId) {
+        await updateInventoryCategory(editingCategory.masterCategoryId, {
+          name: categoryForm.name.trim(),
+          categoryType: categoryForm.name.trim(),
+          description: categoryForm.description.trim() || null,
+          icon: null,
+        });
+        // Refresh data so categories list updates
+        const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
+        const filtered = apiCats.filter((c) => String(c.branchId) === branchId);
+        setMasterCategories(filtered);
+        handleCloseCategoryPanel();
+        toast.success('Category updated');
+      } else {
+        const payload: CreateInventoryCategoryPayload = {
+          branchId,
+          name: categoryForm.name.trim(),
+          categoryType: categoryForm.name.trim(),
+          description: categoryForm.description.trim() || null,
+          icon: null,
+        };
+        await createInventoryCategory(payload);
+        const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
+        const filtered = apiCats.filter((c) => String(c.branchId) === branchId);
+        setMasterCategories(filtered);
+        handleCloseCategoryPanel();
+        toast.success('Category created');
+      }
+    } catch (error) {
+      console.error('Failed to save category:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmDeleteOperation = async () => {
+    if (!operationToDelete) return;
+    setIsSubmitting(true);
+    try {
+      await deleteOperationCategory(operationToDelete.id);
+      setOperations((prev) => prev.filter((op) => op.id !== operationToDelete.id));
+      if (selectedOperationId === operationToDelete.id) {
+        setSelectedOperationId(null);
+        setSelectedCategoryId(null);
+      }
+      setOperationToDelete(null);
+      toast.success('Operation deleted');
+    } catch (error) {
+      console.error('Failed to delete operation:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const confirmDeleteCategory = async () => {
+    if (!categoryToDelete?.masterCategoryId) return;
+    setIsSubmitting(true);
+    try {
+      await deleteInventoryCategory(categoryToDelete.masterCategoryId);
+      const [apiCats] = await Promise.all([getAllMasterCategories(branchId || undefined)]);
+      const filtered = branchId ? apiCats.filter((c) => String(c.branchId) === branchId) : apiCats;
+      setMasterCategories(filtered);
+      if (selectedCategoryId === categoryToDelete.id) setSelectedCategoryId(null);
+      setCategoryToDelete(null);
+      toast.success('Category deleted');
+    } catch (error) {
+      console.error('Failed to delete category:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const shouldPaginate = itemsForCategory.length > ITEMS_PER_PAGE;
@@ -282,6 +715,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
   React.useEffect(() => {
     setCurrentPage(1);
   }, [selectedCategoryId]);
+
+  if (!isSpecificBranch) {
+    return (
+      <div className="pt-6">
+        <div className="bg-white rounded-2xl shadow-sm p-6 text-brand-muted font-bold">
+          Please select a specific branch (not “All Branches”) to manage expenses.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-6 overflow-x-hidden">
@@ -334,8 +777,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
       <div className="flex gap-6 items-stretch min-h-[560px]">
         <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100">
-          <div className="text-sm font-black tracking-wide text-brand-text uppercase">Operation</div>
-          <div className="text-xs text-brand-muted mt-1">Operation first, then categories.</div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Operation</div>
+              <div className="text-xs text-brand-muted mt-1">Operation first, then categories.</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenAddOperation}
+              className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
+              aria-label="Add operation"
+            >
+              +
+            </button>
+          </div>
         </div>
 
         <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
@@ -345,29 +800,55 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
               (cat) => cat.opCategoryId != null && cat.opCategoryId === op.id,
             ).length;
             return (
-              <button
+              <div
                 key={op.id}
-                type="button"
-                onClick={() => handleSelectOperation(op.id)}
                 className={cn(
-                  'w-full text-left px-4 py-3 rounded-xl transition-colors',
-                  active
-                    ? 'bg-brand-primary/10 text-brand-primary'
-                    : 'hover:bg-brand-bg text-brand-text',
+                  'group flex items-center rounded-xl transition-colors relative',
+                  active ? 'bg-brand-primary/10' : 'hover:bg-brand-bg',
                 )}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className={cn('font-bold', active ? '' : 'font-semibold')}>{op.name}</span>
-                  <span
-                    className={cn(
-                      'text-[11px] px-2 py-0.5 rounded-full',
-                      active ? 'bg-brand-primary/15 text-brand-primary' : 'bg-gray-100 text-brand-muted',
-                    )}
+                <button
+                  type="button"
+                  onClick={() => handleSelectOperation(op.id)}
+                  className={cn(
+                    'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
+                    active ? 'text-brand-primary' : 'text-brand-text',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className={cn('font-bold truncate', active ? '' : 'font-semibold')}>{op.name}</span>
+                    <span
+                      className={cn(
+                        'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                        active ? 'bg-brand-primary/15 text-brand-primary' : 'bg-gray-100 text-brand-muted',
+                      )}
+                    >
+                      {categoryCount}
+                    </span>
+                  </div>
+                </button>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={(e) => handleOpenEditOperation(e, op)}
+                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                    aria-label="Edit operation"
                   >
-                    {categoryCount}
-                  </span>
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOperationToDelete(op);
+                    }}
+                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                    aria-label="Delete operation"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -375,8 +856,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
 
       <section className="w-[320px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100">
-          <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category</div>
-          <div className="text-xs text-brand-muted mt-1">Select a category to show its items.</div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category</div>
+              <div className="text-xs text-brand-muted mt-1">Select a category to show its items.</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenAddCategory}
+              className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              aria-label="Add category"
+              disabled={!selectedOperationId}
+            >
+              +
+            </button>
+          </div>
         </div>
 
         <div className="p-2 flex-1 min-h-0 overflow-auto overflow-x-hidden custom-scrollbar relative">
@@ -420,29 +914,57 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
                       (exp) => exp.masterCatId != null && relatedMasterIds.has(exp.masterCatId),
                     ).length;
                     return (
-                      <button
+                      <div
                         key={cat.id}
-                        type="button"
-                        onClick={() => handleSelectCategory(cat.id)}
                         className={cn(
-                          'w-full text-left px-4 py-3 rounded-xl transition-colors',
-                          active
-                            ? 'bg-brand-orange/10 text-brand-utilities'
-                            : 'hover:bg-brand-bg text-brand-text',
+                          'group flex items-center rounded-xl transition-colors relative',
+                          active ? 'bg-brand-orange/10' : 'hover:bg-brand-bg',
                         )}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className={cn('font-semibold', active ? 'font-bold' : '')}>{cat.name}</span>
-                          <span
-                            className={cn(
-                              'text-[11px] px-2 py-0.5 rounded-full',
-                              active ? 'bg-brand-orange/15 text-brand-utilities' : 'bg-gray-100 text-brand-muted',
-                            )}
-                          >
-                            {expenseCount}
-                          </span>
-                        </div>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectCategory(cat.id)}
+                          className={cn(
+                            'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
+                            active ? 'text-brand-utilities' : 'text-brand-text',
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className={cn('truncate', active ? 'font-semibold' : 'font-normal')}>{cat.name}</span>
+                            <span
+                              className={cn(
+                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                active ? 'bg-brand-orange/15 text-brand-utilities' : 'bg-gray-100 text-brand-muted',
+                              )}
+                            >
+                              {expenseCount}
+                            </span>
+                          </div>
+                        </button>
+                        {cat.masterCategoryId && (
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenEditCategory(e, cat)}
+                              className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                              aria-label="Edit category"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCategoryToDelete(cat);
+                              }}
+                              className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                              aria-label="Delete category"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     );
                   })
                 )}
@@ -468,6 +990,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
                   )}
                 </div>
               </div>
+              {selectedCategoryId && (
+                <button
+                  type="button"
+                  onClick={handleOpenAddExpense}
+                  className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
+                >
+                  <Plus size={16} />
+                  New Item
+                </button>
+              )}
             </div>
           </div>
 
@@ -565,7 +1097,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
                               type="button"
                               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                               disabled={currentPage === 1}
-                              className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                              className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
                             >
                               Prev
                             </button>
@@ -576,7 +1108,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
                               type="button"
                               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                               disabled={currentPage === totalPages}
-                              className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+                              className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
                             >
                               Next
                             </button>
@@ -592,6 +1124,280 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = () => {
         </div>
       </section>
       </div>
+
+      {/* Add/Edit Operation Side Panel */}
+      <SidePanel
+        isOpen={isOperationPanelOpen}
+        onClose={handleCloseOperationPanel}
+        title={editingOperation ? 'Edit Operation' : 'Add Operation'}
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={handleCloseOperationPanel}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              disabled={isSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitOperation}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              disabled={isSubmitting || !operationForm.name.trim()}
+            >
+              {isSubmitting ? 'Saving...' : editingOperation ? 'Update' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Name</label>
+            <input
+              type="text"
+              value={operationForm.name}
+              onChange={(e) => setOperationForm((prev) => ({ ...prev, name: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              placeholder="Operation name"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Description</label>
+            <textarea
+              value={operationForm.description}
+              onChange={(e) => setOperationForm((prev) => ({ ...prev, description: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all min-h-[80px]"
+              placeholder="Optional description"
+            />
+          </div>
+        </div>
+      </SidePanel>
+
+      {/* Add/Edit Category Side Panel */}
+      <SidePanel
+        isOpen={isCategoryPanelOpen}
+        onClose={handleCloseCategoryPanel}
+        title={editingCategory ? 'Edit Category' : 'Add Category'}
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={handleCloseCategoryPanel}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              disabled={isSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitCategory}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+              disabled={isSubmitting || !categoryForm.name.trim() || !branchId}
+            >
+              {isSubmitting ? 'Saving...' : editingCategory ? 'Update' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Category name</label>
+            <input
+              type="text"
+              value={categoryForm.name}
+              onChange={(e) => setCategoryForm((prev) => ({ ...prev, name: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              placeholder="Category name"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Description</label>
+            <textarea
+              value={categoryForm.description}
+              onChange={(e) => setCategoryForm((prev) => ({ ...prev, description: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all min-h-[80px]"
+              placeholder="Optional description"
+            />
+          </div>
+        </div>
+      </SidePanel>
+
+      {/* Delete Operation Confirmation */}
+      <Modal
+        isOpen={!!operationToDelete}
+        onClose={() => !isSubmitting && setOperationToDelete(null)}
+        title="Delete Operation"
+        maxWidth="sm"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setOperationToDelete(null)}
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteOperation}
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-brand-muted text-sm">
+            Are you sure you want to delete the operation <span className="font-bold text-brand-text">{operationToDelete?.name}</span>?
+            This will not delete its categories or expense records.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Delete Category Confirmation */}
+      <Modal
+        isOpen={!!categoryToDelete}
+        onClose={() => !isSubmitting && setCategoryToDelete(null)}
+        title="Delete Category"
+        maxWidth="sm"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setCategoryToDelete(null)}
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteCategory}
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-brand-muted text-sm">
+            Are you sure you want to delete the category <span className="font-bold text-brand-text">{categoryToDelete?.name}</span>?
+            Expense entries under this category will remain but may show as uncategorized.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Add/Edit Expense Side Panel */}
+      <SidePanel
+        isOpen={isExpensePanelOpen}
+        onClose={handleCloseExpensePanel}
+        title={editingExpense ? 'Edit Expense' : 'Add Expense'}
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={handleCloseExpensePanel}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              disabled={isSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitExpense}
+              disabled={isSubmitting || expenseForm.expAmount.trim() === '' || !Number.isFinite(Number(expenseForm.expAmount))}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isSubmitting && <Loader2 size={16} className="animate-spin" />}
+              {editingExpense ? 'Update' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Item / Description</label>
+            <input
+              type="text"
+              value={expenseForm.expDesc}
+              onChange={(e) => setExpenseForm((prev) => ({ ...prev, expDesc: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              placeholder="Item or description"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Amount *</label>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={expenseForm.expAmount}
+              onChange={(e) => setExpenseForm((prev) => ({ ...prev, expAmount: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              placeholder="0.00"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Source (optional)</label>
+            <input
+              type="text"
+              value={expenseForm.expSource}
+              onChange={(e) => setExpenseForm((prev) => ({ ...prev, expSource: e.target.value }))}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              placeholder="e.g. receipt, vendor"
+            />
+          </div>
+        </div>
+      </SidePanel>
+
+      {/* Delete Expense Confirmation */}
+      <Modal
+        isOpen={!!expenseToDelete}
+        onClose={() => !isSubmitting && setExpenseToDelete(null)}
+        title="Delete Expense"
+        maxWidth="sm"
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setExpenseToDelete(null)}
+              disabled={isSubmitting}
+              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmDeleteExpense}
+              disabled={isSubmitting}
+              className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 shadow-lg shadow-red-500/30 hover:bg-red-600 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isSubmitting && <Loader2 size={16} className="animate-spin" />}
+              {isSubmitting ? 'Deleting...' : 'Delete'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-brand-muted text-sm">
+            Are you sure you want to delete this expense?
+            {expenseToDelete && (
+              <>
+                {' '}
+                <span className="font-bold text-brand-text">{expenseToDelete.expDesc || expenseToDelete.expName}</span>
+                {' '}
+                ({formatCurrency(expenseToDelete.expAmount)})
+              </>
+            )}
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 };
