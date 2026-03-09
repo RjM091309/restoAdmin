@@ -770,7 +770,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 {formatCurrency(grandTotalExpenses)}
               </div>
               <div className="text-xs text-brand-muted mt-1">
-                All operations
+                All Category -1
               </div>
             </div>
             <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
@@ -789,14 +789,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               <div className="text-xs text-brand-muted mt-1">
                 {selectedCategory ? (
                   <>
-                    Category: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
+                    Category -2: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
                   </>
                 ) : selectedOperation ? (
                   <>
-                    Operation: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
+                    Category -1: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
                   </>
                 ) : (
-                  'Select an operation or category'
+                  'Select a Category -1 or Category -2'
                 )}
               </div>
             </div>
@@ -813,7 +813,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -1</div>
-              <div className="text-xs text-brand-muted mt-1">Operation first, then categories.</div>
+              <div className="text-xs text-brand-muted mt-1">Category -1 first, then Category -2.</div>
             </div>
             <button
               type="button"
@@ -869,17 +869,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                   >
                     <Edit2 size={14} />
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOperationToDelete(op);
-                    }}
-                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                    aria-label="Delete operation"
-                  >
-                    <Trash2 size={14} />
-                  </button>
                 </div>
               </div>
             );
@@ -892,7 +881,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -2</div>
-              <div className="text-xs text-brand-muted mt-1">Select a category to show its items.</div>
+              <div className="text-xs text-brand-muted mt-1">Select a Category -2 to show its items.</div>
             </div>
             <button
               type="button"
@@ -917,7 +906,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="px-4 py-6 text-sm text-brand-muted"
               >
-                Select an operation first.
+                Select a Category -1 first.
               </motion.div>
             ) : (
               <motion.div
@@ -929,7 +918,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 className="space-y-1"
               >
                 {categoriesForOperation.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-brand-muted">No categories.</div>
+                  <div className="px-4 py-6 text-sm text-brand-muted">No Category -2.</div>
                 ) : (
                   categoriesForOperation.map((cat) => {
                     const active = cat.id === selectedCategoryId;
@@ -1012,14 +1001,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           <div className="px-6 py-5 border-b border-gray-100">
             <div className="flex items-end justify-between gap-4">
               <div>
-                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Datatable Items</div>
+                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Table Items</div>
                 <div className="text-xs text-brand-muted mt-1">
                   {selectedCategory ? (
                     <>
                       Showing items for <span className="font-bold text-brand-text">{selectedCategory.name}</span>.
                     </>
                   ) : (
-                    'Select a category to display items.'
+                    'Select a Category -2 to display items.'
                   )}
                 </div>
               </div>
@@ -1048,7 +1037,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     transition={{ duration: 0.18, ease: 'easeOut' }}
                     className="px-6 py-10 text-sm text-brand-muted"
                   >
-                    Choose a category to load table items.
+                    Choose a Category -2 to load table items.
                   </motion.div>
                 ) : (
                   <motion.div
