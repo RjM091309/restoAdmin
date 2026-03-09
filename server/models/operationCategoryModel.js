@@ -40,6 +40,23 @@ class OperationCategoryModel {
 				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 			`);
 
+			// Add STATE column after DESCRIPTION if missing (migration for existing tables)
+			const [stateColumn] = await pool.execute(
+				`SELECT 1
+				 FROM INFORMATION_SCHEMA.COLUMNS
+				 WHERE TABLE_SCHEMA = DATABASE()
+				   AND TABLE_NAME = 'operation_category'
+				   AND COLUMN_NAME = 'STATE'
+				 LIMIT 1`
+			);
+			if (!stateColumn.length) {
+				await pool.execute(
+					`ALTER TABLE operation_category
+					 ADD COLUMN STATE INT(11) NULL DEFAULT 0 COMMENT '1=inventory; 0=expense' AFTER DESCRIPTION`
+				);
+				console.log('[OperationCategoryModel] Added STATE column after DESCRIPTION');
+			}
+
 			OperationCategoryModel._schemaReady = true;
 			OperationCategoryModel._schemaPromise = null;
 		})().catch((error) => {
