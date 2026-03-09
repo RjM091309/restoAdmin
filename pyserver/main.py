@@ -149,33 +149,24 @@ def branch_sales(
     branch_id: Optional[int] = None,
 ) -> dict:
     """
-    Total sales per branch.
-    Mirrors Node's ReportsModel.getSalesPerBranch by aggregating:
-    - billing table (paid orders) grouped by branch
-    - sales_hourly_summary totals grouped by branch
+    Total sales per branch based purely on live billing data.
+    Legacy summary table sales_hourly_summary has been removed.
     """
     try:
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
         date_filter_billing = ""
-        date_filter_summary = ""
         branch_filter_billing = ""
-        branch_filter_summary = ""
         billing_params: List[object] = []
-        summary_params: List[object] = []
 
         if start_date and end_date:
             date_filter_billing = "AND DATE(b.ENCODED_DT) >= %s AND DATE(b.ENCODED_DT) <= %s"
             billing_params.extend([start_date, end_date])
-            date_filter_summary = "AND DATE(s.sale_datetime) >= %s AND DATE(s.sale_datetime) <= %s"
-            summary_params.extend([start_date, end_date])
 
         if branch_id:
             branch_filter_billing = "AND br.IDNo = %s"
             billing_params.append(branch_id)
-            branch_filter_summary = "AND s.branch_id = %s"
-            summary_params.append(branch_id)
 
         billing_query = f"""
             SELECT 
@@ -198,20 +189,6 @@ def branch_sales(
         cur.execute(billing_query, billing_params)
         billing_rows = cur.fetchall()
 
-        summary_query = f"""
-            SELECT 
-                s.branch_id,
-                COALESCE(SUM(s.total_sales), 0) as total_sales
-            FROM sales_hourly_summary s
-            WHERE s.branch_id IS NOT NULL
-            {date_filter_summary}
-            {branch_filter_summary}
-            GROUP BY s.branch_id
-        """
-
-        cur.execute(summary_query, summary_params)
-        summary_rows = cur.fetchall()
-
         cur.close()
         conn.close()
     except Exception as exc:
@@ -222,20 +199,10 @@ def branch_sales(
             "error": getattr(exc, "message", str(exc)),
         }
 
-    # Merge summary data into billing rows
-    summary_map = {}
-    for row in summary_rows:
-        try:
-            bid = int(row["branch_id"])
-        except Exception:
-            continue
-        summary_map[bid] = float(row.get("total_sales") or 0)
-
     result: List[BranchSalesItem] = []
     for row in billing_rows:
         bid = int(row["branch_id"])
-        summary_total = summary_map.get(bid, 0.0)
-        total_sales = float(row.get("total_sales") or 0) + summary_total
+        total_sales = float(row.get("total_sales") or 0)
         order_count = int(row.get("order_count") or 0)
         avg_order_value = float(row.get("avg_order_value") or 0)
 
@@ -275,19 +242,8 @@ def least_selling(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        # Source 1: product_sales_summary (imported / synced data)
-        summary_query = """
-            SELECT 
-                product_name as name,
-                category,
-                COALESCE(sales_quantity, 0) as total_quantity,
-                COALESCE(net_sales, 0) as total_revenue
-            FROM product_sales_summary
-            WHERE sales_quantity > 0
-            ORDER BY sales_quantity ASC
-        """
-        cur.execute(summary_query)
-        summary_rows = cur.fetchall()
+        # Legacy table product_sales_summary has been removed; rely only on actual orders.
+        summary_rows: List[dict] = []
 
         # Source 2: actual orders (paid orders from billing)
         order_date_filter = ""
@@ -415,19 +371,8 @@ def top_selling(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        # Source 1: product_sales_summary (imported / synced data)
-        summary_query = """
-            SELECT 
-                product_name as name,
-                category,
-                COALESCE(sales_quantity, 0) as total_quantity,
-                COALESCE(net_sales, 0) as total_revenue
-            FROM product_sales_summary
-            WHERE sales_quantity > 0
-            ORDER BY sales_quantity DESC
-        """
-        cur.execute(summary_query)
-        summary_rows = cur.fetchall()
+        # Legacy table product_sales_summary has been removed; rely only on actual orders.
+        summary_rows: List[dict] = []
 
         # Source 2: actual orders (paid orders from billing)
         order_date_filter = ""

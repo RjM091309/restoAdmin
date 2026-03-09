@@ -31,7 +31,6 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
-import { Expenses } from './components/expenses/Expenses';
 import { ExpensesMock } from './components/expenses/ExpensesMock';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
@@ -385,7 +384,7 @@ export default function App() {
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
     if (part === 'sales-analytics') return 'Sales Analytics';
-    if (part === 'expenses-mock') return 'Expenses Mock';
+    if (part === 'expenses-mock') return 'Expenses';
     return part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ');
   });
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
@@ -618,16 +617,6 @@ export default function App() {
                 } />
 
                 <Route path="/expenses" element={
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                  >
-                    <Expenses selectedBranch={selectedBranch} dateRange={dateRange} />
-                  </motion.div>
-                } />
-
-                <Route path="/expenses-mock" element={
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

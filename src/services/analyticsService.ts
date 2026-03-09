@@ -119,15 +119,29 @@ export type ApiExpenseCategoryRow = {
 
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/branch-sales?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics branch-sales failed with status ${res.status}`);
+  try {
+    const res = await fetch(`${baseUrl}/api/analytics/branch-sales?${params.toString()}`);
+    if (!res.ok) {
+      // Backend unreachable / HTTP error – treat as no data for UI stability.
+      // eslint-disable-next-line no-console
+      console.warn('[analyticsService] branch-sales HTTP error:', res.status);
+      return [];
+    }
+    const json = await res.json();
+    if (json.success && json.data?.data) {
+      return json.data.data as ApiBranchSalesItem[];
+    }
+    // If Python analytics returns an error (e.g. missing legacy tables),
+    // log and gracefully fall back to empty data instead of crashing dashboard.
+    // eslint-disable-next-line no-console
+    console.warn('[analyticsService] branch-sales backend error:', json?.message || json);
+    return [];
+  } catch (err) {
+    // Network or parsing error – also degrade gracefully.
+    // eslint-disable-next-line no-console
+    console.warn('[analyticsService] branch-sales request failed:', err);
+    return [];
   }
-  const json = await res.json();
-  if (json.success && json.data?.data) {
-    return json.data.data as ApiBranchSalesItem[];
-  }
-  throw new Error(json.message || 'Failed to load branch sales');
 }
 
 export async function fetchLeastSellingApi(params: URLSearchParams): Promise<ApiLeastSellingItem[]> {

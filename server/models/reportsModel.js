@@ -412,8 +412,8 @@ class ReportsModel {
 		return rows;
 	}
 
-	// Get sales hourly summary (from sales_hourly_summary table)
-	// Columns: id, branch_id, sale_datetime, total_sales, refund, discount, net_sales, product_unit_price, gross_profit
+	// Get sales hourly summary based only on live orders + receipts.
+	// Legacy summary table (sales_hourly_summary) has been removed.
 	static async getSalesHourlySummary(startDate = null, endDate = null, branchId = null) {
 		const params = [];
 		const orderParams = [];
@@ -436,23 +436,9 @@ class ReportsModel {
 			orderParams.push(branchId);
 		}
 
-		// Get data from sales_hourly_summary (imported data)
-		// Normalize sale_datetime to hour format for consistent merging
-		const summaryQuery = `
-			SELECT 
-				DATE_FORMAT(sale_datetime, '%Y-%m-%d %H:00:00') as hour,
-				COALESCE(total_sales, 0) as total_sales,
-				COALESCE(refund, 0) as refund,
-				COALESCE(discount, 0) as discount,
-				COALESCE(net_sales, 0) as net_sales,
-				COALESCE(product_unit_price, 0) as product_unit_price,
-				COALESCE(gross_profit, 0) as gross_profit
-			FROM sales_hourly_summary
-			WHERE 1=1
-			${dateFilter}
-			${branchFilter}
-		`;
-		const [summaryRows] = await pool.execute(summaryQuery, params);
+		// Legacy summary table (sales_hourly_summary) has been dropped.
+		// We now rely solely on actual orders + receipts for hourly stats.
+		const summaryRows = [];
 
 		// Get data from actual orders (paid orders only)
 		const ordersQuery = `
@@ -585,187 +571,22 @@ class ReportsModel {
 		return result;
 	}
 
-	// Import sales hourly summary (insert into sales_hourly_summary table)
-	// Expects array of { sale_datetime, total_sales, refund, discount, net_sales, product_unit_price, gross_profit }
-	// branch_id is optional - use provided value or null
+	// Import sales hourly summary
+	// NO-OP: sales_hourly_summary table has been removed from the database.
 	static async importSalesHourlySummary(rows, branchId = null) {
-		if (!rows || rows.length === 0) {
-			return { inserted: 0, message: 'No data to import' };
-		}
-		let inserted = 0;
-		for (const row of rows) {
-			let saleDatetime = row.sale_datetime || row.hour;
-			if (!saleDatetime) continue;
-			// Normalize to MySQL DATETIME format (YYYY-MM-DD HH:mm:ss)
-			if (typeof saleDatetime === 'string') {
-				if (saleDatetime.includes('T')) {
-					// ISO format: convert to MySQL format
-					saleDatetime = saleDatetime.replace('T', ' ').slice(0, 19);
-				} else if (/^\d{4}-\d{2}-\d{2}$/.test(saleDatetime.trim())) {
-					// Date only: add noon time to avoid timezone issues
-					saleDatetime = `${saleDatetime.trim()} 12:00:00`;
-				} else if (/^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}(:\d{2})?$/.test(saleDatetime.trim())) {
-					// Date with time: ensure seconds are included
-					if (!saleDatetime.includes(':')) {
-						saleDatetime = `${saleDatetime.trim()}:00`;
-					}
-					if (saleDatetime.split(':').length === 2) {
-						saleDatetime = `${saleDatetime}:00`;
-					}
-				}
-			}
-			const totalSales = parseFloat(row.total_sales) || 0;
-			const refund = parseFloat(row.refund) || 0;
-			const discount = parseFloat(row.discount) || 0;
-			const netSales = parseFloat(row.net_sales) || totalSales - refund - discount;
-			const productUnitPrice = parseFloat(row.product_unit_price) || 0;
-			const grossProfit = parseFloat(row.gross_profit) || netSales;
-
-			await pool.execute(
-				`INSERT INTO sales_hourly_summary (branch_id, sale_datetime, total_sales, refund, discount, net_sales, product_unit_price, gross_profit)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				[branchId || null, saleDatetime, totalSales, refund, discount, netSales, productUnitPrice, grossProfit]
-			);
-			inserted++;
-		}
-		return { inserted };
+		return {
+			inserted: 0,
+			message: 'sales_hourly_summary table has been removed; importSalesHourlySummary is disabled.',
+		};
 	}
 
-	// Sync order to sales_category_report when order is paid/settled
-	// This automatically updates the sales_category_report table when an order is completed
-	// Aggregates sales by category
+	// Legacy: sync order to sales_category_report (summary table removed)
+	// NO-OP now; kept only for backward compatibility so callers don't break.
 	static async syncOrderToSalesCategoryReport(orderId) {
-		try {
-			// Get order details with billing info
-			const [orderRows] = await pool.execute(`
-				SELECT 
-					o.IDNo,
-					o.BRANCH_ID,
-					o.ENCODED_DT,
-					o.GRAND_TOTAL,
-					o.DISCOUNT_AMOUNT,
-					o.SUBTOTAL,
-					b.STATUS as billing_status
-				FROM orders o
-				LEFT JOIN billing b ON b.ORDER_ID = o.IDNo
-				WHERE o.IDNo = ?
-			`, [orderId]);
-
-			if (!orderRows || orderRows.length === 0) {
-				return { success: false, message: 'Order not found' };
-			}
-
-			const order = orderRows[0];
-
-			// Only sync if billing is PAID (status = 1)
-			if (!order.billing_status || parseInt(order.billing_status) !== 1) {
-				return { success: false, message: 'Order not paid yet' };
-			}
-
-			// Get order items with category information
-			const [orderItems] = await pool.execute(`
-				SELECT 
-					oi.MENU_ID,
-					oi.QTY,
-					oi.UNIT_PRICE,
-					oi.LINE_TOTAL,
-					m.CATEGORY_ID,
-					c.CAT_NAME as category_name
-				FROM order_items oi
-				INNER JOIN menu m ON m.IDNo = oi.MENU_ID
-				LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
-				WHERE oi.ORDER_ID = ?
-			`, [orderId]);
-
-			if (!orderItems || orderItems.length === 0) {
-				return { success: false, message: 'Order has no items' };
-			}
-
-			// Calculate discount proportion (if any)
-			const discountAmount = parseFloat(order.DISCOUNT_AMOUNT) || 0;
-			const subtotal = parseFloat(order.SUBTOTAL) || 0;
-			const discountRatio = subtotal > 0 ? discountAmount / subtotal : 0;
-
-			// Aggregate by category
-			const categoryMap = new Map();
-
-			orderItems.forEach((item) => {
-				const categoryName = (item.category_name || 'Uncategorized').trim();
-				if (!categoryName) return;
-
-				const qty = parseFloat(item.QTY) || 0;
-				const unitPrice = parseFloat(item.UNIT_PRICE) || 0;
-				const lineTotal = parseFloat(item.LINE_TOTAL) || 0;
-
-				// Apply discount proportionally to this item's line total
-				const netSales = lineTotal * (1 - discountRatio);
-
-				if (!categoryMap.has(categoryName)) {
-					categoryMap.set(categoryName, {
-						category: categoryName,
-						sales_quantity: 0,
-						total_sales: 0,
-						refund_quantity: 0,
-						refund_amount: 0,
-						discounts: 0,
-						net_sales: 0,
-					});
-				}
-
-				const catData = categoryMap.get(categoryName);
-				const itemDiscount = lineTotal * discountRatio;
-				catData.sales_quantity += qty;
-				catData.total_sales += lineTotal; // total_sales = sum of line totals before discounts
-				catData.discounts += itemDiscount;
-				catData.net_sales += netSales;
-			});
-
-			// Update or insert into sales_category_report
-			for (const [categoryName, catData] of categoryMap.entries()) {
-				// Check if record exists for this category
-				const [existingRows] = await pool.execute(`
-					SELECT category FROM sales_category_report WHERE category = ?
-				`, [categoryName]);
-
-				if (existingRows && existingRows.length > 0) {
-					// Update existing record - add to existing values
-					await pool.execute(`
-						UPDATE sales_category_report SET
-							sales_quantity = sales_quantity + ?,
-							total_sales = total_sales + ?,
-							discounts = discounts + ?,
-							net_sales = net_sales + ?
-						WHERE category = ?
-					`, [
-						catData.sales_quantity,
-						catData.total_sales,
-						catData.discounts,
-						catData.net_sales,
-						categoryName
-					]);
-				} else {
-					// Insert new record
-					await pool.execute(`
-						INSERT INTO sales_category_report (category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales)
-						VALUES (?, ?, ?, ?, ?, ?, ?)
-					`, [
-						categoryName,
-						catData.sales_quantity,
-						catData.total_sales,
-						0, // refund_quantity
-						0, // refund_amount
-						catData.discounts,
-						catData.net_sales
-					]);
-				}
-			}
-
-			return { success: true, message: 'Order synced to sales_category_report', categories: categoryMap.size };
-		} catch (error) {
-			console.error('Error syncing order to sales_category_report:', error);
-			// Don't throw - this is a background sync operation
-			return { success: false, message: error.message };
-		}
+		return {
+			success: false,
+			message: 'sales_category_report table has been removed; syncOrderToSalesCategoryReport is disabled.',
+		};
 	}
 
 	// Sync order to sales_hourly_summary when order is paid/settled
@@ -1179,7 +1000,7 @@ class ReportsModel {
 		return { inserted };
 	}
 
-	// Get sales by category report (from sales_category_report table + actual orders)
+	// Get sales by category report based on live orders only
 	// Columns: category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales
 	// Accepts start_date, end_date, branch_id for future extension when view has those columns
 	// FIX: When date range is provided, only use actual orders to avoid double-counting synced orders
@@ -1232,49 +1053,7 @@ class ReportsModel {
 		`;
 		const [orderRows] = await pool.execute(ordersQuery, orderParams);
 
-		// If date range is provided, only use actual orders (to avoid double-counting synced orders)
-		// If no date range, combine with sales_category_report for imported historical data
 		const dataMap = new Map();
-
-		if (!startDate || !endDate) {
-			// No date range: include imported data from sales_category_report
-			// Get data from sales_category_report (imported data)
-			const summaryQuery = `
-				SELECT 
-					category,
-					COALESCE(sales_quantity, 0) as sales_quantity,
-					COALESCE(total_sales, 0) as total_sales,
-					COALESCE(refund_quantity, 0) as refund_quantity,
-					COALESCE(refund_amount, 0) as refund_amount,
-					COALESCE(discounts, 0) as discounts,
-					COALESCE(net_sales, 0) as net_sales
-				FROM sales_category_report
-			`;
-			const [summaryRows] = await pool.execute(summaryQuery);
-
-			// Add summary data (imported historical data)
-			summaryRows.forEach(row => {
-				const category = row.category || 'Uncategorized';
-				if (!dataMap.has(category)) {
-					dataMap.set(category, {
-						category: category,
-						sales_quantity: 0,
-						total_sales: 0,
-						refund_quantity: 0,
-						refund_amount: 0,
-						discounts: 0,
-						net_sales: 0
-					});
-				}
-				const data = dataMap.get(category);
-				data.sales_quantity += parseInt(row.sales_quantity) || 0;
-				data.total_sales += parseFloat(row.total_sales) || 0;
-				data.refund_quantity += parseInt(row.refund_quantity) || 0;
-				data.refund_amount += parseFloat(row.refund_amount) || 0;
-				data.discounts += parseFloat(row.discounts) || 0;
-				data.net_sales += parseFloat(row.net_sales) || 0;
-			});
-		}
 
 		// Add/merge actual orders data
 		orderRows.forEach(row => {
@@ -1307,52 +1086,16 @@ class ReportsModel {
 		return result;
 	}
 
-	// Import sales category data (insert into sales_category_report table)
-	// Expects array of { category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales }
-	// Uses INSERT ... ON DUPLICATE KEY UPDATE to handle duplicates (if category has unique key)
-	// Falls back to REPLACE INTO if no unique key exists
+	// Import sales category data
+	// NO-OP: sales_category_report table has been removed from the database.
 	static async importSalesCategoryReport(rows) {
-		if (!rows || rows.length === 0) {
-			return { inserted: 0, message: 'No data to import' };
-		}
-		let inserted = 0;
-		for (const row of rows) {
-			const category = String(row.category || '').trim();
-			if (!category) continue;
-			const salesQuantity = parseInt(row.sales_quantity || row.quantity || 0, 10) || 0;
-			const totalSales = parseFloat(row.total_sales || row.total_revenue || 0) || 0; // Support both total_sales and total_revenue for backward compatibility
-			const refundQuantity = parseInt(row.refund_quantity || 0, 10) || 0;
-			const refundAmount = parseFloat(row.refund_amount || 0) || 0;
-			const discounts = parseFloat(row.discounts || row.discount || 0) || 0;
-			const netSales = parseFloat(row.net_sales || 0) || 0;
-
-			try {
-				// Try INSERT ... ON DUPLICATE KEY UPDATE first (if category has unique key)
-				await pool.execute(
-					`INSERT INTO sales_category_report (category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales) 
-					 VALUES (?, ?, ?, ?, ?, ?, ?)
-					 ON DUPLICATE KEY UPDATE 
-					 sales_quantity = VALUES(sales_quantity),
-					 total_sales = VALUES(total_sales),
-					 refund_quantity = VALUES(refund_quantity),
-					 refund_amount = VALUES(refund_amount),
-					 discounts = VALUES(discounts),
-					 net_sales = VALUES(net_sales)`,
-					[category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales]
-				);
-			} catch (err) {
-				// Fallback to REPLACE INTO if ON DUPLICATE KEY UPDATE fails
-				await pool.execute(
-					`REPLACE INTO sales_category_report (category, sales_quantity, total_sales, refund_quantity, refund_amount, discounts, net_sales) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-					[category, salesQuantity, totalSales, refundQuantity, refundAmount, discounts, netSales]
-				);
-			}
-			inserted++;
-		}
-		return { inserted };
+		return {
+			inserted: 0,
+			message: 'sales_category_report table has been removed; importSalesCategoryReport is disabled.',
+		};
 	}
 
-	// Get goods sales report (from goods_sales_report table + actual orders)
+	// Get goods sales report based on live orders only
 	// Columns: id, goods, category, sales_quantity, discounts, net_sales, unit_cost, total_revenue, created_at, updated_at
 	// Joins with categories table to get category name instead of ID
 	// Note: Category IDs from old system (10009, 10004, etc.) don't match new system IDs (21-44)
@@ -1373,41 +1116,8 @@ class ReportsModel {
 				orderParams.push(branchId);
 			}
 
-			// Get data from product_sales_summary (imported data)
-			let summaryQuery = `
-				SELECT 
-					id,
-					product_name as goods,
-					category,
-					COALESCE(sales_quantity, 0) as sales_quantity,
-					COALESCE(total_sales, 0) as total_sales,
-					COALESCE(refund_quantity, 0) as refund_quantity,
-					COALESCE(refund_amount, 0) as refund_amount,
-					COALESCE(discounts, 0) as discounts,
-					COALESCE(net_sales, 0) as net_sales,
-					COALESCE(unit_cost, 0) as unit_cost,
-					COALESCE(total_revenue, 0) as total_revenue,
-					created_at
-				FROM product_sales_summary
-			`;
-
-			const summaryParams = [];
-			if (startDate || endDate) {
-				const conditions = [];
-				if (startDate) {
-					conditions.push('created_at >= ?');
-					summaryParams.push(startDate);
-				}
-				if (endDate) {
-					conditions.push('created_at <= ?');
-					summaryParams.push(endDate + ' 23:59:59');
-				}
-				if (conditions.length > 0) {
-					summaryQuery += ' WHERE ' + conditions.join(' AND ');
-				}
-			}
-
-			const [summaryRows] = await pool.execute(summaryQuery, summaryParams);
+			// Legacy product_sales_summary table has been removed; rely only on actual orders.
+			const summaryRows = [];
 
 			// Get data from actual orders (paid orders only)
 			const ordersQuery = `
@@ -1773,26 +1483,16 @@ class ReportsModel {
 				params.push(startDate, endDate);
 			}
 
-			// Get totals from sales_hourly_summary
-			// For validation consistency, we get ALL records from summary tables
-			// Date filtering is only applied to receipts/orders data, not summary tables
-			let hourlyQuery = `
-				SELECT 
-					COUNT(*) as record_count,
-					COALESCE(SUM(total_sales), 0) as total_sales,
-					COALESCE(SUM(refund), 0) as total_refund,
-					COALESCE(SUM(discount), 0) as total_discount,
-					COALESCE(SUM(net_sales), 0) as total_net_sales,
-					COALESCE(SUM(gross_profit), 0) as total_gross_profit
-				FROM sales_hourly_summary
-				WHERE 1=1
-			`;
-			const hourlyParams = [];
-			if (branchId) {
-				hourlyQuery += ' AND (branch_id = ? OR branch_id IS NULL)';
-				hourlyParams.push(branchId);
-			}
-			const [hourlyRows] = await pool.execute(hourlyQuery, hourlyParams);
+			// Legacy summary table sales_hourly_summary has been removed.
+			// For validation, we now base hourly totals purely on live orders + receipts.
+			const hourlyRows = [{
+				record_count: 0,
+				total_sales: 0,
+				total_refund: 0,
+				total_discount: 0,
+				total_net_sales: 0,
+				total_gross_profit: 0,
+			}];
 
 			// Also get totals from actual orders (paid orders only) to add to summary
 			const orderParamsForHourly = [];
@@ -1862,18 +1562,16 @@ class ReportsModel {
 				record_count: parseInt(hourlyRows[0]?.record_count || 0)
 			};
 
-			// Get totals from sales_category_report
-			// Note: sales_category_report doesn't have a date column, so we get all records for consistency
-			const [categoryRows] = await pool.execute(`
-				SELECT 
-					COUNT(*) as record_count,
-					COALESCE(SUM(total_sales), 0) as total_sales,
-					COALESCE(SUM(refund_amount), 0) as total_refund,
-					COALESCE(SUM(net_sales), 0) as total_net_sales,
-					COALESCE(SUM(sales_quantity), 0) as total_quantity
-				FROM sales_category_report
-			`);
-			const categorySummaryRefund = parseFloat(categoryRows[0]?.total_refund || 0);
+			// Legacy summary table sales_category_report has been removed.
+			// Keep validation shape but use zeros.
+			const categoryRows = [{
+				record_count: 0,
+				total_sales: 0,
+				total_refund: 0,
+				total_net_sales: 0,
+				total_quantity: 0,
+			}];
+			const categorySummaryRefund = 0;
 
 			// Add refunds from receipts table (same as hourly summary)
 			const categoryTotalRefund = categorySummaryRefund + totalRefundFromReceipts;
@@ -1888,21 +1586,18 @@ class ReportsModel {
 				};
 			}
 
-			// Get totals from product_sales_summary
-			// Note: For validation consistency, we get ALL records (same as sales_category_report)
-			// This ensures all summary tables use the same approach and amounts will match
-			const [goodsRows] = await pool.execute(`
-				SELECT 
-					COUNT(*) as record_count,
-					COALESCE(SUM(total_sales), 0) as total_sales,
-					COALESCE(SUM(total_revenue), 0) as total_revenue,
-					COALESCE(SUM(refund_amount), 0) as total_refund,
-					COALESCE(SUM(net_sales), 0) as total_net_sales,
-					COALESCE(SUM(discounts), 0) as total_discounts,
-					COALESCE(SUM(sales_quantity), 0) as total_quantity
-				FROM product_sales_summary
-			`);
-			const goodsSummaryRefund = parseFloat(goodsRows[0]?.total_refund || 0);
+			// Legacy summary table product_sales_summary has been removed.
+			// Keep validation shape but use zeros.
+			const goodsRows = [{
+				record_count: 0,
+				total_sales: 0,
+				total_revenue: 0,
+				total_refund: 0,
+				total_net_sales: 0,
+				total_discounts: 0,
+				total_quantity: 0,
+			}];
+			const goodsSummaryRefund = 0;
 
 			// Add refunds from receipts table (same as hourly summary)
 			const goodsTotalRefund = goodsSummaryRefund + totalRefundFromReceipts;
@@ -2204,7 +1899,9 @@ class ReportsModel {
 
 		const [billingRows] = await pool.execute(billingQuery, billingParams);
 
-		// Get sales from sales_hourly_summary grouped by branch
+		// Get sales from sales_hourly_summary grouped by branch (if table exists).
+		// If the table has been removed from the database, we gracefully fall back
+		// to using only billing data so that reports continue to work.
 		const summaryQuery = `
 			SELECT 
 				s.branch_id,
@@ -2216,9 +1913,21 @@ class ReportsModel {
 			GROUP BY s.branch_id
 		`;
 
-		const [summaryRows] = await pool.execute(summaryQuery, summaryParams);
+		let summaryRows = [];
+		try {
+			const [rows] = await pool.execute(summaryQuery, summaryParams);
+			summaryRows = rows;
+		} catch (error) {
+			// ER_NO_SUCH_TABLE (1146) => sales_hourly_summary was dropped
+			if (error && (error.code === 'ER_NO_SUCH_TABLE' || error.errno === 1146)) {
+				console.warn('[ReportsModel.getSalesPerBranch] sales_hourly_summary table missing, using billing-only data');
+				summaryRows = [];
+			} else {
+				throw error;
+			}
+		}
 
-		// Merge summary data into billing rows
+		// Merge summary data into billing rows (if any summary rows were found)
 		const summaryMap = new Map();
 		summaryRows.forEach(row => {
 			summaryMap.set(parseInt(row.branch_id), parseFloat(row.total_sales) || 0);

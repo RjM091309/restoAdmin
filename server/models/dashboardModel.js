@@ -8,11 +8,10 @@
 const pool = require('../config/db');
 
 class DashboardModel {
-	// Get today's revenue - Sum of AMOUNT_PAID from billing and total_sales from sales_hourly_summary where date is today
-	// Includes both billing table data and imported sales_hourly_summary data
+	// Get today's revenue - Sum of AMOUNT_PAID from billing only
+	// Legacy summary tables (sales_hourly_summary) have been removed from the database
 	static async getTodaysRevenue(branchId = null, startDate = null, endDate = null) {
 		const params = [];
-		const summaryParams = [];
 		
 		let billingQuery = `
 			SELECT COALESCE(SUM(AMOUNT_PAID - COALESCE(REFUND, 0)), 0) as total_revenue
@@ -37,41 +36,8 @@ class DashboardModel {
 			params.push(branchId);
 		}
 		
-        let summaryQuery = `
-            SELECT COALESCE(SUM(total_sales), 0) as total_revenue
-            FROM sales_hourly_summary
-            WHERE 1=1
-        `;
-		
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				summaryQuery += ` AND DATE(sale_datetime) = ?`;
-				summaryParams.push(startDate);
-			} else {
-				summaryQuery += ` AND DATE(sale_datetime) BETWEEN ? AND ?`;
-				summaryParams.push(startDate, endDate);
-			}
-		} else {
-			summaryQuery += ` AND DATE(sale_datetime) = CURDATE()`;
-		}
-
-		if (branchId) {
-			summaryQuery += ` AND (branch_id = ? OR branch_id IS NULL)`;
-			summaryParams.push(branchId);
-		}
-		
-		// Combine both queries
-		let query = `
-			SELECT COALESCE(SUM(total_revenue), 0) as total_revenue
-			FROM (
-				${billingQuery}
-				UNION ALL
-				${summaryQuery}
-			) AS combined_data
-		`;
-		
-		const allParams = [...params, ...summaryParams];
-		const [rows] = await pool.execute(query, allParams);
+		// Only use billing data; legacy summary tables have been dropped
+		const [rows] = await pool.execute(billingQuery, params);
 		return parseFloat(rows[0]?.total_revenue || 0);
 	}
 

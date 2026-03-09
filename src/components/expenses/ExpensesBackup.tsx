@@ -147,7 +147,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
         getExpenses(branchId),
         getAllMasterCategories(branchId),
       ]);
-      setExpenses(expenseRows);
+      setExpenses(expenseRows.data);
       setMasterCategories(categoryRows);
     } catch (error: any) {
       toast.error(error.message || 'Failed to fetch expenses');
@@ -165,7 +165,7 @@ export const Expenses: React.FC<ExpensesProps> = ({ selectedBranch, dateRange })
   const refreshExpenses = async () => {
     if (!canManage) return;
     const rows = await getExpenses(branchId);
-    setExpenses(rows);
+    setExpenses(rows.data);
   };
 
   useEffect(() => {

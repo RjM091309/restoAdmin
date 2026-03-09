@@ -17,6 +17,7 @@ import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteEx
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X } from 'lucide-react';
+import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 
 type ExpensesMockProps = {
   selectedBranch: Branch | null;
@@ -39,66 +40,14 @@ type Category = {
   masterCategoryId?: string;
 };
 
-type ExpenseItem = {
-  id: string;
-  categoryId: string;
-  date: string; // YYYY-MM-DD
-  item: string;
-  amount: number;
-  category: string;
-};
-
 const ITEMS_PER_PAGE = 50;
+
+// Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(
     Number.isFinite(value) ? value : 0,
   );
-
-// Operations are loaded dynamically from operation_category table (by BRANCH_ID)
-
-const MOCK_CATEGORIES: Category[] = [
-  { id: 'cat-ops-fixed', operationId: 'op-ops', name: 'Fixed Costs / Tax' },
-  { id: 'cat-ops-indirect', operationId: 'op-ops', name: 'Indirect Expenses' },
-  { id: 'cat-ops-supplies', operationId: 'op-ops', name: 'Supplies' },
-  { id: 'cat-ops-labor', operationId: 'op-ops', name: 'Labor/Benefits' },
-  { id: 'cat-ops-vehicle', operationId: 'op-ops', name: 'Vehicle & Gas' },
-  { id: 'cat-food-groc', operationId: 'op-food', name: 'Groceries & Condiments' },
-  { id: 'cat-food-fresh', operationId: 'op-food', name: 'Fresh Food' },
-  { id: 'cat-food-meat', operationId: 'op-food', name: 'Meat & Poultry' },
-  { id: 'cat-food-rice', operationId: 'op-food', name: 'Rice & Grains' },
-  { id: 'cat-food-veg', operationId: 'op-food', name: 'Vegetables & Fruits' },
-  { id: 'cat-food-bev', operationId: 'op-food', name: 'Beverages & Liquor' },
-  { id: 'cat-food-sea', operationId: 'op-food', name: 'Seafood' },
-];
-
-const MOCK_ITEMS: ExpenseItem[] = [
-  { id: 'it-1', categoryId: 'Fixed Costs / Tax', date: '2026-03-01', item: 'Business Tax', amount: 5500, category: 'Fixed Costs / Tax' },
-  { id: 'it-2', categoryId: 'Fixed Costs / Tax', date: '2026-03-04', item: 'Rent', amount: 35000, category: 'Fixed Costs / Tax' },
-  { id: 'it-3', categoryId: 'Indirect Expenses', date: '2026-03-02', item: 'Internet Subscription', amount: 1899, category: 'Indirect Expenses' },
-  { id: 'it-4', categoryId: 'Indirect Expenses', date: '2026-03-05', item: 'Water Bill', amount: 3120, category: 'Indirect Expenses' },
-  { id: 'it-5', categoryId: 'Supplies', date: '2026-03-03', item: 'Dishwashing Liquid', amount: 420, category: 'Supplies' },
-  { id: 'it-6', categoryId: 'Supplies', date: '2026-03-06', item: 'Tissue & Paper Towels', amount: 610, category: 'Supplies' },
-  { id: 'it-7', categoryId: 'Labor/Benefits', date: '2026-03-01', item: 'Staff Meal Allowance', amount: 1200, category: 'Labor/Benefits' },
-  { id: 'it-8', categoryId: 'Labor/Benefits', date: '2026-03-05', item: 'SSS/PhilHealth', amount: 2800, category: 'Labor/Benefits' },
-  { id: 'it-9', categoryId: 'Vehicle & Gas', date: '2026-03-04', item: 'Delivery Gas', amount: 1200, category: 'Vehicle & Gas' },
-  { id: 'it-10', categoryId: 'Vehicle & Gas', date: '2026-03-06', item: 'Motorcycle Maintenance', amount: 900, category: 'Vehicle & Gas' },
-
-  { id: 'it-11', categoryId: 'Groceries & Condiments', date: '2026-03-01', item: 'Soy Sauce, Vinegar, Spices', amount: 760, category: 'Groceries & Condiments' },
-  { id: 'it-12', categoryId: 'Groceries & Condiments', date: '2026-03-04', item: 'Cooking Oil (4L)', amount: 580, category: 'Groceries & Condiments' },
-  { id: 'it-13', categoryId: 'Fresh Food', date: '2026-03-02', item: 'Eggs (tray)', amount: 260, category: 'Fresh Food' },
-  { id: 'it-14', categoryId: 'Fresh Food', date: '2026-03-05', item: 'Fresh Milk', amount: 310, category: 'Fresh Food' },
-  { id: 'it-15', categoryId: 'Meat & Poultry', date: '2026-03-01', item: 'Chicken (10kg)', amount: 1850, category: 'Meat & Poultry' },
-  { id: 'it-16', categoryId: 'Meat & Poultry', date: '2026-03-03', item: 'Pork (5kg)', amount: 1320, category: 'Meat & Poultry' },
-  { id: 'it-17', categoryId: 'Rice & Grains', date: '2026-03-02', item: 'Rice (25kg)', amount: 1450, category: 'Rice & Grains' },
-  { id: 'it-18', categoryId: 'Rice & Grains', date: '2026-03-06', item: 'Flour (10kg)', amount: 820, category: 'Rice & Grains' },
-  { id: 'it-19', categoryId: 'Vegetables & Fruits', date: '2026-03-03', item: 'Onions, Garlic, Ginger', amount: 390, category: 'Vegetables & Fruits' },
-  { id: 'it-20', categoryId: 'Vegetables & Fruits', date: '2026-03-05', item: 'Bananas, Calamansi', amount: 260, category: 'Vegetables & Fruits' },
-  { id: 'it-21', categoryId: 'Beverages & Liquor', date: '2026-03-02', item: 'Softdrinks', amount: 540, category: 'Beverages & Liquor' },
-  { id: 'it-22', categoryId: 'Beverages & Liquor', date: '2026-03-06', item: 'Beer (case)', amount: 1890, category: 'Beverages & Liquor' },
-  { id: 'it-23', categoryId: 'Seafood', date: '2026-03-01', item: 'Squid', amount: 740, category: 'Seafood' },
-  { id: 'it-24', categoryId: 'Seafood', date: '2026-03-04', item: 'Tilapia', amount: 680, category: 'Seafood' },
-];
 
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) => {
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -107,6 +56,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const [masterCategories, setMasterCategories] = useState<InventoryCategory[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const [isOperationPanelOpen, setIsOperationPanelOpen] = useState(false);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
@@ -149,6 +99,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           setOperations([]);
           setMasterCategories([]);
           setExpenses([]);
+          setLoading(false);
           return;
         }
         const resolvedBranchId =
@@ -158,9 +109,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           setOperations([]);
           setMasterCategories([]);
           setExpenses([]);
+          setLoading(false);
           return;
         }
 
+        setLoading(true);
         if (isMounted) {
           setBranchId(resolvedBranchId);
         }
@@ -200,6 +153,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         setOperations([]);
         setMasterCategories([]);
         setExpenses([]);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -731,7 +686,59 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     );
   }
 
+  const expensesSkeleton = (
+    <div className="pt-6 overflow-x-hidden space-y-6 animate-in fade-in duration-300">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <SkeletonCard className="rounded-2xl" />
+        <SkeletonCard className="rounded-2xl" />
+      </div>
+      <div className="flex gap-6 items-stretch min-h-[560px]">
+        <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <Skeleton className="h-4 w-28 mb-2" />
+            <Skeleton className="h-3 w-40" />
+          </div>
+          <div className="p-4 space-y-2">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-12 w-full rounded-xl" />
+            ))}
+          </div>
+        </section>
+        <section className="w-[320px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <Skeleton className="h-4 w-24 mb-2" />
+            <Skeleton className="h-3 w-36" />
+          </div>
+          <div className="p-4 space-y-2">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Skeleton key={i} className="h-11 w-full rounded-xl" />
+            ))}
+          </div>
+        </section>
+        <section className="flex-1 min-w-0">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
+            <div className="px-6 py-5 border-b border-gray-100">
+              <Skeleton className="h-4 w-32 mb-2" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <div className="p-6">
+              <SkeletonTable columns={4} rows={8} showToolbar={false} />
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+
   return (
+    <SkeletonTransition
+      loading={loading}
+      minDelayMs={400}
+      fadeOutMs={250}
+      skeleton={expensesSkeleton}
+      className="block"
+    >
+      <>
     <div className="pt-6 overflow-x-hidden">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5">
@@ -1404,6 +1411,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         </div>
       </Modal>
     </div>
+      </>
+    </SkeletonTransition>
   );
 };
 

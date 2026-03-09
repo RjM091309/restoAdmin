@@ -8,8 +8,11 @@ const passport = require('passport');
 const session = require('express-session');
 const flash = require('connect-flash');
 const i18n = require('i18n');
-require('dotenv').config({ path: path.resolve(__dirname, '..', '.env.local') });
-require('dotenv').config();
+require('dotenv').config({
+	path: path.resolve(__dirname, '..', '.env.local'),
+	override: true,
+});
+require('dotenv').config({ override: true });
 
 // Telegram bot removed - not needed for template
 // const { startTelegramBot } = require('./utils/telegram');

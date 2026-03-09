@@ -1,7 +1,10 @@
 const mysql = require('mysql2/promise');
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '..', '..', '.env.local') });
-require('dotenv').config(); // Load .env variables
+require('dotenv').config({
+	path: path.resolve(__dirname, '..', '..', '.env.local'),
+	override: true,
+});
+require('dotenv').config({ override: true }); // Load .env variables, prefer file over OS env
 
 const pool = mysql.createPool({
 	host: process.env.DB_HOST,
