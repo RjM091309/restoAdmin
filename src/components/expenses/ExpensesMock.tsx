@@ -13,7 +13,7 @@ import {
   deleteInventoryCategory,
   type CreateInventoryCategoryPayload,
 } from '../../services/inventoryService';
-import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteExpense } from '../../services/expenseService';
+import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteExpense, updateInventoryStock } from '../../services/expenseService';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X } from 'lucide-react';
@@ -31,6 +31,7 @@ type Operation = {
   id: string;
   name: string;
   description?: string | null;
+  state: number; // 1=inventory, 0=expense
 };
 
 type Category = {
@@ -68,13 +69,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const [isExpensePanelOpen, setIsExpensePanelOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<ExpenseRecord | null>(null);
-  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '' });
+  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
   const [addingAmountForId, setAddingAmountForId] = useState<string | null>(null);
   const [addingAmountValue, setAddingAmountValue] = useState('');
+  const [editingQtyForId, setEditingQtyForId] = useState<string | null>(null);
+  const [editingQtyValue, setEditingQtyValue] = useState('');
 
-  const [operationForm, setOperationForm] = useState<{ name: string; description: string }>({
+  const [operationForm, setOperationForm] = useState<{ name: string; description: string; state: number }>({
     name: '',
     description: '',
+    state: 0, // 0=expense, 1=inventory
   });
 
   const [categoryForm, setCategoryForm] = useState<{ name: string; description: string }>({
@@ -135,6 +139,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           id: String(row.id),
           name: row.name,
           description: row.description ?? null,
+          state: row.state === 1 ? 1 : 0,
         }));
         mapped.sort((a, b) => {
           const numA = /^(\d+)\.?\s/.exec(a.name);
@@ -275,6 +280,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     return 0;
   }, [expenses, itemsForCategory, masterCategories, selectedCategory, selectedCategoryId, selectedOperationId]);
 
+  const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
+
   const columns: ColumnDef<ExpenseRecord>[] = useMemo(
     () => [
       {
@@ -285,6 +292,69 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         header: 'Item',
         render: (row) => <span>{row.expDesc || row.expName}</span>,
       },
+      ...(isInventoryCategory
+        ? [
+            {
+              header: 'Qty',
+              render: (row: ExpenseRecord) => {
+                const isEditing = editingQtyForId === row.id;
+                return (
+                  <div className="flex items-center justify-end gap-2">
+                    {isEditing ? (
+                      <>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={editingQtyValue}
+                          onChange={(e) => setEditingQtyValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveQty(row);
+                            if (e.key === 'Escape') handleCancelEditQty();
+                          }}
+                          className="w-20 px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none text-right"
+                          placeholder="Qty"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveQty(row)}
+                          disabled={isSubmitting || !Number.isFinite(Number(editingQtyValue)) || Number(editingQtyValue) < 0}
+                          className="p-1 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 disabled:opacity-50"
+                          aria-label="Save qty"
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEditQty}
+                          disabled={isSubmitting}
+                          className="p-1 rounded-lg text-brand-muted hover:bg-gray-100"
+                          aria-label="Cancel"
+                        >
+                          <X size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <span
+                        className="text-right cursor-pointer hover:bg-gray-50 px-2 py-1 rounded"
+                        onClick={() => {
+                          setEditingQtyForId(row.id);
+                          setEditingQtyValue(String(row.stockQty ?? 0));
+                        }}
+                      >
+                        {Number(row.stockQty ?? 0)}
+                      </span>
+                    )}
+                  </div>
+                );
+              },
+              className: 'text-right',
+              headerClassName: 'text-right',
+              cellClassName: 'text-right',
+            },
+          ]
+        : []),
       {
         header: 'Amount',
         render: (row) => <span>{new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number.isFinite(row.expAmount) ? row.expAmount : 0)}</span>,
@@ -369,8 +439,36 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         },
       },
     ],
-    [masterCategories, addingAmountForId, addingAmountValue, isSubmitting],
+    [masterCategories, addingAmountForId, addingAmountValue, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId],
   );
+
+  const handleSaveQty = async (row: ExpenseRecord) => {
+    const qty = Number(editingQtyValue);
+    if (!branchId || !Number.isFinite(qty) || qty < 0) {
+      toast.error('Enter a valid quantity');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await updateInventoryStock(row.id, qty, branchId);
+      const list = await getExpenses(branchId);
+      const filtered = list.filter((e) => String(e.branchId) === branchId);
+      setExpenses(filtered);
+      setEditingQtyForId(null);
+      setEditingQtyValue('');
+      toast.success('Inventory quantity updated');
+    } catch (error) {
+      console.error('Failed to update inventory qty:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to update quantity');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelEditQty = () => {
+    setEditingQtyForId(null);
+    setEditingQtyValue('');
+  };
 
   const handleSelectOperation = (opId: string) => {
     setSelectedOperationId(opId);
@@ -383,14 +481,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const handleOpenAddOperation = () => {
     setEditingOperation(null);
-    setOperationForm({ name: '', description: '' });
+    setOperationForm({ name: '', description: '', state: 0 });
     setIsOperationPanelOpen(true);
   };
 
   const handleOpenEditOperation = (e: React.MouseEvent, op: Operation) => {
     e.stopPropagation();
     setEditingOperation(op);
-    setOperationForm({ name: op.name, description: op.description ?? '' });
+    setOperationForm({ name: op.name, description: op.description ?? '', state: op.state === 1 ? 1 : 0 });
     setIsOperationPanelOpen(true);
   };
 
@@ -416,7 +514,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     if (!isSubmitting) {
       setIsOperationPanelOpen(false);
       setEditingOperation(null);
-      setOperationForm({ name: '', description: '' });
+      setOperationForm({ name: '', description: '', state: 0 });
     }
   };
 
@@ -430,7 +528,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const handleOpenAddExpense = () => {
     setEditingExpense(null);
-    setExpenseForm({ expDesc: '', expAmount: '', expSource: '' });
+    setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
     setIsExpensePanelOpen(true);
   };
 
@@ -440,6 +538,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       expDesc: row.expDesc ?? '',
       expAmount: row.expAmount ? String(row.expAmount) : '',
       expSource: row.expSource ?? '',
+      stockQty: row.stockQty != null ? String(row.stockQty) : '',
     });
     setIsExpensePanelOpen(true);
   };
@@ -448,7 +547,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     if (!isSubmitting) {
       setIsExpensePanelOpen(false);
       setEditingExpense(null);
-      setExpenseForm({ expDesc: '', expAmount: '', expSource: '' });
+      setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
     }
   };
 
@@ -468,13 +567,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           expAmount: amount,
           expSource: expenseForm.expSource.trim() || null,
         });
+        const qty = Number(expenseForm.stockQty);
+        if (isInventoryCategory && Number.isFinite(qty) && qty >= 0) {
+          await updateInventoryStock(editingExpense.id, qty, branchId);
+        }
         const list = await getExpenses(branchId);
         const filtered = list.filter((e) => String(e.branchId) === branchId);
         setExpenses(filtered);
         handleCloseExpensePanel();
         toast.success('Expense updated');
       } else {
-        await createExpense({
+        const newId = await createExpense({
           branchId,
           masterCatId: selectedCategory.masterCategoryId,
           expDesc: expenseForm.expDesc.trim() || null,
@@ -484,6 +587,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         const list = await getExpenses(branchId);
         const filtered = list.filter((e) => String(e.branchId) === branchId);
         setExpenses(filtered);
+        const qty = Number(expenseForm.stockQty);
+        if (isInventoryCategory && Number.isFinite(qty) && qty >= 0 && newId) {
+          await updateInventoryStock(String(newId), qty, branchId);
+          const refreshed = await getExpenses(branchId);
+          setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
+        }
         handleCloseExpensePanel();
         toast.success('Expense added');
       }
@@ -560,11 +669,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         await updateOperationCategory(editingOperation.id, {
           name: operationForm.name.trim(),
           description: operationForm.description.trim() || null,
+          state: operationForm.state,
         });
         setOperations((prev) =>
           prev.map((op) =>
             op.id === editingOperation.id
-              ? { ...op, name: operationForm.name.trim(), description: operationForm.description.trim() || null }
+              ? { ...op, name: operationForm.name.trim(), description: operationForm.description.trim() || null, state: operationForm.state }
               : op,
           ),
         );
@@ -575,6 +685,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           branchId,
           name: operationForm.name.trim(),
           description: operationForm.description.trim() || null,
+          state: operationForm.state,
           active: true,
         });
         setOperations((prev) => [
@@ -583,6 +694,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             id: String(newId),
             name: operationForm.name.trim(),
             description: operationForm.description.trim() || null,
+            state: operationForm.state,
           },
         ]);
         handleCloseOperationPanel();
@@ -1193,6 +1305,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               placeholder="Optional description"
             />
           </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="operation-state"
+              checked={operationForm.state === 1}
+              onChange={(e) => setOperationForm((prev) => ({ ...prev, state: e.target.checked ? 1 : 0 }))}
+              className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary/20 cursor-pointer"
+            />
+            <label htmlFor="operation-state" className="text-sm font-medium text-brand-text cursor-pointer select-none">
+              Inventory
+            </label>
+          </div>
         </div>
       </SidePanel>
 
@@ -1365,6 +1489,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               placeholder="0.00"
             />
           </div>
+          {isInventoryCategory && (
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Qty (for inventory)</label>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={expenseForm.stockQty}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+                placeholder="0"
+              />
+            </div>
+          )}
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Source (optional)</label>
             <input

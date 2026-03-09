@@ -51,43 +51,82 @@ class MasterCategoryModel {
 			console.warn('[MasterCategoryModel.getAll] ensureSchema failed:', schemaErr?.message);
 			// Table may already exist; continue with query
 		}
-		let query = `
-			SELECT
-				IDNo,
-				BRANCH_ID,
-				OP_CAT_ID,
-				CATEGORY_NAME,
-				CATEGORY_TYPE,
-				DESCRIPTION,
-				ICON,
-				ACTIVE,
-				ENCODED_BY,
-				ENCODED_DT,
-				EDITED_BY,
-				EDITED_DT
-			FROM master_categories
-			WHERE ACTIVE = 1
-		`;
+		const isInventoryOnly = categoryType === 'Inventory' || (categoryType && String(categoryType).trim().toLowerCase() === 'inventory');
+		let query;
 		const params = [];
 
-		if (branchId !== null && branchId !== undefined) {
-			query += ` AND BRANCH_ID = ?`;
-			params.push(branchId);
-		}
-		if (categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '') {
-			query += ` AND CATEGORY_TYPE = ?`;
-			params.push(String(categoryType).trim());
+		if (isInventoryOnly) {
+			// Use JOIN: filter by operation_category.STATE=1 (inventory), get category type from oc.NAME (no redundant column)
+			query = `
+				SELECT
+					mc.IDNo,
+					mc.BRANCH_ID,
+					mc.OP_CAT_ID,
+					mc.CATEGORY_NAME,
+					oc.NAME AS CATEGORY_TYPE,
+					mc.DESCRIPTION,
+					mc.ICON,
+					mc.ACTIVE,
+					mc.ENCODED_BY,
+					mc.ENCODED_DT,
+					mc.EDITED_BY,
+					mc.EDITED_DT
+				FROM master_categories mc
+				INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
+				WHERE mc.ACTIVE = 1
+			`;
+			if (branchId !== null && branchId !== undefined) {
+				query += ` AND mc.BRANCH_ID = ?`;
+				params.push(branchId);
+			}
+		} else {
+			query = `
+				SELECT
+					IDNo,
+					BRANCH_ID,
+					OP_CAT_ID,
+					CATEGORY_NAME,
+					CATEGORY_TYPE,
+					DESCRIPTION,
+					ICON,
+					ACTIVE,
+					ENCODED_BY,
+					ENCODED_DT,
+					EDITED_BY,
+					EDITED_DT
+				FROM master_categories
+				WHERE ACTIVE = 1
+			`;
+			if (branchId !== null && branchId !== undefined) {
+				query += ` AND BRANCH_ID = ?`;
+				params.push(branchId);
+			}
+			if (categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '') {
+				query += ` AND CATEGORY_TYPE = ?`;
+				params.push(String(categoryType).trim());
+			}
 		}
 
-		query += ` ORDER BY IDNo DESC`;
+		query += isInventoryOnly ? ` ORDER BY mc.IDNo DESC` : ` ORDER BY IDNo DESC`;
 		try {
 			const [rows] = await pool.execute(query, params);
 			return rows;
 		} catch (selectErr) {
-			// If explicit columns fail (e.g. missing columns), try SELECT *
-			if (selectErr.message && (selectErr.message.includes('Unknown column') || selectErr.message.includes("doesn't exist"))) {
-				const fallbackQuery = `SELECT * FROM master_categories WHERE ACTIVE = 1${branchId !== null && branchId !== undefined ? ' AND BRANCH_ID = ?' : ''}${categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '' ? ' AND CATEGORY_TYPE = ?' : ''} ORDER BY IDNo DESC`;
-				const [fallbackRows] = await pool.execute(fallbackQuery, params);
+			// If JOIN/STATE fails (operation_category missing or no STATE column), fall back to simple query
+			if (selectErr.message && (selectErr.message.includes('Unknown column') || selectErr.message.includes("doesn't exist") || selectErr.message.includes('STATE'))) {
+				const fallbackParams = [];
+				let fallbackQuery = `SELECT * FROM master_categories WHERE ACTIVE = 1`;
+				if (branchId !== null && branchId !== undefined) {
+					fallbackQuery += ` AND BRANCH_ID = ?`;
+					fallbackParams.push(branchId);
+				}
+				// No CATEGORY_TYPE filter - only scope=all uses categoryType for non-inventory requests
+				if (!isInventoryOnly && categoryType !== null && categoryType !== undefined && String(categoryType).trim() !== '') {
+					fallbackQuery += ` AND CATEGORY_TYPE = ?`;
+					fallbackParams.push(String(categoryType).trim());
+				}
+				fallbackQuery += ` ORDER BY IDNo DESC`;
+				const [fallbackRows] = await pool.execute(fallbackQuery, fallbackParams);
 				return fallbackRows;
 			}
 			throw selectErr;
@@ -96,11 +135,21 @@ class MasterCategoryModel {
 
 	static async getById(id) {
 		await MasterCategoryModel.ensureSchema();
-		const [rows] = await pool.execute(
-			`SELECT * FROM master_categories WHERE IDNo = ? AND ACTIVE = 1 AND CATEGORY_TYPE = 'Inventory'`,
-			[id]
-		);
-		return rows[0] || null;
+		try {
+			const [rows] = await pool.execute(
+				`SELECT mc.* FROM master_categories mc
+				 INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
+				 WHERE mc.IDNo = ? AND mc.ACTIVE = 1`,
+				[id]
+			);
+			return rows[0] || null;
+		} catch (err) {
+			if (err.message && (err.message.includes('Unknown column') || err.message.includes("doesn't exist") || err.message.includes('STATE'))) {
+				const [rows] = await pool.execute(`SELECT * FROM master_categories WHERE IDNo = ? AND ACTIVE = 1`, [id]);
+				return rows[0] || null;
+			}
+			throw err;
+		}
 	}
 
 	static async getByIdForBranch(branchId, id) {

@@ -13,6 +13,9 @@ export interface ExpenseRecord {
   encodedBy: string | null;
   encodedDt: string | null;
   active: boolean;
+  stockQty?: number;
+  inventoryId?: string | null;
+  opCatState?: number;
 }
 
 // ---- API internals ----
@@ -37,6 +40,9 @@ type ExpenseApiRecord = {
   ACTIVE: number | boolean;
   ENCODED_BY?: string | null;
   ENCODED_DT?: string | null;
+  INVENTORY_ID?: number | null;
+  STOCK_QTY?: number | string;
+  OP_CAT_STATE?: number;
 };
 
 const API_BASE = '/data-api';
@@ -82,6 +88,9 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
   encodedBy: row.ENCODED_BY ?? null,
   encodedDt: row.ENCODED_DT ?? null,
   active: Boolean(row.ACTIVE),
+  stockQty: typeof row.STOCK_QTY === 'string' ? Number(row.STOCK_QTY) : Number(row.STOCK_QTY ?? 0),
+  inventoryId: row.INVENTORY_ID != null ? String(row.INVENTORY_ID) : null,
+  opCatState: row.OP_CAT_STATE,
 });
 
 // ---- Public API ----
@@ -160,6 +169,19 @@ export async function deleteExpense(id: string): Promise<void> {
   const json = (await response.json()) as ApiResponse<null>;
   if (!response.ok || !json.success) {
     throw new Error(json.error || 'Failed to delete expense');
+  }
+}
+
+export async function updateInventoryStock(expenseId: string, stockQty: number, branchId?: string): Promise<void> {
+  const response = await fetch(buildUrl(`/inventory/items/by-expense/${expenseId}`), {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: authHeaders(),
+    body: JSON.stringify({ stockQty, branch_id: branchId }),
+  });
+  const json = (await response.json()) as ApiResponse<null>;
+  if (!response.ok || !json.success) {
+    throw new Error(json.error || 'Failed to update inventory stock');
   }
 }
 

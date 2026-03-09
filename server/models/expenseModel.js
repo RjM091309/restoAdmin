@@ -89,6 +89,8 @@ class ExpenseModel {
 
 	static async getAll(branchId = null) {
 		await ExpenseModel.ensureSchema();
+		// Use JOIN: get oc.NAME as EXP_CAT, mc.CATEGORY_NAME as EXP_NAME (no redundant CATEGORY_TYPE)
+		// Include all expenses (STATE 0 and 1) so item names show under Food Supplies etc.
 		let query = `
 			SELECT
 				e.IDNo,
@@ -104,14 +106,19 @@ class ExpenseModel {
 				e.EDITED_BY,
 				e.EDITED_DT,
 				mc.IDNo AS MASTER_CATEGORY_ID,
-				mc.CATEGORY_TYPE AS EXP_CAT,
+				oc.NAME AS EXP_CAT,
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
-				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION
+				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
+				inv.IDNo AS INVENTORY_ID,
+				COALESCE(inv.STOCK_QTY, 0) AS STOCK_QTY,
+				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			WHERE e.ACTIVE = 1 AND mc.CATEGORY_TYPE NOT IN ('Inventory')
+			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			LEFT JOIN inventory inv ON inv.EXPENSES_ID = e.IDNo AND inv.ACTIVE = 1
+			WHERE e.ACTIVE = 1
 		`;
 		const params = [];
 
@@ -121,8 +128,25 @@ class ExpenseModel {
 		}
 
 		query += ` ORDER BY e.IDNo DESC`;
-		const [rows] = await pool.execute(query, params);
-		return rows;
+		try {
+			const [rows] = await pool.execute(query, params);
+			return rows;
+		} catch (err) {
+			if (err.message && (err.message.includes('EXPENSES_ID') || err.message.includes('Unknown column'))) {
+				// Fallback without inventory join
+				let fb = `SELECT e.*, b.BRANCH_NAME, mc.IDNo AS MASTER_CATEGORY_ID, oc.NAME AS EXP_CAT, mc.CATEGORY_NAME AS EXP_NAME,
+					mc.ICON AS MASTER_CATEGORY_ICON, mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
+					NULL AS INVENTORY_ID, 0 AS STOCK_QTY, oc.STATE AS OP_CAT_STATE
+					FROM expenses e
+					LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
+					LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+					LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+					WHERE e.ACTIVE = 1`;
+				const [fbRows] = await pool.execute(fb + (branchId != null ? ' AND e.BRANCH_ID = ?' : '') + ' ORDER BY e.IDNo DESC', params);
+				return fbRows;
+			}
+			throw err;
+		}
 	}
 
 	static async getById(id) {
@@ -143,14 +167,15 @@ class ExpenseModel {
 				e.EDITED_BY,
 				e.EDITED_DT,
 				mc.IDNo AS MASTER_CATEGORY_ID,
-				mc.CATEGORY_TYPE AS EXP_CAT,
+				oc.NAME AS EXP_CAT,
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			WHERE e.IDNo = ? AND e.ACTIVE = 1 AND mc.CATEGORY_TYPE NOT IN ('Inventory')
+			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			WHERE e.IDNo = ? AND e.ACTIVE = 1
 			LIMIT 1
 			`,
 			[Number(id)]

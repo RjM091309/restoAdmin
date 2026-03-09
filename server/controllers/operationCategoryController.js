@@ -35,10 +35,10 @@ class OperationCategoryController {
 		}
 	}
 
-	static async create(req, res) {
+		static async create(req, res) {
 		try {
 			const branchId = OperationCategoryController._resolveBranchId(req);
-			const { NAME, DESCRIPTION, ACTIVE } = req.body || {};
+			const { NAME, DESCRIPTION, ACTIVE, STATE } = req.body || {};
 			if (!NAME || String(NAME).trim() === '') {
 				return ApiResponse.badRequest(res, 'NAME is required');
 			}
@@ -46,6 +46,7 @@ class OperationCategoryController {
 				BRANCH_ID: branchId,
 				NAME: String(NAME).trim(),
 				DESCRIPTION: DESCRIPTION != null ? String(DESCRIPTION).trim() : null,
+				STATE: STATE === 1 || STATE === true ? 1 : 0,
 				ACTIVE: ACTIVE !== false && ACTIVE !== 0,
 				ENCODED_BY: req.user?.user_id ?? null,
 			});
@@ -56,17 +57,18 @@ class OperationCategoryController {
 		}
 	}
 
-	static async update(req, res) {
+		static async update(req, res) {
 		try {
 			const id = req.params.id;
 			if (!id) return ApiResponse.badRequest(res, 'ID is required');
-			const { NAME, DESCRIPTION } = req.body || {};
+			const { NAME, DESCRIPTION, STATE } = req.body || {};
 			if (!NAME || String(NAME).trim() === '') {
 				return ApiResponse.badRequest(res, 'NAME is required');
 			}
 			const updated = await OperationCategoryModel.update(id, {
 				NAME: String(NAME).trim(),
 				DESCRIPTION: DESCRIPTION != null ? String(DESCRIPTION).trim() : null,
+				STATE: STATE === 1 || STATE === true ? 1 : 0,
 				EDITED_BY: req.user?.user_id ?? null,
 			});
 			if (!updated) return ApiResponse.notFound(res, 'Operation category');

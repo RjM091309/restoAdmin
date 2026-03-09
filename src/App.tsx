@@ -547,7 +547,7 @@ export default function App() {
                   >
                     <Categories
                       selectedBranch={selectedBranch}
-                      onCategoryClick={(category) => navigate(`/inventory/${category.toLowerCase()}${location.search || ''}`)}
+                      onCategoryClick={(category) => navigate(`/inventory/${category.id}${location.search || ''}`)}
                     />
                   </motion.div>
                 } />
@@ -603,7 +603,7 @@ export default function App() {
                   </motion.div>
                 } />
 
-                <Route path="/inventory/:categoryName" element={
+                <Route path="/inventory/:categoryId" element={
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

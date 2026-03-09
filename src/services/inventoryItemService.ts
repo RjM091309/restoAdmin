@@ -8,16 +8,19 @@ type ApiResponse<T> = {
 type InventoryItemApiRecord = {
 	IDNo: number;
 	BRANCH_ID: number;
-	ITEM_CODE: string;
-	ITEM_NAME: string;
-	CATEGORY_ID: number | null;
-	CATEGORY_NAME: string | null;
-	STOCK_QTY: number | string;
-	UNIT: string;
-	UNIT_COST: number | string;
-	REORDER_LEVEL: number | string;
-	STATUS_FLAG: string;
-	ACTIVE: number | boolean;
+	ITEM_CODE?: string;
+	ITEM_NAME?: string;
+	item_name?: string;
+	CATEGORY_ID?: number | null;
+	CATEGORY_NAME?: string | null;
+	category_name?: string | null;
+	STOCK_QTY?: number | string;
+	UNIT?: string;
+	UNIT_COST?: number | string;
+	REORDER_LEVEL?: number | string;
+	STATUS_FLAG?: string;
+	ACTIVE?: number | boolean;
+	[key: string]: unknown;
 };
 
 export type InventoryItem = {
@@ -77,15 +80,15 @@ const toNumber = (value: number | string | null | undefined) => {
 const mapItemRecord = (row: InventoryItemApiRecord): InventoryItem => ({
 	id: String(row.IDNo),
 	branchId: String(row.BRANCH_ID),
-	itemCode: row.ITEM_CODE,
-	itemName: row.ITEM_NAME,
+	itemCode: row.ITEM_CODE ?? '',
+	itemName: (row.ITEM_NAME ?? row.item_name ?? '').toString(),
 	categoryId: row.CATEGORY_ID !== null && row.CATEGORY_ID !== undefined ? String(row.CATEGORY_ID) : null,
-	categoryName: row.CATEGORY_NAME || null,
+	categoryName: (row.CATEGORY_NAME ?? row.category_name) ?? null,
 	stockQty: toNumber(row.STOCK_QTY),
-	unit: row.UNIT || 'pcs',
+	unit: (row.UNIT ?? 'pcs').toString(),
 	unitCost: toNumber(row.UNIT_COST),
 	reorderLevel: toNumber(row.REORDER_LEVEL),
-	statusFlag: row.STATUS_FLAG || 'In Stock',
+	statusFlag: (row.STATUS_FLAG ?? 'In Stock').toString(),
 	active: Boolean(row.ACTIVE),
 });
 
@@ -97,9 +100,10 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
 	return json.data;
 };
 
-export async function getInventoryItems(branchId?: string): Promise<InventoryItem[]> {
+export async function getInventoryItems(branchId?: string, categoryId?: string | null): Promise<InventoryItem[]> {
 	const params: Record<string, string> = {
 		branch_id: branchId && branchId !== 'all' ? branchId : '',
+		category_id: categoryId && categoryId !== 'all' ? categoryId : '',
 	};
 	const response = await fetch(buildUrl('/inventory/items', params), {
 		credentials: 'include',

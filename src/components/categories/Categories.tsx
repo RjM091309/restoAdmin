@@ -1,20 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Plus, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee, Edit2, Trash2 } from 'lucide-react';
+import { Search, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
-import { Modal } from '../ui/Modal';
-import { Select2 } from '../ui/Select2';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { type Branch } from '../partials/Header';
-import {
-  getInventoryCategories,
-  createInventoryCategory,
-  updateInventoryCategory,
-  deleteInventoryCategory,
-  type InventoryCategory
-} from '../../services/inventoryService';
+import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
 import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
 import { toast } from 'sonner';
 
@@ -60,16 +52,8 @@ const categoryData = [
   { id: 'CAT008', name: 'Beverages', description: 'Coffee, tea, sodas, and juices', items: 35, value: 1850, status: 'Healthy' as const },
 ];
 
-const CATEGORY_TYPE_OPTIONS = [
-  'Inventory',
-  'Maintenance',
-  'Utilities / Bills',
-  'Salary & Rent',
-  'Others',
-] as const;
-
 interface CategoriesProps {
-  onCategoryClick: (category: string) => void;
+  onCategoryClick: (category: InventoryCategory) => void;
   selectedBranch: Branch | null;
 }
 
@@ -77,18 +61,8 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
   const { t, i18n } = useTranslation();
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Form State
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    categoryType: 'Inventory',
-    description: '',
-    icon: 'package'
-  });
 
   const fetchCategories = async () => {
     try {
@@ -111,71 +85,6 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     if (!selectedBranch) return;
     fetchCategories();
   }, [selectedBranch?.id]);
-
-  const handleSave = async () => {
-    if (!formData.name.trim()) {
-      toast.error(t('categories.messages.name_required'));
-      return;
-    }
-
-    try {
-      if (editingId) {
-        await updateInventoryCategory(editingId, {
-          name: formData.name,
-          categoryType: formData.categoryType,
-          description: formData.description,
-          icon: formData.icon,
-        });
-        toast.success(t('categories.messages.update_success'));
-      } else {
-        if (!selectedBranch || selectedBranch.id === 'all') {
-          toast.error(t('categories.messages.select_branch'));
-          return;
-        }
-        await createInventoryCategory({
-          branchId: String(selectedBranch.id),
-          name: formData.name,
-          categoryType: formData.categoryType,
-          description: formData.description,
-          icon: formData.icon,
-        });
-        toast.success(t('categories.messages.create_success'));
-      }
-      setIsModalOpen(false);
-      resetForm();
-      fetchCategories();
-    } catch (error: any) {
-      toast.error(error.message || t('categories.messages.save_failed'));
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm(t('categories.delete_confirm'))) return;
-
-    try {
-      await deleteInventoryCategory(id);
-      toast.success(t('categories.messages.delete_success'));
-      fetchCategories();
-    } catch (error: any) {
-      toast.error(error.message || t('categories.messages.delete_failed'));
-    }
-  };
-
-  const resetForm = () => {
-    setEditingId(null);
-    setFormData({ name: '', categoryType: 'Inventory', description: '', icon: 'package' });
-  };
-
-  const openEdit = (category: InventoryCategory) => {
-    setEditingId(category.id);
-    setFormData({
-      name: category.name,
-      categoryType: category.categoryType || 'Inventory',
-      description: category.description || '',
-      icon: category.icon || 'package',
-    });
-    setIsModalOpen(true);
-  };
 
   const filteredCategories = categories.filter(cat =>
     cat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -240,7 +149,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         return (
           <div
             className="flex items-center gap-4 cursor-pointer group"
-            onClick={() => onCategoryClick(category.name)}
+            onClick={() => onCategoryClick(category)}
           >
             <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-brand-muted group-hover:bg-brand-primary group-hover:text-white transition-colors shrink-0">
               <IconComponent size={24} />
@@ -311,34 +220,6 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
         </div>
       ),
     },
-    {
-      header: t('categories.actions'),
-      className: 'text-right',
-      render: (category) => (
-        <div className="flex justify-end items-center gap-2">
-          <button
-            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            onClick={(e) => {
-              e.stopPropagation();
-              openEdit(category);
-            }}
-            title={t('categories.edit_category')}
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleDelete(category.id);
-            }}
-            title={t('categories.delete_category')}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-      ),
-    },
   ];
 
   return (
@@ -367,32 +248,20 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
             transition={{ duration: 0.5, ease: "easeOut" }}
             className="space-y-8"
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="bg-white p-3 rounded-xl shadow-sm">
-                  <Filter size={18} className="text-brand-muted" />
-                </div>
-                <div className="relative">
-                  <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
-                  <input
-                    type="text"
-                    placeholder={t('categories.search_placeholder')}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
-                  />
-                </div>
+            <div className="flex items-center gap-4">
+              <div className="bg-white p-3 rounded-xl shadow-sm">
+                <Filter size={18} className="text-brand-muted" />
               </div>
-              <button
-                onClick={() => {
-                  resetForm();
-                  setIsModalOpen(true);
-                }}
-                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-              >
-                <Plus size={18} />
-                {t('categories.new_category')}
-              </button>
+              <div className="relative">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                <input
+                  type="text"
+                  placeholder={t('categories.search_placeholder')}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-4 gap-6">
@@ -422,90 +291,6 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* New/Edit Category Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          resetForm();
-        }}
-        title={editingId ? t('categories.edit_category') : t('categories.add_new_category')}
-        maxWidth="md"
-        footer={
-          <div className="flex items-center justify-end gap-3">
-            <button
-              onClick={() => {
-                setIsModalOpen(false);
-                resetForm();
-              }}
-              className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
-            >
-              {t('categories.cancel')}
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
-            >
-              {editingId ? t('categories.update_category') : t('categories.save_category')}
-            </button>
-          </div>
-        }
-      >
-        <div className="space-y-5">
-          <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_name')}</label>
-            <input
-              type="text"
-              placeholder={t('categories.form_name_placeholder')}
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_type')}</label>
-            <Select2
-              options={CATEGORY_TYPE_OPTIONS.map((type) => ({
-                value: type,
-                label: type === 'Inventory' ? t('categories.types.inventory') :
-                  type === 'Maintenance' ? t('categories.types.maintenance') :
-                    type === 'Utilities / Bills' ? t('categories.types.utilities_bills') :
-                      type === 'Salary & Rent' ? t('categories.types.salary_rent') :
-                        t('categories.types.others'),
-              }))}
-              value={formData.categoryType}
-              onChange={(val) => setFormData({ ...formData, categoryType: String(val || 'Inventory') })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_description')}</label>
-            <textarea
-              rows={3}
-              placeholder={t('categories.form_description_placeholder')}
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-orange/20 focus:border-brand-orange/50 outline-none transition-all placeholder:text-gray-400 resize-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_icon')}</label>
-            <Select2
-              options={[
-                { value: 'package', label: t('categories.icons.default_box') },
-                { value: 'beef', label: t('categories.icons.beef_meat') },
-                { value: 'fish', label: t('categories.icons.fish_seafood') },
-                { value: 'leaf', label: t('categories.icons.vegetables_produce') },
-                { value: 'droplets', label: t('categories.icons.dairy') },
-                { value: 'wheat', label: t('categories.icons.grains') },
-                { value: 'coffee', label: t('categories.icons.beverages') },
-              ]}
-              value={formData.icon}
-              onChange={(val) => setFormData({ ...formData, icon: String(val || 'package') })}
-            />
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 };

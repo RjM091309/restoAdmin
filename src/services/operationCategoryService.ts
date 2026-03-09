@@ -5,6 +5,7 @@ export interface OperationCategory {
   branchId: string | null;
   name: string;
   description: string | null;
+  state: number; // 1=inventory, 0=expense
   active: boolean;
 }
 
@@ -22,6 +23,7 @@ type OperationCategoryApiRecord = {
   BRANCH_ID: number | null;
   NAME: string;
   DESCRIPTION: string | null;
+  STATE: number | null;
   ACTIVE: number | boolean;
 };
 
@@ -60,6 +62,7 @@ const mapOperationCategory = (row: OperationCategoryApiRecord): OperationCategor
   branchId: row.BRANCH_ID != null ? String(row.BRANCH_ID) : null,
   name: row.NAME,
   description: row.DESCRIPTION,
+  state: row.STATE === 1 ? 1 : 0,
   active: Boolean(row.ACTIVE),
 });
 
@@ -83,6 +86,7 @@ export type CreateOperationCategoryPayload = {
   branchId?: string | null;
   name: string;
   description?: string | null;
+  state?: number; // 1=inventory, 0=expense
   active?: boolean;
 };
 
@@ -97,6 +101,7 @@ export const createOperationCategory = async (
       BRANCH_ID: payload.branchId ?? null,
       NAME: payload.name,
       DESCRIPTION: payload.description ?? null,
+      STATE: payload.state === 1 ? 1 : 0,
       ACTIVE: payload.active ?? true,
     }),
   });
@@ -112,6 +117,7 @@ export const createOperationCategory = async (
 export type UpdateOperationCategoryPayload = {
   name: string;
   description?: string | null;
+  state?: number; // 1=inventory, 0=expense
 };
 
 export const updateOperationCategory = async (
@@ -125,6 +131,7 @@ export const updateOperationCategory = async (
     body: JSON.stringify({
       NAME: payload.name,
       DESCRIPTION: payload.description ?? null,
+      STATE: payload.state === 1 ? 1 : 0,
     }),
   });
 

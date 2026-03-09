@@ -96,6 +96,7 @@
 	},
 	"inventory_page": {
 		"search_placeholder": "Search inventory...",
+		"viewing_category": "Viewing items for {{category}}",
 		"new_item": "Add New Item",
 		"back_to_categories": "Back to Categories",
 		"currency_symbol": "₱",

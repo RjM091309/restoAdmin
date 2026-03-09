@@ -1,21 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Filter, Search, Plus, AlertTriangle, ArrowLeft, Edit2, Trash2, Package } from 'lucide-react';
+import { Filter, Search, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
-import { Modal } from '../ui/Modal';
-import { Select2 } from '../ui/Select2';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import {
-  createInventoryItem,
-  deleteInventoryItem,
-  getInventoryItems,
-  updateInventoryItem,
-  type InventoryItem,
-} from '../../services/inventoryItemService';
+import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
 import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
 import { type Branch } from '../partials/Header';
 
@@ -26,14 +18,6 @@ interface InventoryProps {
 
 type ItemStatus = 'In Stock' | 'Low Stock' | 'Out of Stock';
 
-const UNIT_OPTIONS = ['kg', 'g', 'L', 'mL', 'pcs'] as const;
-type UnitOption = (typeof UNIT_OPTIONS)[number];
-
-const normalizeStatus = (status: string): ItemStatus => {
-  if (status === 'Low Stock' || status === 'Out of Stock') return status;
-  return 'In Stock';
-};
-
 const computeStatus = (stockQty: number, reorderLevel: number): ItemStatus => {
   if (stockQty <= 0) return 'Out of Stock';
   if (stockQty <= reorderLevel) return 'Low Stock';
@@ -41,25 +25,6 @@ const computeStatus = (stockQty: number, reorderLevel: number): ItemStatus => {
 };
 
 const toItemCode = (id: string) => `INV-${String(Number(id) || 0).padStart(3, '0')}`;
-
-const convertQuantityByUnit = (value: number, fromUnit: string, toUnit: string) => {
-  const from = String(fromUnit || '').toLowerCase();
-  const to = String(toUnit || '').toLowerCase();
-  if (from === to) return value;
-
-  if (from === 'kg' && to === 'g') return value * 1000;
-  if (from === 'g' && to === 'kg') return value / 1000;
-  if (from === 'l' && to === 'ml') return value * 1000;
-  if (from === 'ml' && to === 'l') return value / 1000;
-
-  return value;
-};
-
-const normalizeSegment = (value: string) =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-');
 
 const getUnitKey = (u: string) => {
   const s = String(u || 'kg').toLowerCase();
@@ -70,34 +35,15 @@ const getUnitKey = (u: string) => {
 
 export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = null }) => {
   const { t } = useTranslation();
-  const { categoryName } = useParams<{ categoryName: string }>();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isRestockMode, setIsRestockMode] = useState(false);
+  const { categoryId } = useParams<{ categoryId: string }>();
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [restockQtyInput, setRestockQtyInput] = useState('');
-  const [restockUnitCostInput, setRestockUnitCostInput] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
-  const [formData, setFormData] = useState({
-    itemName: '',
-    stockQty: 0,
-    unit: 'kg',
-    unitCost: 0,
-    reorderLevel: 5,
-    statusFlag: 'In Stock' as ItemStatus,
-  });
 
-  const categoryParam = (categoryName || '').toLowerCase();
   const currentCategory = useMemo(
-    () =>
-      categories.find(
-        (category) =>
-          category.name.toLowerCase() === categoryParam ||
-          normalizeSegment(category.name) === normalizeSegment(categoryParam)
-      ) || null,
-    [categories, categoryParam]
+    () => (categoryId && categories.find((c) => c.id === categoryId)) || null,
+    [categories, categoryId]
   );
 
   const fetchData = async () => {
@@ -105,7 +51,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       setLoading(true);
       const branchId = String(selectedBranch?.id || '');
       const [itemRows, categoryRows] = await Promise.all([
-        getInventoryItems(branchId),
+        getInventoryItems(branchId, categoryId || undefined),
         getInventoryCategories(branchId),
       ]);
       setItems(itemRows);
@@ -120,27 +66,20 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
   useEffect(() => {
     if (!selectedBranch) return;
     fetchData();
-  }, [selectedBranch?.id]);
+  }, [selectedBranch?.id, categoryId]);
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    if (!q) return items;
     return items.filter((item) => {
       const itemCategory = String(item.categoryName || '').toLowerCase();
-      const categoryMatch =
-        !categoryParam ||
-        itemCategory === categoryParam ||
-        normalizeSegment(itemCategory) === normalizeSegment(categoryParam);
-
-      if (!categoryMatch) return false;
-      if (!q) return true;
-
       return (
         item.id.toLowerCase().includes(q) ||
-        item.itemName.toLowerCase().includes(q) ||
+        (item.itemName || '').toLowerCase().includes(q) ||
         itemCategory.includes(q)
       );
     });
-  }, [items, searchQuery, categoryParam]);
+  }, [items, searchQuery]);
 
   const stats = useMemo(() => {
     const total = filteredItems.length;
@@ -149,134 +88,6 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     const totalValue = filteredItems.reduce((sum, item) => sum + Number(item.stockQty || 0) * Number(item.unitCost || 0), 0);
     return { total, low, out, totalValue };
   }, [filteredItems]);
-
-  const resetForm = () => {
-    setEditingId(null);
-    setIsRestockMode(false);
-    setRestockQtyInput('');
-    setRestockUnitCostInput('');
-    setFormData({
-      itemName: '',
-      stockQty: 0,
-      unit: 'kg',
-      unitCost: 0,
-      reorderLevel: 5,
-      statusFlag: 'In Stock',
-    });
-  };
-
-  const openEdit = (item: InventoryItem) => {
-    setIsRestockMode(false);
-    setEditingId(item.id);
-    setFormData({
-      itemName: item.itemName,
-      stockQty: item.stockQty,
-      unit: item.unit || 'kg',
-      unitCost: item.unitCost || 0,
-      reorderLevel: item.reorderLevel || 0,
-      statusFlag: normalizeStatus(item.statusFlag || computeStatus(item.stockQty, item.reorderLevel)),
-    });
-    setIsModalOpen(true);
-  };
-
-  const openRestock = (item: InventoryItem) => {
-    setIsRestockMode(true);
-    setRestockQtyInput('');
-    setRestockUnitCostInput('');
-    setEditingId(item.id);
-    setFormData({
-      itemName: item.itemName,
-      stockQty: item.stockQty,
-      unit: item.unit || 'kg',
-      unitCost: item.unitCost || 0,
-      reorderLevel: item.reorderLevel || 0,
-      statusFlag: normalizeStatus(item.statusFlag || computeStatus(item.stockQty, item.reorderLevel)),
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleUnitChange = (nextUnit: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      unit: nextUnit as UnitOption,
-      stockQty: convertQuantityByUnit(Number(prev.stockQty || 0), prev.unit, nextUnit),
-      reorderLevel: convertQuantityByUnit(Number(prev.reorderLevel || 0), prev.unit, nextUnit),
-    }));
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!window.confirm(t('inventory_page.messages.delete_confirm'))) return;
-    try {
-      await deleteInventoryItem(id);
-      toast.success(t('inventory_page.messages.delete_success'));
-      fetchData();
-    } catch (error: any) {
-      toast.error(error.message || t('inventory_page.messages.delete_failed'));
-    }
-  };
-
-  const handleSave = async () => {
-    if (!formData.itemName.trim()) {
-      toast.error(t('inventory_page.messages.name_required'));
-      return;
-    }
-
-    const editingItem = editingId ? items.find((item) => item.id === editingId) : null;
-    const resolvedCategoryId = currentCategory?.id || editingItem?.categoryId || null;
-    const resolvedCategoryName = currentCategory?.name || editingItem?.categoryName || null;
-    if (!resolvedCategoryName) {
-      toast.error(t('inventory_page.messages.no_category'));
-      return;
-    }
-
-    const payload = {
-      branchId: selectedBranch && selectedBranch.id !== 'all' ? String(selectedBranch.id) : undefined,
-      itemName: formData.itemName.trim(),
-      categoryId: resolvedCategoryId,
-      categoryName: resolvedCategoryName,
-      stockQty: Number(formData.stockQty || 0),
-      unit: formData.unit,
-      unitCost: Number(formData.unitCost || 0),
-      reorderLevel: Number(formData.reorderLevel || 0),
-      statusFlag: formData.statusFlag,
-    };
-
-    if (isRestockMode) {
-      const additionalQty = Number(restockQtyInput);
-      if (!Number.isFinite(additionalQty) || additionalQty <= 0) {
-        toast.error(t('inventory_page.messages.invalid_qty'));
-        return;
-      }
-      payload.stockQty = Number(editingItem?.stockQty || 0) + additionalQty;
-
-      const nextUnitCostRaw = String(restockUnitCostInput || '').trim();
-      if (nextUnitCostRaw !== '') {
-        const nextUnitCost = Number(nextUnitCostRaw);
-        if (!Number.isFinite(nextUnitCost) || nextUnitCost < 0) {
-          toast.error(t('inventory_page.messages.invalid_cost'));
-          return;
-        }
-        payload.unitCost = nextUnitCost;
-      } else {
-        payload.unitCost = Number(editingItem?.unitCost || 0);
-      }
-    }
-
-    try {
-      if (editingId) {
-        await updateInventoryItem(editingId, payload);
-        toast.success(t('inventory_page.messages.update_success'));
-      } else {
-        await createInventoryItem(payload);
-        toast.success(t('inventory_page.messages.create_success'));
-      }
-      setIsModalOpen(false);
-      resetForm();
-      fetchData();
-    } catch (error: any) {
-      toast.error(error.message || t('inventory_page.messages.save_failed'));
-    }
-  };
 
   const columns: ColumnDef<InventoryItem>[] = [
     {
@@ -357,35 +168,6 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
         );
       },
     },
-    {
-      header: t('inventory_page.table.actions'),
-      className: 'text-right',
-      render: (item) => (
-        <div className="flex justify-end items-center gap-2">
-          <button
-            className="p-2 text-brand-muted hover:text-emerald-600 hover:bg-emerald-50 transition-colors rounded-lg"
-            title={t('inventory_page.modal.restock_title')}
-            onClick={() => openRestock(item)}
-          >
-            <Package size={16} />
-          </button>
-          <button
-            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            title={t('inventory_page.modal.edit_title')}
-            onClick={() => openEdit(item)}
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title={t('inventory_page.table.delete_title')}
-            onClick={() => handleDelete(item.id)}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-      ),
-    },
   ];
 
 
@@ -440,18 +222,13 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
                   />
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  resetForm();
-                  setIsModalOpen(true);
-                }}
-                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-              >
-                <Plus size={18} />
-                {t('inventory_page.new_item')}
-              </button>
             </div>
 
+            {currentCategory && (
+              <p className="text-sm text-brand-muted">
+                {t('inventory_page.viewing_category', { category: currentCategory.name })}
+              </p>
+            )}
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_items')}</p>
@@ -484,203 +261,6 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Add New Item Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          resetForm();
-        }}
-        title={
-          isRestockMode
-            ? t('inventory_page.modal.restock_title')
-            : editingId
-              ? t('inventory_page.modal.edit_title')
-              : t('inventory_page.modal.add_title')
-        }
-        maxWidth="3xl"
-        footer={
-          <div className="flex items-center justify-end gap-2 sm:gap-3">
-            <button
-              onClick={() => {
-                setIsModalOpen(false);
-                resetForm();
-              }}
-              className="px-4 sm:px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
-            >
-              {t('inventory_page.modal.cancel')}
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-5 sm:px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98]"
-            >
-              {isRestockMode
-                ? t('inventory_page.modal.save_restock')
-                : editingId
-                  ? t('inventory_page.modal.update_item')
-                  : t('inventory_page.modal.save_item')}
-            </button>
-          </div>
-        }
-      >
-        {isRestockMode ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
-            <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.add_stock_qty')}</label>
-              <input
-                type="number"
-                placeholder={t('inventory_page.modal.add_stock_placeholder')}
-                value={restockQtyInput}
-                onChange={(e) => setRestockQtyInput(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-              />
-              <p className="mt-2 text-xs text-brand-muted">
-                {t('inventory_page.modal.current_stock', { qty: formData.stockQty, unit: formData.unit })}
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.new_unit_cost')}</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder={t('inventory_page.modal.new_unit_cost_placeholder')}
-                value={restockUnitCostInput}
-                onChange={(e) => setRestockUnitCostInput(e.target.value)}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-              />
-              <p className="mt-2 text-xs text-brand-muted">
-                {t('inventory_page.modal.current_cost', {
-                  cost: Number(formData.unitCost || 0).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2
-                  })
-                })}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-7">
-            <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.item_name')}</label>
-              <input
-                type="text"
-                placeholder={t('inventory_page.modal.item_name_placeholder')}
-                value={formData.itemName}
-                onChange={(e) => setFormData((prev) => ({ ...prev, itemName: e.target.value }))}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5">
-              <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.stock_level_unit')}</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    placeholder={t('inventory_page.modal.stock_placeholder')}
-                    value={formData.stockQty}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        stockQty: Number(e.target.value || 0),
-                      }))
-                    }
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                  />
-                  <Select2
-                    options={UNIT_OPTIONS.map((unit) => ({
-                      value: unit,
-                      label: t(`inventory_page.units.${unit}`),
-                    }))}
-                    value={formData.unit}
-                    onChange={(val) => handleUnitChange(String(val || 'kg'))}
-                    className="w-28 sm:w-32 shrink-0"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.unit_cost')}</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder={t('inventory_page.modal.unit_cost_placeholder')}
-                  value={formData.unitCost}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      unitCost: Number(e.target.value || 0),
-                    }))
-                  }
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.reorder_level')}</label>
-                <input
-                  type="number"
-                  placeholder={t('inventory_page.modal.reorder_level_placeholder')}
-                  value={formData.reorderLevel}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      reorderLevel: Number(e.target.value || 0),
-                    }))
-                  }
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-brand-text mb-2">{t('inventory_page.modal.status_flag')}</label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                <label className={cn(
-                  "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
-                  formData.statusFlag === 'In Stock' ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'
-                )}>
-                  <input
-                    type="radio"
-                    name="status"
-                    checked={formData.statusFlag === 'In Stock'}
-                    onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'In Stock' }))}
-                    className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer"
-                  />
-                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.in_stock')}</span>
-                </label>
-                <label className={cn(
-                  "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
-                  formData.statusFlag === 'Low Stock' ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-white'
-                )}>
-                  <input
-                    type="radio"
-                    name="status"
-                    checked={formData.statusFlag === 'Low Stock'}
-                    onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'Low Stock' }))}
-                    className="w-4 h-4 text-orange-500 focus:ring-orange-500/20 cursor-pointer"
-                  />
-                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.low_stock')}</span>
-                </label>
-                <label className={cn(
-                  "flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2",
-                  formData.statusFlag === 'Out of Stock' ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'
-                )}>
-                  <input
-                    type="radio"
-                    name="status"
-                    checked={formData.statusFlag === 'Out of Stock'}
-                    onChange={() => setFormData((prev) => ({ ...prev, statusFlag: 'Out of Stock' }))}
-                    className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer"
-                  />
-                  <span className="text-sm font-bold text-brand-text">{t('inventory_page.status.out_of_stock')}</span>
-                </label>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

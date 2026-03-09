@@ -31,10 +31,12 @@ class InventoryController {
 	static async getAll(req, res) {
 		try {
 			const branchId = InventoryController._resolveBranchId(req);
-			const rows = await InventoryModel.getAll(branchId);
+			const categoryId = req.query?.category_id ?? req.query?.categoryId ?? null;
+			const rows = await InventoryModel.getAll(branchId, categoryId);
 			return ApiResponse.success(res, rows, 'Inventory items retrieved successfully');
 		} catch (error) {
-			return ApiResponse.error(res, 'Failed to fetch inventory items', 500, error.message);
+			console.error('[InventoryController.getAll] Error:', error?.message, error?.stack);
+			return ApiResponse.error(res, error?.message || 'Failed to fetch inventory items', 500, error?.stack);
 		}
 	}
 
@@ -101,6 +103,19 @@ class InventoryController {
 			return ApiResponse.success(res, null, 'Inventory item deleted successfully');
 		} catch (error) {
 			return ApiResponse.error(res, 'Failed to delete inventory item', 500, error.message);
+		}
+	}
+
+	static async updateStockByExpenseId(req, res) {
+		try {
+			const { expenseId } = req.params;
+			const stockQty = req.body?.stockQty ?? req.body?.STOCK_QTY ?? req.body?.qty ?? 0;
+			const branchId = InventoryController._resolveBranchId(req);
+			const ok = await InventoryModel.updateStockByExpenseId(expenseId, stockQty, branchId);
+			if (!ok) return ApiResponse.badRequest(res, 'Expense not found or not an inventory category');
+			return ApiResponse.success(res, null, 'Inventory stock updated successfully');
+		} catch (error) {
+			return ApiResponse.error(res, 'Failed to update inventory stock', 500, error.message);
 		}
 	}
 }
