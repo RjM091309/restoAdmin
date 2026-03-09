@@ -136,6 +136,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           name: row.name,
           description: row.description ?? null,
         }));
+        mapped.sort((a, b) => {
+          const numA = /^(\d+)\.?\s/.exec(a.name);
+          const numB = /^(\d+)\.?\s/.exec(b.name);
+          if (numA && numB) {
+            const nA = parseInt(numA[1], 10);
+            const nB = parseInt(numB[1], 10);
+            if (nA !== nB) return nA - nB;
+          }
+          return a.name.localeCompare(b.name, undefined, { numeric: true });
+        });
 
         const filteredCategories = apiCats.filter(
           (cat) => String(cat.branchId) === resolvedBranchId,
@@ -190,12 +200,23 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       }
     });
 
-    return Array.from(byType.values()).map<Category>((entry) => ({
-      id: entry.id,
-      operationId: selectedOperationId,
-      name: entry.label,
-      masterCategoryId: entry.masterCategoryId,
-    }));
+    return Array.from(byType.values())
+      .map<Category>((entry) => ({
+        id: entry.id,
+        operationId: selectedOperationId,
+        name: entry.label,
+        masterCategoryId: entry.masterCategoryId,
+      }))
+      .sort((a, b) => {
+        const numA = /^(\d+)\.?\s/.exec(a.name);
+        const numB = /^(\d+)\.?\s/.exec(b.name);
+        if (numA && numB) {
+          const nA = parseInt(numA[1], 10);
+          const nB = parseInt(numB[1], 10);
+          if (nA !== nB) return nA - nB;
+        }
+        return a.name.localeCompare(b.name, undefined, { numeric: true });
+      });
   }, [masterCategories, selectedOperationId]);
 
   const selectedCategory = useMemo(() => {
@@ -791,7 +812,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Operation</div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -1</div>
               <div className="text-xs text-brand-muted mt-1">Operation first, then categories.</div>
             </div>
             <button
@@ -870,7 +891,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category</div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -2</div>
               <div className="text-xs text-brand-muted mt-1">Select a category to show its items.</div>
             </div>
             <button
