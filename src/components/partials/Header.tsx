@@ -179,25 +179,38 @@ export const Header: React.FC<HeaderProps> = ({
 
           setBranches(branchOptions);
 
-          if (!selectedBranch && branchOptions.length > 0) {
-            const params = new URLSearchParams(window.location.search);
-            const branchIdFromUrl = params.get('branchId');
-            if (!branchIdFromUrl) {
-              if (isAdmin) {
-                const allOption = branchOptions.find((b) => String(b.id) === 'all') || branchOptions[0];
-                onBranchChange(allOption);
-              } else {
-                const resolved =
-                  userBranchId && userBranchId !== 'all'
-                    ? branchOptions.find((b) => String(b.id) === userBranchId) || null
-                    : null;
-                const firstSpecific = branchOptions.find((b) => String(b.id) !== 'all') || null;
-                onBranchChange(
-                  resolved ||
-                    firstSpecific ||
-                    branchOptions[0]
-                );
-              }
+          const params = new URLSearchParams(window.location.search);
+          const branchIdFromUrl = params.get('branchId');
+          const branchNameFromUrl = params.get('branchName');
+
+          if (branchIdFromUrl) {
+            // URL has branch — keep selectedBranch in sync so direct links (e.g. /expenses-mock?branchId=3) load correct data
+            const urlBranch: Branch = {
+              id: branchIdFromUrl,
+              name: branchNameFromUrl?.replace(/\+/g, ' ') || (branchIdFromUrl === 'all' ? t('header.all_branches') : `Branch ${branchIdFromUrl}`),
+            };
+            const matches =
+              selectedBranch &&
+              String(selectedBranch.id) === String(branchIdFromUrl);
+            if (!matches) {
+              onBranchChange(urlBranch);
+            }
+          } else if (!selectedBranch && branchOptions.length > 0) {
+            // No branch in URL — set default by role
+            if (isAdmin) {
+              const allOption = branchOptions.find((b) => String(b.id) === 'all') || branchOptions[0];
+              onBranchChange(allOption);
+            } else {
+              const resolved =
+                userBranchId && userBranchId !== 'all'
+                  ? branchOptions.find((b) => String(b.id) === userBranchId) || null
+                  : null;
+              const firstSpecific = branchOptions.find((b) => String(b.id) !== 'all') || null;
+              onBranchChange(
+                resolved ||
+                  firstSpecific ||
+                  branchOptions[0]
+              );
             }
           }
         }

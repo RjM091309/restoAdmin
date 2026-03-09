@@ -10,11 +10,12 @@ const ApiResponse = require('../utils/apiResponse');
 
 class OperationCategoryController {
 	static _resolveBranchId(req) {
+		// Prefer explicit query/body so admin can view any branch; session is fallback for branch users
 		const raw =
-			req.session?.branch_id ||
 			req.query?.branch_id ||
 			req.body?.branch_id ||
 			req.body?.BRANCH_ID ||
+			req.session?.branch_id ||
 			req.user?.branch_id ||
 			null;
 

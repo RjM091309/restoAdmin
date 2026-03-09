@@ -107,20 +107,25 @@ export type CreateInventoryCategoryPayload = {
     categoryType: string;
     description: string | null;
     icon: string | null;
+    opCategoryId?: string | number | null;
 };
 
 export async function createInventoryCategory(payload: CreateInventoryCategoryPayload): Promise<number> {
+    const body: Record<string, unknown> = {
+        BRANCH_ID: payload.branchId,
+        CATEGORY_NAME: payload.name,
+        CATEGORY_TYPE: payload.categoryType,
+        DESCRIPTION: payload.description,
+        ICON: payload.icon,
+    };
+    if (payload.opCategoryId !== undefined && payload.opCategoryId !== null && payload.opCategoryId !== '') {
+        body.OP_CAT_ID = payload.opCategoryId;
+    }
     const response = await fetch(buildUrl('/inventory/categories'), {
         method: 'POST',
         credentials: 'include',
         headers: authHeaders(),
-        body: JSON.stringify({
-            BRANCH_ID: payload.branchId,
-            CATEGORY_NAME: payload.name,
-            CATEGORY_TYPE: payload.categoryType,
-            DESCRIPTION: payload.description,
-            ICON: payload.icon,
-        }),
+        body: JSON.stringify(body),
     });
     const json = (await response.json()) as ApiResponse<{ id: number }>;
     if (!response.ok || !json.success) {
@@ -134,19 +139,24 @@ export type UpdateInventoryCategoryPayload = {
     categoryType: string;
     description: string | null;
     icon: string | null;
+    opCategoryId?: string | number | null;
 };
 
 export async function updateInventoryCategory(id: string, payload: UpdateInventoryCategoryPayload): Promise<void> {
+    const body: Record<string, unknown> = {
+        CATEGORY_NAME: payload.name,
+        CATEGORY_TYPE: payload.categoryType,
+        DESCRIPTION: payload.description,
+        ICON: payload.icon,
+    };
+    if (payload.opCategoryId !== undefined && payload.opCategoryId !== null && payload.opCategoryId !== '') {
+        body.OP_CAT_ID = payload.opCategoryId;
+    }
     const response = await fetch(buildUrl(`/inventory/categories/${id}`), {
         method: 'PUT',
         credentials: 'include',
         headers: authHeaders(),
-        body: JSON.stringify({
-            CATEGORY_NAME: payload.name,
-            CATEGORY_TYPE: payload.categoryType,
-            DESCRIPTION: payload.description,
-            ICON: payload.icon,
-        }),
+        body: JSON.stringify(body),
     });
     const json = (await response.json()) as ApiResponse<null>;
     if (!response.ok || !json.success) {

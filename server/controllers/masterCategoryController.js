@@ -16,11 +16,16 @@ class MasterCategoryController {
 	}
 
 	static _resolvePayload(req) {
+		const rawOpCatId = req.body.OP_CAT_ID ?? req.body.opCategoryId ?? req.body.op_cat_id ?? null;
+		const OP_CAT_ID = rawOpCatId !== null && rawOpCatId !== undefined && rawOpCatId !== ''
+			? Number(rawOpCatId)
+			: null;
 		return {
 			CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.name || '',
 			CATEGORY_TYPE: req.body.CATEGORY_TYPE || req.body.categoryType || 'Inventory',
 			DESCRIPTION: req.body.DESCRIPTION || req.body.description || null,
 			ICON: req.body.ICON || req.body.icon || null,
+			OP_CAT_ID: Number.isFinite(OP_CAT_ID) ? OP_CAT_ID : null,
 		};
 	}
 
@@ -70,6 +75,7 @@ class MasterCategoryController {
 				CATEGORY_TYPE: payload.CATEGORY_TYPE,
 				DESCRIPTION: payload.DESCRIPTION,
 				ICON: payload.ICON,
+				OP_CAT_ID: payload.OP_CAT_ID ?? null,
 				user_id: userId,
 			});
 
@@ -93,6 +99,7 @@ class MasterCategoryController {
 				CATEGORY_TYPE: payload.CATEGORY_TYPE,
 				DESCRIPTION: payload.DESCRIPTION,
 				ICON: payload.ICON,
+				OP_CAT_ID: payload.OP_CAT_ID ?? null,
 				user_id: userId,
 			});
 

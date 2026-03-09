@@ -153,6 +153,9 @@ class MasterCategoryModel {
 	static async create(data) {
 		await MasterCategoryModel.ensureSchema();
 		const currentDate = new Date();
+		const opCatId = data.OP_CAT_ID !== undefined && data.OP_CAT_ID !== null && data.OP_CAT_ID !== ''
+			? Number(data.OP_CAT_ID)
+			: null;
 		const values = [
 			Number(data.BRANCH_ID),
 			String(data.CATEGORY_NAME).trim(),
@@ -172,9 +175,10 @@ class MasterCategoryModel {
 					ICON,
 					ACTIVE,
 					ENCODED_BY,
-					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-				values
+					ENCODED_DT,
+					OP_CAT_ID
+				) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+				[...values.slice(0, 5), values[5], values[6], opCatId]
 			);
 			return result.insertId;
 		} catch (err) {
@@ -194,11 +198,29 @@ class MasterCategoryModel {
 						ICON,
 						ACTIVE,
 						ENCODED_BY,
-						ENCODED_DT
-					) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-					[nextId, ...values]
+						ENCODED_DT,
+						OP_CAT_ID
+					) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+					[nextId, ...values.slice(0, 5), values[5], values[6], opCatId]
 				);
 				return nextId;
+			}
+			// Column OP_CAT_ID might not exist on older schemas; try without it
+			if (msg.includes('Unknown column') && msg.includes('OP_CAT_ID')) {
+				const [result] = await pool.execute(
+					`INSERT INTO master_categories (
+						BRANCH_ID,
+						CATEGORY_NAME,
+						CATEGORY_TYPE,
+						DESCRIPTION,
+						ICON,
+						ACTIVE,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+					values
+				);
+				return result.insertId;
 			}
 			throw err;
 		}
@@ -207,12 +229,16 @@ class MasterCategoryModel {
 	static async update(id, data) {
 		await MasterCategoryModel.ensureSchema();
 		const currentDate = new Date();
+		const opCatId = data.OP_CAT_ID !== undefined && data.OP_CAT_ID !== null && data.OP_CAT_ID !== ''
+			? Number(data.OP_CAT_ID)
+			: null;
 		const [result] = await pool.execute(
 			`UPDATE master_categories
 			SET CATEGORY_NAME = ?,
 				CATEGORY_TYPE = ?,
 				DESCRIPTION = ?,
 				ICON = ?,
+				OP_CAT_ID = ?,
 				EDITED_BY = ?,
 				EDITED_DT = ?
 			WHERE IDNo = ? AND ACTIVE = 1`,
@@ -221,6 +247,7 @@ class MasterCategoryModel {
 				String(data.CATEGORY_TYPE || 'Inventory'),
 				data.DESCRIPTION || null,
 				data.ICON || null,
+				opCatId,
 				data.user_id || null,
 				currentDate,
 				id,

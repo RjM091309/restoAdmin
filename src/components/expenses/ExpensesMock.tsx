@@ -172,9 +172,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         ]);
         if (!isMounted) return;
 
-        // Ensure data is strictly scoped to the currently selected branch
+        // Ensure data is strictly scoped to the currently selected branch.
+        // Include operations that match the branch OR have no branch (global/shared).
         const filteredOps = apiOps.filter(
-          (row) => row.branchId != null && String(row.branchId) === resolvedBranchId,
+          (row) =>
+            row.branchId == null || String(row.branchId) === resolvedBranchId,
         );
         const mapped: Operation[] = filteredOps.map((row) => ({
           id: String(row.id),
@@ -293,7 +295,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         0,
       );
     }
-    return expenses.reduce((sum, row) => sum + row.expAmount, 0);
+    // Nothing selected → selected total is 0
+    return 0;
   }, [expenses, itemsForCategory, masterCategories, selectedCategory, selectedCategoryId, selectedOperationId]);
 
   const columns: ColumnDef<ExpenseRecord>[] = useMemo(
@@ -628,6 +631,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           categoryType: categoryForm.name.trim(),
           description: categoryForm.description.trim() || null,
           icon: null,
+          opCategoryId: selectedOperationId ?? undefined,
         });
         // Refresh data so categories list updates
         const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
@@ -642,6 +646,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           categoryType: categoryForm.name.trim(),
           description: categoryForm.description.trim() || null,
           icon: null,
+          opCategoryId: selectedOperationId ?? undefined,
         };
         await createInventoryCategory(payload);
         const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
@@ -737,7 +742,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 {formatCurrency(grandTotalExpenses)}
               </div>
               <div className="text-xs text-brand-muted mt-1">
-                All operations (static)
+                All operations
               </div>
             </div>
             <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
@@ -763,7 +768,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     Operation: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
                   </>
                 ) : (
-                  'All operations'
+                  'Select an operation or category'
                 )}
               </div>
             </div>
