@@ -14,6 +14,7 @@ import { type Branch } from '../partials/Header';
 interface InventoryProps {
   onBack?: () => void;
   selectedBranch?: Branch | null;
+  onCategoryResolved?: (categoryId: string, categoryName: string) => void;
 }
 
 type ItemStatus = 'In Stock' | 'Low Stock' | 'Out of Stock';
@@ -33,7 +34,7 @@ const getUnitKey = (u: string) => {
   return s;
 };
 
-export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = null }) => {
+export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = null, onCategoryResolved }) => {
   const { t } = useTranslation();
   const { categoryId } = useParams<{ categoryId: string }>();
   const [loading, setLoading] = useState(true);
@@ -45,6 +46,11 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
     () => (categoryId && categories.find((c) => c.id === categoryId)) || null,
     [categories, categoryId]
   );
+
+  useEffect(() => {
+    if (!categoryId || !currentCategory?.name) return;
+    onCategoryResolved?.(String(categoryId), String(currentCategory.name));
+  }, [categoryId, currentCategory?.name, onCategoryResolved]);
 
   const fetchData = async () => {
     try {
@@ -201,7 +207,12 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               <div className="flex items-center gap-4">
                 {onBack && (
                   <button
-                    onClick={onBack}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onBack();
+                    }}
                     className="bg-white p-3 rounded-xl shadow-sm border border-transparent hover:border-brand-primary/30 transition-all group"
                     title={t('inventory_page.back_to_categories')}
                   >
@@ -224,11 +235,6 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               </div>
             </div>
 
-            {currentCategory && (
-              <p className="text-sm text-brand-muted">
-                {t('inventory_page.viewing_category', { category: currentCategory.name })}
-              </p>
-            )}
             <div className="grid grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_items')}</p>

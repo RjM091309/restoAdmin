@@ -882,7 +882,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 {formatCurrency(grandTotalExpenses)}
               </div>
               <div className="text-xs text-brand-muted mt-1">
-                All Category -1
+                All Main Categories
               </div>
             </div>
             <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
@@ -901,14 +901,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               <div className="text-xs text-brand-muted mt-1">
                 {selectedCategory ? (
                   <>
-                    Category -2: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
+                    Sub Category: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
                   </>
                 ) : selectedOperation ? (
                   <>
-                    Category -1: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
+                    Main Category: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
                   </>
                 ) : (
-                  'Select a Category -1 or Category -2'
+                  'Select a Main Category or Sub Category'
                 )}
               </div>
             </div>
@@ -924,14 +924,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -1</div>
-              <div className="text-xs text-brand-muted mt-1">Category -1 first, then Category -2.</div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Main Category</div>
+              <div className="text-xs text-brand-muted mt-1">Main Category first, then Sub Category.</div>
             </div>
             <button
               type="button"
               onClick={handleOpenAddOperation}
               className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
-              aria-label="Add operation"
+              aria-label="Add main category"
             >
               +
             </button>
@@ -977,7 +977,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     type="button"
                     onClick={(e) => handleOpenEditOperation(e, op)}
                     className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                    aria-label="Edit operation"
+                    aria-label="Edit main category"
                   >
                     <Edit2 size={14} />
                   </button>
@@ -992,14 +992,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Category -2</div>
-              <div className="text-xs text-brand-muted mt-1">Select a Category -2 to show its items.</div>
+              <div className="text-sm font-black tracking-wide text-brand-text uppercase">Sub Category</div>
+              <div className="text-xs text-brand-muted mt-1">Select a Sub Category to show its items.</div>
             </div>
             <button
               type="button"
               onClick={handleOpenAddCategory}
               className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              aria-label="Add category"
+              aria-label="Add sub category"
               disabled={!selectedOperationId}
             >
               +
@@ -1018,7 +1018,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="px-4 py-6 text-sm text-brand-muted"
               >
-                Select a Category -1 first.
+                Select a Main Category first.
               </motion.div>
             ) : (
               <motion.div
@@ -1030,7 +1030,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 className="space-y-1"
               >
                 {categoriesForOperation.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-brand-muted">No Category -2.</div>
+                  <div className="px-4 py-6 text-sm text-brand-muted">No Sub Category.</div>
                 ) : (
                   categoriesForOperation.map((cat) => {
                     const active = cat.id === selectedCategoryId;
@@ -1081,7 +1081,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                               type="button"
                               onClick={(e) => handleOpenEditCategory(e, cat)}
                               className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                              aria-label="Edit category"
+                              aria-label="Edit sub category"
                             >
                               <Edit2 size={14} />
                             </button>
@@ -1092,7 +1092,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                                 setCategoryToDelete(cat);
                               }}
                               className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                              aria-label="Delete category"
+                              aria-label="Delete sub category"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1120,7 +1120,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                       Showing items for <span className="font-bold text-brand-text">{selectedCategory.name}</span>.
                     </>
                   ) : (
-                    'Select a Category -2 to display items.'
+                    'Select a Sub Category to display items.'
                   )}
                 </div>
               </div>
@@ -1149,7 +1149,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     transition={{ duration: 0.18, ease: 'easeOut' }}
                     className="px-6 py-10 text-sm text-brand-muted"
                   >
-                    Choose a Category -2 to load table items.
+                  Choose a Sub Category to load table items.
                   </motion.div>
                 ) : (
                   <motion.div
@@ -1263,7 +1263,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       <SidePanel
         isOpen={isOperationPanelOpen}
         onClose={handleCloseOperationPanel}
-        title={editingOperation ? 'Edit Operation' : 'Add Operation'}
+        title={editingOperation ? 'Edit Main Category' : 'Add Main Category'}
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
@@ -1305,16 +1305,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               placeholder="Optional description"
             />
           </div>
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="operation-state"
-              checked={operationForm.state === 1}
-              onChange={(e) => setOperationForm((prev) => ({ ...prev, state: e.target.checked ? 1 : 0 }))}
-              className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary/20 cursor-pointer"
-            />
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
             <label htmlFor="operation-state" className="text-sm font-medium text-brand-text cursor-pointer select-none">
               Inventory
+            </label>
+            <label htmlFor="operation-state" className="relative inline-flex items-center cursor-pointer select-none">
+              <input
+                type="checkbox"
+                id="operation-state"
+                checked={operationForm.state === 1}
+                onChange={(e) => setOperationForm((prev) => ({ ...prev, state: e.target.checked ? 1 : 0 }))}
+                className="sr-only peer"
+              />
+              <span className="h-6 w-11 rounded-full bg-gray-200 transition-colors peer-checked:bg-brand-primary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-primary/20" />
+              <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5" />
             </label>
           </div>
         </div>
@@ -1324,7 +1328,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       <SidePanel
         isOpen={isCategoryPanelOpen}
         onClose={handleCloseCategoryPanel}
-        title={editingCategory ? 'Edit Category' : 'Add Category'}
+        title={editingCategory ? 'Edit Sub Category' : 'Add Sub Category'}
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
@@ -1348,13 +1352,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       >
         <div className="space-y-5">
           <div className="space-y-3">
-            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Category name</label>
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Sub category name</label>
             <input
               type="text"
               value={categoryForm.name}
               onChange={(e) => setCategoryForm((prev) => ({ ...prev, name: e.target.value }))}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-              placeholder="Category name"
+              placeholder="Sub category name"
             />
           </div>
           <div className="space-y-3">

@@ -191,6 +191,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
         )}
         {isSpecificBranch && (
           <SidebarItem
+            icon={Package}
+            label={t('sidebar.inventory')}
+            active={activeTab === 'Inventory'}
+            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && (
+          <SidebarItem
             icon={UtensilsCrossed}
             label={t('sidebar.menu_management')}
             active={activeTab === 'Menu Management'}
@@ -246,14 +254,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
             />
           </>
-        )}
-        {isSpecificBranch && (
-          <SidebarItem
-            icon={Package}
-            label={t('sidebar.inventory')}
-            active={activeTab === 'Inventory'}
-            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
         )}
         {isAdmin && !isSpecificBranch && (
           <SidebarItem

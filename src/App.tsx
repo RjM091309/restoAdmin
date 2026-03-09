@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -360,6 +360,11 @@ export default function App() {
   const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(() => parseBranchFromSearch(location.search));
+  const [inventoryCrumbById, setInventoryCrumbById] = useState<Record<string, string>>({});
+
+  const handleInventoryCategoryResolved = useCallback((id: string, name: string) => {
+    setInventoryCrumbById((prev) => ({ ...prev, [String(id)]: String(name) }));
+  }, []);
 
   useEffect(() => {
     const resolved = parseBranchFromSearch(location.search);
@@ -375,7 +380,7 @@ export default function App() {
   const primaryPath = pathParts[0] || 'dashboard';
 
   // Create breadcrumb array
-  const breadcrumbs = pathParts.map(part => {
+  const breadcrumbs = pathParts.map((part, idx) => {
     if (part === 'menu-management') return 'Menu Management';
     if (part === 'users') return 'User Management';
     if (part === 'branches') return 'Branch Management';
@@ -385,6 +390,15 @@ export default function App() {
     if (part === 'access') return 'User Access';
     if (part === 'sales-analytics') return 'Sales Analytics';
     if (part === 'expenses-mock') return 'Expenses';
+    if (primaryPath === 'inventory' && idx === 1) {
+      const id = String(part);
+      const fromNavState =
+        (location.state as any)?.categoryName != null
+          ? String((location.state as any).categoryName)
+          : '';
+      const fromMemory = inventoryCrumbById[id] || '';
+      return (fromNavState || fromMemory || id).trim();
+    }
     return part.charAt(0).toUpperCase() + part.slice(1).replace(/-/g, ' ');
   });
   if (breadcrumbs.length === 0) breadcrumbs.push('Dashboard');
@@ -547,7 +561,10 @@ export default function App() {
                   >
                     <Categories
                       selectedBranch={selectedBranch}
-                      onCategoryClick={(category) => navigate(`/inventory/${category.id}${location.search || ''}`)}
+                      onCategoryClick={(category) => {
+                        setInventoryCrumbById((prev) => ({ ...prev, [String(category.id)]: category.name }));
+                        navigate(`/inventory/${category.id}${location.search || ''}`, { state: { categoryName: category.name } });
+                      }}
                     />
                   </motion.div>
                 } />
@@ -612,6 +629,7 @@ export default function App() {
                     <Inventory
                       selectedBranch={selectedBranch}
                       onBack={() => navigate(`/inventory${location.search || ''}`)}
+                      onCategoryResolved={handleInventoryCategoryResolved}
                     />
                   </motion.div>
                 } />

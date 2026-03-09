@@ -151,7 +151,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
             className="flex items-center gap-4 cursor-pointer group"
             onClick={() => onCategoryClick(category)}
           >
-            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-brand-muted group-hover:bg-brand-primary group-hover:text-white transition-colors shrink-0">
+            <div className="w-12 h-12 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-brand-muted group-hover:border-brand-primary group-hover:bg-brand-primary/5 group-hover:text-brand-primary transition-colors shrink-0">
               <IconComponent size={24} />
             </div>
             <div>
