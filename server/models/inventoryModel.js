@@ -180,15 +180,39 @@ class InventoryModel {
 					if (Number(count[0]?.n ?? 0) === 0) {
 						await pool.execute(`
 							INSERT INTO inventory (
-								BRANCH_ID, EXPENSES_ID, STOCK_QTY, UNIT, UNIT_COST, REORDER_LEVEL,
-								STATUS_FLAG, ACTIVE, ENCODED_BY, ENCODED_DT, EDITED_BY, EDITED_DT
+								BRANCH_ID,
+								EXPENSES_ID,
+								ITEM_NAME,
+								CATEGORY_ID,
+								STOCK_QTY,
+								UNIT,
+								UNIT_COST,
+								REORDER_LEVEL,
+								STATUS_FLAG,
+								ACTIVE,
+								ENCODED_BY,
+								ENCODED_DT,
+								EDITED_BY,
+								EDITED_DT
 							)
 							SELECT
-								e.BRANCH_ID, e.IDNo, 0, 'pcs', COALESCE(e.EXP_AMOUNT, 0), 0,
-								'In Stock', 1, e.ENCODED_BY, e.ENCODED_DT, e.EDITED_BY, e.EDITED_DT
+								e.BRANCH_ID,
+								e.IDNo,
+								COALESCE(e.EXP_DESC, 'Unknown Item'),
+								e.MASTER_CAT_ID,
+								0,
+								'pcs',
+								COALESCE(e.EXP_AMOUNT, 0),
+								0,
+								'In Stock',
+								1,
+								e.ENCODED_BY,
+								e.ENCODED_DT,
+								e.EDITED_BY,
+								e.EDITED_DT
 							FROM expenses e
 							INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID AND mc.ACTIVE = 1
-							INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
+							INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 							LEFT JOIN inventory inv ON inv.EXPENSES_ID = e.IDNo AND inv.ACTIVE = 1
 							WHERE inv.IDNo IS NULL
 						`);
@@ -208,68 +232,44 @@ class InventoryModel {
 
 	static async getAll(branchId = null, categoryId = null) {
 		await InventoryModel.ensureSchema();
-		// Base: expenses under inventory categories. LEFT JOIN inventory for stock.
-		// Shows ALL items (even 0 stock) - inventory row optional
+		// Pure inventory-based view, aggregated per item for a branch/category
 		const params = [];
-		let where = 'WHERE 1=1';
+		let where = 'WHERE i.ACTIVE = 1';
 		if (branchId != null && branchId !== undefined) {
-			where += ' AND e.BRANCH_ID = ?';
+			where += ' AND i.BRANCH_ID = ?';
 			params.push(branchId);
 		}
 		if (categoryId != null && categoryId !== undefined && String(categoryId).trim() !== '') {
-			where += ' AND e.MASTER_CAT_ID = ?';
+			where += ' AND i.CATEGORY_ID = ?';
 			params.push(Number(categoryId) || categoryId);
 		}
+
 		const query = `
 			SELECT
-				COALESCE(i.IDNo, e.IDNo) AS IDNo,
-				e.BRANCH_ID,
-				e.EXP_DESC AS ITEM_NAME,
-				e.MASTER_CAT_ID AS CATEGORY_ID,
+				MIN(i.IDNo) AS IDNo,
+				i.BRANCH_ID,
+				i.ITEM_NAME,
+				i.CATEGORY_ID,
 				mc.CATEGORY_NAME AS CATEGORY_NAME,
-				COALESCE(i.STOCK_QTY, 0) AS STOCK_QTY,
-				COALESCE(i.UNIT, 'pcs') AS UNIT,
-				COALESCE(i.UNIT_COST, e.EXP_AMOUNT, 0) AS UNIT_COST,
-				COALESCE(i.REORDER_LEVEL, 0) AS REORDER_LEVEL,
-				COALESCE(i.STATUS_FLAG, 'In Stock') AS STATUS_FLAG,
+				SUM(i.STOCK_QTY) AS STOCK_QTY,
+				MAX(i.UNIT) AS UNIT,
+				MAX(i.UNIT_COST) AS UNIT_COST,
+				MAX(i.REORDER_LEVEL) AS REORDER_LEVEL,
+				MAX(i.STATUS_FLAG) AS STATUS_FLAG,
 				1 AS ACTIVE,
-				e.ENCODED_BY,
-				e.ENCODED_DT,
-				e.EDITED_BY,
-				e.EDITED_DT
-			FROM expenses e
-			INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID AND mc.ACTIVE = 1
-			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
-			LEFT JOIN inventory i ON i.EXPENSES_ID = e.IDNo AND i.ACTIVE = 1
+				MIN(i.ENCODED_BY) AS ENCODED_BY,
+				MIN(i.ENCODED_DT) AS ENCODED_DT,
+				MAX(i.EDITED_BY) AS EDITED_BY,
+				MAX(i.EDITED_DT) AS EDITED_DT
+			FROM inventory i
+			LEFT JOIN master_categories mc ON mc.IDNo = i.CATEGORY_ID AND mc.ACTIVE = 1
 			${where}
-			ORDER BY e.IDNo DESC
+			GROUP BY i.BRANCH_ID, i.ITEM_NAME, i.CATEGORY_ID
+			ORDER BY IDNo DESC
 		`;
-		try {
-			const [rows] = await pool.execute(query, params);
-			return rows;
-		} catch (err) {
-			if (err.message && (err.message.includes('EXPENSES_ID') || err.message.includes('Unknown column') || err.message.includes("doesn't exist"))) {
-				// Fallback: expenses only (no inventory join) - shows all items even with 0 stock
-				const fbWhere = [
-					branchId != null && branchId !== undefined ? 'e.BRANCH_ID = ?' : null,
-					categoryId != null && String(categoryId).trim() !== '' ? 'e.MASTER_CAT_ID = ?' : null,
-				].filter(Boolean).join(' AND ');
-				const [fbRows] = await pool.execute(
-					`SELECT e.IDNo, e.BRANCH_ID, e.EXP_DESC AS ITEM_NAME, e.MASTER_CAT_ID AS CATEGORY_ID,
-						mc.CATEGORY_NAME AS CATEGORY_NAME, 0 AS STOCK_QTY, 'pcs' AS UNIT,
-						COALESCE(e.EXP_AMOUNT, 0) AS UNIT_COST, 0 AS REORDER_LEVEL, 'In Stock' AS STATUS_FLAG,
-						1 AS ACTIVE, e.ENCODED_BY, e.ENCODED_DT, e.EDITED_BY, e.EDITED_DT
-					FROM expenses e
-					INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID AND mc.ACTIVE = 1
-					INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
-					${fbWhere ? `WHERE ${fbWhere}` : ''}
-					ORDER BY e.IDNo DESC`,
-					params
-				);
-				return fbRows;
-			}
-			throw err;
-		}
+
+		const [rows] = await pool.execute(query, params);
+		return rows;
 	}
 
 	static async getById(id) {
@@ -282,9 +282,14 @@ class InventoryModel {
 		await InventoryModel.ensureSchema();
 		const currentDate = new Date();
 		const parsedUnitCost = Number(data.UNIT_COST || 0);
+		// Generate explicit IDNo to handle schemas without AUTO_INCREMENT default
+		const [idRows] = await pool.execute(`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM inventory`);
+		const nextId = Number(idRows[0]?.nextId || 1);
+
 		// Store only FK: CATEGORY_ID or EXPENSES_ID - name comes from join
-		const [result] = await pool.execute(
+		await pool.execute(
 			`INSERT INTO inventory (
+				IDNo,
 				BRANCH_ID,
 				ITEM_NAME,
 				CATEGORY_ID,
@@ -296,8 +301,9 @@ class InventoryModel {
 				ACTIVE,
 				ENCODED_BY,
 				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			[
+				nextId,
 				Number(data.BRANCH_ID),
 				String(data.ITEM_NAME || '').trim(),
 				data.CATEGORY_ID ? Number(data.CATEGORY_ID) : null,
@@ -316,7 +322,7 @@ class InventoryModel {
 				INVENTORY_ID, BRANCH_ID, OLD_UNIT_COST, NEW_UNIT_COST, CHANGE_TYPE, CHANGED_BY, CHANGED_AT
 			) VALUES (?, ?, ?, ?, 'INITIAL', ?, ?)`,
 			[
-				result.insertId,
+				nextId,
 				Number(data.BRANCH_ID),
 				parsedUnitCost,
 				parsedUnitCost,
@@ -324,7 +330,7 @@ class InventoryModel {
 				currentDate,
 			]
 		);
-		return result.insertId;
+		return nextId;
 	}
 
 	static async update(id, data) {
@@ -414,19 +420,53 @@ class InventoryModel {
 			}
 			// Create inventory from expense if not exists (inventory category)
 			const [exp] = await pool.execute(
-				`SELECT e.BRANCH_ID, e.EXP_DESC, e.EXP_AMOUNT, e.MASTER_CAT_ID, e.ENCODED_BY, e.ENCODED_DT
-				 FROM expenses e
-				 INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
-				 INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.STATE = 1
-				 WHERE e.IDNo = ? LIMIT 1`,
+				`SELECT
+					e.BRANCH_ID,
+					e.EXP_DESC,
+					e.EXP_AMOUNT,
+					e.MASTER_CAT_ID,
+					e.ENCODED_BY,
+					e.ENCODED_DT
+				FROM expenses e
+				INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+				INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID
+				WHERE e.IDNo = ? LIMIT 1`,
 				[expenseId]
 			);
 			if (exp.length) {
 				const brId = branchId ?? exp[0].BRANCH_ID ?? 1;
+				const itemName = exp[0].EXP_DESC || 'Unknown Item';
+				// Generate explicit IDNo to handle schemas without AUTO_INCREMENT default
+				const [idRows] = await pool.execute(`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM inventory`);
+				const nextId = Number(idRows[0]?.nextId || 1);
+
 				await pool.execute(
-					`INSERT INTO inventory (BRANCH_ID, EXPENSES_ID, STOCK_QTY, UNIT, UNIT_COST, REORDER_LEVEL, STATUS_FLAG, ACTIVE, ENCODED_BY, ENCODED_DT)
-					 VALUES (?, ?, ?, 'pcs', COALESCE(?, 0), 0, 'In Stock', 1, ?, ?)`,
-					[brId, expenseId, qty, exp[0].EXP_AMOUNT, exp[0].ENCODED_BY, exp[0].ENCODED_DT]
+					`INSERT INTO inventory (
+						IDNo,
+						BRANCH_ID,
+						EXPENSES_ID,
+						ITEM_NAME,
+						CATEGORY_ID,
+						STOCK_QTY,
+						UNIT,
+						UNIT_COST,
+						REORDER_LEVEL,
+						STATUS_FLAG,
+						ACTIVE,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES (?, ?, ?, ?, ?, ?, 'pcs', COALESCE(?, 0), 0, 'In Stock', 1, ?, ?)`,
+					[
+						nextId,
+						brId,
+						expenseId,
+						itemName,
+						exp[0].MASTER_CAT_ID,
+						qty,
+						exp[0].EXP_AMOUNT,
+						exp[0].ENCODED_BY,
+						exp[0].ENCODED_DT,
+					]
 				);
 				return true;
 			}

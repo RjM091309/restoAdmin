@@ -56,14 +56,15 @@ class MasterCategoryModel {
 		const params = [];
 
 		if (isInventoryOnly) {
-			// Use JOIN: filter by operation_category.STATE=1 (inventory), get category type from oc.NAME (no redundant column)
+			// Inventory-only: categories linked to any active operation_category
+			// (no oc.STATE column; rely on ACTIVE + OP_CAT_ID instead)
 			query = `
 				SELECT
 					mc.IDNo,
 					mc.BRANCH_ID,
 					mc.OP_CAT_ID,
 					mc.CATEGORY_NAME,
-					oc.NAME AS CATEGORY_TYPE,
+					COALESCE(mc.CATEGORY_TYPE, 'Inventory') AS CATEGORY_TYPE,
 					mc.DESCRIPTION,
 					mc.ICON,
 					mc.ACTIVE,
@@ -72,7 +73,9 @@ class MasterCategoryModel {
 					mc.EDITED_BY,
 					mc.EDITED_DT
 				FROM master_categories mc
-				INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
+				LEFT JOIN operation_category oc
+					ON oc.IDNo = mc.OP_CAT_ID
+					AND oc.ACTIVE = 1
 				WHERE mc.ACTIVE = 1
 			`;
 			if (branchId !== null && branchId !== undefined) {
@@ -136,12 +139,11 @@ class MasterCategoryModel {
 	static async getById(id) {
 		await MasterCategoryModel.ensureSchema();
 		try {
-			const [rows] = await pool.execute(
-				`SELECT mc.* FROM master_categories mc
-				 INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1 AND oc.STATE = 1
-				 WHERE mc.IDNo = ? AND mc.ACTIVE = 1`,
-				[id]
-			);
+		const [rows] = await pool.execute(
+			`SELECT mc.* FROM master_categories mc
+			 WHERE mc.IDNo = ? AND mc.ACTIVE = 1`,
+			[id]
+		);
 			return rows[0] || null;
 		} catch (err) {
 			if (err.message && (err.message.includes('Unknown column') || err.message.includes("doesn't exist") || err.message.includes('STATE'))) {
