@@ -1029,7 +1029,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                   )}
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className={cn('font-bold truncate', active ? '' : 'font-semibold')}>{op.name}</span>
+                    <span className={cn('flex-1 font-bold break-words', active ? '' : 'font-semibold')}>{op.name}</span>
                     <span
                       className={cn(
                         'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
@@ -1132,7 +1132,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                           )}
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <span className={cn('truncate', active ? 'font-semibold' : 'font-normal')}>{cat.name}</span>
+                            <span className={cn('flex-1 break-words', active ? 'font-semibold' : 'font-normal')}>{cat.name}</span>
                             <span
                               className={cn(
                                 'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
