@@ -191,6 +191,7 @@ class ExpenseModel {
 			`,
 			[Number(id)]
 		);
+
 		return rows[0] || null;
 	}
 
