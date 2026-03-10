@@ -9,6 +9,7 @@ const BillingModel = require('../models/billingModel');
 const OrderModel = require('../models/orderModel');
 const TableModel = require('../models/tableModel');
 const OrderItemsModel = require('../models/orderItemsModel');
+const InventoryDeductionModel = require('../models/inventoryDeductionModel');
 const ReportsModel = require('../models/reportsModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
@@ -116,7 +117,8 @@ class BillingController {
 			const order = await OrderModel.getById(id);
 			if (order) {
 				if (newStatus === 1) {
-					// FULLY PAID: Mark Order as SETTLED (1) and Table as AVAILABLE (1)
+					// FULLY PAID: Mark Order as SETTLED (1), update inventory_deductions, and Table as AVAILABLE (1)
+					await InventoryDeductionModel.updateStatusByOrderId(Number(id), 1, req.session.user_id);
 					await OrderModel.updateStatus(id, 1, req.session.user_id);
 					if (order.TABLE_ID) {
 						await TableModel.updateStatus(order.TABLE_ID, 1);

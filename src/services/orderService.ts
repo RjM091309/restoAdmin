@@ -164,6 +164,22 @@ export async function updateOrderStatus(orderId: string, status: number): Promis
     await handleResponse<{ order_id: number; status: number }>(response);
 }
 
+export type InventoryInsufficientItem = {
+    ingredientName: string;
+    required: number;
+    available: number;
+    unit: string;
+};
+
+export class InventoryInsufficientError extends Error {
+    insufficient: InventoryInsufficientItem[];
+    constructor(message: string, insufficient: InventoryInsufficientItem[]) {
+        super(message);
+        this.name = 'InventoryInsufficientError';
+        this.insufficient = insufficient;
+    }
+}
+
 export async function createOrder(payload: CreateOrderPayload): Promise<{ id: number; order_no: string }> {
     const response = await fetch(buildUrl('/orders'), {
         method: 'POST',
@@ -174,5 +190,21 @@ export async function createOrder(payload: CreateOrderPayload): Promise<{ id: nu
         },
         body: JSON.stringify(payload),
     });
-    return handleResponse<{ id: number; order_no: string }>(response);
+    const json = (await response.json()) as ApiResponse<{ id: number; order_no: string }> & { insufficient?: InventoryInsufficientItem[] };
+    if (!response.ok || !json.success) {
+        if (json.insufficient?.length) {
+            throw new InventoryInsufficientError(json.error || 'Insufficient inventory', json.insufficient);
+        }
+        throw new Error(json.error || 'Request failed');
+    }
+    return json.data!;
+}
+
+export async function deleteOrderItem(orderItemId: string): Promise<void> {
+    const response = await fetch(buildUrl(`/order_items/${orderItemId}`), {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: authHeaders(),
+    });
+    await handleResponse<null>(response);
 }

@@ -15,6 +15,7 @@ const UserModel = require('../models/userModel');
 const UserBranchModel = require('../models/userBranchModel');
 const BranchModel = require('../models/branchModel');
 const InventoryDeductionService = require('../services/inventoryDeductionService');
+const InventoryDeductionModel = require('../models/inventoryDeductionModel');
 const argon2 = require('argon2');
 const { generateTokenPair, verifyRefreshToken } = require('../utils/jwt');
 const socketService = require('../utils/socketService');
@@ -629,8 +630,12 @@ class ApiController {
 				return res.status(403).json({ success: false, error: 'Order is not in your branch' });
 			}
 
-			if (targetStatus === 1) await InventoryDeductionService.settleOrderWithInventory(Number(order_id), user_id);
-			else await OrderModel.updateStatus(order_id, targetStatus, user_id);
+			if (targetStatus === 1) {
+				await InventoryDeductionModel.updateStatusByOrderId(Number(order_id), 1, user_id);
+				await OrderModel.updateStatus(order_id, 1, user_id);
+			} else {
+				await OrderModel.updateStatus(order_id, targetStatus, user_id);
+			}
 
 			const paymentMethod = payment_method || 'CASH';
 
@@ -699,6 +704,23 @@ class ApiController {
 			}
 			if (!resolvedBranchId) return res.status(400).json({ success: false, error: 'Branch ID is required' });
 
+			const newOrderItems = items.map(item => ({
+				menu_id: parseInt(item.menu_id),
+				qty: parseFloat(item.qty),
+				unit_price: parseFloat(item.unit_price),
+				line_total: parseFloat(item.qty) * parseFloat(item.unit_price),
+				status: item.status || 3
+			}));
+
+			const validation = await InventoryDeductionService.validateOrderItemsForInventory(resolvedBranchId, newOrderItems);
+			if (!validation.valid) {
+				return res.status(200).json({
+					success: false,
+					error: 'Insufficient inventory for order items',
+					insufficient: validation.insufficient,
+				});
+			}
+
 			const orderData = {
 				BRANCH_ID: resolvedBranchId,
 				ORDER_NO: order_no.trim(),
@@ -714,14 +736,6 @@ class ApiController {
 			};
 
 			const orderId = await OrderModel.create(orderData);
-			const newOrderItems = items.map(item => ({
-				menu_id: parseInt(item.menu_id),
-				qty: parseFloat(item.qty),
-				unit_price: parseFloat(item.unit_price),
-				line_total: parseFloat(item.qty) * parseFloat(item.unit_price),
-				status: item.status || 3
-			}));
-
 			await OrderItemsModel.createForOrder(orderId, newOrderItems, user_id);
 			await BillingModel.createForOrder({ branch_id: orderData.BRANCH_ID, order_id: orderId, amount_due: orderData.GRAND_TOTAL, amount_paid: 0, status: 3, user_id: user_id });
 

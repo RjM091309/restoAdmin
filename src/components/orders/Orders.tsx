@@ -25,8 +25,11 @@ import { toast } from 'sonner';
 import {
     getOrders,
     getOrderItems,
+    getOrderById,
     createOrder,
     updateOrderStatus,
+    deleteOrderItem,
+    InventoryInsufficientError,
     ORDER_STATUS,
     type OrderRecord,
     type OrderItemRecord,
@@ -80,6 +83,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // ----- Status update -----
     const [statusSubmitting, setStatusSubmitting] = useState(false);
+    const [itemRemoving, setItemRemoving] = useState(false);
     const [swal, setSwal] = useState<SwalState>(null);
 
     // ----- New order modal -----
@@ -219,6 +223,38 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const closeDetail = () => { setDetailOrder(null); setDetailItems([]); };
 
+    // ==================== Remove order item ====================
+    const confirmRemoveItem = (item: OrderItemRecord) => {
+        if (!detailOrder) return;
+        setSwal({
+            type: 'question',
+            title: t('orders.swal.remove_item_title'),
+            text: t('orders.swal.remove_item_text', { itemName: item.MENU_NAME ?? `Item #${item.MENU_ID}` }),
+            showCancel: true,
+            confirmText: t('orders.swal.remove_item_confirm'),
+            onConfirm: async () => {
+                setSwal(null);
+                setItemRemoving(true);
+                try {
+                    await deleteOrderItem(String(item.IDNo));
+                    const [refreshed, updatedOrder] = await Promise.all([
+                        getOrderItems(String(detailOrder.IDNo)),
+                        getOrderById(String(detailOrder.IDNo)),
+                    ]);
+                    setDetailItems(refreshed);
+                    if (updatedOrder) setDetailOrder(updatedOrder);
+                    await loadOrders();
+                    toast.success(t('orders.swal.remove_item_success'));
+                } catch (e) {
+                    toast.error(e instanceof Error ? e.message : t('orders.swal.remove_item_failed'));
+                } finally {
+                    setItemRemoving(false);
+                }
+            },
+            onCancel: () => setSwal(null),
+        });
+    };
+
     // ==================== Status update ====================
     const confirmUpdateStatus = (order: OrderRecord, newStatus: number) => {
         const label = getStatusLabel(newStatus);
@@ -348,7 +384,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             await loadOrders();
             toast.success(t('orders.swal.created_text', { orderNo: newOrderNo.trim() }));
         } catch (e) {
-            toast.error(e instanceof Error ? e.message : t('orders.swal.create_failed'));
+            if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
+                const list = e.insufficient.map((i) => t('orders.swal.insufficient_inventory_item', {
+                    name: i.ingredientName,
+                    required: i.required,
+                    available: i.available,
+                    unit: i.unit,
+                })).join('\n');
+                setSwal({
+                    type: 'warning',
+                    title: t('orders.swal.insufficient_inventory_title'),
+                    text: `${t('orders.swal.insufficient_inventory_text')}\n\n${list}`,
+                    onConfirm: () => setSwal(null),
+                });
+            } else {
+                toast.error(e instanceof Error ? e.message : t('orders.swal.create_failed'));
+            }
         } finally {
             setNewOrderSubmitting(false);
         }
@@ -774,6 +825,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.qty')}</th>
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
+                                                {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                    <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs w-16">{t('orders.actions')}</th>
+                                                )}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
@@ -783,6 +837,18 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                     <td className="px-4 py-2 text-right">{item.QTY}</td>
                                                     <td className="px-4 py-2 text-right">₱{Number(item.UNIT_PRICE).toLocaleString()}</td>
                                                     <td className="px-4 py-2 text-right font-bold">₱{Number(item.LINE_TOTAL).toLocaleString()}</td>
+                                                    {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                        <td className="px-4 py-2 text-right">
+                                                            <button
+                                                                onClick={() => confirmRemoveItem(item)}
+                                                                disabled={itemRemoving}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                title={t('orders.remove_item')}
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>

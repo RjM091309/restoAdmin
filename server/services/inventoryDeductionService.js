@@ -61,6 +61,68 @@ async function addStockWithConn(conn, branchId, ingredientId, qty, userId) {
 
 class InventoryDeductionService {
 	/**
+	 * Validate that inventory has sufficient stock for the given order items before creation.
+	 * @param {number} branchId - Branch ID
+	 * @param {Array<{ menu_id: number, qty: number }>} items - Order items
+	 * @returns {{ valid: boolean, insufficient: Array<{ ingredientName: string, required: number, available: number, unit: string }> }}
+	 */
+	static async validateOrderItemsForInventory(branchId, items) {
+		if (!items || !items.length) {
+			return { valid: true, insufficient: [] };
+		}
+		const branchIdNum = Number(branchId);
+		if (!Number.isFinite(branchIdNum)) {
+			return { valid: true, insufficient: [] };
+		}
+
+		// Aggregate required qty per ingredient
+		const requiredMap = new Map(); // ingredientId -> { required, ingredientName, unit }
+		for (const item of items) {
+			const menuId = Number(item.menu_id);
+			const itemQty = Number(item.qty) || 1;
+			if (!Number.isFinite(menuId) || menuId <= 0) continue;
+			const menuIngredients = await MenuIngredientModel.getByMenuId(menuId);
+			for (const mi of menuIngredients) {
+				const ingId = mi.INGREDIENT_ID;
+				const qtyPerServe = Number(mi.QTY_PER_SERVE) || 1;
+				const needed = qtyPerServe * itemQty;
+				const existing = requiredMap.get(ingId);
+				if (existing) {
+					existing.required += needed;
+				} else {
+					requiredMap.set(ingId, {
+						ingredientName: mi.INGREDIENT_NAME || `Ingredient #${ingId}`,
+						required: needed,
+						unit: sanitizeUnit(mi.UNIT),
+					});
+				}
+			}
+		}
+
+		const insufficient = [];
+		for (const [ingredientId, data] of requiredMap) {
+			const [rows] = await pool.execute(
+				`SELECT STOCK_QTY FROM inventory WHERE INGREDIENT_ID = ? AND BRANCH_ID = ? AND ACTIVE = 1 LIMIT 1`,
+				[Number(ingredientId), branchIdNum]
+			);
+			const available = rows.length ? Number(rows[0].STOCK_QTY) || 0 : 0;
+			if (available < data.required) {
+				insufficient.push({
+					ingredientName: data.ingredientName,
+					required: data.required,
+					available,
+					unit: data.unit,
+				});
+			}
+		}
+
+		return {
+			valid: insufficient.length === 0,
+			insufficient,
+		};
+	}
+
+	/**
 	 * Deduct menu_ingredients from inventory when order is CONFIRMED.
 	 * Records each deduction in inventory_deductions.
 	 */
@@ -140,6 +202,35 @@ class InventoryDeductionService {
 			await connection.execute(
 				`UPDATE inventory_deductions SET STATUS = -1, ACTIVE = 0, EDITED_BY = ?, EDITED_DT = NOW() WHERE ORDER_ID = ? AND ACTIVE = 1`,
 				[userId != null ? Number(userId) : null, Number(orderId)]
+			);
+			await connection.commit();
+		} catch (err) {
+			await connection.rollback();
+			throw err;
+		} finally {
+			connection.release();
+		}
+		return { reversed: true, count: deductions.length };
+	}
+
+	/**
+	 * Reverse deductions for a single order item when that item is removed from a CONFIRMED order.
+	 * Adds stock back and marks those deductions inactive.
+	 */
+	static async reverseOnOrderItemDeleted(orderItemId, userId) {
+		const deductions = await InventoryDeductionModel.getByOrderItemId(orderItemId, true);
+		if (!deductions.length) {
+			return { reversed: false, reason: 'no_deductions_for_item', count: 0 };
+		}
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			for (const d of deductions) {
+				await addStockWithConn(connection, d.BRANCH_ID, d.INGREDIENT_ID, d.DEDUCTED_QTY, userId);
+			}
+			await connection.execute(
+				`UPDATE inventory_deductions SET STATUS = -1, ACTIVE = 0, EDITED_BY = ?, EDITED_DT = NOW() WHERE ORDER_ITEM_ID = ? AND ACTIVE = 1`,
+				[userId != null ? Number(userId) : null, Number(orderItemId)]
 			);
 			await connection.commit();
 		} catch (err) {

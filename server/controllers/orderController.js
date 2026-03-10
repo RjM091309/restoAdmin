@@ -53,6 +53,18 @@ class OrderController {
 				return res.status(400).json({ error: 'Branch ID is required. Please select a branch first.' });
 			}
 
+			const items = Array.isArray(req.body.ORDER_ITEMS) ? req.body.ORDER_ITEMS : (Array.isArray(req.body.items) ? req.body.items : []);
+			if (items.length) {
+				const validation = await InventoryDeductionService.validateOrderItemsForInventory(branchId, items);
+				if (!validation.valid) {
+					return res.status(200).json({
+						success: false,
+						error: 'Insufficient inventory for order items',
+						insufficient: validation.insufficient,
+					});
+				}
+			}
+
 			const payload = {
 				BRANCH_ID: branchId,
 				ORDER_NO: req.body.ORDER_NO,
@@ -68,7 +80,6 @@ class OrderController {
 			};
 
 			const orderId = await OrderModel.create(payload);
-			const items = Array.isArray(req.body.ORDER_ITEMS) ? req.body.ORDER_ITEMS : [];
 			if (items.length) {
 				await OrderItemsModel.createForOrder(orderId, items, req.session.user_id);
 			}
@@ -170,7 +181,7 @@ class OrderController {
 			};
 
 			if (payload.STATUS === 1) {
-				await InventoryDeductionService.settleOrderWithInventory(Number(id), payload.user_id);
+				await InventoryDeductionModel.updateStatusByOrderId(Number(id), 1, payload.user_id);
 			}
 			const updated = payload.STATUS === 1 ? true : await OrderModel.update(id, payload);
 			// Only replace order items if ORDER_ITEMS is explicitly provided in the request
@@ -432,7 +443,7 @@ class OrderController {
 
 			const pool = require('../config/db');
 
-			// Get existing item
+			// Get existing item and order
 			const [itemRows] = await pool.execute('SELECT * FROM order_items WHERE IDNo = ?', [id]);
 			if (itemRows.length === 0) {
 				return ApiResponse.notFound(res, 'Order item');
@@ -441,6 +452,12 @@ class OrderController {
 			const existingItem = itemRows[0];
 			const orderId = existingItem.ORDER_ID;
 
+			// If order is CONFIRMED, reverse inventory deductions for this item before deleting
+			const order = await OrderModel.getById(orderId);
+			if (order && Number(order.STATUS) === 2) {
+				await InventoryDeductionService.reverseOnOrderItemDeleted(Number(id), user_id);
+			}
+
 			// Delete order item
 			await pool.execute('DELETE FROM order_items WHERE IDNo = ?', [id]);
 
@@ -448,7 +465,9 @@ class OrderController {
 			const [allItems] = await pool.execute('SELECT LINE_TOTAL FROM order_items WHERE ORDER_ID = ?', [orderId]);
 			const newSubtotal = allItems.reduce((sum, item) => sum + parseFloat(item.LINE_TOTAL || 0), 0);
 
-			const order = await OrderModel.getById(orderId);
+			if (!order) {
+				return ApiResponse.error(res, 'Order not found', 404);
+			}
 			const taxAmount = parseFloat(order.TAX_AMOUNT || 0);
 			const serviceCharge = parseFloat(order.SERVICE_CHARGE || 0);
 			const discountAmount = parseFloat(order.DISCOUNT_AMOUNT || 0);
@@ -521,7 +540,7 @@ class OrderController {
 				await InventoryDeductionService.reverseOnOrderCancelled(Number(id), user_id);
 				updated = await OrderModel.updateStatus(id, parsedStatus, user_id);
 			} else {
-				// SETTLED (1): reflect in inventory_deductions STATUS = 3
+				// SETTLED (1): reflect in inventory_deductions STATUS = 1
 				if (parsedStatus === 1) {
 					await InventoryDeductionModel.updateStatusByOrderId(Number(id), parsedStatus, user_id);
 				}

@@ -1173,6 +1173,7 @@
 		"no_items_added": "No items added yet.",
 		"mark_as_settled": "Mark as Settled",
 		"cancel_order": "Cancel Order",
+		"remove_item": "Remove Item",
 		"view_details": "View Details",
 		"unable_to_load": "Unable to load orders",
 		"failed_to_load": "Failed to load orders",
@@ -1201,6 +1202,14 @@
 			"created_title": "Created!",
 			"created_text": "Order {{orderNo}} has been created.",
 			"create_failed": "Failed to create order",
+			"remove_item_title": "Remove Item?",
+			"remove_item_text": "Remove \"{{itemName}}\" from this order?",
+			"remove_item_confirm": "Yes, Remove",
+			"remove_item_success": "Item removed.",
+			"remove_item_failed": "Failed to remove item",
+			"insufficient_inventory_title": "Insufficient Inventory",
+			"insufficient_inventory_text": "The following ingredients do not have enough stock:",
+			"insufficient_inventory_item": "{{name}}: need {{required}} {{unit}}, only {{available}} {{unit}} available",
 			"ok": "OK"
 		}
 	},

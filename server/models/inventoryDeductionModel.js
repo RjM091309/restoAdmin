@@ -132,6 +132,22 @@ class InventoryDeductionModel {
 		);
 		return rows.length > 0;
 	}
+
+	/** Get active deductions for a specific order item (for partial reversal when item is removed) */
+	static async getByOrderItemId(orderItemId, activeOnly = true) {
+		await InventoryDeductionModel.ensureSchema();
+		let where = 'WHERE inv_ded.ORDER_ITEM_ID = ?';
+		if (activeOnly) where += ' AND inv_ded.ACTIVE = 1';
+		const [rows] = await pool.execute(
+			`SELECT inv_ded.IDNo, inv_ded.ORDER_ID, inv_ded.ORDER_ITEM_ID, inv_ded.BRANCH_ID, inv_ded.INGREDIENT_ID, inv_ded.MENU_ID,
+				inv_ded.DEDUCTED_QTY, inv_ded.UNIT, inv_ded.STATUS, inv_ded.ACTIVE
+			 FROM inventory_deductions inv_ded
+			 ${where}
+			 ORDER BY inv_ded.ENCODED_DT ASC`,
+			[Number(orderItemId)]
+		);
+		return rows;
+	}
 }
 
 module.exports = InventoryDeductionModel;
