@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Filter, Search, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { Filter, Search, AlertTriangle, ArrowLeft, Scale, Loader2 } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { formatQty } from '../../lib/uomUtils';
@@ -8,9 +8,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
+import { getInventoryItems, adjustStock, type InventoryItem } from '../../services/inventoryItemService';
 import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
 import { type Branch } from '../partials/Header';
+import { Modal } from '../ui/Modal';
 
 interface InventoryProps {
   onBack?: () => void;
@@ -42,6 +43,10 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
   const [searchQuery, setSearchQuery] = useState('');
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
+  const [adjustItem, setAdjustItem] = useState<InventoryItem | null>(null);
+  const [adjustType, setAdjustType] = useState<'add' | 'deduct'>('add');
+  const [adjustQty, setAdjustQty] = useState('');
+  const [adjustSubmitting, setAdjustSubmitting] = useState(false);
 
   const currentCategory = useMemo(
     () => (categoryId && categories.find((c) => c.id === categoryId)) || null,
@@ -175,6 +180,28 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
         );
       },
     },
+    {
+      header: t('inventory_page.table.actions'),
+      render: (item) =>
+        item.isManualStock && item.ingredientId ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAdjustItem(item);
+              setAdjustType('add');
+              setAdjustQty('');
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary/10 text-brand-primary hover:bg-brand-primary/20 font-medium text-sm transition-colors"
+            title={t('inventory_page.modal.adjust_title')}
+          >
+            <Scale size={14} />
+            {t('inventory_page.modal.adjust_title')}
+          </button>
+        ) : (
+          <span className="text-xs text-brand-muted">—</span>
+        ),
+    },
   ];
 
 
@@ -268,6 +295,112 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Modal
+        isOpen={!!adjustItem}
+        onClose={() => {
+          if (!adjustSubmitting) {
+            setAdjustItem(null);
+            setAdjustQty('');
+          }
+        }}
+        title={t('inventory_page.modal.adjust_title')}
+        maxWidth="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (!adjustSubmitting) {
+                  setAdjustItem(null);
+                  setAdjustQty('');
+                }
+              }}
+              className="px-4 py-2 rounded-xl border border-gray-200 text-brand-text hover:bg-gray-50 font-medium transition-colors"
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              disabled={adjustSubmitting || !adjustQty || Number(adjustQty) <= 0}
+              onClick={async () => {
+                if (!adjustItem?.ingredientId || !adjustItem?.branchId || !adjustQty || Number(adjustQty) <= 0) return;
+                setAdjustSubmitting(true);
+                try {
+                  await adjustStock(adjustItem.ingredientId, adjustItem.branchId, Number(adjustQty), adjustType);
+                  toast.success(t('inventory_page.messages.adjust_success'));
+                  setAdjustItem(null);
+                  setAdjustQty('');
+                  fetchData();
+                } catch (err: any) {
+                  toast.error(err?.message || t('inventory_page.messages.adjust_insufficient'));
+                } finally {
+                  setAdjustSubmitting(false);
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {adjustSubmitting && <Loader2 size={16} className="animate-spin" />}
+              {t('common.save')}
+            </button>
+          </div>
+        }
+      >
+        {adjustItem && (
+          <div className="space-y-4">
+            <p className="text-sm text-brand-muted">{t('inventory_page.modal.adjust_subtitle')}</p>
+            <div>
+              <p className="text-sm font-medium text-brand-text mb-1">{adjustItem.itemName}</p>
+              <p className="text-xs text-brand-muted">
+                {t('inventory_page.modal.current_stock', {
+                  qty: formatQty(adjustItem.stockQty, adjustItem.unit || 'pcs'),
+                  unit: t(`inventory_page.units.${getUnitKey(adjustItem.unit || '')}`),
+                })}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAdjustType('add')}
+                className={cn(
+                  'flex-1 py-2.5 rounded-xl font-medium text-sm transition-colors',
+                  adjustType === 'add'
+                    ? 'bg-green-100 text-green-700 border-2 border-green-300'
+                    : 'bg-gray-50 text-brand-muted border-2 border-transparent hover:bg-gray-100'
+                )}
+              >
+                {t('inventory_page.modal.adjust_add')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdjustType('deduct')}
+                className={cn(
+                  'flex-1 py-2.5 rounded-xl font-medium text-sm transition-colors',
+                  adjustType === 'deduct'
+                    ? 'bg-orange-100 text-orange-700 border-2 border-orange-300'
+                    : 'bg-gray-50 text-brand-muted border-2 border-transparent hover:bg-gray-100'
+                )}
+              >
+                {t('inventory_page.modal.adjust_deduct')}
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-brand-text mb-1">
+                {t('inventory_page.modal.adjust_qty')}
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={adjustQty}
+                onChange={(e) => setAdjustQty(e.target.value)}
+                placeholder={t('inventory_page.modal.adjust_qty_placeholder')}
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
+              />
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

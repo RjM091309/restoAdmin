@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const IngredientModel = require('./ingredientModel');
+const MasterCategoryModel = require('./masterCategoryModel');
 
 class InventoryModel {
 	static _schemaReady = false;
@@ -11,6 +12,7 @@ class InventoryModel {
 
 		InventoryModel._schemaPromise = (async () => {
 			await IngredientModel.ensureSchema();
+			await MasterCategoryModel.ensureSchema();
 
 			await pool.execute(`
 				CREATE TABLE IF NOT EXISTS inventory (
@@ -52,10 +54,12 @@ class InventoryModel {
 		const query = `
 			SELECT
 				COALESCE(agg.FIRST_ID, ing.IDNo) AS IDNo,
+				ing.IDNo AS INGREDIENT_ID,
 				ing.BRANCH_ID,
 				ing.NAME AS ITEM_NAME,
 				ing.MASTER_CAT_ID,
 				mc.CATEGORY_NAME AS CATEGORY_NAME,
+				COALESCE(mc.IS_MANUAL_STOCK, 0) AS IS_MANUAL_STOCK,
 				COALESCE(agg.STOCK_QTY, 0) AS STOCK_QTY,
 				ing.UNIT,
 				COALESCE(ing.UNIT_COST, 0) AS UNIT_COST,
@@ -262,7 +266,8 @@ class InventoryModel {
 		);
 		if (!rows.length) return false;
 		const current = Number(rows[0].STOCK_QTY) || 0;
-		const newQty = Math.max(0, current - deductQty);
+		if (deductQty > current) return false;
+		const newQty = current - deductQty;
 		await pool.execute(
 			`UPDATE inventory SET STOCK_QTY = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ?`,
 			[newQty, userId != null ? Number(userId) : null, rows[0].IDNo]

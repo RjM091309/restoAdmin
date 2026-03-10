@@ -8,6 +8,7 @@ export interface InventoryCategory {
     categoryType: string;
     description: string | null;
     icon: string | null;
+    isManualStock?: boolean;
     active: boolean;
 }
 
@@ -28,6 +29,7 @@ type InventoryCategoryApiRecord = {
     CATEGORY_TYPE: string;
     DESCRIPTION: string | null;
     ICON: string | null;
+    IS_MANUAL_STOCK?: number;
     ACTIVE: number | boolean;
 };
 
@@ -70,6 +72,7 @@ const mapCategoryRecord = (row: InventoryCategoryApiRecord): InventoryCategory =
     categoryType: row.CATEGORY_TYPE || 'Inventory',
     description: row.DESCRIPTION,
     icon: row.ICON || null,
+    isManualStock: Boolean(row.IS_MANUAL_STOCK),
     active: Boolean(row.ACTIVE),
 });
 
@@ -108,6 +111,7 @@ export type CreateInventoryCategoryPayload = {
     description: string | null;
     icon: string | null;
     opCategoryId?: string | number | null;
+    isManualStock?: boolean;
 };
 
 export async function createInventoryCategory(payload: CreateInventoryCategoryPayload): Promise<number> {
@@ -117,6 +121,7 @@ export async function createInventoryCategory(payload: CreateInventoryCategoryPa
         CATEGORY_TYPE: payload.categoryType,
         DESCRIPTION: payload.description,
         ICON: payload.icon,
+        isManualStock: Boolean(payload.isManualStock),
     };
     if (payload.opCategoryId !== undefined && payload.opCategoryId !== null && payload.opCategoryId !== '') {
         body.OP_CAT_ID = payload.opCategoryId;
@@ -140,6 +145,7 @@ export type UpdateInventoryCategoryPayload = {
     description: string | null;
     icon: string | null;
     opCategoryId?: string | number | null;
+    isManualStock?: boolean;
 };
 
 export async function updateInventoryCategory(id: string, payload: UpdateInventoryCategoryPayload): Promise<void> {
@@ -148,6 +154,7 @@ export async function updateInventoryCategory(id: string, payload: UpdateInvento
         CATEGORY_TYPE: payload.categoryType,
         DESCRIPTION: payload.description,
         ICON: payload.icon,
+        isManualStock: Boolean(payload.isManualStock),
     };
     if (payload.opCategoryId !== undefined && payload.opCategoryId !== null && payload.opCategoryId !== '') {
         body.OP_CAT_ID = payload.opCategoryId;

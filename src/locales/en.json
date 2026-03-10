@@ -139,6 +139,14 @@
 			"out_of_stock": "Out of Stock"
 		},
 		"modal": {
+			"adjust_title": "Adjust Stock",
+			"adjust_subtitle": "Manual add or deduct quantity (e.g. for seasonings not in menu)",
+			"adjust_add": "Add Stock",
+			"adjust_deduct": "Deduct Stock",
+			"adjust_qty": "Quantity",
+			"adjust_qty_placeholder": "Enter quantity",
+			"adjust_reason": "Reason (optional)",
+			"adjust_reason_placeholder": "e.g. Used in cooking, New purchase",
 			"restock_title": "Restock Item",
 			"edit_title": "Edit Inventory Item",
 			"add_title": "Add New Inventory Item",
@@ -173,7 +181,9 @@
 			"update_success": "Inventory item updated successfully",
 			"create_success": "Inventory item created successfully",
 			"save_failed": "Failed to save inventory item",
-			"delete_confirm": "Are you sure you want to delete this item?"
+			"delete_confirm": "Are you sure you want to delete this item?",
+			"adjust_success": "Stock adjusted successfully",
+			"adjust_insufficient": "Insufficient stock to deduct"
 		}
 	},
 	"admin_dashboard": {

@@ -83,9 +83,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     state: 0, // 0=expense, 1=inventory
   });
 
-  const [categoryForm, setCategoryForm] = useState<{ name: string; description: string }>({
+  const [categoryForm, setCategoryForm] = useState<{ name: string; description: string; isManualStock: boolean }>({
     name: '',
     description: '',
+    isManualStock: false,
   });
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
@@ -479,7 +480,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const handleOpenAddCategory = () => {
     setEditingCategory(null);
-    setCategoryForm({ name: '', description: '' });
+    setCategoryForm({ name: '', description: '', isManualStock: false });
     setIsCategoryPanelOpen(true);
   };
 
@@ -491,6 +492,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     setCategoryForm({
       name: mc ? (mc.categoryType || mc.name || cat.name) : cat.name,
       description: mc?.description ?? '',
+      isManualStock: mc?.isManualStock ?? false,
     });
     setIsCategoryPanelOpen(true);
   };
@@ -507,7 +509,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     if (!isSubmitting) {
       setIsCategoryPanelOpen(false);
       setEditingCategory(null);
-      setCategoryForm({ name: '', description: '' });
+      setCategoryForm({ name: '', description: '', isManualStock: false });
     }
   };
 
@@ -784,6 +786,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           description: categoryForm.description.trim() || null,
           icon: null,
           opCategoryId: selectedOperationId ?? undefined,
+          isManualStock: categoryForm.isManualStock,
         });
         // Refresh data so categories list updates
         const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
@@ -799,6 +802,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           description: categoryForm.description.trim() || null,
           icon: null,
           opCategoryId: selectedOperationId ?? undefined,
+          isManualStock: categoryForm.isManualStock,
         };
         await createInventoryCategory(payload);
         const [apiCats] = await Promise.all([getAllMasterCategories(branchId)]);
@@ -1433,6 +1437,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all min-h-[80px]"
               placeholder="Optional description"
             />
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="category-manual-stock"
+              checked={categoryForm.isManualStock}
+              onChange={(e) => setCategoryForm((prev) => ({ ...prev, isManualStock: e.target.checked }))}
+              className="h-4 w-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary/20"
+            />
+            <label htmlFor="category-manual-stock" className="text-sm font-medium text-brand-text cursor-pointer">
+              Enable manual stock adjustment (e.g. for seasonings not in menu)
+            </label>
           </div>
         </div>
       </SidePanel>

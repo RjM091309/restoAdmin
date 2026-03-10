@@ -20,12 +20,17 @@ class MasterCategoryController {
 		const OP_CAT_ID = rawOpCatId !== null && rawOpCatId !== undefined && rawOpCatId !== ''
 			? Number(rawOpCatId)
 			: null;
+		const rawManual = req.body.IS_MANUAL_STOCK ?? req.body.isManualStock ?? req.body.is_manual_stock ?? null;
+		const IS_MANUAL_STOCK = rawManual !== null && rawManual !== undefined
+			? (Boolean(rawManual) || Number(rawManual) ? 1 : 0)
+			: 0;
 		return {
 			CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.name || '',
 			CATEGORY_TYPE: req.body.CATEGORY_TYPE || req.body.categoryType || 'Inventory',
 			DESCRIPTION: req.body.DESCRIPTION || req.body.description || null,
 			ICON: req.body.ICON || req.body.icon || null,
 			OP_CAT_ID: Number.isFinite(OP_CAT_ID) ? OP_CAT_ID : null,
+			IS_MANUAL_STOCK,
 		};
 	}
 
@@ -76,6 +81,7 @@ class MasterCategoryController {
 				DESCRIPTION: payload.DESCRIPTION,
 				ICON: payload.ICON,
 				OP_CAT_ID: payload.OP_CAT_ID ?? null,
+				IS_MANUAL_STOCK: payload.IS_MANUAL_STOCK ?? 0,
 				user_id: userId,
 			});
 
@@ -100,6 +106,7 @@ class MasterCategoryController {
 				DESCRIPTION: payload.DESCRIPTION,
 				ICON: payload.ICON,
 				OP_CAT_ID: payload.OP_CAT_ID ?? null,
+				IS_MANUAL_STOCK: payload.IS_MANUAL_STOCK ?? 0,
 				user_id: userId,
 			});
 

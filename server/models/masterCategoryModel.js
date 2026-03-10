@@ -34,6 +34,20 @@ class MasterCategoryModel {
 				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 			`);
 
+			// Migration: add IS_MANUAL_STOCK for manual stock adjustment (e.g. seasonings)
+			try {
+				const [has] = await pool.execute(
+					`SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+					 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'master_categories' AND COLUMN_NAME = 'IS_MANUAL_STOCK' LIMIT 1`
+				);
+				if (!has.length) {
+					await pool.execute(`ALTER TABLE master_categories ADD COLUMN IS_MANUAL_STOCK TINYINT(1) NOT NULL DEFAULT 0 AFTER ICON`);
+					console.log('[MasterCategoryModel] Added IS_MANUAL_STOCK to master_categories');
+				}
+			} catch (migErr) {
+				console.warn('[MasterCategoryModel] IS_MANUAL_STOCK migration skipped:', migErr?.message);
+			}
+
 			MasterCategoryModel._schemaReady = true;
 			MasterCategoryModel._schemaPromise = null;
 		})().catch((error) => {
@@ -66,6 +80,7 @@ class MasterCategoryModel {
 					COALESCE(mc.CATEGORY_TYPE, 'Inventory') AS CATEGORY_TYPE,
 					mc.DESCRIPTION,
 					mc.ICON,
+					COALESCE(mc.IS_MANUAL_STOCK, 0) AS IS_MANUAL_STOCK,
 					mc.ACTIVE,
 					mc.ENCODED_BY,
 					mc.ENCODED_DT,
@@ -92,6 +107,7 @@ class MasterCategoryModel {
 					CATEGORY_TYPE,
 					DESCRIPTION,
 					ICON,
+					COALESCE(IS_MANUAL_STOCK, 0) AS IS_MANUAL_STOCK,
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT,
@@ -223,6 +239,9 @@ class MasterCategoryModel {
 		const opCatId = data.OP_CAT_ID !== undefined && data.OP_CAT_ID !== null && data.OP_CAT_ID !== ''
 			? Number(data.OP_CAT_ID)
 			: null;
+		const isManualStock = data.IS_MANUAL_STOCK !== undefined && data.IS_MANUAL_STOCK !== null
+			? (Number(data.IS_MANUAL_STOCK) ? 1 : 0)
+			: 0;
 		const values = [
 			Number(data.BRANCH_ID),
 			String(data.CATEGORY_NAME).trim(),
@@ -240,12 +259,13 @@ class MasterCategoryModel {
 					CATEGORY_TYPE,
 					DESCRIPTION,
 					ICON,
+					IS_MANUAL_STOCK,
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT,
 					OP_CAT_ID
-				) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-				[...values.slice(0, 5), values[5], values[6], opCatId]
+				) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+				[...values.slice(0, 5), isManualStock, values[5], values[6], opCatId]
 			);
 			return result.insertId;
 		} catch (err) {
@@ -263,17 +283,18 @@ class MasterCategoryModel {
 						CATEGORY_TYPE,
 						DESCRIPTION,
 						ICON,
+						IS_MANUAL_STOCK,
 						ACTIVE,
 						ENCODED_BY,
 						ENCODED_DT,
 						OP_CAT_ID
-					) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-					[nextId, ...values.slice(0, 5), values[5], values[6], opCatId]
+					) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+					[nextId, ...values.slice(0, 5), isManualStock, values[5], values[6], opCatId]
 				);
 				return nextId;
 			}
 			// Column OP_CAT_ID might not exist on older schemas; try without it
-			if (msg.includes('Unknown column') && msg.includes('OP_CAT_ID')) {
+			if (msg.includes('Unknown column') && (msg.includes('OP_CAT_ID') || msg.includes('IS_MANUAL_STOCK'))) {
 				const [result] = await pool.execute(
 					`INSERT INTO master_categories (
 						BRANCH_ID,
@@ -299,12 +320,16 @@ class MasterCategoryModel {
 		const opCatId = data.OP_CAT_ID !== undefined && data.OP_CAT_ID !== null && data.OP_CAT_ID !== ''
 			? Number(data.OP_CAT_ID)
 			: null;
+		const isManualStock = data.IS_MANUAL_STOCK !== undefined && data.IS_MANUAL_STOCK !== null
+			? (Number(data.IS_MANUAL_STOCK) ? 1 : 0)
+			: 0;
 		const [result] = await pool.execute(
 			`UPDATE master_categories
 			SET CATEGORY_NAME = ?,
 				CATEGORY_TYPE = ?,
 				DESCRIPTION = ?,
 				ICON = ?,
+				IS_MANUAL_STOCK = ?,
 				OP_CAT_ID = ?,
 				EDITED_BY = ?,
 				EDITED_DT = ?
@@ -314,6 +339,7 @@ class MasterCategoryModel {
 				String(data.CATEGORY_TYPE || 'Inventory'),
 				data.DESCRIPTION || null,
 				data.ICON || null,
+				isManualStock,
 				opCatId,
 				data.user_id || null,
 				currentDate,

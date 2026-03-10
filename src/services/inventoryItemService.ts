@@ -7,7 +7,9 @@ type ApiResponse<T> = {
 
 type InventoryItemApiRecord = {
 	IDNo: number;
+	INGREDIENT_ID?: number;
 	BRANCH_ID: number;
+	IS_MANUAL_STOCK?: number;
 	ITEM_CODE?: string;
 	ITEM_NAME?: string;
 	item_name?: string;
@@ -26,6 +28,8 @@ type InventoryItemApiRecord = {
 
 export type InventoryItem = {
 	id: string;
+	ingredientId?: string;
+	isManualStock?: boolean;
 	branchId: string;
 	itemCode: string;
 	itemName: string;
@@ -80,6 +84,8 @@ const toNumber = (value: number | string | null | undefined) => {
 
 const mapItemRecord = (row: InventoryItemApiRecord): InventoryItem => ({
 	id: String(row.IDNo),
+	ingredientId: row.INGREDIENT_ID != null ? String(row.INGREDIENT_ID) : undefined,
+	isManualStock: Boolean(row.IS_MANUAL_STOCK),
 	branchId: String(row.BRANCH_ID),
 	itemCode: row.ITEM_CODE ?? '',
 	itemName: (row.ITEM_NAME ?? row.item_name ?? '').toString(),
@@ -169,5 +175,30 @@ export async function deleteInventoryItem(id: string): Promise<void> {
 	const json = (await response.json()) as ApiResponse<null>;
 	if (!response.ok || !json.success) {
 		throw new Error(json.error || 'Failed to delete inventory item');
+	}
+}
+
+export type AdjustStockType = 'add' | 'deduct';
+
+export async function adjustStock(
+	ingredientId: string,
+	branchId: string,
+	qty: number,
+	type: AdjustStockType
+): Promise<void> {
+	const response = await fetch(buildUrl('/inventory/items/adjust'), {
+		method: 'POST',
+		credentials: 'include',
+		headers: authHeaders(),
+		body: JSON.stringify({
+			ingredientId,
+			branchId,
+			qty,
+			type,
+		}),
+	});
+	const json = (await response.json()) as ApiResponse<null>;
+	if (!response.ok || !json.success) {
+		throw new Error(json.error || 'Failed to adjust stock');
 	}
 }

@@ -4,6 +4,7 @@ const { authenticate } = require('../middleware/unifiedAuth');
 const InventoryController = require('../controllers/inventoryController');
 
 router.get('/inventory/items', authenticate, InventoryController.getAll);
+router.post('/inventory/items/adjust', authenticate, InventoryController.adjustStock);
 router.patch('/inventory/items/by-expense/:expenseId', authenticate, InventoryController.updateStockByExpenseId);
 router.get('/inventory/items/:id', authenticate, InventoryController.getById);
 router.post('/inventory/items', authenticate, InventoryController.create);

@@ -106,6 +106,44 @@ class InventoryController {
 		}
 	}
 
+	/**
+	 * Manual stock adjustment (add/deduct) for items not in menu_ingredients (e.g. seasonings).
+	 * Body: { ingredientId, branchId, qty, type: 'add'|'deduct' }
+	 */
+	static async adjustStock(req, res) {
+		try {
+			const ingredientId = req.body?.ingredientId ?? req.body?.INGREDIENT_ID ?? null;
+			const branchId = InventoryController._resolveBranchId(req) ?? req.body?.branchId ?? req.body?.BRANCH_ID ?? null;
+			const qty = Number(req.body?.qty ?? req.body?.QTY ?? 0);
+			const type = String(req.body?.type ?? req.body?.TYPE ?? 'add').toLowerCase();
+
+			if (!ingredientId || !branchId) {
+				return ApiResponse.badRequest(res, 'ingredientId and branchId are required');
+			}
+			if (!Number.isFinite(qty) || qty <= 0) {
+				return ApiResponse.badRequest(res, 'qty must be a positive number');
+			}
+			if (type !== 'add' && type !== 'deduct') {
+				return ApiResponse.badRequest(res, 'type must be "add" or "deduct"');
+			}
+
+			const userId = req.session?.user_id || req.user?.user_id || null;
+
+			if (type === 'add') {
+				const ok = await InventoryModel.addStock(Number(branchId), Number(ingredientId), qty, userId);
+				if (!ok) return ApiResponse.badRequest(res, 'Failed to add stock');
+			} else {
+				const ok = await InventoryModel.deductStock(Number(branchId), Number(ingredientId), qty, userId);
+				if (!ok) return ApiResponse.badRequest(res, 'Insufficient stock or item not found');
+			}
+
+			return ApiResponse.success(res, null, 'Stock adjusted successfully');
+		} catch (error) {
+			console.error('[InventoryController.adjustStock] Error:', error?.message);
+			return ApiResponse.error(res, error?.message || 'Failed to adjust stock', 500, error?.stack);
+		}
+	}
+
 	static async updateStockByExpenseId(req, res) {
 		try {
 			const { expenseId } = req.params;
