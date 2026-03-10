@@ -109,9 +109,18 @@
 		"units": {
 			"kg": "kg",
 			"g": "g",
-			"L": "L",
+			"L": "liter",
 			"mL": "mL",
-			"pcs": "pcs"
+			"pcs": "pcs",
+			"box": "box",
+			"pack": "pack",
+			"bottle": "bottle",
+			"jar": "jar",
+			"can": "can",
+			"bag": "bag",
+			"head": "head",
+			"bunch": "bunch",
+			"cup": "cup"
 		},
 		"table": {
 			"item_code": "Item Code",

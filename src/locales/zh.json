@@ -276,9 +276,18 @@
 		"units": {
 			"kg": "kg",
 			"g": "g",
-			"L": "L",
+			"L": "升",
 			"mL": "mL",
-			"pcs": "个"
+			"pcs": "个",
+			"box": "盒",
+			"pack": "包",
+			"bottle": "瓶",
+			"jar": "罐",
+			"can": "罐",
+			"bag": "袋",
+			"head": "棵",
+			"bunch": "把",
+			"cup": "杯"
 		},
 		"table": {
 			"item_code": "物品代码",

@@ -108,9 +108,18 @@
 		"units": {
 			"kg": "kg",
 			"g": "g",
-			"L": "L",
+			"L": "리터",
 			"mL": "mL",
-			"pcs": "개"
+			"pcs": "개",
+			"box": "박스",
+			"pack": "팩",
+			"bottle": "병",
+			"jar": "항아리",
+			"can": "캔",
+			"bag": "봉지",
+			"head": "통",
+			"bunch": "단",
+			"cup": "컵"
 		},
 		"table": {
 			"item_code": "항목 코드",

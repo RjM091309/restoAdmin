@@ -178,11 +178,14 @@ class InventoryModel {
 		return result.affectedRows > 0;
 	}
 
-	static async updateStockByExpenseId(expenseId, stockQty, branchId = null, addToExisting = false) {
+	static async updateStockByExpenseId(expenseId, stockQty, branchId = null, addToExisting = false, unit = null) {
 		await InventoryModel.ensureSchema();
 		const qty = Number(stockQty);
 		if (!Number.isFinite(qty)) return false;
 		if (!addToExisting && qty < 0) return false;
+		const validUnits = ['pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
+		const unitVal = unit && String(unit).trim() ? String(unit).trim().toLowerCase() : 'pcs';
+		const safeUnit = validUnits.includes(unitVal) ? unitVal : 'pcs';
 		try {
 			const [exp] = await pool.execute(
 				`SELECT e.BRANCH_ID, e.EXP_DESC, e.EXP_AMOUNT, e.MASTER_CAT_ID, e.INGREDIENT_ID, e.ENCODED_BY, e.ENCODED_DT
@@ -209,12 +212,14 @@ class InventoryModel {
 				} else {
 					const [ins] = await pool.execute(
 						`INSERT INTO ingredients (BRANCH_ID, NAME, MASTER_CAT_ID, UNIT, ACTIVE, ENCODED_BY, ENCODED_DT)
-						 VALUES (?, ?, ?, 'pcs', 1, ?, ?)`,
-						[brId, String(exp[0].EXP_DESC || '').trim(), exp[0].MASTER_CAT_ID, exp[0].ENCODED_BY, exp[0].ENCODED_DT]
+						 VALUES (?, ?, ?, ?, 1, ?, ?)`,
+						[brId, String(exp[0].EXP_DESC || '').trim(), exp[0].MASTER_CAT_ID, safeUnit, exp[0].ENCODED_BY, exp[0].ENCODED_DT]
 					);
 					ingredientId = ins.insertId;
 				}
 				await pool.execute(`UPDATE expenses SET INGREDIENT_ID = ? WHERE IDNo = ? AND ACTIVE = 1`, [ingredientId, expenseId]);
+			} else if (unit && String(unit).trim()) {
+				await pool.execute(`UPDATE ingredients SET UNIT = ? WHERE IDNo = ? AND ACTIVE = 1`, [safeUnit, ingredientId]);
 			}
 
 			const [rows] = await pool.execute(

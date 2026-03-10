@@ -112,7 +112,8 @@ class InventoryController {
 			const stockQty = req.body?.stockQty ?? req.body?.STOCK_QTY ?? req.body?.qty ?? 0;
 			const branchId = InventoryController._resolveBranchId(req);
 			const addToExisting = Boolean(req.body?.addToExisting ?? req.body?.add_to_existing ?? false);
-			const ok = await InventoryModel.updateStockByExpenseId(expenseId, stockQty, branchId, addToExisting);
+			const unit = req.body?.unit ?? req.body?.UNIT ?? null;
+			const ok = await InventoryModel.updateStockByExpenseId(expenseId, stockQty, branchId, addToExisting, unit);
 			if (!ok) return ApiResponse.badRequest(res, 'Expense not found or not an inventory category');
 			return ApiResponse.success(res, null, 'Inventory stock updated successfully');
 		} catch (error) {

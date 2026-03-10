@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Filter, Search, AlertTriangle, ArrowLeft } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
+import { formatQty } from '../../lib/uomUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useParams } from 'react-router-dom';
@@ -118,7 +119,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
         return (
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold">
-              {item.stockQty} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
+              {formatQty(item.stockQty, item.unit || 'pcs')} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
             </span>
             <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div
@@ -137,7 +138,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       header: t('inventory_page.table.reorder_stock'),
       render: (item) => (
         <span className="text-sm font-bold text-brand-text">
-          {item.reorderLevel} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
+          {formatQty(item.reorderLevel, item.unit || 'pcs')} {t(`inventory_page.units.${getUnitKey(item.unit || '')}`)}
         </span>
       ),
     },

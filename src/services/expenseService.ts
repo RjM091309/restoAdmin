@@ -16,6 +16,7 @@ export interface ExpenseRecord {
   active: boolean;
   stockQty?: number;
   inventoryId?: string | null;
+  unit?: string;
   opCatState?: number;
 }
 
@@ -44,6 +45,7 @@ type ExpenseApiRecord = {
   INVENTORY_ID?: number | null;
   STOCK_QTY?: number | string;
   EXP_QTY?: number | string | null;
+  UNIT?: string;
   OP_CAT_STATE?: number;
 };
 
@@ -93,6 +95,7 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
   active: Boolean(row.ACTIVE),
   stockQty: typeof row.STOCK_QTY === 'string' ? Number(row.STOCK_QTY) : Number(row.STOCK_QTY ?? 0),
   inventoryId: row.INVENTORY_ID != null ? String(row.INVENTORY_ID) : null,
+  unit: row.UNIT ?? 'pcs',
   opCatState: row.OP_CAT_STATE,
 });
 
@@ -183,13 +186,16 @@ export async function updateInventoryStock(
   expenseId: string,
   stockQty: number,
   branchId?: string,
-  addToExisting = false
+  addToExisting = false,
+  unit?: string | null
 ): Promise<void> {
+  const body: Record<string, unknown> = { stockQty, branch_id: branchId, addToExisting };
+  if (unit) body.unit = unit;
   const response = await fetch(buildUrl(`/inventory/items/by-expense/${expenseId}`), {
     method: 'PATCH',
     credentials: 'include',
     headers: authHeaders(),
-    body: JSON.stringify({ stockQty, branch_id: branchId, addToExisting }),
+    body: JSON.stringify(body),
   });
   const json = (await response.json()) as ApiResponse<null>;
   if (!response.ok || !json.success) {

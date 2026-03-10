@@ -116,6 +116,7 @@ class ExpenseModel {
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
 				inv.IDNo AS INVENTORY_ID,
 				COALESCE(inv.STOCK_QTY, 0) AS STOCK_QTY,
+				COALESCE(ing.UNIT, 'pcs') AS UNIT,
 				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
@@ -141,7 +142,7 @@ class ExpenseModel {
 				// Fallback without inventory join
 				let fb = `SELECT e.*, b.BRANCH_NAME, mc.IDNo AS MASTER_CATEGORY_ID, oc.NAME AS EXP_CAT, mc.CATEGORY_NAME AS EXP_NAME,
 					mc.ICON AS MASTER_CATEGORY_ICON, mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
-					NULL AS INVENTORY_ID, 0 AS STOCK_QTY, oc.STATE AS OP_CAT_STATE
+					NULL AS INVENTORY_ID, 0 AS STOCK_QTY, 'pcs' AS UNIT, oc.STATE AS OP_CAT_STATE
 					FROM expenses e
 					LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 					LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
@@ -178,11 +179,13 @@ class ExpenseModel {
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
+				COALESCE(ing.UNIT, 'pcs') AS UNIT,
 				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
 			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			LEFT JOIN ingredients ing ON ing.ACTIVE = 1 AND ((e.INGREDIENT_ID IS NOT NULL AND ing.IDNo = e.INGREDIENT_ID) OR (e.INGREDIENT_ID IS NULL AND ing.BRANCH_ID = e.BRANCH_ID AND TRIM(ing.NAME) = TRIM(e.EXP_DESC) AND ing.MASTER_CAT_ID <=> e.MASTER_CAT_ID))
 			WHERE e.IDNo = ? AND e.ACTIVE = 1
 			LIMIT 1
 			`,

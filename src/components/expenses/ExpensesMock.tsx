@@ -18,6 +18,7 @@ import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
+import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 
 type ExpensesMockProps = {
   selectedBranch: Branch | null;
@@ -69,7 +70,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const [isExpensePanelOpen, setIsExpensePanelOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<ExpenseRecord | null>(null);
-  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
+  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
   const [addingAmountForId, setAddingAmountForId] = useState<string | null>(null);
   const [addingAmountValue, setAddingAmountValue] = useState('');
   const [addingQtyValue, setAddingQtyValue] = useState('');
@@ -261,6 +262,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       });
   }, [expenses, masterCategories, selectedCategory, selectedOperationId]);
 
+  // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
+  const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
+
   const totalForView = useMemo(() => {
     if (selectedCategoryId && selectedCategory) {
       return itemsForCategory.reduce((sum, row) => sum + row.expAmount, 0);
@@ -299,11 +303,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               header: 'Qty',
               render: (row: ExpenseRecord) => {
                 const qty = row.expQty != null ? row.expQty : row.stockQty;
+                const unit = row.unit ?? 'pcs';
                 return (
-                  <div className="flex items-center justify-end">
+                  <div className="flex items-center justify-end gap-1">
                     <span className="text-right px-2 py-1 rounded">
-                      {Number(qty ?? 0)}
+                      {formatQty(qty ?? 0, unit)}
                     </span>
+                    <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span>
                   </div>
                 );
               },
@@ -335,7 +341,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     <input
                       type="number"
                       min={0}
-                      step="1"
+                      step={getQtyInputStep(row.unit ?? 'pcs')}
                       value={addingQtyValue}
                       onChange={(e) => setAddingQtyValue(e.target.value)}
                       onKeyDown={(e) => {
@@ -507,7 +513,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const handleOpenAddExpense = () => {
     setEditingExpense(null);
-    setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
+    setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
     setIsExpensePanelOpen(true);
   };
 
@@ -518,6 +524,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       expAmount: row.expAmount ? String(row.expAmount) : '',
       expSource: row.expSource ?? '',
       stockQty: row.stockQty != null ? String(row.stockQty) : '',
+      unit: row.unit ?? 'pcs',
     });
     setIsExpensePanelOpen(true);
   };
@@ -526,7 +533,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     if (!isSubmitting) {
       setIsExpensePanelOpen(false);
       setEditingExpense(null);
-      setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '' });
+      setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
     }
   };
 
@@ -535,6 +542,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     const amount = Number(expenseForm.expAmount);
     if (!Number.isFinite(amount) || amount < 0) {
       toast.error('Enter a valid amount');
+      return;
+    }
+    if (isInventoryCategory && !editingExpense && !expenseForm.unit.trim()) {
+      toast.error('Select a unit for inventory');
       return;
     }
     const qtyRaw = expenseForm.stockQty.trim();
@@ -555,7 +566,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             const oldQty = editingExpense.expQty ?? editingExpense.stockQty ?? 0;
             const delta = qty - Number(oldQty);
             if (delta !== 0) {
-              await updateInventoryStock(editingExpense.id, delta, branchId, true);
+              await updateInventoryStock(editingExpense.id, delta, branchId, true, expenseForm.unit || undefined);
+            } else if (expenseForm.unit && expenseForm.unit !== (editingExpense.unit ?? 'pcs')) {
+              await updateInventoryStock(editingExpense.id, 0, branchId, true, expenseForm.unit);
             }
           } catch (error) {
             console.error('Failed to update inventory qty after expense update:', error);
@@ -581,7 +594,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         setExpenses(filtered);
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
           try {
-            await updateInventoryStock(String(newId), qty, branchId, true);
+            await updateInventoryStock(String(newId), qty, branchId, true, expenseForm.unit || undefined);
             const refreshed = await getExpenses(branchId);
             setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
           } catch (error) {
@@ -1512,7 +1525,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             <button
               type="button"
               onClick={handleSubmitExpense}
-              disabled={isSubmitting || expenseForm.expAmount.trim() === '' || !Number.isFinite(Number(expenseForm.expAmount))}
+              disabled={
+                isSubmitting ||
+                expenseForm.expAmount.trim() === '' ||
+                !Number.isFinite(Number(expenseForm.expAmount)) ||
+                (isInventoryCategory && !editingExpense && !expenseForm.unit.trim())
+              }
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
@@ -1545,18 +1563,43 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             />
           </div>
           {isInventoryCategory && (
-            <div className="space-y-3">
-              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Qty (for inventory)</label>
-              <input
-                type="number"
-                min={0}
-                step="1"
-                value={expenseForm.stockQty}
-                onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-                placeholder="0"
-              />
-            </div>
+            <>
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                  Unit <span className="text-red-500">{!editingExpense ? '*' : ''}</span>
+                </label>
+                <select
+                  value={expenseForm.unit}
+                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, unit: e.target.value }))}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+                  required={!editingExpense}
+                >
+                  <option value="">Select unit</option>
+                  {UOM_OPTIONS.map((u) => (
+                    <option key={u} value={u}>
+                      {getUnitLabel(u)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                  Qty (for inventory) <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step={getQtyInputStep(expenseFormUnit)}
+                    value={expenseForm.stockQty}
+                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+                    placeholder={expenseFormUnit === 'pcs' ? '0' : '0.0000'}
+                  />
+                  <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
+                </div>
+              </div>
+            </>
           )}
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Source (optional)</label>
