@@ -26,10 +26,9 @@ function normalizeUnit(unit: string): string {
   return String(unit || 'pcs').toLowerCase().trim();
 }
 
-/** Display label for unit (e.g. L → liter) */
+/** Display label for unit — matches backend VALID_UNITS (lowercase) */
 export function getUnitLabel(unit: string): string {
   const u = normalizeUnit(unit);
-  if (u === 'l') return 'liter';
   return u || 'pcs';
 }
 

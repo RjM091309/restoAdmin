@@ -15,6 +15,7 @@ import {
     AlertCircle,
     Loader2,
     ImageIcon,
+    ListChecks,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -33,6 +34,15 @@ import {
     type CreateMenuPayload,
     type UpdateMenuPayload,
 } from '../../services/menuService';
+import {
+    getMenuIngredients,
+    createMenuIngredient,
+    updateMenuIngredient,
+    deleteMenuIngredient,
+    type MenuIngredientRecord,
+} from '../../services/menuIngredientService';
+import { getIngredients } from '../../services/ingredientService';
+import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
 
 // ---- Props & types ----
@@ -70,6 +80,18 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [editingItem, setEditingItem] = useState<MenuRecord | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [swal, setSwal] = useState<SwalState>(null);
+
+    // ----- Ingredients modal -----
+    const [ingredientsForMenu, setIngredientsForMenu] = useState<MenuRecord | null>(null);
+    const [menuIngredients, setMenuIngredients] = useState<MenuIngredientRecord[]>([]);
+    const [ingredientsLoading, setIngredientsLoading] = useState(false);
+    const [ingredientsSubmitting, setIngredientsSubmitting] = useState(false);
+    const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; unit: string }[]>([]);
+    const [addIngredientId, setAddIngredientId] = useState('');
+    const [addQty, setAddQty] = useState('');
+    const [editingIngredientId, setEditingIngredientId] = useState<string | null>(null);
+    const [editingQty, setEditingQty] = useState('');
+    const [editingUnit, setEditingUnit] = useState('');
 
     // ----- Form -----
     const [formName, setFormName] = useState('');
@@ -152,6 +174,114 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setIsCreateOpen(false);
         setEditingItem(null);
         resetForm();
+    };
+
+    // ==================== Ingredients modal ====================
+    const openIngredientsModal = async (item: MenuRecord) => {
+        setIngredientsForMenu(item);
+        setMenuIngredients([]);
+        setAddIngredientId('');
+        setAddQty('');
+        setEditingIngredientId(null);
+        setIngredientsLoading(true);
+        try {
+            const [ingredients, list] = await Promise.all([
+                getMenuIngredients(item.id),
+                getIngredients(item.branchId, undefined),
+            ]);
+            setMenuIngredients(ingredients);
+            setAllIngredients(list.map((i) => ({ id: i.id, name: i.name, unit: i.unit || 'pcs' })));
+        } catch (e) {
+            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to load ingredients', onConfirm: () => setSwal(null) });
+        } finally {
+            setIngredientsLoading(false);
+        }
+    };
+
+    const closeIngredientsModal = () => {
+        if (!ingredientsSubmitting) {
+            setIngredientsForMenu(null);
+            setMenuIngredients([]);
+            setAddIngredientId('');
+            setAddQty('');
+            setEditingIngredientId(null);
+        }
+    };
+
+    const handleAddIngredient = async () => {
+        if (!ingredientsForMenu || !addIngredientId.trim()) return;
+        const qty = Number(addQty);
+        if (!Number.isFinite(qty) || qty <= 0) {
+            setSwal({ type: 'warning', title: t('menu_page.ingredients.invalid_qty'), text: t('menu_page.ingredients.invalid_qty_msg'), onConfirm: () => setSwal(null) });
+            return;
+        }
+        if (menuIngredients.some((mi) => mi.ingredientId === addIngredientId)) {
+            setSwal({ type: 'warning', title: t('menu_page.ingredients.already_added'), text: t('menu_page.ingredients.already_added_msg'), onConfirm: () => setSwal(null) });
+            return;
+        }
+        const selectedIng = allIngredients.find((i) => i.id === addIngredientId);
+        const unit = selectedIng?.unit || 'pcs';
+        setIngredientsSubmitting(true);
+        try {
+            await createMenuIngredient({
+                menuId: ingredientsForMenu.id,
+                ingredientId: addIngredientId,
+                qtyPerServe: qty,
+                unit,
+            });
+            const refreshed = await getMenuIngredients(ingredientsForMenu.id);
+            setMenuIngredients(refreshed);
+            setAddIngredientId('');
+            setAddQty('');
+        } catch (e) {
+            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to add', onConfirm: () => setSwal(null) });
+        } finally {
+            setIngredientsSubmitting(false);
+        }
+    };
+
+    const handleUpdateIngredient = async (id: string) => {
+        const qty = Number(editingQty);
+        if (!Number.isFinite(qty) || qty <= 0) return;
+        setIngredientsSubmitting(true);
+        try {
+            await updateMenuIngredient(id, { qtyPerServe: qty, unit: editingUnit });
+            if (ingredientsForMenu) {
+                const refreshed = await getMenuIngredients(ingredientsForMenu.id);
+                setMenuIngredients(refreshed);
+            }
+            setEditingIngredientId(null);
+        } catch (e) {
+            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to update', onConfirm: () => setSwal(null) });
+        } finally {
+            setIngredientsSubmitting(false);
+        }
+    };
+
+    const handleRemoveIngredient = async (rec: MenuIngredientRecord) => {
+        setSwal({
+            type: 'question',
+            title: t('menu_page.ingredients.remove_title'),
+            text: t('menu_page.ingredients.remove_confirm', { name: rec.ingredientName }),
+            showCancel: true,
+            confirmText: t('menu_page.messages.delete_confirm_btn'),
+            onConfirm: async () => {
+                setSwal(null);
+                setIngredientsSubmitting(true);
+                try {
+                    await deleteMenuIngredient(rec.id);
+                    if (ingredientsForMenu) {
+                        const refreshed = await getMenuIngredients(ingredientsForMenu.id);
+                        setMenuIngredients(refreshed);
+                    }
+                } catch (e) {
+                    setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to remove', onConfirm: () => setSwal(null) });
+                } finally {
+                    setIngredientsSubmitting(false);
+                }
+            },
+            onCancel: () => setSwal(null),
+        });
     };
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,6 +411,13 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             className: 'text-right',
             render: (item) => (
                 <div className="flex justify-end items-center gap-2">
+                    <button
+                        onClick={() => openIngredientsModal(item)}
+                        className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+                        title={t('menu_page.ingredients.title')}
+                    >
+                        <ListChecks size={16} />
+                    </button>
                     <button
                         onClick={() => openEdit(item)}
                         className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
@@ -525,6 +662,169 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 }
             >
                 {modalContent}
+            </Modal>
+
+            {/* Ingredients Modal */}
+            <Modal
+                isOpen={!!ingredientsForMenu}
+                onClose={closeIngredientsModal}
+                title={ingredientsForMenu ? t('menu_page.ingredients.modal_title', { name: ingredientsForMenu.name }) : t('menu_page.ingredients.title')}
+                maxWidth="lg"
+                footer={
+                    <div className="flex justify-end">
+                        <button
+                            onClick={closeIngredientsModal}
+                            disabled={ingredientsSubmitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('common.close')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-5">
+                    {ingredientsLoading ? (
+                        <div className="flex items-center justify-center py-12">
+                            <Loader2 size={32} className="animate-spin text-brand-primary" />
+                        </div>
+                    ) : (
+                        <>
+                            <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.ingredient')}</th>
+                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.qty_per_serve')}</th>
+                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.unit')}</th>
+                                            <th className="text-right px-4 py-3 font-bold text-brand-text w-24">{t('menu_page.table.actions')}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {menuIngredients.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} className="px-4 py-8 text-center text-brand-muted">
+                                                    {t('menu_page.ingredients.no_ingredients')}
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            menuIngredients.map((rec) => (
+                                                <tr key={rec.id} className="border-t border-gray-100 hover:bg-gray-50/50">
+                                                    <td className="px-4 py-3 font-medium text-brand-text">{rec.ingredientName}</td>
+                                                    <td className="px-4 py-3">
+                                                        {editingIngredientId === rec.id ? (
+                                                            <input
+                                                                type="number"
+                                                                value={editingQty}
+                                                                onChange={(e) => setEditingQty(e.target.value)}
+                                                                min={getQtyInputStep(rec.unit) || 0.01}
+                                                                step={getQtyInputStep(rec.unit) || 0.01}
+                                                                className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                                                            />
+                                                        ) : (
+                                                            <span className="text-brand-text">{formatQty(rec.qtyPerServe, rec.unit)}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        {editingIngredientId === rec.id ? (
+                                                            <select
+                                                                value={editingUnit}
+                                                                onChange={(e) => setEditingUnit(e.target.value)}
+                                                                className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                                                            >
+                                                                {UOM_OPTIONS.map((o) => (
+                                                                    <option key={o} value={o}>{getUnitLabel(o)}</option>
+                                                                ))}
+                                                            </select>
+                                                        ) : (
+                                                            <span className="text-brand-muted">{getUnitLabel(rec.unit)}</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right">
+                                                        {editingIngredientId === rec.id ? (
+                                                            <div className="flex justify-end gap-1">
+                                                                <button
+                                                                    onClick={() => handleUpdateIngredient(rec.id)}
+                                                                    disabled={ingredientsSubmitting}
+                                                                    className="px-2 py-1 text-xs font-bold text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50"
+                                                                >
+                                                                    {ingredientsSubmitting ? <Loader2 size={14} className="animate-spin inline" /> : t('menu_page.ingredients.save')}
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => setEditingIngredientId(null)}
+                                                                    disabled={ingredientsSubmitting}
+                                                                    className="px-2 py-1 text-xs font-bold text-brand-muted hover:bg-gray-100 rounded-lg"
+                                                                >
+                                                                    {t('menu_page.modal.cancel')}
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex justify-end gap-1">
+                                                                <button
+                                                                    onClick={() => { setEditingIngredientId(rec.id); setEditingQty(String(rec.qtyPerServe)); setEditingUnit(rec.unit || 'pcs'); }}
+                                                                    disabled={ingredientsSubmitting}
+                                                                    className="p-1.5 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-lg transition-colors"
+                                                                    title={t('menu_page.modal.edit_title')}
+                                                                >
+                                                                    <Edit2 size={14} />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleRemoveIngredient(rec)}
+                                                                    disabled={ingredientsSubmitting}
+                                                                    className="p-1.5 text-brand-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                                    title={t('menu_page.ingredients.remove')}
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                                <div className="flex-1 min-w-[140px]">
+                                    <label className="block text-xs font-bold text-brand-text mb-1">{t('menu_page.ingredients.ingredient')}</label>
+                                    <Select2
+                                        options={[{ value: '', label: t('menu_page.ingredients.select_ingredient') }, ...allIngredients.filter((i) => !menuIngredients.some((mi) => mi.ingredientId === i.id)).map((i) => ({ value: i.id, label: i.name }))]}
+                                        value={addIngredientId}
+                                        onChange={(v) => setAddIngredientId(v ? String(v) : '')}
+                                        placeholder={t('menu_page.ingredients.select_ingredient')}
+                                    />
+                                </div>
+                                <div className="w-24">
+                                    <label className="block text-xs font-bold text-brand-text mb-1">{t('menu_page.ingredients.qty_per_serve')}</label>
+                                    <input
+                                        type="number"
+                                        value={addQty}
+                                        onChange={(e) => setAddQty(e.target.value)}
+                                        min={0.01}
+                                        step={0.01}
+                                        placeholder="0"
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
+                                    />
+                                </div>
+                                <div className="w-28">
+                                    <label className="block text-xs font-bold text-brand-text mb-1">{t('menu_page.ingredients.unit')}</label>
+                                    <div className="h-10 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-brand-muted flex items-center">
+                                        {addIngredientId ? getUnitLabel(allIngredients.find((i) => i.id === addIngredientId)?.unit || 'pcs') : '—'}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={handleAddIngredient}
+                                    disabled={ingredientsSubmitting || !addIngredientId}
+                                    className="px-4 py-2 rounded-lg font-bold text-white bg-brand-primary hover:bg-brand-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    {ingredientsSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
+                                    {t('menu_page.ingredients.add')}
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
             </Modal>
 
             {/* SweetAlert-style popup */}

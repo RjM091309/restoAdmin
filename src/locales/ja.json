@@ -1282,6 +1282,25 @@
 			"error_title": "エラー",
 			"operation_failed": "操作に失敗しました",
 			"delete_failed": "削除に失敗しました"
+		},
+		"ingredients": {
+			"title": "食材を管理",
+			"modal_title": "{{name}} の食材",
+			"add_ingredient": "食材を追加",
+			"ingredient": "食材",
+			"select_ingredient": "食材を選択",
+			"qty_per_serve": "1人前の量",
+			"unit": "単位",
+			"no_ingredients": "食材がありません。下から追加してください。",
+			"invalid_qty": "無効な数量",
+			"invalid_qty_msg": "0より大きい有効な数量を入力してください。",
+			"already_added": "既に追加済み",
+			"already_added_msg": "この食材は既にリストに含まれています。",
+			"remove_title": "食材を削除しますか？",
+			"remove_confirm": "このメニュー項目から「{{name}}」を削除しますか？",
+			"add": "追加",
+			"save": "保存",
+			"remove": "削除"
 		}
 	},
 	"category": {

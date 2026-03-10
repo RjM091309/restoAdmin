@@ -1317,6 +1317,25 @@
 			"error_title": "Error",
 			"operation_failed": "Operation failed",
 			"delete_failed": "Delete failed"
+		},
+		"ingredients": {
+			"title": "Manage Ingredients",
+			"modal_title": "Ingredients for {{name}}",
+			"add_ingredient": "Add Ingredient",
+			"ingredient": "Ingredient",
+			"select_ingredient": "Select ingredient",
+			"qty_per_serve": "Qty per serve",
+			"unit": "Unit",
+			"no_ingredients": "No ingredients yet. Add one below.",
+			"invalid_qty": "Invalid Quantity",
+			"invalid_qty_msg": "Please enter a valid quantity greater than 0.",
+			"already_added": "Already Added",
+			"already_added_msg": "This ingredient is already in the list.",
+			"remove_title": "Remove Ingredient?",
+			"remove_confirm": "Remove \"{{name}}\" from this menu item?",
+			"add": "Add",
+			"save": "Save",
+			"remove": "Remove"
 		}
 	},
 	"category": {

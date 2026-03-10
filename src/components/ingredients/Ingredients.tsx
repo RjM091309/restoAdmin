@@ -17,13 +17,12 @@ import {
   type Ingredient,
 } from '../../services/ingredientService';
 import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
+import { UOM_OPTIONS, getUnitLabel } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
 
 type IngredientsProps = {
   selectedBranch: Branch | null;
 };
-
-const UNIT_OPTIONS = ['pcs', 'kg', 'g', 'L', 'mL', 'box', 'pack', 'bottle'];
 
 export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
   const { t } = useTranslation();
@@ -172,7 +171,7 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
     {
       header: 'Unit',
       render: (row) => (
-        <span className="text-sm font-medium">{row.unit || 'pcs'}</span>
+        <span className="text-sm font-medium">{getUnitLabel(row.unit || 'pcs')}</span>
       ),
     },
     {
@@ -363,9 +362,9 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
               onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
             >
-              {UNIT_OPTIONS.map((u) => (
+              {UOM_OPTIONS.map((u) => (
                 <option key={u} value={u}>
-                  {u}
+                  {getUnitLabel(u)}
                 </option>
               ))}
             </select>

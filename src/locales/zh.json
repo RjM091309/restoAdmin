@@ -1283,6 +1283,25 @@
 			"error_title": "错误",
 			"operation_failed": "操作失败",
 			"delete_failed": "删除失败"
+		},
+		"ingredients": {
+			"title": "管理配料",
+			"modal_title": "{{name}} 的配料",
+			"add_ingredient": "添加配料",
+			"ingredient": "配料",
+			"select_ingredient": "选择配料",
+			"qty_per_serve": "每份用量",
+			"unit": "单位",
+			"no_ingredients": "暂无配料。请在下方添加。",
+			"invalid_qty": "无效数量",
+			"invalid_qty_msg": "请输入大于 0 的有效数量。",
+			"already_added": "已添加",
+			"already_added_msg": "该配料已在列表中。",
+			"remove_title": "移除配料？",
+			"remove_confirm": "从此菜单项中移除「{{name}}」？",
+			"add": "添加",
+			"save": "保存",
+			"remove": "移除"
 		}
 	},
 	"category": {

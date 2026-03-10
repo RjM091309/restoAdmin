@@ -8,6 +8,14 @@
 const pool = require('../config/db');
 const IngredientModel = require('./ingredientModel');
 
+// Same valid units as inventory (lowercase)
+const VALID_UNITS = ['pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
+
+function sanitizeUnit(unit) {
+	const u = unit && String(unit).trim() ? String(unit).trim().toLowerCase() : 'pcs';
+	return VALID_UNITS.includes(u) ? u : 'pcs';
+}
+
 class MenuIngredientModel {
 	static _schemaReady = false;
 	static _schemaPromise = null;
@@ -53,7 +61,7 @@ class MenuIngredientModel {
 					CONSTRAINT fk_menu_ingredients_ingredient
 						FOREIGN KEY (INGREDIENT_ID) REFERENCES ingredients(IDNo)
 						ON UPDATE CASCADE ON DELETE RESTRICT
-				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 			`);
 
 			MenuIngredientModel._schemaReady = true;
@@ -110,6 +118,7 @@ class MenuIngredientModel {
 
 	static async create(data) {
 		await MenuIngredientModel.ensureSchema();
+		const safeUnit = sanitizeUnit(data.UNIT);
 		const [result] = await pool.execute(
 			`INSERT INTO menu_ingredients (MENU_ID, INGREDIENT_ID, QTY_PER_SERVE, UNIT, ACTIVE, ENCODED_BY, ENCODED_DT)
 			 VALUES (?, ?, ?, ?, 1, ?, NOW())`,
@@ -117,7 +126,7 @@ class MenuIngredientModel {
 				Number(data.MENU_ID),
 				Number(data.INGREDIENT_ID),
 				Number(data.QTY_PER_SERVE) || 1,
-				String(data.UNIT || 'pcs').trim() || 'pcs',
+				safeUnit,
 				data.ENCODED_BY != null ? Number(data.ENCODED_BY) : null,
 			]
 		);
@@ -126,6 +135,16 @@ class MenuIngredientModel {
 
 	static async update(id, data) {
 		await MenuIngredientModel.ensureSchema();
+		let safeUnit;
+		if (data.UNIT != null && data.UNIT !== '') {
+			safeUnit = sanitizeUnit(data.UNIT);
+		} else {
+			const [row] = await pool.execute(
+				`SELECT UNIT FROM menu_ingredients WHERE IDNo = ? AND ACTIVE = 1 LIMIT 1`,
+				[Number(id)]
+			);
+			safeUnit = row.length ? sanitizeUnit(row[0].UNIT) : 'pcs';
+		}
 		const [result] = await pool.execute(
 			`UPDATE menu_ingredients SET
 				QTY_PER_SERVE = ?,
@@ -135,7 +154,7 @@ class MenuIngredientModel {
 			 WHERE IDNo = ? AND ACTIVE = 1`,
 			[
 				Number(data.QTY_PER_SERVE) ?? 1,
-				String(data.UNIT || 'pcs').trim() || 'pcs',
+				safeUnit,
 				data.EDITED_BY != null ? Number(data.EDITED_BY) : null,
 				Number(id),
 			]

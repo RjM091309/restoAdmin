@@ -11,6 +11,7 @@ const BillingModel = require('../models/billingModel');
 const TableModel = require('../models/tableModel');
 const NotificationModel = require('../models/notificationModel');
 const InventoryDeductionService = require('../services/inventoryDeductionService');
+const InventoryDeductionModel = require('../models/inventoryDeductionModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
 
@@ -511,10 +512,20 @@ class OrderController {
 
 			const parsedStatus = parseInt(status);
 			let updated = false;
-			if (parsedStatus === 1) {
-				await InventoryDeductionService.settleOrderWithInventory(Number(id), user_id);
-				updated = true;
+			if (parsedStatus === 2) {
+				// CONFIRMED: deduct menu_ingredients from inventory, record in inventory_deductions
+				await InventoryDeductionService.deductOnOrderConfirmed(Number(id), user_id);
+				updated = await OrderModel.updateStatus(id, parsedStatus, user_id);
+			} else if (parsedStatus === -1) {
+				// CANCELLED: reverse deductions (add stock back, mark inventory_deductions ACTIVE=0)
+				await InventoryDeductionService.reverseOnOrderCancelled(Number(id), user_id);
+				updated = await OrderModel.updateStatus(id, parsedStatus, user_id);
 			} else {
+				// SETTLED (1): reflect in inventory_deductions STATUS = 3
+				if (parsedStatus === 1) {
+					await InventoryDeductionModel.updateStatusByOrderId(Number(id), parsedStatus, user_id);
+				}
+				// PENDING (3), etc: just update order status
 				updated = await OrderModel.updateStatus(id, parsedStatus, user_id);
 			}
 			if (!updated) {

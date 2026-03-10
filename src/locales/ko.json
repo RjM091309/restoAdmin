@@ -1319,6 +1319,25 @@
 			"error_title": "오류",
 			"operation_failed": "작업에 실패했습니다",
 			"delete_failed": "삭제에 실패했습니다"
+		},
+		"ingredients": {
+			"title": "재료 관리",
+			"modal_title": "{{name}} 재료",
+			"add_ingredient": "재료 추가",
+			"ingredient": "재료",
+			"select_ingredient": "재료 선택",
+			"qty_per_serve": "1인분 수량",
+			"unit": "단위",
+			"no_ingredients": "재료가 없습니다. 아래에서 추가하세요.",
+			"invalid_qty": "잘못된 수량",
+			"invalid_qty_msg": "0보다 큰 유효한 수량을 입력하세요.",
+			"already_added": "이미 추가됨",
+			"already_added_msg": "이 재료는 이미 목록에 있습니다.",
+			"remove_title": "재료를 제거하시겠습니까?",
+			"remove_confirm": "이 메뉴 항목에서 \"{{name}}\"을(를) 제거하시겠습니까?",
+			"add": "추가",
+			"save": "저장",
+			"remove": "제거"
 		}
 	},
 	"category": {

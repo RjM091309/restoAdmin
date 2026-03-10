@@ -247,6 +247,56 @@ class InventoryModel {
 			throw err;
 		}
 	}
+
+	/**
+	 * Deduct stock for order confirmation. Reduces STOCK_QTY for (branchId, ingredientId).
+	 * @returns {boolean} true if deducted, false if no inventory row or insufficient
+	 */
+	static async deductStock(branchId, ingredientId, qty, userId = null) {
+		await InventoryModel.ensureSchema();
+		const deductQty = Number(qty);
+		if (!Number.isFinite(deductQty) || deductQty <= 0) return false;
+		const [rows] = await pool.execute(
+			`SELECT IDNo, STOCK_QTY FROM inventory WHERE INGREDIENT_ID = ? AND BRANCH_ID = ? AND ACTIVE = 1 LIMIT 1`,
+			[Number(ingredientId), Number(branchId)]
+		);
+		if (!rows.length) return false;
+		const current = Number(rows[0].STOCK_QTY) || 0;
+		const newQty = Math.max(0, current - deductQty);
+		await pool.execute(
+			`UPDATE inventory SET STOCK_QTY = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ?`,
+			[newQty, userId != null ? Number(userId) : null, rows[0].IDNo]
+		);
+		return true;
+	}
+
+	/**
+	 * Add stock back (reversal). Increases STOCK_QTY for (branchId, ingredientId).
+	 */
+	static async addStock(branchId, ingredientId, qty, userId = null) {
+		await InventoryModel.ensureSchema();
+		const addQty = Number(qty);
+		if (!Number.isFinite(addQty) || addQty <= 0) return false;
+		const [rows] = await pool.execute(
+			`SELECT IDNo, STOCK_QTY FROM inventory WHERE INGREDIENT_ID = ? AND BRANCH_ID = ? AND ACTIVE = 1 LIMIT 1`,
+			[Number(ingredientId), Number(branchId)]
+		);
+		if (!rows.length) {
+			await pool.execute(
+				`INSERT INTO inventory (BRANCH_ID, INGREDIENT_ID, STOCK_QTY, STATUS_FLAG, ACTIVE, ENCODED_BY, ENCODED_DT)
+				 VALUES (?, ?, ?, 'In Stock', 1, ?, NOW())`,
+				[Number(branchId), Number(ingredientId), addQty, userId != null ? Number(userId) : null]
+			);
+			return true;
+		}
+		const current = Number(rows[0].STOCK_QTY) || 0;
+		const newQty = current + addQty;
+		await pool.execute(
+			`UPDATE inventory SET STOCK_QTY = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ?`,
+			[newQty, userId != null ? Number(userId) : null, rows[0].IDNo]
+		);
+		return true;
+	}
 }
 
 module.exports = InventoryModel;
