@@ -2,7 +2,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
-import { DataTable, type ColumnDef } from '../ui/DataTable';
 import {
   ClipboardList,
   Package,
@@ -52,39 +51,6 @@ const ordersOverviewData = [
   { name: 'Fri', orders: 150 },
   { name: 'Sat', orders: 145 },
   { name: 'Sun', orders: 140 },
-];
-
-const recentOrders = [
-  {
-    id: 'ORD1025',
-    menu: 'Salmon Sushi Roll',
-    category: 'Seafood',
-    qty: 3,
-    amount: 30.0,
-    customer: 'Dana White',
-    status: 'On Process',
-    image: 'https://images.unsplash.com/photo-1579871494447-9811cf80d66c?q=80&w=200&auto=format&fit=crop', // Sushi
-  },
-  {
-    id: 'ORD1026',
-    menu: 'Grilled Chicken',
-    category: 'Chicken',
-    qty: 1,
-    amount: 18.0,
-    customer: 'John Doe',
-    status: 'Completed',
-    image: 'https://images.unsplash.com/photo-1598514982205-f36b96d1e8d4?q=80&w=200&auto=format&fit=crop', // Chicken
-  },
-  {
-    id: 'ORD1027',
-    menu: 'Pasta Carbonara',
-    category: 'Pasta',
-    qty: 2,
-    amount: 24.0,
-    customer: 'Jane Smith',
-    status: 'Pending',
-    image: 'https://images.unsplash.com/photo-1612874742237-6526221588e3?q=80&w=200&auto=format&fit=crop', // Pasta
-  },
 ];
 
 const trendingMenus = [
@@ -150,20 +116,7 @@ const StatCard = ({
     <div>
       <p className="text-brand-muted text-sm font-medium mb-1">{label}</p>
       <div className="flex items-baseline gap-2">
-        <h3 className="text-2xl font-bold">{value}</h3>
-        <span
-          className={cn(
-            'text-xs font-bold flex items-center gap-0.5',
-            trendType === 'up' ? 'text-green-500' : 'text-red-500',
-          )}
-        >
-          {trendType === 'up' ? (
-            <TrendingUp size={12} />
-          ) : (
-            <TrendingUp size={12} />
-          )}
-          {trend}
-        </span>
+        <h3 className="text-2xl font-bold">0</h3>
       </div>
     </div>
   </div>
@@ -185,7 +138,6 @@ const TrendingMenuItem = ({
       />
       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm">
         <Star size={10} className="text-yellow-500 fill-yellow-500" />
-        <span className="text-xs font-bold">{menu.rating}</span>
       </div>
     </div>
     <div className="flex items-start justify-between">
@@ -197,15 +149,12 @@ const TrendingMenuItem = ({
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5 text-brand-muted">
             <Star size={12} />
-            <span className="text-xs font-bold">{menu.rating}</span>
           </div>
           <div className="flex items-center gap-1.5 text-brand-muted">
             <ClipboardList size={12} />
-            <span className="text-xs font-bold">{menu.orders}</span>
           </div>
         </div>
       </div>
-      <p className="text-xl font-bold text-brand-primary">${menu.price.toFixed(2)}</p>
     </div>
   </div>
 );
@@ -348,22 +297,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
               <StatCard
                 icon={ClipboardList}
                 label={t('dashboard.total_orders')}
-                value={dashboardData.dynamicStats.orders}
-                trend="1.58%"
+                value=""
+                trend=""
                 trendType="up"
               />
               <StatCard
                 icon={Package}
                 label={t('dashboard.total_customer')}
-                value={dashboardData.dynamicStats.customers}
-                trend="0.42%"
+                value=""
+                trend=""
                 trendType="down"
               />
               <StatCard
                 icon={TrendingUp}
                 label={t('dashboard.total_revenue')}
-                value={dashboardData.dynamicStats.revenue}
-                trend="2.36%"
+                value=""
+                trend=""
                 trendType="up"
               />
             </div>
@@ -373,7 +322,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                 <div className="flex items-center justify-between mb-8">
                   <div>
                     <h4 className="text-base text-brand-muted font-medium">{t('dashboard.total_revenue')}</h4>
-                    <p className="text-3xl font-bold">{dashboardData.dynamicStats.revenue}</p>
                   </div>
                   <div className="flex items-center gap-6">
                     <div className="flex items-center gap-4">
@@ -416,6 +364,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 12, fill: '#64748b' }}
+                        tickFormatter={() => ''}
                       />
                       <Tooltip
                         contentStyle={{
@@ -424,6 +373,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         }}
                         labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                        formatter={() => ''}
+                        labelFormatter={() => ''}
                       />
                       <Area
                         type="monotone"
@@ -482,7 +433,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         style={{ backgroundColor: item.color }}
                       />
                       <span className="text-xs font-medium text-brand-muted">{item.name}</span>
-                      <span className="text-xs font-bold">{item.value}%</span>
                     </div>
                   ))}
                 </div>
@@ -512,6 +462,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 12, fill: '#64748b' }}
+                        tickFormatter={() => ''}
                       />
                       <Tooltip
                         cursor={{ fill: '#4f46e5', opacity: 0.1 }}
@@ -520,6 +471,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                           border: 'none',
                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         }}
+                        formatter={() => ''}
+                        labelFormatter={() => ''}
                       />
                       <Bar
                         dataKey="orders"
@@ -554,12 +507,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         </div>
                         <div>
                           <p className="text-sm font-bold">{type.label}</p>
-                          <p className="text-xs text-brand-muted font-medium">
-                            {type.percentage}%
-                          </p>
                         </div>
                       </div>
-                      <p className="text-base font-bold">{type.value}</p>
                     </div>
                   ))}
                 </div>
@@ -589,74 +538,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                   </button>
                 </div>
               </div>
-              <DataTable
-                data={recentOrders}
-                columns={[
-                  {
-                    header: t('dashboard.order_id'),
-                    className: 'pb-4',
-                    render: (order) => <span className="text-sm font-bold text-brand-muted">{order.id}</span>
-                  },
-                  {
-                    header: t('dashboard.photo'),
-                    className: 'pb-4',
-                    render: (order) => (
-                      <img
-                        src={order.image}
-                        alt={order.menu}
-                        className="w-10 h-10 rounded-lg object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    )
-                  },
-                  {
-                    header: t('dashboard.menu'),
-                    className: 'pb-4',
-                    render: (order) => (
-                      <div>
-                        <p className="text-sm font-bold">{order.menu}</p>
-                        <p className="text-xs text-brand-muted font-medium">{order.category}</p>
-                      </div>
-                    )
-                  },
-                  {
-                    header: t('dashboard.qty'),
-                    className: 'pb-4',
-                    render: (order) => <span className="text-sm font-bold">{order.qty}</span>
-                  },
-                  {
-                    header: t('dashboard.amount'),
-                    className: 'pb-4',
-                    render: (order) => <span className="text-sm font-bold">${order.amount.toFixed(2)}</span>
-                  },
-                  {
-                    header: t('dashboard.customer'),
-                    className: 'pb-4',
-                    render: (order) => <span className="text-sm font-bold">{order.customer}</span>
-                  },
-                  {
-                    header: t('dashboard.status'),
-                    className: 'pb-4',
-                    render: (order) => (
-                      <span
-                        className={cn(
-                          'text-xs font-bold px-2 py-1 rounded-lg',
-                          order.status === 'On Process'
-                            ? 'bg-orange-100 text-orange-600'
-                            : order.status === 'Completed'
-                              ? 'bg-green-100 text-green-600'
-                              : 'bg-gray-100 text-gray-600',
-                        )}
-                      >
-                        {order.status === 'On Process' ? t('dashboard.on_process') :
-                          order.status === 'Completed' ? t('dashboard.completed') :
-                            t('dashboard.pending')}
-                      </span>
-                    )
-                  }
-                ]}
-                keyExtractor={(item) => item.id}
-              />
+              <div className="flex items-center justify-center border border-dashed border-slate-200 rounded-2xl py-12 text-sm font-medium text-brand-muted">
+                No data
+              </div>
             </div>
           </div>
 
