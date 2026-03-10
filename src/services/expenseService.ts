@@ -9,6 +9,7 @@ export interface ExpenseRecord {
   expName: string;
   expDesc: string | null;
   expAmount: number;
+  expQty?: number | null;
   expSource: string | null;
   encodedBy: string | null;
   encodedDt: string | null;
@@ -42,6 +43,7 @@ type ExpenseApiRecord = {
   ENCODED_DT?: string | null;
   INVENTORY_ID?: number | null;
   STOCK_QTY?: number | string;
+  EXP_QTY?: number | string | null;
   OP_CAT_STATE?: number;
 };
 
@@ -84,6 +86,7 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
   expName: row.EXP_NAME,
   expDesc: row.EXP_DESC ?? null,
   expAmount: typeof row.EXP_AMOUNT === 'string' ? Number(row.EXP_AMOUNT) : Number(row.EXP_AMOUNT || 0),
+  expQty: row.EXP_QTY != null && row.EXP_QTY !== '' ? (typeof row.EXP_QTY === 'string' ? Number(row.EXP_QTY) : Number(row.EXP_QTY)) : null,
   expSource: row.EXP_SOURCE ?? null,
   encodedBy: row.ENCODED_BY ?? null,
   encodedDt: row.ENCODED_DT ?? null,
@@ -112,6 +115,7 @@ export type CreateExpensePayload = {
   masterCatId: string;
   expDesc: string | null;
   expAmount: number;
+  expQty?: number | null;
   expSource: string | null;
 };
 
@@ -125,6 +129,7 @@ export async function createExpense(payload: CreateExpensePayload): Promise<numb
       MASTER_CAT_ID: payload.masterCatId,
       EXP_DESC: payload.expDesc,
       EXP_AMOUNT: payload.expAmount,
+      EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
     }),
   });
@@ -139,6 +144,7 @@ export type UpdateExpensePayload = {
   masterCatId: string;
   expDesc: string | null;
   expAmount: number;
+  expQty?: number | null;
   expSource: string | null;
 };
 
@@ -151,6 +157,7 @@ export async function updateExpense(id: string, payload: UpdateExpensePayload): 
       MASTER_CAT_ID: payload.masterCatId,
       EXP_DESC: payload.expDesc,
       EXP_AMOUNT: payload.expAmount,
+      EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
     }),
   });
@@ -172,12 +179,17 @@ export async function deleteExpense(id: string): Promise<void> {
   }
 }
 
-export async function updateInventoryStock(expenseId: string, stockQty: number, branchId?: string): Promise<void> {
+export async function updateInventoryStock(
+  expenseId: string,
+  stockQty: number,
+  branchId?: string,
+  addToExisting = false
+): Promise<void> {
   const response = await fetch(buildUrl(`/inventory/items/by-expense/${expenseId}`), {
     method: 'PATCH',
     credentials: 'include',
     headers: authHeaders(),
-    body: JSON.stringify({ stockQty, branch_id: branchId }),
+    body: JSON.stringify({ stockQty, branch_id: branchId, addToExisting }),
   });
   const json = (await response.json()) as ApiResponse<null>;
   if (!response.ok || !json.success) {

@@ -32,6 +32,7 @@ import { AdminDashboard } from './components/dashboard/AdminDashboard';
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
 import { ExpensesMock } from './components/expenses/ExpensesMock';
+import { Ingredients } from './components/ingredients/Ingredients';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { Branches } from './components/users/Branches';
@@ -446,6 +447,7 @@ export default function App() {
       case 'Payment type': navigate(`/sales-report/payment-type${suffix}`); break;
       case 'Receipt': navigate(`/sales-report/receipt${suffix}`); break;
       case 'Expenses Mock': navigate(`/expenses-mock${suffix}`); break;
+      case 'Ingredients': navigate(`/ingredients${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
     }
   };
@@ -631,6 +633,16 @@ export default function App() {
                       onBack={() => navigate(`/inventory${location.search || ''}`)}
                       onCategoryResolved={handleInventoryCategoryResolved}
                     />
+                  </motion.div>
+                } />
+
+                <Route path="/ingredients" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <Ingredients selectedBranch={selectedBranch} />
                   </motion.div>
                 } />
 

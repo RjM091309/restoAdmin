@@ -1,5 +1,7 @@
 const ExpenseModel = require('../models/expenseModel');
 const MasterCategoryModel = require('../models/masterCategoryModel');
+const InventoryModel = require('../models/inventoryModel');
+const IngredientModel = require('../models/ingredientModel');
 const ApiResponse = require('../utils/apiResponse');
 
 function csvEscape(value) {
@@ -31,6 +33,7 @@ class ExpenseController {
 			EXP_NAME: req.body.EXP_NAME || req.body.expName || req.body.categoryName || req.body.CATEGORY_NAME || '',
 			EXP_DESC: req.body.EXP_DESC || req.body.expDesc || req.body.description || req.body.DESC || null,
 			EXP_AMOUNT: req.body.EXP_AMOUNT ?? req.body.expAmount ?? req.body.amount ?? null,
+			EXP_QTY: req.body.EXP_QTY ?? req.body.expQty ?? req.body.exp_qty ?? null,
 			EXP_SOURCE: req.body.EXP_SOURCE || req.body.expSource || req.body.source || null,
 		};
 	}
@@ -106,10 +109,20 @@ class ExpenseController {
 				MASTER_CAT_ID: masterCategory.IDNo,
 				EXP_DESC: payload.EXP_DESC,
 				EXP_AMOUNT: amount,
+				EXP_QTY: payload.EXP_QTY,
 				EXP_SOURCE: payload.EXP_SOURCE,
 				user_id: userId,
 				ENCODED_BY: encodedBy,
 			});
+
+			// Auto-link to ingredient when inventory category (STATE=1)
+			if (await MasterCategoryModel.isInventoryCategory(masterCategory.IDNo)) {
+				try {
+					await IngredientModel.linkExpenseToIngredient(id);
+				} catch (linkErr) {
+					console.warn('[ExpenseController.create] linkExpenseToIngredient:', linkErr?.message);
+				}
+			}
 
 			return ApiResponse.created(res, { id }, 'Expense created successfully');
 		} catch (error) {
@@ -154,11 +167,22 @@ class ExpenseController {
 				MASTER_CAT_ID: masterCategory.IDNo,
 				EXP_DESC: payload.EXP_DESC,
 				EXP_AMOUNT: amount,
+				EXP_QTY: payload.EXP_QTY,
 				EXP_SOURCE: payload.EXP_SOURCE,
 				user_id: userId,
 			});
 
 			if (!ok) return ApiResponse.notFound(res, 'Expense');
+
+			// Re-link to ingredient when inventory category (para iwas confuse)
+			if (await MasterCategoryModel.isInventoryCategory(masterCategory.IDNo)) {
+				try {
+					await IngredientModel.linkExpenseToIngredient(id);
+				} catch (linkErr) {
+					console.warn('[ExpenseController.update] linkExpenseToIngredient:', linkErr?.message);
+				}
+			}
+
 			return ApiResponse.success(res, null, 'Expense updated successfully');
 		} catch (error) {
 			console.error('[ExpenseController.update] error:', error);
@@ -171,6 +195,17 @@ class ExpenseController {
 			const { id } = req.params;
 			const current = await ExpenseModel.getById(id);
 			if (!current) return ApiResponse.notFound(res, 'Expense');
+
+			// Deduct inventory qty before soft delete (inventory category only)
+			const isInventoryCategory = current.OP_CAT_STATE === 1;
+			const expQty = current.EXP_QTY != null ? Number(current.EXP_QTY) : 0;
+			if (isInventoryCategory && Number.isFinite(expQty) && expQty > 0) {
+				try {
+					await InventoryModel.updateStockByExpenseId(id, -expQty, current.BRANCH_ID, true);
+				} catch (invErr) {
+					console.warn('[ExpenseController.delete] inventory deduct:', invErr?.message);
+				}
+			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const ok = await ExpenseModel.delete(id, userId);

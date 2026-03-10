@@ -11,6 +11,7 @@ type InventoryItemApiRecord = {
 	ITEM_CODE?: string;
 	ITEM_NAME?: string;
 	item_name?: string;
+	MASTER_CAT_ID?: number | null;
 	CATEGORY_ID?: number | null;
 	CATEGORY_NAME?: string | null;
 	category_name?: string | null;
@@ -82,7 +83,7 @@ const mapItemRecord = (row: InventoryItemApiRecord): InventoryItem => ({
 	branchId: String(row.BRANCH_ID),
 	itemCode: row.ITEM_CODE ?? '',
 	itemName: (row.ITEM_NAME ?? row.item_name ?? '').toString(),
-	categoryId: row.CATEGORY_ID !== null && row.CATEGORY_ID !== undefined ? String(row.CATEGORY_ID) : null,
+	categoryId: (row.MASTER_CAT_ID ?? row.CATEGORY_ID) != null ? String(row.MASTER_CAT_ID ?? row.CATEGORY_ID) : null,
 	categoryName: (row.CATEGORY_NAME ?? row.category_name) ?? null,
 	stockQty: toNumber(row.STOCK_QTY),
 	unit: (row.UNIT ?? 'pcs').toString(),
@@ -121,7 +122,7 @@ export async function createInventoryItem(payload: SaveInventoryItemPayload): Pr
 		body: JSON.stringify({
 			BRANCH_ID: payload.branchId,
 			ITEM_NAME: payload.itemName,
-			CATEGORY_ID: payload.categoryId,
+			MASTER_CAT_ID: payload.categoryId,
 			CATEGORY_NAME: payload.categoryName,
 			STOCK_QTY: payload.stockQty,
 			UNIT: payload.unit,
@@ -144,7 +145,7 @@ export async function updateInventoryItem(id: string, payload: SaveInventoryItem
 		headers: authHeaders(),
 		body: JSON.stringify({
 			ITEM_NAME: payload.itemName,
-			CATEGORY_ID: payload.categoryId,
+			MASTER_CAT_ID: payload.categoryId,
 			CATEGORY_NAME: payload.categoryName,
 			STOCK_QTY: payload.stockQty,
 			UNIT: payload.unit,

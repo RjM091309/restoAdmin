@@ -18,7 +18,7 @@ class InventoryController {
 	static _resolvePayload(req) {
 		return {
 			ITEM_NAME: req.body.ITEM_NAME || req.body.name || '',
-			CATEGORY_ID: req.body.CATEGORY_ID || req.body.categoryId || null,
+			MASTER_CAT_ID: req.body.MASTER_CAT_ID ?? req.body.CATEGORY_ID ?? req.body.categoryId ?? null,
 			CATEGORY_NAME: req.body.CATEGORY_NAME || req.body.category || null,
 			STOCK_QTY: req.body.STOCK_QTY ?? req.body.stock ?? 0,
 			UNIT: req.body.UNIT || req.body.unit || 'pcs',
@@ -111,7 +111,8 @@ class InventoryController {
 			const { expenseId } = req.params;
 			const stockQty = req.body?.stockQty ?? req.body?.STOCK_QTY ?? req.body?.qty ?? 0;
 			const branchId = InventoryController._resolveBranchId(req);
-			const ok = await InventoryModel.updateStockByExpenseId(expenseId, stockQty, branchId);
+			const addToExisting = Boolean(req.body?.addToExisting ?? req.body?.add_to_existing ?? false);
+			const ok = await InventoryModel.updateStockByExpenseId(expenseId, stockQty, branchId, addToExisting);
 			if (!ok) return ApiResponse.badRequest(res, 'Expense not found or not an inventory category');
 			return ApiResponse.success(res, null, 'Inventory stock updated successfully');
 		} catch (error) {

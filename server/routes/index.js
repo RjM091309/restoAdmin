@@ -14,6 +14,7 @@ module.exports = [
     require('./categoryRoutes'),          // Category routes
 	require('./operationCategoryRoutes'), // Operation category routes
 	require('./masterCategoryRoutes'), // Inventory category routes
+	require('./ingredientRoutes'), // Ingredients & menu recipe
 	require('./inventoryRoutes'), // Inventory item routes
     require('./dashboardRoutes'),         // Dashboard routes
     require('./employeeRoutes'),          // Employee routes

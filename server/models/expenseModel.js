@@ -61,6 +61,8 @@ class ExpenseModel {
 					{ col: 'ENCODED_DT', sql: `ALTER TABLE expenses ADD COLUMN ENCODED_DT TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
 					{ col: 'EDITED_BY', sql: `ALTER TABLE expenses ADD COLUMN EDITED_BY VARCHAR(100) NULL` },
 					{ col: 'EDITED_DT', sql: `ALTER TABLE expenses ADD COLUMN EDITED_DT TIMESTAMP NULL` },
+					{ col: 'EXP_QTY', sql: `ALTER TABLE expenses ADD COLUMN EXP_QTY DECIMAL(12,3) NULL AFTER EXP_AMOUNT` },
+					{ col: 'INGREDIENT_ID', sql: `ALTER TABLE expenses ADD COLUMN INGREDIENT_ID INT NULL AFTER MASTER_CAT_ID` },
 				];
 
 				for (const m of migrations) {
@@ -97,8 +99,10 @@ class ExpenseModel {
 				e.BRANCH_ID,
 				b.BRANCH_NAME,
 				e.MASTER_CAT_ID,
+				e.INGREDIENT_ID,
 				e.EXP_DESC,
 				e.EXP_AMOUNT,
+				e.EXP_QTY,
 				e.EXP_SOURCE,
 				e.ACTIVE,
 				e.ENCODED_BY,
@@ -117,7 +121,8 @@ class ExpenseModel {
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
 			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
-			LEFT JOIN inventory inv ON inv.EXPENSES_ID = e.IDNo AND inv.ACTIVE = 1
+			LEFT JOIN ingredients ing ON ing.ACTIVE = 1 AND ((e.INGREDIENT_ID IS NOT NULL AND ing.IDNo = e.INGREDIENT_ID) OR (e.INGREDIENT_ID IS NULL AND ing.BRANCH_ID = e.BRANCH_ID AND TRIM(ing.NAME) = TRIM(e.EXP_DESC) AND ing.MASTER_CAT_ID <=> e.MASTER_CAT_ID))
+			LEFT JOIN (SELECT INGREDIENT_ID, BRANCH_ID, MAX(IDNo) AS IDNo, SUM(STOCK_QTY) AS STOCK_QTY FROM inventory WHERE ACTIVE = 1 AND INGREDIENT_ID IS NOT NULL GROUP BY INGREDIENT_ID, BRANCH_ID) inv ON inv.INGREDIENT_ID = ing.IDNo AND inv.BRANCH_ID = ing.BRANCH_ID
 			WHERE e.ACTIVE = 1
 		`;
 		const params = [];
@@ -132,7 +137,7 @@ class ExpenseModel {
 			const [rows] = await pool.execute(query, params);
 			return rows;
 		} catch (err) {
-			if (err.message && (err.message.includes('EXPENSES_ID') || err.message.includes('Unknown column'))) {
+			if (err.message && (err.message.includes('EXPENSES_ID') || err.message.includes('INGREDIENT_ID') || err.message.includes('ingredients') || err.message.includes('EXP_QTY') || err.message.includes('Unknown column'))) {
 				// Fallback without inventory join
 				let fb = `SELECT e.*, b.BRANCH_NAME, mc.IDNo AS MASTER_CATEGORY_ID, oc.NAME AS EXP_CAT, mc.CATEGORY_NAME AS EXP_NAME,
 					mc.ICON AS MASTER_CATEGORY_ICON, mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
@@ -158,8 +163,10 @@ class ExpenseModel {
 				e.BRANCH_ID,
 				b.BRANCH_NAME,
 				e.MASTER_CAT_ID,
+				e.INGREDIENT_ID,
 				e.EXP_DESC,
 				e.EXP_AMOUNT,
+				e.EXP_QTY,
 				e.EXP_SOURCE,
 				e.ACTIVE,
 				e.ENCODED_BY,
@@ -170,7 +177,8 @@ class ExpenseModel {
 				oc.NAME AS EXP_CAT,
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
-				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION
+				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
+				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
@@ -187,11 +195,13 @@ class ExpenseModel {
 		await ExpenseModel.ensureSchema();
 		const encodedBy = String(data.ENCODED_BY ?? data.user_id ?? 'system').trim() || 'system';
 		const masterCatId = Number(data.MASTER_CAT_ID);
+		const expQty = data.EXP_QTY != null && Number.isFinite(Number(data.EXP_QTY)) ? Number(data.EXP_QTY) : null;
 		const values = [
 			Number(data.BRANCH_ID),
 			masterCatId,
 			data.EXP_DESC || null,
 			Number(data.EXP_AMOUNT),
+			expQty,
 			data.EXP_SOURCE || null,
 			encodedBy,
 		];
@@ -203,11 +213,12 @@ class ExpenseModel {
 					MASTER_CAT_ID,
 					EXP_DESC,
 					EXP_AMOUNT,
+					EXP_QTY,
 					EXP_SOURCE,
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+				) VALUES (?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
 				`,
 				values
 			);
@@ -227,15 +238,25 @@ class ExpenseModel {
 						MASTER_CAT_ID,
 						EXP_DESC,
 						EXP_AMOUNT,
+						EXP_QTY,
 						EXP_SOURCE,
 						ACTIVE,
 						ENCODED_BY,
 						ENCODED_DT
-					) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
 					`,
 					[nextId, ...values]
 				);
 				return nextId;
+			}
+			if (msg.includes('EXP_QTY') || msg.includes('Unknown column')) {
+				// Fallback when EXP_QTY column doesn't exist yet
+				const valuesNoQty = [Number(data.BRANCH_ID), masterCatId, data.EXP_DESC || null, Number(data.EXP_AMOUNT), data.EXP_SOURCE || null, encodedBy];
+				const [result] = await pool.execute(
+					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_SOURCE, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)`,
+					valuesNoQty
+				);
+				return result.insertId;
 			}
 			throw err;
 		}
@@ -243,28 +264,42 @@ class ExpenseModel {
 
 	static async update(id, data) {
 		await ExpenseModel.ensureSchema();
-		const [result] = await pool.execute(
-			`
-			UPDATE expenses
-			SET
-				MASTER_CAT_ID = ?,
-				EXP_DESC = ?,
-				EXP_AMOUNT = ?,
-				EXP_SOURCE = ?,
-				EDITED_BY = ?,
-				EDITED_DT = CURRENT_TIMESTAMP
-			WHERE IDNo = ? AND ACTIVE = 1
-			`,
-			[
-				Number(data.MASTER_CAT_ID),
-				data.EXP_DESC || null,
-				Number(data.EXP_AMOUNT),
-				data.EXP_SOURCE || null,
-				String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
-				Number(id),
-			]
-		);
-		return result.affectedRows > 0;
+		const expQty = data.EXP_QTY != null && Number.isFinite(Number(data.EXP_QTY)) ? Number(data.EXP_QTY) : null;
+		try {
+			const [result] = await pool.execute(
+				`
+				UPDATE expenses
+				SET
+					MASTER_CAT_ID = ?,
+					EXP_DESC = ?,
+					EXP_AMOUNT = ?,
+					EXP_QTY = ?,
+					EXP_SOURCE = ?,
+					EDITED_BY = ?,
+					EDITED_DT = CURRENT_TIMESTAMP
+				WHERE IDNo = ? AND ACTIVE = 1
+				`,
+				[
+					Number(data.MASTER_CAT_ID),
+					data.EXP_DESC || null,
+					Number(data.EXP_AMOUNT),
+					expQty,
+					data.EXP_SOURCE || null,
+					String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
+					Number(id),
+				]
+			);
+			return result.affectedRows > 0;
+		} catch (err) {
+			if (err.message && (err.message.includes('EXP_QTY') || err.message.includes('Unknown column'))) {
+				const [result] = await pool.execute(
+					`UPDATE expenses SET MASTER_CAT_ID = ?, EXP_DESC = ?, EXP_AMOUNT = ?, EXP_SOURCE = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ? AND ACTIVE = 1`,
+					[Number(data.MASTER_CAT_ID), data.EXP_DESC || null, Number(data.EXP_AMOUNT), data.EXP_SOURCE || null, String(data.user_id ?? data.EDITED_BY ?? '').trim() || null, Number(id)]
+				);
+				return result.affectedRows > 0;
+			}
+			throw err;
+		}
 	}
 
 	static async delete(id, userId = null) {

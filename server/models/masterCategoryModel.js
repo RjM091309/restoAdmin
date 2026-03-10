@@ -56,8 +56,7 @@ class MasterCategoryModel {
 		const params = [];
 
 		if (isInventoryOnly) {
-			// Inventory-only: categories linked to any active operation_category
-			// (no oc.STATE column; rely on ACTIVE + OP_CAT_ID instead)
+			// Inventory-only: categories linked to operation_category with STATE = 1 (inventory type)
 			query = `
 				SELECT
 					mc.IDNo,
@@ -73,9 +72,10 @@ class MasterCategoryModel {
 					mc.EDITED_BY,
 					mc.EDITED_DT
 				FROM master_categories mc
-				LEFT JOIN operation_category oc
+				INNER JOIN operation_category oc
 					ON oc.IDNo = mc.OP_CAT_ID
 					AND oc.ACTIVE = 1
+					AND oc.STATE = 1
 				WHERE mc.ACTIVE = 1
 			`;
 			if (branchId !== null && branchId !== undefined) {
@@ -151,6 +151,22 @@ class MasterCategoryModel {
 				return rows[0] || null;
 			}
 			throw err;
+		}
+	}
+
+	/** Returns true if master category is inventory type (operation_category.STATE = 1) */
+	static async isInventoryCategory(masterCategoryId) {
+		await MasterCategoryModel.ensureSchema();
+		try {
+			const [rows] = await pool.execute(
+				`SELECT oc.STATE FROM master_categories mc
+				 INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+				 WHERE mc.IDNo = ? AND mc.ACTIVE = 1 LIMIT 1`,
+				[Number(masterCategoryId)]
+			);
+			return rows[0]?.STATE === 1;
+		} catch (_) {
+			return false;
 		}
 	}
 

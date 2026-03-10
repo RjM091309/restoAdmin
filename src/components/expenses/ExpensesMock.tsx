@@ -298,10 +298,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             {
               header: 'Qty',
               render: (row: ExpenseRecord) => {
+                const qty = row.expQty != null ? row.expQty : row.stockQty;
                 return (
                   <div className="flex items-center justify-end">
                     <span className="text-right px-2 py-1 rounded">
-                      {Number(row.stockQty ?? 0)}
+                      {Number(qty ?? 0)}
                     </span>
                   </div>
                 );
@@ -357,17 +358,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                       if (e.key === 'Escape') handleCancelAddSameItemAmount();
                     }}
                     className="w-28 px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
-                    placeholder="Amount"
+                    placeholder={isInventoryCategory ? 'Amount (0 = qty only)' : 'Amount'}
                   />
                   <button
                     type="button"
                     onClick={() => handleSaveSameItemAmount(row)}
                     disabled={
                       isSubmitting ||
-                      addingAmountValue.trim() === '' ||
-                      !Number.isFinite(Number(addingAmountValue)) ||
-                      (isInventoryCategory &&
-                        (addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue))))
+                      (isInventoryCategory
+                        ? addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue)) ||
+                          (addingAmountValue.trim() !== '' && (!Number.isFinite(Number(addingAmountValue)) || Number(addingAmountValue) < 0))
+                        : addingAmountValue.trim() === '' || !Number.isFinite(Number(addingAmountValue)))
                     }
                     className="p-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                     aria-label="Save"
@@ -417,18 +418,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         },
       },
     ],
-    [
-      masterCategories,
-      addingAmountForId,
-      addingAmountValue,
-      addingQtyValue,
-      isSubmitting,
-      isInventoryCategory,
-      editingQtyForId,
-      editingQtyValue,
-      operations,
-      selectedOperationId,
-    ],
+    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId],
   );
 
   const handleSaveQty = async (row: ExpenseRecord) => {
@@ -557,11 +547,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           masterCatId: editingExpense.masterCatId ?? selectedCategory.masterCategoryId,
           expDesc: expenseForm.expDesc.trim() || null,
           expAmount: amount,
+          expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
         });
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0) {
           try {
-            await updateInventoryStock(editingExpense.id, qty, branchId);
+            const oldQty = editingExpense.expQty ?? editingExpense.stockQty ?? 0;
+            const delta = qty - Number(oldQty);
+            if (delta !== 0) {
+              await updateInventoryStock(editingExpense.id, delta, branchId, true);
+            }
           } catch (error) {
             console.error('Failed to update inventory qty after expense update:', error);
             toast.error('Expense saved, but failed to update inventory stock.');
@@ -578,6 +573,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           masterCatId: selectedCategory.masterCategoryId,
           expDesc: expenseForm.expDesc.trim() || null,
           expAmount: amount,
+          expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
         });
         const list = await getExpenses(branchId);
@@ -585,7 +581,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         setExpenses(filtered);
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
           try {
-            await updateInventoryStock(String(newId), qty, branchId);
+            await updateInventoryStock(String(newId), qty, branchId, true);
             const refreshed = await getExpenses(branchId);
             setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
           } catch (error) {
@@ -626,7 +622,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     setAddingAmountForId(row.id);
     setAddingAmountValue(String(row.expAmount ?? ''));
     if (isInventoryCategory) {
-      setAddingQtyValue(String(row.stockQty ?? 0));
+      setAddingQtyValue(''); // Empty so user types qty for the new purchase
     } else {
       setAddingQtyValue('');
     }
@@ -643,6 +639,32 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     const qtyRaw = addingQtyValue.trim();
     const hasQty = qtyRaw !== '';
     const qty = hasQty ? Number(qtyRaw) : NaN;
+    const isQtyOnlyRestock = isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && (addingAmountValue.trim() === '' || amount === 0);
+
+    if (isQtyOnlyRestock) {
+      // Add qty to existing row only — no new expense, no duplicate
+      if (!branchId || !row.id) {
+        toast.error('Cannot add quantity');
+        return;
+      }
+      setIsSubmitting(true);
+      try {
+        await updateInventoryStock(String(row.id), qty, branchId, true);
+        const list = await getExpenses(branchId);
+        setExpenses(list.filter((e) => String(e.branchId) === branchId));
+        setAddingAmountForId(null);
+        setAddingAmountValue('');
+        setAddingQtyValue('');
+        toast.success(`${qty} qty added to stock`);
+      } catch (error) {
+        console.error('Failed to add qty:', error);
+        toast.error(error instanceof Error ? error.message : 'Failed to add quantity');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     if (!branchId || !selectedCategory?.masterCategoryId || !Number.isFinite(amount) || amount < 0) {
       toast.error('Enter a valid amount');
       return;
@@ -659,39 +681,25 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     }
     setIsSubmitting(true);
     try {
-      if (isInventoryCategory) {
-        const newId = await createExpense({
-          branchId,
-          masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
-          expDesc: row.expDesc ?? row.expName ?? null,
-          expAmount: amount,
-          expSource: row.expSource ?? null,
-        });
-        const list = await getExpenses(branchId);
-        const filtered = list.filter((e) => String(e.branchId) === branchId);
-        setExpenses(filtered);
-        if (hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
-          try {
-            await updateInventoryStock(String(newId), qty, branchId);
-            const refreshed = await getExpenses(branchId);
-            setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
-          } catch (error) {
-            console.error('Failed to update inventory qty after adding amount:', error);
-            toast.error('Amount saved, but failed to update inventory stock.');
-          }
+      const newId = await createExpense({
+        branchId,
+        masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
+        expDesc: row.expDesc ?? row.expName ?? null,
+        expAmount: amount,
+        expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
+        expSource: row.expSource ?? null,
+      });
+      if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
+        try {
+          await updateInventoryStock(String(newId), qty, branchId, true);
+        } catch (error) {
+          console.error('Failed to update inventory qty after adding amount:', error);
+          toast.error('Amount saved, but failed to update inventory stock.');
         }
-      } else {
-        await createExpense({
-          branchId,
-          masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
-          expDesc: row.expDesc ?? row.expName ?? null,
-          expAmount: amount,
-          expSource: row.expSource ?? null,
-        });
-        const list = await getExpenses(branchId);
-        const filtered = list.filter((e) => String(e.branchId) === branchId);
-        setExpenses(filtered);
       }
+      const list = await getExpenses(branchId);
+      const filtered = list.filter((e) => String(e.branchId) === branchId);
+      setExpenses(filtered);
       setAddingAmountForId(null);
       setAddingAmountValue('');
       setAddingQtyValue('');

@@ -13,6 +13,7 @@ import {
   Circle,
   DollarSign,
   CreditCard,
+  FlaskConical,
 } from 'lucide-react';
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
@@ -254,6 +255,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
             />
           </>
+        )}
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={FlaskConical}
+            label="Ingredients"
+            active={activeTab === 'Ingredients'}
+            onClick={() => { onTabChange('Ingredients'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
         )}
         {isAdmin && !isSpecificBranch && (
           <SidebarItem
