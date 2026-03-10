@@ -1,5 +1,4 @@
 const IngredientModel = require('../models/ingredientModel');
-const InventoryModel = require('../models/inventoryModel');
 const ApiResponse = require('../utils/apiResponse');
 
 class IngredientController {
@@ -96,11 +95,7 @@ class IngredientController {
 	static async syncFromExpenses(req, res) {
 		try {
 			await IngredientModel.syncFromExpenses();
-			const inventorySynced = await InventoryModel.syncToIngredientIds();
-			const msg = inventorySynced > 0
-				? `Ingredients and ${inventorySynced} inventory rows synced successfully`
-				: 'Ingredients synced from expenses successfully';
-			return ApiResponse.success(res, { inventoryRowsUpdated: inventorySynced }, msg);
+			return ApiResponse.success(res, null, 'Ingredients synced from expenses successfully');
 		} catch (error) {
 			console.error('[IngredientController.syncFromExpenses]', error?.message || error);
 			return ApiResponse.error(res, 'Failed to sync ingredients', 500, error.message);

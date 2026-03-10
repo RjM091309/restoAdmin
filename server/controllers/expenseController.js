@@ -1,7 +1,6 @@
 const ExpenseModel = require('../models/expenseModel');
 const MasterCategoryModel = require('../models/masterCategoryModel');
 const InventoryModel = require('../models/inventoryModel');
-const IngredientModel = require('../models/ingredientModel');
 const ApiResponse = require('../utils/apiResponse');
 
 function csvEscape(value) {
@@ -115,15 +114,6 @@ class ExpenseController {
 				ENCODED_BY: encodedBy,
 			});
 
-			// Auto-link to ingredient when inventory category (STATE=1)
-			if (await MasterCategoryModel.isInventoryCategory(masterCategory.IDNo)) {
-				try {
-					await IngredientModel.linkExpenseToIngredient(id);
-				} catch (linkErr) {
-					console.warn('[ExpenseController.create] linkExpenseToIngredient:', linkErr?.message);
-				}
-			}
-
 			return ApiResponse.created(res, { id }, 'Expense created successfully');
 		} catch (error) {
 			console.error('[ExpenseController.create] error:', error);
@@ -173,15 +163,6 @@ class ExpenseController {
 			});
 
 			if (!ok) return ApiResponse.notFound(res, 'Expense');
-
-			// Re-link to ingredient when inventory category (para iwas confuse)
-			if (await MasterCategoryModel.isInventoryCategory(masterCategory.IDNo)) {
-				try {
-					await IngredientModel.linkExpenseToIngredient(id);
-				} catch (linkErr) {
-					console.warn('[ExpenseController.update] linkExpenseToIngredient:', linkErr?.message);
-				}
-			}
 
 			return ApiResponse.success(res, null, 'Expense updated successfully');
 		} catch (error) {

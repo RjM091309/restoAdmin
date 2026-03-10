@@ -1,6 +1,4 @@
 const MasterCategoryModel = require('../models/masterCategoryModel');
-const IngredientModel = require('../models/ingredientModel');
-const pool = require('../config/db');
 const ApiResponse = require('../utils/apiResponse');
 
 class MasterCategoryController {
@@ -81,22 +79,6 @@ class MasterCategoryController {
 				user_id: userId,
 			});
 
-			// When category is inventory type (OP_CAT STATE=1), sync expenses to ingredients
-			if (payload.OP_CAT_ID) {
-				try {
-					const [rows] = await pool.execute(
-						'SELECT STATE FROM operation_category WHERE IDNo = ? AND ACTIVE = 1 LIMIT 1',
-						[payload.OP_CAT_ID]
-					);
-					const oc = rows?.[0];
-					if (oc?.STATE === 1) {
-						await IngredientModel.syncFromExpensesForCategory(id, branchId);
-					}
-				} catch (syncErr) {
-					console.warn('[MasterCategoryController.create] sync ingredients:', syncErr?.message);
-				}
-			}
-
 			return ApiResponse.created(res, { id }, 'Inventory category created successfully');
 		} catch (error) {
 			return ApiResponse.error(res, 'Failed to create inventory category', 500, error.message);
@@ -122,23 +104,6 @@ class MasterCategoryController {
 			});
 
 			if (!ok) return ApiResponse.notFound(res, 'Inventory category');
-
-			// When category is inventory type (OP_CAT STATE=1), sync expenses to ingredients
-			if (payload.OP_CAT_ID) {
-				try {
-					const [rows] = await pool.execute(
-						'SELECT STATE FROM operation_category WHERE IDNo = ? AND ACTIVE = 1 LIMIT 1',
-						[payload.OP_CAT_ID]
-					);
-					const oc = rows?.[0];
-					if (oc?.STATE === 1) {
-						const branchId = MasterCategoryController._resolveBranchId(req);
-						await IngredientModel.syncFromExpensesForCategory(id, branchId);
-					}
-				} catch (syncErr) {
-					console.warn('[MasterCategoryController.update] sync ingredients:', syncErr?.message);
-				}
-			}
 
 			return ApiResponse.success(res, null, 'Inventory category updated successfully');
 		} catch (error) {
