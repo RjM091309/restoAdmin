@@ -1258,7 +1258,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                                   <td
                                     key={i}
                                     className={cn(
-                                      'px-6 py-4 text-sm text-brand-text',
+                                      'px-4 py-2 text-[11px] text-brand-text',
                                       i === 0
                                         ? 'bg-violet-50 font-medium group-hover:bg-violet-100'
                                         : 'bg-white group-hover:bg-brand-bg/50',
