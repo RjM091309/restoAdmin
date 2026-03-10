@@ -679,7 +679,7 @@ def expense_summary(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        where = ["e.ACTIVE = 1"]
+        where = ["e.ACTIVE = 1", "oc.ACTIVE = 1"]
         params: List[object] = []
 
         if branch_id:
@@ -699,7 +699,8 @@ def expense_summary(
             SELECT
                 COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
             FROM expenses e
-            LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+            LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+            INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
             WHERE {where_sql}
         """
 
@@ -735,7 +736,7 @@ def expense_breakdown(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        where = ["e.ACTIVE = 1"]
+        where = ["e.ACTIVE = 1", "oc.ACTIVE = 1"]
         params: List[object] = []
 
         if branch_id:
@@ -754,15 +755,16 @@ def expense_breakdown(
         query = f"""
             SELECT
                 e.BRANCH_ID AS branch_id,
-                mc.CATEGORY_TYPE AS exp_cat,
+                oc.NAME AS exp_cat,
                 mc.CATEGORY_NAME AS exp_name,
                 COUNT(*) AS entry_count,
                 COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_amount
             FROM expenses e
-            LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+            LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+            INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
             WHERE {where_sql}
-            GROUP BY e.BRANCH_ID, mc.CATEGORY_TYPE, mc.CATEGORY_NAME
-            ORDER BY total_amount DESC, mc.CATEGORY_TYPE ASC, mc.CATEGORY_NAME ASC
+            GROUP BY e.BRANCH_ID, oc.NAME, mc.CATEGORY_NAME
+            ORDER BY total_amount DESC, oc.NAME ASC, mc.CATEGORY_NAME ASC
         """
 
         cur.execute(query, params)

@@ -561,7 +561,7 @@ def expense_summary(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        where_clauses: List[str] = ["e.ACTIVE = 1"]
+        where_clauses: List[str] = ["e.ACTIVE = 1", "oc.ACTIVE = 1"]
         params: List[object] = []
 
         if branch_id:
@@ -573,15 +573,17 @@ def expense_summary(
             where_clauses.append("DATE(e.ENCODED_DT) <= %s")
             params.extend([start_date, end_date])
 
-        # Match Node ExpenseModel.getSummary semantics as closely as possible:
+        # Match Node ExpenseModel.getSummary semantics:
         # - Sum EXP_AMOUNT from expenses
-        # - Only ACTIVE rows
+        # - Join operation_category, filter oc.ACTIVE = 1
         where_sql = " AND ".join(where_clauses)
 
         query = f"""
             SELECT
                 COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
             FROM expenses e
+            LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+            INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
             WHERE {where_sql}
         """
 

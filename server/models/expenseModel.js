@@ -92,7 +92,7 @@ class ExpenseModel {
 	static async getAll(branchId = null) {
 		await ExpenseModel.ensureSchema();
 		// Use JOIN: get oc.NAME as EXP_CAT, mc.CATEGORY_NAME as EXP_NAME (no redundant CATEGORY_TYPE)
-		// Include all expenses (STATE 0 and 1) so item names show under Food Supplies etc.
+		// INNER JOIN operation_category so we only include expenses with ACTIVE operation_category
 		let query = `
 			SELECT
 				e.IDNo,
@@ -121,10 +121,10 @@ class ExpenseModel {
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			LEFT JOIN ingredients ing ON ing.ACTIVE = 1 AND ((e.INGREDIENT_ID IS NOT NULL AND ing.IDNo = e.INGREDIENT_ID) OR (e.INGREDIENT_ID IS NULL AND ing.BRANCH_ID = e.BRANCH_ID AND TRIM(ing.NAME) = TRIM(e.EXP_DESC) AND ing.MASTER_CAT_ID <=> e.MASTER_CAT_ID))
 			LEFT JOIN (SELECT INGREDIENT_ID, BRANCH_ID, MAX(IDNo) AS IDNo, SUM(STOCK_QTY) AS STOCK_QTY FROM inventory WHERE ACTIVE = 1 AND INGREDIENT_ID IS NOT NULL GROUP BY INGREDIENT_ID, BRANCH_ID) inv ON inv.INGREDIENT_ID = ing.IDNo AND inv.BRANCH_ID = ing.BRANCH_ID
-			WHERE e.ACTIVE = 1
+			WHERE e.ACTIVE = 1 AND oc.STATE = 1
 		`;
 		const params = [];
 
@@ -146,7 +146,7 @@ class ExpenseModel {
 					FROM expenses e
 					LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 					LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-					LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+					INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 					WHERE e.ACTIVE = 1`;
 				const [fbRows] = await pool.execute(fb + (branchId != null ? ' AND e.BRANCH_ID = ?' : '') + ' ORDER BY e.IDNo DESC', params);
 				return fbRows;
@@ -319,7 +319,7 @@ class ExpenseModel {
 	}
 
 	static _buildReportFilters(filters = {}) {
-		const where = ['e.ACTIVE = 1'];
+		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1'];
 		const params = [];
 
 		if (filters.branchId !== null && filters.branchId !== undefined) {
@@ -365,7 +365,8 @@ class ExpenseModel {
 				COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense,
 				COALESCE(SUM(CASE WHEN DATE_FORMAT(e.ENCODED_DT, '%Y-%m') = DATE_FORMAT(CURDATE(), '%Y-%m') THEN e.EXP_AMOUNT ELSE 0 END), 0) AS current_month_expense
 			FROM expenses e
-			LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			WHERE ${whereSql}
 			`,
 			params
@@ -379,15 +380,16 @@ class ExpenseModel {
 		const [rows] = await pool.execute(
 			`
 			SELECT
-				mc.CATEGORY_TYPE AS EXP_CAT,
+				oc.NAME AS EXP_CAT,
 				mc.CATEGORY_NAME AS EXP_NAME,
 				COUNT(*) AS entry_count,
 				COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_amount
 			FROM expenses e
-			LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			WHERE ${whereSql}
-			GROUP BY mc.CATEGORY_TYPE, mc.CATEGORY_NAME
-			ORDER BY total_amount DESC, mc.CATEGORY_TYPE ASC, mc.CATEGORY_NAME ASC
+			GROUP BY oc.NAME, mc.CATEGORY_NAME
+			ORDER BY total_amount DESC, oc.NAME ASC, mc.CATEGORY_NAME ASC
 			`,
 			params
 		);
@@ -407,7 +409,8 @@ class ExpenseModel {
 				${groupBy} AS period,
 				COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_amount
 			FROM expenses e
-			LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			WHERE ${whereSql}
 			GROUP BY period
 			ORDER BY period ASC
@@ -426,7 +429,7 @@ class ExpenseModel {
 				e.IDNo,
 				e.BRANCH_ID,
 				b.BRANCH_NAME,
-				mc.CATEGORY_TYPE AS EXP_CAT,
+				oc.NAME AS EXP_CAT,
 				mc.CATEGORY_NAME AS EXP_NAME,
 				e.EXP_DESC,
 				e.EXP_AMOUNT,
@@ -435,7 +438,8 @@ class ExpenseModel {
 				e.ENCODED_DT
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
-			LEFT JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			WHERE ${whereSql}
 			ORDER BY e.IDNo DESC
 			`,
