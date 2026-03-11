@@ -34,10 +34,12 @@ import { twMerge } from 'tailwind-merge';
 import {
   fetchDailySalesApi,
   fetchDailyOrdersApi,
+  fetchDailyExpensesApi,
   fetchExpenseSummaryApi,
   fetchBranchSalesApi,
   type ApiDailySalesItem,
   type ApiDailyOrdersItem,
+  type ApiDailyExpenseItem,
   type ApiExpenseSummary,
   type ApiBranchSalesItem,
 } from '../../services/analyticsService';
@@ -64,6 +66,15 @@ const getCurrentMonthRange = () => {
 
 const formatCurrency = (value: number) =>
   `₱${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+const formatDateLabel = (dateStr: string) => {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+};
 
 const categoryData = [
   { name: 'Seafood', value: 30, color: '#0f172a' },
@@ -251,14 +262,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         baseParams.set('start_date', start);
         baseParams.set('end_date', end);
 
-        const [dailySales, dailyOrders, expenseSummary, branchSales]: [
+        const [dailySales, dailyOrders, dailyExpenses, expenseSummary, branchSales]: [
           ApiDailySalesItem[],
           ApiDailyOrdersItem[],
+          ApiDailyExpenseItem[],
           ApiExpenseSummary,
           ApiBranchSalesItem[],
         ] = await Promise.all([
           fetchDailySalesApi(new URLSearchParams(baseParams)),
           fetchDailyOrdersApi(new URLSearchParams(baseParams)),
+          fetchDailyExpensesApi(new URLSearchParams(baseParams)),
           fetchExpenseSummaryApi(new URLSearchParams(baseParams)),
           fetchBranchSalesApi(new URLSearchParams(baseParams)),
         ]);
@@ -276,16 +289,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         );
         const totalOrders = branchItem?.order_count ?? 0;
 
-        const revenueData: RevenuePoint[] = dailySales.map((item) => ({
-          name: new Date(item.sale_date).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-          }),
-          income: item.total_sales,
-          // We only have a total expense summary for the period,
-          // so keep per-day expenses as 0 for now.
-          expense: 0,
-        }));
+        // Build a map of daily expenses by date to align with daily sales
+        const expenseByDate = new Map<string, number>();
+        dailyExpenses.forEach((e) => {
+          expenseByDate.set(e.expense_date, Number(e.total_expense || 0));
+        });
+
+        let revenueData: RevenuePoint[] = [];
+        if (dailySales.length > 0) {
+          revenueData = dailySales.map((item) => {
+            const key = item.sale_date;
+            const dailyExpense = expenseByDate.get(key) ?? 0;
+            return {
+              name: new Date(item.sale_date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              }),
+              income: item.total_sales,
+              expense: dailyExpense,
+            };
+          });
+        } else if (totalExpenses > 0) {
+          // No sales data but we have expenses: show a single point using the start date as label
+          revenueData = [
+            {
+              name: formatDateLabel(start),
+              income: 0,
+              expense: totalExpenses,
+            },
+          ];
+        }
 
         const last7Days = dailyOrders.slice(-7);
         const ordersOverview = last7Days.map((item) => ({

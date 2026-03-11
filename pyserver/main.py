@@ -135,6 +135,14 @@ class DailyOrdersItem(BaseModel):
     order_count: int
 
 
+class DailyExpenseItem(BaseModel):
+    expense_date: str
+    total_expense: float
+
+class DailyExpenseItem(BaseModel):
+    expense_date: str
+    total_expense: float
+
 class ExpenseSummary(BaseModel):
     total_expense: float
 
@@ -795,6 +803,76 @@ def expense_summary(
 
     summary = ExpenseSummary(total_expense=float(row.get("total_expense") or 0.0))
     return {"success": True, "data": summary.model_dump()}
+
+
+@app.get("/api/analytics/daily-expenses")
+def daily_expenses(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Daily expenses time series based on expenses table.
+    Mirrors expense-summary filters but groups by DATE(e.ENCODED_DT).
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        where = ["e.ACTIVE = 1", "oc.ACTIVE = 1"]
+        params: List[object] = []
+
+        if branch_id:
+            where.append("e.BRANCH_ID = %s")
+            params.append(branch_id)
+
+        if start_date:
+            where.append("DATE(e.ENCODED_DT) >= %s")
+            params.append(start_date)
+        if end_date:
+            where.append("DATE(e.ENCODED_DT) <= %s")
+            params.append(end_date)
+
+        where_sql = " AND ".join(where)
+
+        query = f"""
+            SELECT
+                DATE(e.ENCODED_DT) AS expense_date,
+                COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
+            FROM expenses e
+            LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+            INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+            WHERE {where_sql}
+            GROUP BY DATE(e.ENCODED_DT)
+            ORDER BY DATE(e.ENCODED_DT)
+        """
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] daily-expenses DB query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch daily expenses",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    items: List[DailyExpenseItem] = []
+    for row in rows:
+        date_val = row.get("expense_date")
+        if date_val is None:
+            continue
+        items.append(
+            DailyExpenseItem(
+                expense_date=str(date_val),
+                total_expense=float(row.get("total_expense") or 0.0),
+            )
+        )
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
 
 
 @app.get("/api/analytics/expense-breakdown")

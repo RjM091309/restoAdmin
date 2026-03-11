@@ -122,6 +122,11 @@ export type ApiExpenseCategoryRow = {
   total_amount: number;
 };
 
+export type ApiDailyExpenseItem = {
+  expense_date: string;
+  total_expense: number;
+};
+
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
   try {
@@ -197,6 +202,19 @@ export async function fetchDailyOrdersApi(params: URLSearchParams): Promise<ApiD
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailyOrdersItem[];
+  }
+  return [];
+}
+
+export async function fetchDailyExpensesApi(params: URLSearchParams): Promise<ApiDailyExpenseItem[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/daily-expenses?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics daily-expenses failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiDailyExpenseItem[];
   }
   return [];
 }
