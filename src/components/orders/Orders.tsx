@@ -15,6 +15,8 @@ import {
     Loader2,
     Trash2,
     Clock,
+    Pencil,
+    Check,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -29,6 +31,7 @@ import {
     createOrder,
     updateOrderStatus,
     deleteOrderItem,
+    updateOrderItemQuantity,
     InventoryInsufficientError,
     ORDER_STATUS,
     type OrderRecord,
@@ -81,9 +84,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailItems, setDetailItems] = useState<OrderItemRecord[]>([]);
     const [detailLoading, setDetailLoading] = useState(false);
 
-    // ----- Status update -----
+    // ----- Status update & item actions -----
     const [statusSubmitting, setStatusSubmitting] = useState(false);
     const [itemRemoving, setItemRemoving] = useState(false);
+    const [itemUpdating, setItemUpdating] = useState(false);
+    const [editingItemId, setEditingItemId] = useState<number | null>(null);
+    const [editingQty, setEditingQty] = useState<number>(1);
     const [swal, setSwal] = useState<SwalState>(null);
 
     // ----- New order modal -----
@@ -226,6 +232,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     // ==================== Remove order item ====================
     const confirmRemoveItem = (item: OrderItemRecord) => {
         if (!detailOrder) return;
+        if (itemUpdating) return;
         setSwal({
             type: 'question',
             title: t('orders.swal.remove_item_title'),
@@ -253,6 +260,63 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             },
             onCancel: () => setSwal(null),
         });
+    };
+
+    const startEditItem = (item: OrderItemRecord) => {
+        if (itemRemoving || itemUpdating) return;
+        setEditingItemId(item.IDNo);
+        setEditingQty(Number(item.QTY) || 1);
+    };
+
+    const cancelEditItem = () => {
+        if (itemUpdating) return;
+        setEditingItemId(null);
+    };
+
+    const submitEditItem = async (item: OrderItemRecord) => {
+        if (!detailOrder) return;
+        const qty = Number(editingQty);
+        if (!Number.isFinite(qty) || qty <= 0) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.invalid_qty_title'),
+                text: t('orders.swal.invalid_qty_text'),
+                onConfirm: () => setSwal(null),
+            });
+            return;
+        }
+        setItemUpdating(true);
+        try {
+            await updateOrderItemQuantity(String(item.IDNo), qty);
+            const [refreshed, updatedOrder] = await Promise.all([
+                getOrderItems(String(detailOrder.IDNo)),
+                getOrderById(String(detailOrder.IDNo)),
+            ]);
+            setDetailItems(refreshed);
+            if (updatedOrder) setDetailOrder(updatedOrder);
+            await loadOrders();
+            toast.success(t('orders.updated_item_qty_success', { itemName: item.MENU_NAME ?? `Item #${item.MENU_ID}` }));
+            setEditingItemId(null);
+        } catch (e) {
+            if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
+                const list = e.insufficient.map((i) => t('orders.swal.insufficient_inventory_item', {
+                    name: i.ingredientName,
+                    required: i.required,
+                    available: i.available,
+                    unit: i.unit,
+                })).join('\n');
+                setSwal({
+                    type: 'warning',
+                    title: t('orders.swal.insufficient_inventory_title'),
+                    text: `${t('orders.swal.insufficient_inventory_text')}\n\n${list}`,
+                    onConfirm: () => setSwal(null),
+                });
+            } else {
+                toast.error(e instanceof Error ? e.message : t('orders.swal.update_failed'));
+            }
+        } finally {
+            setItemUpdating(false);
+        }
     };
 
     // ==================== Status update ====================
@@ -826,31 +890,79 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
                                                 {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
-                                                    <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs w-16">{t('orders.actions')}</th>
+                                                    <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs w-24">{t('orders.actions')}</th>
                                                 )}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
-                                            {detailItems.map((item) => (
-                                                <tr key={item.IDNo}>
-                                                    <td className="px-4 py-2">{item.MENU_NAME ?? `Menu #${item.MENU_ID}`}</td>
-                                                    <td className="px-4 py-2 text-right">{item.QTY}</td>
-                                                    <td className="px-4 py-2 text-right">₱{Number(item.UNIT_PRICE).toLocaleString()}</td>
-                                                    <td className="px-4 py-2 text-right font-bold">₱{Number(item.LINE_TOTAL).toLocaleString()}</td>
-                                                    {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                            {detailItems.map((item) => {
+                                                const isEditing = editingItemId === item.IDNo;
+                                                return (
+                                                    <tr key={item.IDNo}>
+                                                        <td className="px-4 py-2">{item.MENU_NAME ?? `Menu #${item.MENU_ID}`}</td>
                                                         <td className="px-4 py-2 text-right">
-                                                            <button
-                                                                onClick={() => confirmRemoveItem(item)}
-                                                                disabled={itemRemoving}
-                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
-                                                                title={t('orders.remove_item')}
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
+                                                            {isEditing ? (
+                                                                <input
+                                                                    type="number"
+                                                                    min={1}
+                                                                    value={editingQty}
+                                                                    onChange={(e) => setEditingQty(Number(e.target.value))}
+                                                                    className="w-20 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-right text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                                                />
+                                                            ) : (
+                                                                item.QTY
+                                                            )}
                                                         </td>
-                                                    )}
-                                                </tr>
-                                            ))}
+                                                        <td className="px-4 py-2 text-right">₱{Number(item.UNIT_PRICE).toLocaleString()}</td>
+                                                        <td className="px-4 py-2 text-right font-bold">₱{Number(item.LINE_TOTAL).toLocaleString()}</td>
+                                                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                            <td className="px-4 py-2 text-right">
+                                                                <div className="flex items-center justify-end gap-1">
+                                                                    {isEditing ? (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={() => submitEditItem(item)}
+                                                                                disabled={itemUpdating}
+                                                                                className="p-2 text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                                title={t('orders.save_item')}
+                                                                            >
+                                                                                <Check size={16} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={cancelEditItem}
+                                                                                disabled={itemUpdating}
+                                                                                className="p-2 text-brand-muted hover:bg-gray-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                                title={t('orders.cancel')}
+                                                                            >
+                                                                                <X size={16} />
+                                                                            </button>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <button
+                                                                                onClick={() => startEditItem(item)}
+                                                                                disabled={itemRemoving || itemUpdating}
+                                                                                className="p-2 text-brand-muted hover:bg-gray-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                                title={t('orders.edit_item')}
+                                                                            >
+                                                                                <Pencil size={16} />
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => confirmRemoveItem(item)}
+                                                                                disabled={itemRemoving || itemUpdating}
+                                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                                title={t('orders.remove_item')}
+                                                                            >
+                                                                                <Trash2 size={16} />
+                                                                            </button>
+                                                                        </>
+                                                                    )}
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>

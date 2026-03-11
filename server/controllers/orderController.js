@@ -355,9 +355,44 @@ class OrderController {
 			const orderId = existingItem.ORDER_ID;
 
 			// Calculate new line total
-			const newQty = qty !== undefined ? parseFloat(qty) : existingItem.QTY;
+			const oldQty = Number(existingItem.QTY) || 0;
+			const newQty = qty !== undefined ? parseFloat(qty) : oldQty;
 			const newUnitPrice = unit_price !== undefined ? parseFloat(unit_price) : existingItem.UNIT_PRICE;
 			const newLineTotal = newQty * newUnitPrice;
+
+			const orderForInventory = await OrderModel.getById(orderId);
+			const isConfirmed = orderForInventory && Number(orderForInventory.STATUS) === 2;
+			const qtyChanged = Number(newQty) !== oldQty;
+			const qtyDelta = Number(newQty) - oldQty;
+			const isIncrease = qtyDelta > 0;
+
+			// Align with create order:
+			// - Kapag CONFIRMED at TUMAAS ang qty -> validate ADDITIONAL qty lang vs stock, then adjust inventory
+			// - Kapag CONFIRMED at BUMABA ang qty -> huwag mag-validate; ibalik lang ang sobra sa inventory
+			if (isConfirmed && qtyChanged) {
+				if (isIncrease) {
+					// Validate inventory for the *extra* qty only (delta), similar to create order
+					const itemsForValidation = [
+						{
+							menu_id: existingItem.MENU_ID,
+							qty: qtyDelta,
+						},
+					];
+					const validation = await InventoryDeductionService.validateOrderItemsForInventory(
+						Number(orderForInventory.BRANCH_ID),
+						itemsForValidation
+					);
+					if (!validation.valid) {
+						return res.status(200).json({
+							success: false,
+							error: 'Insufficient inventory for order items',
+							insufficient: validation.insufficient,
+						});
+					}
+				}
+				// Reverse this item's deductions (add stock back); pagkatapos ng update, magde-deduct tayo ulit
+				await InventoryDeductionService.reverseOnOrderItemDeleted(Number(id), user_id);
+			}
 
 			// Update order item
 			const updateQuery = `
@@ -380,6 +415,11 @@ class OrderController {
 				user_id,
 				id
 			]);
+
+			// Deduct inventory for this item with new qty (same flow as create order → confirm)
+			if (isConfirmed && qtyChanged) {
+				await InventoryDeductionService.deductForOrderItem(Number(orderId), Number(id), user_id);
+			}
 
 			// Recalculate order totals
 			const [allItems] = await pool.execute('SELECT LINE_TOTAL FROM order_items WHERE ORDER_ID = ?', [orderId]);

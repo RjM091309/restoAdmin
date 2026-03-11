@@ -220,6 +220,70 @@ class InventoryDeductionService {
 	}
 
 	/**
+	 * Deduct inventory for a single order item only (e.g. after editing its qty).
+	 * Call after the order_items row is updated. Uses current QTY from DB.
+	 * Same flow as deductOnOrderConfirmed but for one item only.
+	 */
+	static async deductForOrderItem(orderId, orderItemId, userId) {
+		await InventoryDeductionModel.ensureSchema();
+		const order = await OrderModel.getById(orderId);
+		if (!order || !order.BRANCH_ID) {
+			return { deducted: false, reason: 'order_not_found_or_no_branch', count: 0 };
+		}
+		const branchId = Number(order.BRANCH_ID);
+		const items = await OrderItemsModel.getByOrderId(orderId);
+		const item = items.find((i) => Number(i.IDNo) === Number(orderItemId));
+		if (!item) {
+			return { deducted: false, reason: 'order_item_not_found', count: 0 };
+		}
+		const menuId = item.MENU_ID;
+		const itemQty = Number(item.QTY) || 1;
+		const menuIngredients = await MenuIngredientModel.getByMenuId(menuId);
+		if (!menuIngredients.length) {
+			return { deducted: true, count: 0 };
+		}
+		let totalDeducted = 0;
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			for (const mi of menuIngredients) {
+				const qtyPerServe = Number(mi.QTY_PER_SERVE) || 1;
+				const rawDeducted = qtyPerServe * itemQty;
+				const deductedQty = Number(rawDeducted.toFixed(3));
+				const unit = sanitizeUnit(mi.UNIT);
+				const ingredientId = mi.INGREDIENT_ID;
+				const deducted = await deductStockWithConn(connection, branchId, ingredientId, deductedQty, userId);
+				if (deducted) {
+					await connection.execute(
+						`INSERT INTO inventory_deductions (
+							ORDER_ID, ORDER_ITEM_ID, BRANCH_ID, INGREDIENT_ID, MENU_ID,
+							DEDUCTED_QTY, UNIT, STATUS, ACTIVE, ENCODED_BY, ENCODED_DT
+						) VALUES (?, ?, ?, ?, ?, ?, ?, 2, 1, ?, NOW())`,
+						[
+							orderId,
+							orderItemId,
+							branchId,
+							ingredientId,
+							menuId,
+							deductedQty,
+							unit,
+							userId != null ? Number(userId) : null,
+						]
+					);
+					totalDeducted++;
+				}
+			}
+			await connection.commit();
+		} catch (err) {
+			await connection.rollback();
+			throw err;
+		} finally {
+			connection.release();
+		}
+		return { deducted: totalDeducted > 0, count: totalDeducted };
+	}
+
+	/**
 	 * Reverse deductions for a single order item when that item is removed from a CONFIRMED order.
 	 * Adds stock back and marks those deductions inactive.
 	 */

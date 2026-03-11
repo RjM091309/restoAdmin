@@ -208,3 +208,22 @@ export async function deleteOrderItem(orderItemId: string): Promise<void> {
     });
     await handleResponse<null>(response);
 }
+
+export async function updateOrderItemQuantity(orderItemId: string, qty: number): Promise<void> {
+    const response = await fetch(buildUrl(`/order_items/${orderItemId}`), {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify({ qty }),
+    });
+    const json = (await response.json()) as ApiResponse<{ item_id: number; new_subtotal: number; new_grand_total: number }> & { insufficient?: InventoryInsufficientItem[] };
+    if (!response.ok || !json.success) {
+        if (json.insufficient?.length) {
+            throw new InventoryInsufficientError(json.error || 'Insufficient inventory', json.insufficient);
+        }
+        throw new Error(json.error || 'Request failed');
+    }
+}
