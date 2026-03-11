@@ -31,26 +31,45 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+  fetchDailySalesApi,
+  fetchDailyOrdersApi,
+  fetchExpenseSummaryApi,
+  fetchBranchSalesApi,
+  type ApiDailySalesItem,
+  type ApiDailyOrdersItem,
+  type ApiExpenseSummary,
+  type ApiBranchSalesItem,
+} from '../../services/analyticsService';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const toYYYYMMDD = (d: Date): string =>
+  d.getFullYear() +
+  '-' +
+  String(d.getMonth() + 1).padStart(2, '0') +
+  '-' +
+  String(d.getDate()).padStart(2, '0');
+
+const getCurrentMonthRange = () => {
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return {
+    start: toYYYYMMDD(firstDayOfMonth),
+    end: toYYYYMMDD(today),
+  };
+};
+
+const formatCurrency = (value: number) =>
+  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
 const categoryData = [
   { name: 'Seafood', value: 30, color: '#0f172a' },
   { name: 'Beverages', value: 25, color: '#4f46e5' },
   { name: 'Dessert', value: 25, color: '#e2e8f0' },
   { name: 'Pasta', value: 20, color: '#c7d2fe' },
-];
-
-const ordersOverviewData = [
-  { name: 'Mon', orders: 120 },
-  { name: 'Tue', orders: 130 },
-  { name: 'Wed', orders: 140 },
-  { name: 'Thu', orders: 185 },
-  { name: 'Fri', orders: 150 },
-  { name: 'Sat', orders: 145 },
-  { name: 'Sun', orders: 140 },
 ];
 
 const trendingMenus = [
@@ -81,9 +100,10 @@ const trendingMenus = [
 ];
 
 type DashboardStats = {
-  orders: string;
-  customers: string;
-  revenue: string;
+  totalOrders: number;
+  totalSales: number;
+  totalExpenses: number;
+  totalProfit: number;
 };
 
 type RevenuePoint = {
@@ -94,6 +114,10 @@ type RevenuePoint = {
 
 type DashboardProps = {
   selectedBranch: Branch | null;
+  dateRange: {
+    start: string;
+    end: string;
+  };
 };
 
 const StatCard = ({
@@ -116,7 +140,7 @@ const StatCard = ({
     <div>
       <p className="text-brand-muted text-sm font-medium mb-1">{label}</p>
       <div className="flex items-baseline gap-2">
-        <h3 className="text-2xl font-bold">0</h3>
+        <h3 className="text-2xl font-bold">{value}</h3>
       </div>
     </div>
   </div>
@@ -199,39 +223,98 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [dashboardData, setDashboardData] = React.useState<{
-    dynamicStats: DashboardStats;
-    dynamicRevenueData: RevenuePoint[];
+    stats: DashboardStats;
+    revenueData: RevenuePoint[];
+    ordersOverview: { name: string; orders: number }[];
   } | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (selectedBranch) {
-      const fetchData = async () => {
-        setLoading(true);
-        try {
-          const token = localStorage.getItem('token');
-          const res = await fetch(`/api/dashboard-data?branchId=${selectedBranch.id}`, {
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-          });
-          const json = await res.json();
-          if (json.success) {
-            setDashboardData(json.data);
-          }
-        } catch (error) {
-          console.error("Failed to fetch dashboard data:", error);
-        } finally {
-          setLoading(false);
-        }
-      };
-      fetchData();
-    }
-  }, [selectedBranch]);
+    const loadBranchDashboard = async () => {
+      if (!selectedBranch) {
+        setDashboardData(null);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const fallback = getCurrentMonthRange();
+        const start = dateRange.start || fallback.start;
+        const end = dateRange.end || fallback.end;
+
+        const baseParams = new URLSearchParams();
+        baseParams.set('branch_id', String(selectedBranch.id));
+        baseParams.set('start_date', start);
+        baseParams.set('end_date', end);
+
+        const [dailySales, dailyOrders, expenseSummary, branchSales]: [
+          ApiDailySalesItem[],
+          ApiDailyOrdersItem[],
+          ApiExpenseSummary,
+          ApiBranchSalesItem[],
+        ] = await Promise.all([
+          fetchDailySalesApi(new URLSearchParams(baseParams)),
+          fetchDailyOrdersApi(new URLSearchParams(baseParams)),
+          fetchExpenseSummaryApi(new URLSearchParams(baseParams)),
+          fetchBranchSalesApi(new URLSearchParams(baseParams)),
+        ]);
+
+        const totalSales = dailySales.reduce(
+          (sum, item) => sum + Number(item.total_sales || 0),
+          0,
+        );
+
+        const totalExpenses = expenseSummary.total_expense ?? 0;
+        const totalProfit = totalSales - totalExpenses;
+
+        const branchItem = branchSales.find(
+          (b) => String(b.branch_id) === String(selectedBranch.id),
+        );
+        const totalOrders = branchItem?.order_count ?? 0;
+
+        const revenueData: RevenuePoint[] = dailySales.map((item) => ({
+          name: new Date(item.sale_date).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+          }),
+          income: item.total_sales,
+          // We only have a total expense summary for the period,
+          // so keep per-day expenses as 0 for now.
+          expense: 0,
+        }));
+
+        const last7Days = dailyOrders.slice(-7);
+        const ordersOverview = last7Days.map((item) => ({
+          name: new Date(item.sale_date).toLocaleDateString('en-US', {
+            weekday: 'short',
+          }),
+          orders: item.order_count,
+        }));
+
+        setDashboardData({
+          stats: {
+            totalOrders,
+            totalSales,
+            totalExpenses,
+            totalProfit,
+          },
+          revenueData,
+          ordersOverview,
+        });
+      } catch (error) {
+        console.error('Failed to load branch dashboard data:', error);
+        setDashboardData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadBranchDashboard();
+  }, [selectedBranch, dateRange.start, dateRange.end]);
 
   const orderTypes = [
     {
@@ -297,21 +380,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
               <StatCard
                 icon={ClipboardList}
                 label={t('dashboard.total_orders')}
-                value=""
+                value={dashboardData
+                  ? dashboardData.stats.totalOrders.toLocaleString()
+                  : '0'}
                 trend=""
                 trendType="up"
               />
               <StatCard
                 icon={Package}
-                label={t('dashboard.total_customer')}
-                value=""
+                label="Total Expenses"
+                value={
+                  dashboardData
+                    ? formatCurrency(dashboardData.stats.totalExpenses)
+                    : formatCurrency(0)
+                }
                 trend=""
                 trendType="down"
               />
               <StatCard
                 icon={TrendingUp}
-                label={t('dashboard.total_revenue')}
-                value=""
+                label="Total Profit"
+                value={
+                  dashboardData
+                    ? formatCurrency(dashboardData.stats.totalProfit)
+                    : formatCurrency(0)
+                }
                 trend=""
                 trendType="up"
               />
@@ -323,25 +416,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                   <div>
                     <h4 className="text-base text-brand-muted font-medium">{t('dashboard.total_revenue')}</h4>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-primary" />
-                        <span className="text-sm font-medium">{t('dashboard.income')}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-brand-text" />
-                        <span className="text-sm font-medium">{t('dashboard.expense')}</span>
-                      </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-brand-primary" />
+                      <span className="text-sm font-medium">{t('dashboard.income')}</span>
                     </div>
-                    <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                      <option>{t('dashboard.last_8_months')}</option>
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-brand-text" />
+                      <span className="text-sm font-medium">{t('dashboard.expense')}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="h-64 w-full">
+                  {dashboardData.revenueData.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl">
+                      No data
+                    </div>
+                  ) : (
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <ComposedChart data={dashboardData.dynamicRevenueData}>
+                    <ComposedChart data={dashboardData.revenueData}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
@@ -364,7 +457,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={() => ''}
+                        tickFormatter={(value: number) =>
+                          value === 0 ? '' : formatCurrency(value as number)
+                        }
                       />
                       <Tooltip
                         contentStyle={{
@@ -373,8 +468,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         }}
                         labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
-                        formatter={() => ''}
-                        labelFormatter={() => ''}
+                        formatter={(value: number, _name: string, props: any) => [
+                          formatCurrency(value as number),
+                          props.dataKey === 'income'
+                            ? t('dashboard.income')
+                            : t('dashboard.expense'),
+                        ]}
+                        labelFormatter={(label: string) => label}
                       />
                       <Area
                         type="monotone"
@@ -396,6 +496,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 
@@ -448,8 +549,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                   </select>
                 </div>
                 <div className="h-64 w-full">
+                  {dashboardData.ordersOverview.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl">
+                      No data
+                    </div>
+                  ) : (
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <BarChart data={ordersOverviewData}>
+                    <BarChart data={dashboardData.ordersOverview}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
                         dataKey="name"
@@ -462,7 +568,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                         axisLine={false}
                         tickLine={false}
                         tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={() => ''}
                       />
                       <Tooltip
                         cursor={{ fill: '#4f46e5', opacity: 0.1 }}
@@ -471,8 +576,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                           border: 'none',
                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         }}
-                        formatter={() => ''}
-                        labelFormatter={() => ''}
+                        labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                        itemStyle={{ color: '#4f46e5'}}
+                        formatter={(value: number) => [
+                          value,
+                          t('dashboard.total_orders'),
+                        ]}
+                        labelFormatter={(label: string) => label}
                       />
                       <Bar
                         dataKey="orders"
@@ -483,6 +593,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch }) => {
                       />
                     </BarChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 

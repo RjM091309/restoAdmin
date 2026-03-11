@@ -130,6 +130,11 @@ class DailySalesItem(BaseModel):
     gross_profit: float
 
 
+class DailyOrdersItem(BaseModel):
+    sale_date: str
+    order_count: int
+
+
 class ExpenseSummary(BaseModel):
     total_expense: float
 
@@ -656,6 +661,78 @@ def daily_sales(
         )
 
     # Sort by date
+    items.sort(key=lambda x: x.sale_date)
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+@app.get("/api/analytics/daily-orders")
+def daily_orders(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Daily order count time series based on billing data, aligned with daily-sales:
+    - Counts DISTINCT billing.ORDER_ID per local PH day
+    - Filters by branch and date when provided
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+
+        date_filter = ""
+        branch_filter = ""
+        params: List[object] = []
+
+        if start_date and end_date:
+            date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        if branch_id:
+            branch_filter = "AND b.BRANCH_ID = %s"
+            params.append(branch_id)
+
+        query = f"""
+            SELECT 
+                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+                COUNT(DISTINCT b.ORDER_ID) AS order_count
+            FROM billing b
+            WHERE b.STATUS IN (1, 2)
+            {date_filter}
+            {branch_filter}
+            GROUP BY DATE({billing_local_dt})
+        """
+
+        cur.execute(query, params)
+        rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] daily-orders query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch daily orders",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    items: List[DailyOrdersItem] = []
+    for row in rows:
+        sale_date = row.get("sale_date")
+        if sale_date is None:
+            continue
+        items.append(
+            DailyOrdersItem(
+                sale_date=str(sale_date),
+                order_count=int(row.get("order_count") or 0),
+            )
+        )
+
     items.sort(key=lambda x: x.sale_date)
 
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}

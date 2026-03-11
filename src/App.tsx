@@ -505,6 +505,7 @@ export default function App() {
                     ) : (
                       <Dashboard
                         selectedBranch={selectedBranch}
+                        dateRange={dateRange}
                       />
                     )}
                   </motion.div>

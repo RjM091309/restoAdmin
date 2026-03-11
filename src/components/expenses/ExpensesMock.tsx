@@ -905,7 +905,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
             ))}
           </div>
         </section>
-        <section className="w-[320px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+        <section className="w-[360px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="px-5 py-4 border-b border-gray-100">
             <Skeleton className="h-4 w-24 mb-2" />
             <Skeleton className="h-3 w-36" />
@@ -1056,7 +1056,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         </div>
       </section>
 
-      <section className="w-[320px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+      <section className="w-[360px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between gap-3">
             <div>

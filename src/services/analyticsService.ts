@@ -40,6 +40,11 @@ export type ApiDailySalesItem = {
   gross_profit: number;
 };
 
+export type ApiDailyOrdersItem = {
+  sale_date: string;
+  order_count: number;
+};
+
 export type ApiMenuReportRow = {
   id: number;
   goods: string;
@@ -179,6 +184,19 @@ export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDa
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailySalesItem[];
+  }
+  return [];
+}
+
+export async function fetchDailyOrdersApi(params: URLSearchParams): Promise<ApiDailyOrdersItem[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/daily-orders?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics daily-orders failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiDailyOrdersItem[];
   }
   return [];
 }
