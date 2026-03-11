@@ -56,7 +56,8 @@ export function formatQty(value: number | null | undefined, unit: string): strin
   const n = Number.isFinite(value) ? Number(value) : 0;
   const places = getQtyDecimalPlaces(unit);
   if (places === 0) return String(Math.round(n));
-  return n.toFixed(places);
+  // For decimal units: strip trailing zeros so 3, 100, 0.5 look clean
+  return parseFloat(n.toFixed(places)).toString();
 }
 
 /** Valid unit values for backend validation (lowercase) */

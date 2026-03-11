@@ -1610,7 +1610,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     value={expenseForm.stockQty}
                     onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
                     className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-                    placeholder={expenseFormUnit === 'pcs' ? '0' : '0.0000'}
+                    placeholder="0"
                   />
                   <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
                 </div>

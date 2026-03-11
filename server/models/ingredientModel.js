@@ -57,6 +57,13 @@ class IngredientModel {
 				}
 			}
 
+			// Normalize REORDER_LEVEL type/scale across environments
+			try {
+				await pool.execute(`ALTER TABLE ingredients MODIFY COLUMN REORDER_LEVEL DECIMAL(12,3) NOT NULL DEFAULT 0`);
+			} catch (alterErr) {
+				console.warn('[IngredientModel] REORDER_LEVEL type normalization skipped:', alterErr?.message);
+			}
+
 			// Migration: rename CATEGORY_ID to MASTER_CAT_ID (para iwas confuse - same as expenses)
 			try {
 				const [cols] = await pool.execute(

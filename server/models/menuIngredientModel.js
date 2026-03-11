@@ -44,7 +44,7 @@ class MenuIngredientModel {
 					IDNo INT AUTO_INCREMENT PRIMARY KEY,
 					MENU_ID INT NOT NULL,
 					INGREDIENT_ID INT NOT NULL,
-					QTY_PER_SERVE DECIMAL(12,4) NOT NULL DEFAULT 1,
+					QTY_PER_SERVE DECIMAL(12,3) NOT NULL DEFAULT 1,
 					UNIT VARCHAR(20) NOT NULL DEFAULT 'pcs',
 					ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
 					ENCODED_BY INT NULL,
@@ -63,6 +63,13 @@ class MenuIngredientModel {
 						ON UPDATE CASCADE ON DELETE RESTRICT
 				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 			`);
+
+			// Normalize QTY_PER_SERVE type/scale across environments
+			try {
+				await pool.execute(`ALTER TABLE menu_ingredients MODIFY COLUMN QTY_PER_SERVE DECIMAL(12,3) NOT NULL DEFAULT 1`);
+			} catch (alterErr) {
+				console.warn('[MenuIngredientModel] QTY_PER_SERVE type normalization skipped:', alterErr.message);
+			}
 
 			MenuIngredientModel._schemaReady = true;
 			MenuIngredientModel._schemaPromise = null;

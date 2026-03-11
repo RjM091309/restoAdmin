@@ -75,6 +75,13 @@ class ExpenseModel {
 						}
 					}
 				}
+
+				// Ensure consistent data type/scale for EXP_QTY across environments
+				try {
+					await pool.execute(`ALTER TABLE expenses MODIFY COLUMN EXP_QTY DECIMAL(12,3) NULL`);
+				} catch (alterErr) {
+					console.warn('[ExpenseModel] EXP_QTY type normalization skipped:', alterErr.message);
+				}
 			} catch (migrationErr) {
 				console.warn('[ExpenseModel] Migration check warning:', migrationErr.message);
 			}

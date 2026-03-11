@@ -53,6 +53,13 @@ class InventoryDeductionModel {
 				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 			`);
 
+			// Normalize DEDUCTED_QTY type/scale across environments
+			try {
+				await pool.execute(`ALTER TABLE inventory_deductions MODIFY COLUMN DEDUCTED_QTY DECIMAL(12,3) NOT NULL DEFAULT 0`);
+			} catch (alterErr) {
+				console.warn('[InventoryDeductionModel] DEDUCTED_QTY type normalization skipped:', alterErr.message);
+			}
+
 			InventoryDeductionModel._schemaReady = true;
 			InventoryDeductionModel._schemaPromise = null;
 		})();

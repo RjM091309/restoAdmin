@@ -32,6 +32,13 @@ class InventoryModel {
 				)
 			`);
 
+			// Normalize STOCK_QTY type/scale across existing databases
+			try {
+				await pool.execute(`ALTER TABLE inventory MODIFY COLUMN STOCK_QTY DECIMAL(12,3) NOT NULL DEFAULT 0`);
+			} catch (alterErr) {
+				console.warn('[InventoryModel] STOCK_QTY type normalization skipped:', alterErr.message);
+			}
+
 			InventoryModel._schemaReady = true;
 			InventoryModel._schemaPromise = null;
 		})();

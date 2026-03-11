@@ -75,7 +75,7 @@ class InventoryDeductionService {
 			return { valid: true, insufficient: [] };
 		}
 
-		// Aggregate required qty per ingredient
+		// Aggregate required qty per ingredient (rounded to 3 decimal places to match DB scale)
 		const requiredMap = new Map(); // ingredientId -> { required, ingredientName, unit }
 		for (const item of items) {
 			const menuId = Number(item.menu_id);
@@ -85,7 +85,8 @@ class InventoryDeductionService {
 			for (const mi of menuIngredients) {
 				const ingId = mi.INGREDIENT_ID;
 				const qtyPerServe = Number(mi.QTY_PER_SERVE) || 1;
-				const needed = qtyPerServe * itemQty;
+				const rawNeeded = qtyPerServe * itemQty;
+				const needed = Number(rawNeeded.toFixed(3));
 				const existing = requiredMap.get(ingId);
 				if (existing) {
 					existing.required += needed;
@@ -127,6 +128,8 @@ class InventoryDeductionService {
 	 * Records each deduction in inventory_deductions.
 	 */
 	static async deductOnOrderConfirmed(orderId, userId) {
+		// Ensure inventory_deductions table exists before any direct INSERTs
+		await InventoryDeductionModel.ensureSchema();
 		const order = await OrderModel.getById(orderId);
 		if (!order || !order.BRANCH_ID) {
 			return { deducted: false, reason: 'order_not_found_or_no_branch', count: 0 };
@@ -149,7 +152,9 @@ class InventoryDeductionService {
 				const itemQty = Number(item.QTY) || 1;
 				const menuIngredients = await MenuIngredientModel.getByMenuId(menuId);
 				for (const mi of menuIngredients) {
-					const deductedQty = (Number(mi.QTY_PER_SERVE) || 1) * itemQty;
+					const qtyPerServe = Number(mi.QTY_PER_SERVE) || 1;
+					const rawDeducted = qtyPerServe * itemQty;
+					const deductedQty = Number(rawDeducted.toFixed(3));
 					const unit = sanitizeUnit(mi.UNIT);
 					const ingredientId = mi.INGREDIENT_ID;
 					const deducted = await deductStockWithConn(connection, branchId, ingredientId, deductedQty, userId);
@@ -188,6 +193,7 @@ class InventoryDeductionService {
 	 * Reverse deductions when order is CANCELLED. Adds stock back and marks deductions inactive.
 	 */
 	static async reverseOnOrderCancelled(orderId, userId) {
+		await InventoryDeductionModel.ensureSchema();
 		const hasActive = await InventoryDeductionModel.hasActiveDeductionsForOrder(orderId);
 		if (!hasActive) {
 			return { reversed: false, reason: 'no_active_deductions', count: 0 };
@@ -218,6 +224,7 @@ class InventoryDeductionService {
 	 * Adds stock back and marks those deductions inactive.
 	 */
 	static async reverseOnOrderItemDeleted(orderItemId, userId) {
+		await InventoryDeductionModel.ensureSchema();
 		const deductions = await InventoryDeductionModel.getByOrderItemId(orderItemId, true);
 		if (!deductions.length) {
 			return { reversed: false, reason: 'no_deductions_for_item', count: 0 };
