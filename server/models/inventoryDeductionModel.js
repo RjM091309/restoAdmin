@@ -151,3 +151,7 @@ class InventoryDeductionModel {
 }
 
 module.exports = InventoryDeductionModel;
+
+InventoryDeductionModel.ensureSchema().catch((error) => {
+	console.error('[INVENTORY DEDUCTION MODEL] Failed to ensure schema:', error.message);
+});
