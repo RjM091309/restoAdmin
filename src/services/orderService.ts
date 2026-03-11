@@ -227,3 +227,35 @@ export async function updateOrderItemQuantity(orderItemId: string, qty: number):
         throw new Error(json.error || 'Request failed');
     }
 }
+
+export async function addItemsToOrder(orderId: string, items: CreateOrderItemPayload[]): Promise<{
+    order_id: number;
+    order_no: string;
+    items_added: number;
+    new_subtotal: number;
+    new_grand_total: number;
+}> {
+    const response = await fetch(buildUrl(`/orders/${orderId}/items`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify({ items }),
+    });
+    const json = (await response.json()) as ApiResponse<{
+        order_id: number;
+        order_no: string;
+        items_added: number;
+        new_subtotal: number;
+        new_grand_total: number;
+    }> & { insufficient?: InventoryInsufficientItem[] };
+    if (!response.ok || !json.success) {
+        if (json.insufficient?.length) {
+            throw new InventoryInsufficientError(json.error || 'Insufficient inventory', json.insufficient);
+        }
+        throw new Error(json.error || 'Request failed');
+    }
+    return json.data!;
+}

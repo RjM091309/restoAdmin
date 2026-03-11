@@ -475,6 +475,102 @@ class OrderController {
 		}
 	}
 
+	// Add items to existing order (additional order items)
+	static async addItemsToOrder(req, res) {
+		try {
+			const { id: orderId } = req.params;
+			const user_id = req.session.user_id || req.user?.user_id;
+			const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
+			if (!rawItems.length) {
+				return ApiResponse.badRequest(res, 'At least one order item is required');
+			}
+			const order = await OrderModel.getById(orderId);
+			if (!order) {
+				return ApiResponse.notFound(res, 'Order');
+			}
+			if (Number(order.STATUS) === 1 || Number(order.STATUS) === -1) {
+				return ApiResponse.badRequest(res, 'Cannot add items to settled or cancelled order');
+			}
+			const branchId = Number(order.BRANCH_ID);
+			const itemsNormalized = rawItems.map((item) => {
+				const qty = Number(item.qty) || 1;
+				const unit_price = Number(item.unit_price) || 0;
+				return {
+					menu_id: Number(item.menu_id),
+					qty,
+					unit_price,
+					line_total: qty * unit_price,
+					status: item.status != null ? Number(item.status) : 3,
+				};
+			});
+			// If order is CONFIRMED, validate inventory for the new items only
+			if (Number(order.STATUS) === 2) {
+				const validation = await InventoryDeductionService.validateOrderItemsForInventory(branchId, itemsNormalized);
+				if (!validation.valid) {
+					return res.status(200).json({
+						success: false,
+						error: 'Insufficient inventory for order items',
+						insufficient: validation.insufficient,
+					});
+				}
+			}
+			const existingItems = await OrderItemsModel.getByOrderId(orderId);
+			const existingSubtotal = existingItems.reduce((sum, i) => sum + parseFloat(i.LINE_TOTAL || 0), 0);
+			const newItemsTotal = itemsNormalized.reduce((sum, i) => sum + i.line_total, 0);
+			await OrderItemsModel.createForOrder(orderId, itemsNormalized, user_id);
+			// When CONFIRMED, deduct inventory for each new item (new rows are last by IDNo)
+			if (Number(order.STATUS) === 2) {
+				const allItemsNow = await OrderItemsModel.getByOrderId(orderId);
+				const newCount = itemsNormalized.length;
+				const newItemRows = [...allItemsNow]
+					.sort((a, b) => Number(b.IDNo) - Number(a.IDNo))
+					.slice(0, newCount);
+				for (const row of newItemRows) {
+					await InventoryDeductionService.deductForOrderItem(Number(orderId), Number(row.IDNo), user_id);
+				}
+			}
+			const newSubtotal = Number((existingSubtotal + newItemsTotal).toFixed(2));
+			const taxAmount = parseFloat(order.TAX_AMOUNT || 0);
+			const serviceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+			const discountAmount = parseFloat(order.DISCOUNT_AMOUNT || 0);
+			const newGrandTotal = Number((newSubtotal + taxAmount + serviceCharge - discountAmount).toFixed(2));
+			await OrderModel.update(orderId, {
+				TABLE_ID: order.TABLE_ID,
+				ORDER_TYPE: order.ORDER_TYPE,
+				STATUS: order.STATUS,
+				SUBTOTAL: newSubtotal,
+				TAX_AMOUNT: taxAmount,
+				SERVICE_CHARGE: serviceCharge,
+				DISCOUNT_AMOUNT: discountAmount,
+				GRAND_TOTAL: newGrandTotal,
+				user_id: user_id,
+			});
+			const existingBilling = await BillingModel.getByOrderId(orderId);
+			if (existingBilling) {
+				await BillingModel.updateForOrder(orderId, { amount_due: newGrandTotal });
+			}
+			const orderItems = await OrderItemsModel.getByOrderId(orderId);
+			socketService.emitOrderUpdate(orderId, {
+				order_id: orderId,
+				order_no: order.ORDER_NO,
+				table_id: order.TABLE_ID,
+				status: order.STATUS,
+				grand_total: newGrandTotal,
+				items: orderItems,
+			});
+			return ApiResponse.success(res, {
+				order_id: parseInt(orderId),
+				order_no: order.ORDER_NO,
+				items_added: itemsNormalized.length,
+				new_subtotal: newSubtotal,
+				new_grand_total: newGrandTotal,
+			}, 'Items added to order successfully');
+		} catch (error) {
+			console.error('Error adding items to order:', error);
+			return ApiResponse.error(res, 'Failed to add items to order', 500, error.message);
+		}
+	}
+
 	// Delete single order item
 	static async deleteOrderItem(req, res) {
 		try {

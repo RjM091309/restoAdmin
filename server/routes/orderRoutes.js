@@ -17,6 +17,7 @@ router.get('/orders/:id', authenticate, OrderController.getById);
 router.get('/orders/:id/items', authenticate, OrderController.getItems);
 
 router.post('/orders', authenticate, OrderController.create);
+router.post('/orders/:id/items', authenticate, OrderController.addItemsToOrder);
 router.put('/orders/:id', authenticate, OrderController.update);
 router.patch('/orders/:id/status', authenticate, OrderController.updateStatus);
 router.put('/order_items/:id/status', authenticate, OrderController.updateItemStatus);

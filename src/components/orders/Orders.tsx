@@ -32,10 +32,12 @@ import {
     updateOrderStatus,
     deleteOrderItem,
     updateOrderItemQuantity,
+    addItemsToOrder,
     InventoryInsufficientError,
     ORDER_STATUS,
     type OrderRecord,
     type OrderItemRecord,
+    type CreateOrderItemPayload,
 } from '../../services/orderService';
 import { getMenus, type MenuRecord } from '../../services/menuService';
 import { type Branch } from '../partials/Header';
@@ -104,6 +106,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [newOrderItems, setNewOrderItems] = useState<NewOrderItem[]>([]);
     const [newOrderSelectedMenuId, setNewOrderSelectedMenuId] = useState<string>('');
     const [newOrderQty, setNewOrderQty] = useState<number>(1);
+
+    // ----- Add items to existing order (detail modal) -----
+    const [detailMenus, setDetailMenus] = useState<MenuRecord[]>([]);
+    const [detailMenusLoading, setDetailMenusLoading] = useState(false);
+    const [detailSelectedMenuId, setDetailSelectedMenuId] = useState<string>('');
+    const [detailAddQty, setDetailAddQty] = useState<number>(1);
+    const [detailAdding, setDetailAdding] = useState(false);
 
     // ==================== Helper ====================
     const getStatusLabel = (status: number) => {
@@ -466,6 +475,116 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             }
         } finally {
             setNewOrderSubmitting(false);
+        }
+    };
+
+    // Load menus for adding items to existing order (detail modal)
+    useEffect(() => {
+        if (!detailOrder) {
+            setDetailMenus([]);
+            setDetailSelectedMenuId('');
+            setDetailAddQty(1);
+            return;
+        }
+        // Allow adding items when order is PENDING or CONFIRMED (not settled/cancelled)
+        if (detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) return;
+        let cancelled = false;
+        setDetailMenusLoading(true);
+        getMenus(branchId)
+            .then((menus) => {
+                if (cancelled) return;
+                setDetailMenus((Array.isArray(menus) ? menus : []).filter((m) => m.active && (m.effectiveAvailable ?? m.isAvailable)));
+            })
+            .catch(() => {
+                if (!cancelled) setDetailMenus([]);
+            })
+            .finally(() => {
+                if (!cancelled) setDetailMenusLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [detailOrder, branchId]);
+
+    // Clear add-item selection if the selected menu is already in the order (use edit qty instead)
+    useEffect(() => {
+        if (detailSelectedMenuId && detailItems.some((it) => Number(it.MENU_ID) === Number(detailSelectedMenuId))) {
+            setDetailSelectedMenuId('');
+        }
+    }, [detailItems, detailSelectedMenuId]);
+
+    const addDetailOrderItem = async () => {
+        if (!detailOrder) return;
+        if (detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) {
+            toast.error(t('orders.additional_items_not_allowed'));
+            return;
+        }
+        if (!detailSelectedMenuId) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.select_item_title'),
+                text: t('orders.swal.select_item_text'),
+                onConfirm: () => setSwal(null),
+            });
+            return;
+        }
+        const qty = Number(detailAddQty);
+        if (!Number.isFinite(qty) || qty <= 0) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.invalid_qty_title'),
+                text: t('orders.swal.invalid_qty_text'),
+                onConfirm: () => setSwal(null),
+            });
+            return;
+        }
+        const menu = detailMenus.find((m) => m.id === detailSelectedMenuId);
+        if (!menu) return;
+        const payloadItems: CreateOrderItemPayload[] = [
+            {
+                menu_id: Number(menu.id),
+                qty,
+                unit_price: Number(menu.price || 0),
+                line_total: Number(qty) * Number(menu.price || 0),
+                status: ORDER_STATUS.PENDING,
+            },
+        ];
+        setDetailAdding(true);
+        try {
+            await addItemsToOrder(String(detailOrder.IDNo), payloadItems);
+            const [refreshed, updatedOrder] = await Promise.all([
+                getOrderItems(String(detailOrder.IDNo)),
+                getOrderById(String(detailOrder.IDNo)),
+            ]);
+            setDetailItems(refreshed);
+            if (updatedOrder) setDetailOrder(updatedOrder);
+            await loadOrders();
+            toast.success(t('orders.additional_items_added_success'));
+            setDetailSelectedMenuId('');
+            setDetailAddQty(1);
+        } catch (e) {
+            if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
+                const list = e.insufficient
+                    .map((i) =>
+                        t('orders.swal.insufficient_inventory_item', {
+                            name: i.ingredientName,
+                            required: i.required,
+                            available: i.available,
+                            unit: i.unit,
+                        })
+                    )
+                    .join('\n');
+                setSwal({
+                    type: 'warning',
+                    title: t('orders.swal.insufficient_inventory_title'),
+                    text: `${t('orders.swal.insufficient_inventory_text')}\n\n${list}`,
+                    onConfirm: () => setSwal(null),
+                });
+            } else {
+                toast.error(e instanceof Error ? e.message : t('orders.swal.update_failed'));
+            }
+        } finally {
+            setDetailAdding(false);
         }
     };
 
@@ -874,7 +993,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         </div>
 
                         {/* Items table */}
-                        <div className="space-y-2">
+                        <div className="space-y-4">
                             <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
                             {detailLoading ? (
                                 <div className="flex items-center justify-center py-8"><Loader2 size={24} className="animate-spin text-brand-primary" /></div>
@@ -968,6 +1087,59 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 </div>
                             )}
                         </div>
+
+                        {/* Additional items (add menu to this order) */}
+                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                            <div className="space-y-3 pt-2 border-t border-gray-100">
+                                <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                    {t('orders.additional_items')}
+                                </p>
+                                <div className="grid grid-cols-12 gap-3 items-end">
+                                    <div className="col-span-7">
+                                        <Select2
+                                            options={detailMenus
+                                                .filter((m) => !detailItems.some((it) => Number(it.MENU_ID) === Number(m.id)))
+                                                .map((m) => ({
+                                                    value: m.id,
+                                                    label: `${m.name} — ₱${Number(m.price).toLocaleString()}`,
+                                                }))}
+                                            value={detailSelectedMenuId || null}
+                                            onChange={(v) => setDetailSelectedMenuId(v ? String(v) : '')}
+                                            placeholder={
+                                                detailMenusLoading
+                                                    ? t('orders.loading_menu')
+                                                    : t('orders.select_item')
+                                            }
+                                            disabled={detailMenusLoading || detailAdding}
+                                        />
+                                    </div>
+                                    <div className="col-span-2">
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={detailAddQty}
+                                            onChange={(e) => setDetailAddQty(Number(e.target.value))}
+                                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                        />
+                                    </div>
+                                    <div className="col-span-3">
+                                        <button
+                                            type="button"
+                                            onClick={addDetailOrderItem}
+                                            disabled={detailMenusLoading || detailAdding}
+                                            className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1"
+                                        >
+                                            {detailAdding && <Loader2 size={14} className="animate-spin" />}
+                                            {!detailAdding && <Plus size={14} />}
+                                            {t('orders.add')}
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-[11px] text-brand-muted">
+                                    {t('orders.additional_items_helper')}
+                                </p>
+                            </div>
+                        )}
 
                         {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
