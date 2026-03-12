@@ -182,30 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           active={activeTab === 'Dashboard'}
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
-        {isSpecificBranch && (
-          <SidebarItem
-            icon={DollarSign}
-            label={t('sidebar.expenses')}
-            active={activeTab === 'Expenses'}
-            onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && (
-          <SidebarItem
-            icon={Package}
-            label={t('sidebar.inventory')}
-            active={activeTab === 'Inventory'}
-            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && (
-          <SidebarItem
-            icon={UtensilsCrossed}
-            label={t('sidebar.menu_management')}
-            active={activeTab === 'Menu Management'}
-            onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
+
         <SidebarItem
           icon={BarChart3}
           label={t('sidebar.sales_report')}
@@ -213,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           isExpandable
           isExpanded={salesReportExpanded}
           onClick={handleSalesReportToggle}
-        >
+          >
           <SubItem
             label={t('sidebar.sales_analytics')}
             active={activeTab === 'Sales Analytics'}
@@ -240,6 +217,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => onTabChange('Receipt')}
           />
         </SidebarItem>
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={DollarSign}
+            label={t('sidebar.expenses')}
+            active={activeTab === 'Expenses'}
+            onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={Package}
+            label={t('sidebar.inventory')}
+            active={activeTab === 'Inventory'}
+            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && (
+          <SidebarItem
+            icon={UtensilsCrossed}
+            label={t('sidebar.menu_management')}
+            active={activeTab === 'Menu Management'}
+            onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        
         {isSpecificBranch && (
           <>
             <SidebarItem
