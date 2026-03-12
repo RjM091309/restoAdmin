@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { type Branch } from '../partials/Header';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
 import {
@@ -11,7 +12,6 @@ import {
   Star,
   Calendar,
   ChevronDown,
-  Search,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -32,6 +32,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { getOrders, getOrderItems, ORDER_STATUS, type OrderItemRecord, type OrderRecord } from '../../services/orderService';
 import {
   fetchDailySalesApi,
   fetchDailyOrdersApi,
@@ -166,6 +167,37 @@ const renderActiveCategorySlice = (props: any) => {
   );
 };
 
+const parseDateSafe = (value: string) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const isBetweenInclusive = (value: Date, start: Date, end: Date) => {
+  const t = value.getTime();
+  return t >= start.getTime() && t <= end.getTime();
+};
+
+const statusBadgeClass = (status: number) =>
+  status === ORDER_STATUS.SETTLED
+    ? 'bg-green-100 text-green-600'
+    : status === ORDER_STATUS.CANCELLED
+      ? 'bg-red-100 text-red-600'
+      : status === ORDER_STATUS.CONFIRMED
+        ? 'bg-blue-100 text-blue-600'
+        : 'bg-orange-100 text-orange-600';
+
+const orderTypeLabel = (t: any, orderType: string | null | undefined) => {
+  if (!orderType) return '—';
+  const normalized = orderType.trim().toUpperCase().replace(/\s+/g, '_');
+  if (normalized === 'DINE_IN') return t('orders.dine_in');
+  if (normalized === 'TAKE_OUT') return t('orders.take_out');
+  if (normalized === 'DELIVERY') return t('orders.delivery');
+  return orderType;
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const StatCard = ({
   icon: Icon,
   label,
@@ -271,6 +303,9 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
 
 export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const topCategoriesReqSeq = React.useRef(0);
   const [dashboardData, setDashboardData] = React.useState<{
     stats: DashboardStats;
     revenueData: RevenuePoint[];
@@ -282,6 +317,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   >([]);
   const [loadingTopCategories, setLoadingTopCategories] = React.useState(false);
   const [activeCategoryIndex, setActiveCategoryIndex] = React.useState<number | null>(null);
+  const [recentOrders, setRecentOrders] = React.useState<OrderRecord[]>([]);
+  const [loadingRecentOrders, setLoadingRecentOrders] = React.useState(false);
+  const [recentOrderItemsMeta, setRecentOrderItemsMeta] = React.useState<
+    Record<string, { lineCount: number; totalQty: number }>
+  >({});
 
   React.useEffect(() => {
     const loadBranchDashboard = async () => {
@@ -390,7 +430,82 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   }, [selectedBranch, dateRange.start, dateRange.end]);
 
   React.useEffect(() => {
+    const loadRecentOrders = async () => {
+      if (!selectedBranch) {
+        setRecentOrders([]);
+        return;
+      }
+
+      const fallback = getCurrentMonthRange();
+      const startStr = dateRange.start || fallback.start;
+      const endStr = dateRange.end || fallback.end;
+      const start = new Date(`${startStr}T00:00:00`);
+      const end = new Date(`${endStr}T23:59:59`);
+
+      setLoadingRecentOrders(true);
+      try {
+        const branchId = String(selectedBranch.id);
+        const all = await getOrders(branchId);
+        const filtered = (Array.isArray(all) ? all : [])
+          .filter((o) => {
+            const d = parseDateSafe(o.ENCODED_DT);
+            return d ? isBetweenInclusive(d, start, end) : false;
+          })
+          .sort((a, b) => {
+            const ad = parseDateSafe(a.ENCODED_DT)?.getTime() ?? 0;
+            const bd = parseDateSafe(b.ENCODED_DT)?.getTime() ?? 0;
+            return bd - ad;
+          })
+          .slice(0, 5);
+        setRecentOrders(filtered);
+      } catch (err) {
+        console.error('Failed to load recent orders:', err);
+        setRecentOrders([]);
+      } finally {
+        setLoadingRecentOrders(false);
+      }
+    };
+
+    void loadRecentOrders();
+  }, [selectedBranch, dateRange.start, dateRange.end]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadRecentOrderItemCounts = async () => {
+      if (!recentOrders.length) {
+        setRecentOrderItemsMeta({});
+        return;
+      }
+      try {
+        const results = await Promise.all(
+          recentOrders.map(async (o) => {
+            try {
+              const items: OrderItemRecord[] = await getOrderItems(String(o.IDNo));
+              const totalQty = (Array.isArray(items) ? items : []).reduce(
+                (sum, it) => sum + Number(it.QTY || 0),
+                0
+              );
+              return [String(o.IDNo), { lineCount: Array.isArray(items) ? items.length : 0, totalQty }] as const;
+            } catch {
+              return [String(o.IDNo), { lineCount: 0, totalQty: 0 }] as const;
+            }
+          })
+        );
+        if (cancelled) return;
+        setRecentOrderItemsMeta(Object.fromEntries(results));
+      } catch {
+        if (!cancelled) setRecentOrderItemsMeta({});
+      }
+    };
+    void loadRecentOrderItemCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [recentOrders]);
+
+  React.useEffect(() => {
     const loadTopCategories = async () => {
+      const reqId = ++topCategoriesReqSeq.current;
       if (!selectedBranch) {
         setTopCategories([]);
         return;
@@ -407,9 +522,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         params.set('branch_id', String(selectedBranch.id));
       }
 
+      // Keep previous categories while loading to avoid "No data" flicker on fast date changes.
       setLoadingTopCategories(true);
       try {
-        const rows: ApiCategoryReportRow[] = await fetchCategoryReportApi(params);
+        // Retry once on transient backend slowness (PyServer sometimes returns empty during warm-up).
+        let rows: ApiCategoryReportRow[] = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+          rows = await fetchCategoryReportApi(params);
+          if (rows && rows.length > 0) break;
+          // Wait a bit before retrying (but bail if a newer request started).
+          if (reqId !== topCategoriesReqSeq.current) return;
+          if (attempt === 0) await sleep(450);
+        }
+        if (reqId !== topCategoriesReqSeq.current) return; // ignore stale response
         // API is already ordered by totalSales DESC; show Top 5 only.
         const mapped = rows.slice(0, 5).map((row, i) => ({
           name: row.category || 'Uncategorized',
@@ -418,10 +543,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         }));
         setTopCategories(mapped);
       } catch (err) {
+        if (reqId !== topCategoriesReqSeq.current) return;
         console.error('Failed to load top categories:', err);
-        setTopCategories([]);
+        // Do not force-clear; keep previous data if any.
+        setTopCategories((prev) => prev);
       } finally {
-        setLoadingTopCategories(false);
+        if (reqId === topCategoriesReqSeq.current) setLoadingTopCategories(false);
       }
     };
 
@@ -776,29 +903,102 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
             <div className="bg-white p-6 rounded-2xl shadow-sm">
               <div className="flex items-center justify-between mb-8">
                 <h4 className="text-base font-bold">{t('dashboard.recent_orders')}</h4>
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <Search
-                      size={14}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
-                    />
-                    <input
-                      type="text"
-                      placeholder={t('dashboard.search_placeholder')}
-                      className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-48 outline-none"
-                    />
-                  </div>
-                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer">
-                    <option>{t('dashboard.this_week')}</option>
-                  </select>
-                  <button className="text-xs font-bold bg-brand-bg px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-                    {t('dashboard.see_all_orders')}
-                  </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/orders${location.search || ''}`)}
+                  className="text-xs font-bold bg-brand-bg px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  {t('dashboard.see_all_orders')}
+                </button>
+              </div>
+              {loadingRecentOrders ? (
+                <div className="flex items-center justify-center border border-dashed border-slate-200 rounded-2xl py-12 text-sm font-medium text-brand-muted">
+                  {t('common.loading')}
                 </div>
-              </div>
-              <div className="flex items-center justify-center border border-dashed border-slate-200 rounded-2xl py-12 text-sm font-medium text-brand-muted">
-                No data
-              </div>
+              ) : recentOrders.length === 0 ? (
+                <div className="flex items-center justify-center border border-dashed border-slate-200 rounded-2xl py-12 text-sm font-medium text-brand-muted">
+                  No data
+                </div>
+              ) : (
+                <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 grid grid-cols-[minmax(0,1fr)_110px_120px_140px_110px] items-center gap-3">
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Order #</div>
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide text-center">Type</div>
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide text-center">Order Items</div>
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide text-right">Total Amount</div>
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide text-right">Status</div>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {recentOrders.map((o) => {
+                      const dt = parseDateSafe(o.ENCODED_DT);
+                      const dateLabel = dt
+                        ? dt.toLocaleString(undefined, {
+                            month: 'short',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : o.ENCODED_DT;
+
+                      const meta = recentOrderItemsMeta[String(o.IDNo)];
+                      const totalQty = meta?.totalQty ?? 0;
+
+                      return (
+                        <div
+                          key={o.IDNo}
+                          className="px-4 py-3 grid grid-cols-[minmax(0,1fr)_110px_120px_140px_110px] items-center gap-3 hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-extrabold text-slate-900 truncate">{o.ORDER_NO}</div>
+                            </div>
+                            <div className="text-xs text-brand-muted font-medium truncate">{dateLabel}</div>
+                          </div>
+
+                          <div className="flex items-center justify-center">
+                            {o.ORDER_TYPE ? (
+                              <span className="text-[10px] font-bold bg-gray-100 px-2 py-1 rounded-lg whitespace-nowrap">
+                                {orderTypeLabel(t, o.ORDER_TYPE)}
+                              </span>
+                            ) : (
+                              <span className="text-brand-muted text-sm">—</span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-center">
+                            <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
+                              {totalQty ? totalQty : '—'}
+                            </span>
+                          </div>
+
+                          <div className="text-sm font-extrabold text-slate-900 whitespace-nowrap text-right">
+                            {formatCurrency(Number(o.GRAND_TOTAL || 0))}
+                          </div>
+
+                          <div className="flex items-center justify-end">
+                            <span
+                              className={cn(
+                                'text-xs font-bold px-2 py-1 rounded-lg whitespace-nowrap',
+                                statusBadgeClass(Number(o.STATUS))
+                              )}
+                            >
+                              {Number(o.STATUS) === ORDER_STATUS.PENDING
+                                ? t('orders.pending')
+                                : Number(o.STATUS) === ORDER_STATUS.CONFIRMED
+                                  ? t('orders.confirmed')
+                                  : Number(o.STATUS) === ORDER_STATUS.SETTLED
+                                    ? t('orders.settled')
+                                    : Number(o.STATUS) === ORDER_STATUS.CANCELLED
+                                      ? t('orders.cancelled')
+                                      : t('orders.unknown')}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
