@@ -20,6 +20,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  Sector,
   BarChart,
   Bar,
   Rectangle,
@@ -37,11 +38,13 @@ import {
   fetchDailyExpensesApi,
   fetchExpenseSummaryApi,
   fetchBranchSalesApi,
+  fetchCategoryReportApi,
   type ApiDailySalesItem,
   type ApiDailyOrdersItem,
   type ApiDailyExpenseItem,
   type ApiExpenseSummary,
   type ApiBranchSalesItem,
+  type ApiCategoryReportRow,
 } from '../../services/analyticsService';
 
 function cn(...inputs: ClassValue[]) {
@@ -76,12 +79,7 @@ const formatDateLabel = (dateStr: string) => {
   });
 };
 
-const categoryData = [
-  { name: 'Seafood', value: 30, color: '#0f172a' },
-  { name: 'Beverages', value: 25, color: '#4f46e5' },
-  { name: 'Dessert', value: 25, color: '#e2e8f0' },
-  { name: 'Pasta', value: 20, color: '#c7d2fe' },
-];
+const TOP_CATEGORY_COLORS = ['#0f172a', '#4f46e5', '#e2e8f0', '#c7d2fe', '#6366f1'];
 
 const trendingMenus = [
   {
@@ -129,6 +127,43 @@ type DashboardProps = {
     start: string;
     end: string;
   };
+};
+
+const PieTooltip = ({ active, payload, total }: any) => {
+  if (!active || !payload?.length) return null;
+  const p = payload[0];
+  const name = p?.name ?? p?.payload?.name ?? '';
+  const value = Number(p?.value ?? 0);
+  const safeTotal = Number(total ?? 0);
+  const percent = safeTotal > 0 ? value / safeTotal : 0;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-md">
+      <div className="text-sm font-bold text-slate-900 mb-0.5">{name}</div>
+      <div className="text-xs text-slate-600">
+        {formatCurrency(value)} • {(percent * 100).toFixed(1)}%
+      </div>
+    </div>
+  );
+};
+
+const renderActiveCategorySlice = (props: any) => {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload } = props;
+  return (
+    <g style={{ cursor: 'pointer' }}>
+      <text x={cx} y={cy} dy={4} textAnchor="middle" className="fill-slate-700 text-xs font-semibold">
+        {payload?.name}
+      </text>
+      <Sector
+        cx={cx}
+        cy={cy}
+        innerRadius={innerRadius}
+        outerRadius={outerRadius + 6}
+        startAngle={startAngle}
+        endAngle={endAngle}
+        fill={fill}
+      />
+    </g>
+  );
 };
 
 const StatCard = ({
@@ -242,6 +277,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     ordersOverview: { name: string; orders: number }[];
   } | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [topCategories, setTopCategories] = React.useState<
+    { name: string; value: number; color: string }[]
+  >([]);
+  const [loadingTopCategories, setLoadingTopCategories] = React.useState(false);
+  const [activeCategoryIndex, setActiveCategoryIndex] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     const loadBranchDashboard = async () => {
@@ -347,6 +387,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     };
 
     void loadBranchDashboard();
+  }, [selectedBranch, dateRange.start, dateRange.end]);
+
+  React.useEffect(() => {
+    const loadTopCategories = async () => {
+      if (!selectedBranch) {
+        setTopCategories([]);
+        return;
+      }
+
+      const fallback = getCurrentMonthRange();
+      const start = dateRange.start || fallback.start;
+      const end = dateRange.end || fallback.end;
+
+      const params = new URLSearchParams();
+      params.set('start_date', start);
+      params.set('end_date', end);
+      if (String(selectedBranch.id) !== 'all') {
+        params.set('branch_id', String(selectedBranch.id));
+      }
+
+      setLoadingTopCategories(true);
+      try {
+        const rows: ApiCategoryReportRow[] = await fetchCategoryReportApi(params);
+        // API is already ordered by totalSales DESC; show Top 5 only.
+        const mapped = rows.slice(0, 5).map((row, i) => ({
+          name: row.category || 'Uncategorized',
+          value: row.netSales ?? 0,
+          color: TOP_CATEGORY_COLORS[i % TOP_CATEGORY_COLORS.length],
+        }));
+        setTopCategories(mapped);
+      } catch (err) {
+        console.error('Failed to load top categories:', err);
+        setTopCategories([]);
+      } finally {
+        setLoadingTopCategories(false);
+      }
+    };
+
+    void loadTopCategories();
   }, [selectedBranch, dateRange.start, dateRange.end]);
 
   const orderTypes = [
@@ -536,31 +615,66 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-6">
                   <h4 className="text-base font-bold">{t('dashboard.top_categories')}</h4>
-                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>{t('dashboard.this_month')}</option>
-                  </select>
                 </div>
                 <div className="h-48 w-full relative">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <PieChart>
-                      <Pie
-                        data={categoryData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {categoryData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {loadingTopCategories ? (
+                    <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl">
+                      {t('common.loading')}
+                    </div>
+                  ) : topCategories.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl">
+                      No data
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <PieChart>
+                        <Tooltip
+                          content={({ active, payload }) => (
+                            <PieTooltip
+                              active={active}
+                              payload={payload}
+                              total={topCategories.reduce((s, it) => s + Number(it.value || 0), 0)}
+                            />
+                          )}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: 'none',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          }}
+                        />
+                      {/*
+                        Recharts Pie supports activeIndex/activeShape at runtime,
+                        but some type versions omit these props. Cast for TS.
+                      */}
+                      {(Pie as any)(
+                        {
+                          data: topCategories,
+                          cx: '50%',
+                          cy: '50%',
+                          innerRadius: 60,
+                          outerRadius: 80,
+                          paddingAngle: 5,
+                          dataKey: 'value',
+                          activeIndex: activeCategoryIndex ?? undefined,
+                          activeShape: renderActiveCategorySlice,
+                          onMouseLeave: () => setActiveCategoryIndex(null),
+                          children: topCategories.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.color}
+                              style={{ cursor: 'pointer', transition: 'opacity 150ms ease' }}
+                              onMouseEnter={() => setActiveCategoryIndex(index)}
+                            />
+                          )),
+                        },
+                        null
+                      )}
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-y-3 mt-4">
-                  {categoryData.map((item) => (
+                  {topCategories.map((item) => (
                     <div key={item.name} className="flex items-center gap-2">
                       <div
                         className="w-2 h-2 rounded-full"
