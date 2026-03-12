@@ -33,6 +33,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { getOrders, getOrderItems, ORDER_STATUS, type OrderItemRecord, type OrderRecord } from '../../services/orderService';
+import { getMenus, resolveImageUrl, type MenuRecord } from '../../services/menuService';
 import {
   fetchDailySalesApi,
   fetchDailyOrdersApi,
@@ -40,12 +41,14 @@ import {
   fetchExpenseSummaryApi,
   fetchBranchSalesApi,
   fetchCategoryReportApi,
+  fetchTopSellingApi,
   type ApiDailySalesItem,
   type ApiDailyOrdersItem,
   type ApiDailyExpenseItem,
   type ApiExpenseSummary,
   type ApiBranchSalesItem,
   type ApiCategoryReportRow,
+  type ApiTopSellingItem,
 } from '../../services/analyticsService';
 
 function cn(...inputs: ClassValue[]) {
@@ -82,32 +85,17 @@ const formatDateLabel = (dateStr: string) => {
 
 const TOP_CATEGORY_COLORS = ['#0f172a', '#4f46e5', '#e2e8f0', '#c7d2fe', '#6366f1'];
 
-const trendingMenus = [
-  {
-    name: 'Grilled Chicken Delight',
-    category: 'Chicken',
-    rating: 4.9,
-    orders: 350,
-    price: 18.0,
-    image: 'https://images.unsplash.com/photo-1532550907401-a500c9a57435?q=80&w=600&auto=format&fit=crop', // Grilled chicken
-  },
-  {
-    name: 'Sunny Citrus Cake',
-    category: 'Dessert',
-    rating: 4.8,
-    orders: 400,
-    price: 8.5,
-    image: 'https://images.unsplash.com/photo-1571115177098-24ec42ed204d?q=80&w=600&auto=format&fit=crop', // Cake
-  },
-  {
-    name: 'Fiery Shrimp Salad',
-    category: 'Seafood',
-    rating: 4.7,
-    orders: 270,
-    price: 12.0,
-    image: 'https://images.unsplash.com/photo-1551248429-40975aa4de74?q=80&w=600&auto=format&fit=crop', // Shrimp salad
-  },
-];
+const DEFAULT_TRENDING_IMAGE =
+  'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?q=80&w=800&auto=format&fit=crop';
+
+type TrendingMenuRow = {
+  key: string;
+  name: string;
+  category: string;
+  totalQty: number;
+  netSales: number;
+  image: string;
+};
 
 type DashboardStats = {
   totalOrders: number;
@@ -226,20 +214,23 @@ const StatCard = ({
 
 const TrendingMenuItem = ({
   menu,
+  netSalesLabel = 'Net sales',
 }: {
-  menu: (typeof trendingMenus)[number];
+  menu: TrendingMenuRow;
+  netSalesLabel?: string;
   key?: React.Key;
 }) => (
   <div className="group cursor-pointer">
     <div className="relative mb-3 overflow-hidden rounded-2xl">
       <img
-        src={menu.image}
+        src={menu.image || DEFAULT_TRENDING_IMAGE}
         alt={menu.name}
         className="w-full aspect-[4/3] object-cover group-hover:scale-105 transition-transform duration-500"
         referrerPolicy="no-referrer"
       />
       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm">
         <Star size={10} className="text-yellow-500 fill-yellow-500" />
+        <span className="text-[10px] font-bold">{formatCurrency(menu.netSales)}</span>
       </div>
     </div>
     <div className="flex items-start justify-between">
@@ -251,9 +242,11 @@ const TrendingMenuItem = ({
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5 text-brand-muted">
             <Star size={12} />
+            <span className="text-xs font-bold">{netSalesLabel}</span>
           </div>
           <div className="flex items-center gap-1.5 text-brand-muted">
             <ClipboardList size={12} />
+            <span className="text-xs font-bold">{menu.totalQty.toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -261,7 +254,13 @@ const TrendingMenuItem = ({
   </div>
 );
 
-const VerticalCarousel = ({ items }: { items: any[] }) => {
+const VerticalCarousel = ({
+  items,
+  netSalesLabel = 'Net sales',
+}: {
+  items: any[];
+  netSalesLabel?: string;
+}) => {
   const [index, setIndex] = React.useState(0);
 
   React.useEffect(() => {
@@ -293,6 +292,7 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
               <TrendingMenuItem
                 key={`${menu.name}-${index}-${i}`}
                 menu={menu}
+                netSalesLabel={netSalesLabel}
               />
             ))}
         </motion.div>
@@ -306,6 +306,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const navigate = useNavigate();
   const location = useLocation();
   const topCategoriesReqSeq = React.useRef(0);
+  const trendingReqSeq = React.useRef(0);
   const [dashboardData, setDashboardData] = React.useState<{
     stats: DashboardStats;
     revenueData: RevenuePoint[];
@@ -322,6 +323,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const [recentOrderItemsMeta, setRecentOrderItemsMeta] = React.useState<
     Record<string, { lineCount: number; totalQty: number }>
   >({});
+  const [trendingMenusData, setTrendingMenusData] = React.useState<TrendingMenuRow[]>([]);
+  const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(false);
+  const [menuImageByName, setMenuImageByName] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
     const loadBranchDashboard = async () => {
@@ -428,6 +432,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
 
     void loadBranchDashboard();
   }, [selectedBranch, dateRange.start, dateRange.end]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadMenuImages = async () => {
+      if (!selectedBranch) {
+        setMenuImageByName({});
+        return;
+      }
+      try {
+        const branchId = String(selectedBranch.id);
+        const menus: MenuRecord[] = await getMenus(branchId);
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        (Array.isArray(menus) ? menus : []).forEach((m) => {
+          const key = (m.name || '').trim().toLowerCase();
+          const resolved = resolveImageUrl(m.imageUrl);
+          if (key && resolved) map[key] = resolved;
+        });
+        setMenuImageByName(map);
+      } catch {
+        if (!cancelled) setMenuImageByName({});
+      }
+    };
+    void loadMenuImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBranch?.id]);
 
   React.useEffect(() => {
     const loadRecentOrders = async () => {
@@ -554,6 +586,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
 
     void loadTopCategories();
   }, [selectedBranch, dateRange.start, dateRange.end]);
+
+  React.useEffect(() => {
+    const loadTrendingMenus = async () => {
+      const reqId = ++trendingReqSeq.current;
+      if (!selectedBranch) {
+        setTrendingMenusData([]);
+        return;
+      }
+
+      const fallback = getCurrentMonthRange();
+      const start = dateRange.start || fallback.start;
+      const end = dateRange.end || fallback.end;
+
+      const params = new URLSearchParams();
+      params.set('start_date', start);
+      params.set('end_date', end);
+      if (String(selectedBranch.id) !== 'all') {
+        params.set('branch_id', String(selectedBranch.id));
+      }
+      params.set('limit', '5');
+
+      setLoadingTrendingMenus(true);
+      try {
+        // Same source as Sales Report -> Menu Top 5 Products
+        let rows: ApiTopSellingItem[] = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+          rows = await fetchTopSellingApi(params);
+          if (rows && rows.length > 0) break;
+          if (reqId !== trendingReqSeq.current) return;
+          if (attempt === 0) await sleep(450);
+        }
+        if (reqId !== trendingReqSeq.current) return;
+
+        setTrendingMenusData(
+          (Array.isArray(rows) ? rows : []).slice(0, 5).map((r, idx) => {
+            const name = r.MENU_NAME || '';
+            const img = menuImageByName[name.trim().toLowerCase()] || DEFAULT_TRENDING_IMAGE;
+            return {
+              key: String(r.IDNo ?? idx),
+              name,
+              category: r.category || 'Uncategorized',
+              totalQty: Number(r.total_quantity ?? 0),
+              netSales: Number(r.total_revenue ?? 0),
+              image: img,
+            };
+          })
+        );
+      } catch (err) {
+        if (reqId !== trendingReqSeq.current) return;
+        console.error('Failed to load trending menus:', err);
+        setTrendingMenusData((prev) => prev);
+      } finally {
+        if (reqId === trendingReqSeq.current) setLoadingTrendingMenus(false);
+      }
+    };
+
+    void loadTrendingMenus();
+  }, [selectedBranch, dateRange.start, dateRange.end, menuImageByName]);
 
   const orderTypes = [
     {
@@ -818,9 +908,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
               <div className="col-span-2 bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-8">
                   <h4 className="text-base font-bold">{t('dashboard.orders_overview')}</h4>
-                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>{t('dashboard.this_week')}</option>
-                  </select>
                 </div>
                 <div className="h-64 w-full">
                   {dashboardData.ordersOverview.length === 0 ? (
@@ -874,9 +961,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <div className="flex items-center justify-between mb-8">
                   <h4 className="text-base font-bold">{t('dashboard.order_types')}</h4>
-                  <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                    <option>{t('dashboard.this_month')}</option>
-                  </select>
                 </div>
                 <div className="space-y-6">
                   {orderTypes.map((type) => (
@@ -1006,12 +1090,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
             <div className="bg-white p-6 rounded-2xl shadow-sm h-full flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <h4 className="text-base font-bold">{t('dashboard.trending_menus')}</h4>
-                <select className="bg-brand-bg border-none text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
-                  <option>{t('dashboard.this_week')}</option>
-                </select>
               </div>
               <div className="flex-1 overflow-hidden">
-                <VerticalCarousel items={trendingMenus} />
+                {loadingTrendingMenus ? (
+                  <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl py-8">
+                    <span className="animate-pulse">{t('common.loading')}</span>
+                  </div>
+                ) : trendingMenusData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl py-8">
+                    No data
+                  </div>
+                ) : (
+                  <VerticalCarousel
+                    items={trendingMenusData}
+                    netSalesLabel={t('sales_analytics.net_sales') || 'Net sales'}
+                  />
+                )}
               </div>
             </div>
           </div>
