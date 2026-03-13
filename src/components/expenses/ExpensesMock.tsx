@@ -16,7 +16,7 @@ import {
 import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteExpense, updateInventoryStock } from '../../services/expenseService';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
-import { Edit2, Trash2, Plus, Loader2, Check, X } from 'lucide-react';
+import { Edit2, Trash2, Plus, Loader2, Check, X, Search } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 
@@ -858,23 +858,35 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     }
   };
 
-  const shouldPaginate = itemsForCategory.length > ITEMS_PER_PAGE;
+  const [tableSearch, setTableSearch] = useState('');
+
+  const filteredItemsForCategory = useMemo(() => {
+    const term = tableSearch.trim().toLowerCase();
+    if (!term) return itemsForCategory;
+    return itemsForCategory.filter((row) => {
+      const name = (row.expDesc || row.expName || '').toLowerCase();
+      return name.includes(term);
+    });
+  }, [itemsForCategory, tableSearch]);
+
+  const shouldPaginate = filteredItemsForCategory.length > ITEMS_PER_PAGE;
   const [currentPage, setCurrentPage] = useState(1);
 
   const pagedItems = useMemo(() => {
-    if (!shouldPaginate) return itemsForCategory;
+    if (!shouldPaginate) return filteredItemsForCategory;
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
-    return itemsForCategory.slice(startIndex, endIndex);
-  }, [currentPage, itemsForCategory, shouldPaginate]);
+    return filteredItemsForCategory.slice(startIndex, endIndex);
+  }, [currentPage, filteredItemsForCategory, shouldPaginate]);
 
   const totalPages = useMemo(() => {
     if (!shouldPaginate) return 1;
-    return Math.max(1, Math.ceil(itemsForCategory.length / ITEMS_PER_PAGE));
-  }, [itemsForCategory.length, shouldPaginate]);
+    return Math.max(1, Math.ceil(filteredItemsForCategory.length / ITEMS_PER_PAGE));
+  }, [filteredItemsForCategory.length, shouldPaginate]);
 
   React.useEffect(() => {
     setCurrentPage(1);
+    setTableSearch('');
   }, [selectedCategoryId]);
 
   if (!isSpecificBranch) {
@@ -1193,14 +1205,29 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 </div>
               </div>
               {selectedCategoryId && (
-                <button
-                  type="button"
-                  onClick={handleOpenAddExpense}
-                  className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
-                >
-                  <Plus size={16} />
-                  New Item
-                </button>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Search
+                      size={14}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
+                    />
+                    <input
+                      type="text"
+                      value={tableSearch}
+                      onChange={(e) => setTableSearch(e.target.value)}
+                      placeholder="Search item..."
+                      className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-44 outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddExpense}
+                    className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
+                  >
+                    <Plus size={16} />
+                    New Item
+                  </button>
+                </div>
               )}
             </div>
           </div>
