@@ -369,15 +369,49 @@ class OrderController {
 			// Align with create order:
 			// - Kapag CONFIRMED at TUMAAS ang qty -> validate ADDITIONAL qty lang vs stock, then adjust inventory
 			// - Kapag CONFIRMED at BUMABA ang qty -> huwag mag-validate; ibalik lang ang sobra sa inventory
-			if (isConfirmed && qtyChanged) {
-				if (isIncrease) {
-					// Validate inventory for the *extra* qty only (delta), similar to create order
-					const itemsForValidation = [
-						{
-							menu_id: existingItem.MENU_ID,
-							qty: qtyDelta,
-						},
-					];
+			if (qtyChanged) {
+				if (isConfirmed) {
+					if (isIncrease) {
+						// Validate inventory for the *extra* qty only (delta), similar to create order
+						const itemsForValidation = [
+							{
+								menu_id: existingItem.MENU_ID,
+								qty: qtyDelta,
+							},
+						];
+						const validation = await InventoryDeductionService.validateOrderItemsForInventory(
+							Number(orderForInventory.BRANCH_ID),
+							itemsForValidation
+						);
+						if (!validation.valid) {
+							return res.status(200).json({
+								success: false,
+								error: 'Insufficient inventory for order items',
+								insufficient: validation.insufficient,
+							});
+						}
+					}
+					// Reverse this item's deductions (add stock back); pagkatapos ng update, magde-deduct tayo ulit
+					await InventoryDeductionService.reverseOnOrderItemDeleted(Number(id), user_id);
+				} else {
+					// Pending / other statuses: inventory not yet deducted.
+					// Validate FULL order (all items with updated qty) so total requirement never exceeds stock.
+					const allItems = await OrderItemsModel.getByOrderId(orderId);
+					const qtyPerMenu = new Map();
+					for (const item of allItems) {
+						const menuId = Number(item.MENU_ID);
+						let q = Number(item.QTY) || 0;
+						if (item.IDNo === Number(id)) {
+							// use new qty for this row
+							q = Number(newQty) || 0;
+						}
+						if (!Number.isFinite(menuId) || menuId <= 0 || q <= 0) continue;
+						qtyPerMenu.set(menuId, (qtyPerMenu.get(menuId) || 0) + q);
+					}
+					const itemsForValidation = Array.from(qtyPerMenu.entries()).map(([menu_id, qty]) => ({
+						menu_id,
+						qty,
+					}));
 					const validation = await InventoryDeductionService.validateOrderItemsForInventory(
 						Number(orderForInventory.BRANCH_ID),
 						itemsForValidation
@@ -390,8 +424,6 @@ class OrderController {
 						});
 					}
 				}
-				// Reverse this item's deductions (add stock back); pagkatapos ng update, magde-deduct tayo ulit
-				await InventoryDeductionService.reverseOnOrderItemDeleted(Number(id), user_id);
 			}
 
 			// Update order item
@@ -503,18 +535,49 @@ class OrderController {
 					status: item.status != null ? Number(item.status) : 3,
 				};
 			});
-			// If order is CONFIRMED, validate inventory for the new items only
-			if (Number(order.STATUS) === 2) {
-				const validation = await InventoryDeductionService.validateOrderItemsForInventory(branchId, itemsNormalized);
-				if (!validation.valid) {
-					return res.status(200).json({
-						success: false,
-						error: 'Insufficient inventory for order items',
-						insufficient: validation.insufficient,
-					});
-				}
-			}
 			const existingItems = await OrderItemsModel.getByOrderId(orderId);
+
+			// Validate inventory for additional items.
+			// - For CONFIRMED orders: inventory is already deducted for existing items,
+			//   so we only need to validate the *new* items.
+			// - For PENDING orders: inventory has NOT been deducted yet, so we must validate
+			//   the total qty = existing items + new items, to avoid over-allocating stock.
+			let itemsForValidation;
+			if (Number(order.STATUS) === 2) {
+				itemsForValidation = itemsNormalized;
+			} else {
+				const qtyPerMenu = new Map();
+				// existing items
+				for (const it of existingItems) {
+					const menuId = Number(it.MENU_ID);
+					const q = Number(it.QTY) || 0;
+					if (!Number.isFinite(menuId) || menuId <= 0 || q <= 0) continue;
+					qtyPerMenu.set(menuId, (qtyPerMenu.get(menuId) || 0) + q);
+				}
+				// new items
+				for (const it of itemsNormalized) {
+					const menuId = Number(it.menu_id);
+					const q = Number(it.qty) || 0;
+					if (!Number.isFinite(menuId) || menuId <= 0 || q <= 0) continue;
+					qtyPerMenu.set(menuId, (qtyPerMenu.get(menuId) || 0) + q);
+				}
+				itemsForValidation = Array.from(qtyPerMenu.entries()).map(([menu_id, qty]) => ({
+					menu_id,
+					qty,
+				}));
+			}
+
+			const validation = await InventoryDeductionService.validateOrderItemsForInventory(
+				branchId,
+				itemsForValidation
+			);
+			if (!validation.valid) {
+				return res.status(200).json({
+					success: false,
+					error: 'Insufficient inventory for order items',
+					insufficient: validation.insufficient,
+				});
+			}
 			const existingSubtotal = existingItems.reduce((sum, i) => sum + parseFloat(i.LINE_TOTAL || 0), 0);
 			const newItemsTotal = itemsNormalized.reduce((sum, i) => sum + i.line_total, 0);
 			await OrderItemsModel.createForOrder(orderId, itemsNormalized, user_id);
