@@ -12,6 +12,7 @@ import {
   Star,
   Calendar,
   ChevronDown,
+  DollarSign,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -681,7 +682,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           className="flex gap-8 pt-6"
         >
           <div className="flex-1 space-y-8">
-            <SkeletonStatCards count={3} />
+            <SkeletonStatCards count={4} />
             <div className="grid grid-cols-3 gap-6">
               <SkeletonChart className="col-span-2" />
               <SkeletonChart />
@@ -712,6 +713,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 value={dashboardData
                   ? dashboardData.stats.totalOrders.toLocaleString()
                   : '0'}
+                trend=""
+                trendType="up"
+              />
+              <StatCard
+                icon={DollarSign}
+                label="Total Sales"
+                value={
+                  dashboardData
+                    ? formatCurrency(dashboardData.stats.totalSales)
+                    : formatCurrency(0)
+                }
                 trend=""
                 trendType="up"
               />
