@@ -270,13 +270,19 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
                 />
               </div>
               <div className="flex items-center gap-2">
-                <button type="button" onClick={handleExportCsv} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  CSV
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="flex items-center justify-center h-9 w-9 rounded-lg bg-green-50 hover:bg-green-100 transition-colors cursor-pointer"
+                >
+                  <img src="/csv.png" alt="CSV export" className="h-6 w-6" />
                 </button>
-                <button type="button" onClick={handleExportPdf} className="text-sm font-semibold text-red-700 hover:text-red-800 transition-colors flex items-center gap-1.5">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path><path d="M14 2v6h6"></path><path d="M9 12h1.5a1.5 1.5 0 0 1 0 3H9v-3z"></path><path d="M15 12h2"></path><path d="M15 15h2"></path></svg>
-                  PDF
+                <button
+                  type="button"
+                  onClick={handleExportPdf}
+                  className="flex items-center justify-center h-9 w-9 rounded-lg bg-red-50 hover:bg-red-100 transition-colors cursor-pointer"
+                >
+                  <img src="/pdf.png" alt="PDF export" className="h-6 w-6" />
                 </button>
               </div>
             </div>
