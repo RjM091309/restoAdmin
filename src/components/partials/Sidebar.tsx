@@ -251,6 +251,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
+        {isSpecificBranch && hasFeature('menu_management') && (
+          <SidebarItem
+            icon={UtensilsCrossed}
+            label={t('sidebar.menu_management')}
+            active={activeTab === 'Menu Management'}
+            onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
         {isSpecificBranch && hasFeature('orders') && (
           <SidebarItem
             icon={ClipboardList}
