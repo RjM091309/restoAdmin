@@ -10,12 +10,12 @@ import {
     UtensilsCrossed,
     AlertTriangle,
     CheckCircle2,
-    XCircle,
     X,
     AlertCircle,
     Loader2,
     ImageIcon,
     ListChecks,
+    FolderPlus,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -26,6 +26,7 @@ import {
     getMenus,
     getMenuCategories,
     createMenu,
+    createMenuCategory,
     updateMenu,
     deleteMenu,
     resolveImageUrl,
@@ -81,6 +82,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [editingItem, setEditingItem] = useState<MenuRecord | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [swal, setSwal] = useState<SwalState>(null);
+    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [categoryName, setCategoryName] = useState('');
+    const [categoryDesc, setCategoryDesc] = useState('');
+    const [categorySubmitting, setCategorySubmitting] = useState(false);
 
     // ----- Ingredients modal -----
     const [ingredientsForMenu, setIngredientsForMenu] = useState<MenuRecord | null>(null);
@@ -177,6 +182,40 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setIsCreateOpen(false);
         setEditingItem(null);
         resetForm();
+    };
+
+    const openCategoryModal = () => {
+        setCategoryName('');
+        setCategoryDesc('');
+        setIsCategoryModalOpen(true);
+    };
+
+    const closeCategoryModal = () => {
+        if (categorySubmitting) return;
+        setIsCategoryModalOpen(false);
+        setCategoryName('');
+        setCategoryDesc('');
+    };
+
+    const handleCreateCategory = async () => {
+        const name = categoryName.trim();
+        if (!name) {
+            setSwal({ type: 'warning', title: t('category.manage_category'), text: t('categories.messages.name_required'), onConfirm: () => setSwal(null) });
+            return;
+        }
+        if (branchId === 'all') {
+            setSwal({ type: 'warning', title: t('category.manage_category'), text: t('categories.messages.select_branch'), onConfirm: () => setSwal(null) });
+            return;
+        }
+        setCategorySubmitting(true);
+        try {
+            await createMenuCategory(branchId, { name, description: categoryDesc.trim() || null });
+            setSwal({ type: 'success', title: t('category.category_created_successfully'), text: '', onConfirm: () => { setSwal(null); closeCategoryModal(); refreshData(); } });
+        } catch (e) {
+            setSwal({ type: 'error', title: t('category.failed_to_create_category'), text: e instanceof Error ? e.message : 'Failed to create category', onConfirm: () => setSwal(null) });
+        } finally {
+            setCategorySubmitting(false);
+        }
     };
 
     // ==================== Ingredients modal ====================
@@ -589,15 +628,27 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     className="w-44"
                                 />
                             </div>
-                            {canCreate('menu_management') && (
-                              <button
-                                  onClick={openCreate}
-                                  className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-                              >
-                                  <Plus size={18} />
-                                  {t('menu_page.new_item')}
-                              </button>
-                            )}
+                            <div className="flex items-center gap-3">
+                                {canCreate('menu_management') && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={openCategoryModal}
+                                            className="bg-white border-2 border-brand-primary text-brand-primary px-5 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-sm hover:bg-brand-primary/5 transition-all"
+                                        >
+                                            <FolderPlus size={18} />
+                                            {t('categories.add_new_category')}
+                                        </button>
+                                        <button
+                                            onClick={openCreate}
+                                            className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
+                                        >
+                                            <Plus size={18} />
+                                            {t('menu_page.new_item')}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
                         </div>
 
                         {/* Error */}
@@ -671,6 +722,58 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 }
             >
                 {modalContent}
+            </Modal>
+
+            {/* Add New Category Modal */}
+            <Modal
+                isOpen={isCategoryModalOpen}
+                onClose={closeCategoryModal}
+                title={t('categories.add_new_category')}
+                maxWidth="md"
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={closeCategoryModal}
+                            disabled={categorySubmitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('menu_page.modal.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCreateCategory}
+                            disabled={categorySubmitting}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {categorySubmitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('categories.save_category')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-5">
+                    <div>
+                        <label className="block text-sm font-bold text-brand-text mb-2">{t('category.category_name')}</label>
+                        <input
+                            type="text"
+                            value={categoryName}
+                            onChange={(e) => setCategoryName(e.target.value)}
+                            placeholder={t('category.category_name')}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_description')}</label>
+                        <textarea
+                            value={categoryDesc}
+                            onChange={(e) => setCategoryDesc(e.target.value)}
+                            placeholder={t('categories.form_description_placeholder')}
+                            rows={2}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 resize-none"
+                        />
+                    </div>
+                </div>
             </Modal>
 
             {/* Ingredients Modal */}

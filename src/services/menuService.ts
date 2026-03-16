@@ -161,6 +161,28 @@ export const getMenuCategories = async (branchId?: string): Promise<MenuCategory
     return data.map(mapCategoryRecord);
 };
 
+export type CreateMenuCategoryPayload = { name: string; description?: string | null };
+
+export async function createMenuCategory(branchId: string | null, payload: CreateMenuCategoryPayload): Promise<{ id: number }> {
+    const body: Record<string, string | number | null> = {
+        CAT_NAME: payload.name.trim(),
+        CAT_DESC: payload.description?.trim() || null,
+    };
+    if (branchId && branchId !== 'all') body.branch_id = branchId;
+
+    const response = await fetch(buildUrl('/category'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const json = (await response.json()) as ApiResponse<{ id: number }>;
+    if (!response.ok || !json.success) {
+        throw new Error((json as { error?: string }).error || 'Failed to create category');
+    }
+    return json.data as { id: number };
+}
+
 // --- Create / Update / Delete ---
 
 export type CreateMenuPayload = {

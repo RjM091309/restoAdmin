@@ -1,25 +1,14 @@
-// ============================================
-// CATEGORY CONTROLLER
-// ============================================
-// File: controllers/categoryController.js
-// Description: Handles category-related business logic
-// ============================================
+// Category controller: CRUD + translation for menu categories
 
 const CategoryModel = require('../models/categoryModel');
 const TranslationService = require('../utils/translationService');
 const ApiResponse = require('../utils/apiResponse');
 
 class CategoryController {
+	// Prefer body/query branch (UI selection), then session/user
 	static _resolveBranchId(req) {
-		const raw =
-			req.session?.branch_id ||
-			req.query?.branch_id ||
-			req.body?.branch_id ||
-			req.body?.BRANCH_ID ||
-			req.user?.branch_id ||
-			null;
-
-		if (raw === null || raw === undefined || raw === '' || raw === 'all') return null;
+		const raw = req.query?.branch_id ?? req.body?.branch_id ?? req.body?.BRANCH_ID ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
+		if (raw == null || raw === '' || raw === 'all') return null;
 		const parsed = Number(raw);
 		return Number.isFinite(parsed) ? parsed : null;
 	}
@@ -112,13 +101,20 @@ class CategoryController {
 				return ApiResponse.badRequest(res, 'Category name is required');
 			}
 
-			const user_id = req.session?.user_id || req.user?.user_id;
-			if (!user_id) return ApiResponse.badRequest(res, 'User ID is required');
+			const rawUserId = req.session?.user_id ?? req.user?.user_id;
+			const user_id = rawUserId != null ? Number(rawUserId) : null;
+			if (user_id == null || !Number.isFinite(user_id)) {
+				return ApiResponse.badRequest(res, 'User ID is required. Please log in again.');
+			}
 
 			const branchId = CategoryController._resolveBranchId(req);
+			if (branchId == null) {
+				return ApiResponse.badRequest(res, 'Please select a branch to create a category.');
+			}
+
 			const categoryId = await CategoryModel.create({
-				CAT_NAME: payload.CAT_NAME,
-				CAT_DESC: payload.CAT_DESC,
+				CAT_NAME: payload.CAT_NAME.trim(),
+				CAT_DESC: payload.CAT_DESC || null,
 				BRANCH_ID: branchId,
 				user_id,
 			});
@@ -126,7 +122,7 @@ class CategoryController {
 			return ApiResponse.created(res, { id: categoryId }, 'Category created successfully');
 		} catch (error) {
 			console.error('Error creating category:', error);
-			return ApiResponse.error(res, 'Failed to create category', 500, error.message);
+			return ApiResponse.error(res, error.message || 'Failed to create category', 500, process.env.NODE_ENV === 'development' ? error.stack : undefined);
 		}
 	}
 
