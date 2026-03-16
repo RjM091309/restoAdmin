@@ -361,18 +361,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           fetchBranchSalesApi(new URLSearchParams(baseParams)),
         ]);
 
-        const totalSales = dailySales.reduce(
-          (sum, item) => sum + Number(item.total_sales || 0),
-          0,
-        );
-
-        const totalExpenses = expenseSummary.total_expense ?? 0;
-        const totalProfit = totalSales - totalExpenses;
-
         const branchItem = branchSales.find(
           (b) => String(b.branch_id) === String(selectedBranch.id),
         );
-        const totalOrders = branchItem?.order_count ?? 0;
+
+        // Prefer daily-sales for totalSales so it stays aligned with revenue chart.
+        // Fallback to branch-sales when daily-sales is temporarily empty or fails warm-up.
+        const totalSalesFromDaily = dailySales.reduce(
+          (sum, item) => sum + Number(item.total_sales || 0),
+          0,
+        );
+        const totalSalesFromBranch = branchItem ? Number(branchItem.total_sales || 0) : 0;
+        const totalSales = totalSalesFromDaily || totalSalesFromBranch;
+
+        // Primary source for expenses is the summary endpoint, but the Python
+        // service can occasionally return 0 during warm-up or transient DB issues.
+        // Fall back to summing daily-expenses so the Total Expenses card is stable.
+        const totalExpensesFromSummary = expenseSummary?.total_expense ?? 0;
+        const totalExpensesFromDaily = dailyExpenses.reduce(
+          (sum, item) => sum + Number(item.total_expense || 0),
+          0,
+        );
+        const totalExpenses = totalExpensesFromSummary || totalExpensesFromDaily;
+        const totalProfit = totalSales - totalExpenses;
+
+        // Primary source for total orders is branch-sales (already aggregated by branch),
+        // but when that endpoint returns empty data we fall back to summing daily-orders.
+        const totalOrdersFromBranch = branchItem?.order_count ?? 0;
+        const totalOrdersFromDaily = dailyOrders.reduce(
+          (sum, item) => sum + Number(item.order_count || 0),
+          0,
+        );
+        const totalOrders = totalOrdersFromBranch || totalOrdersFromDaily;
 
         // Build a map of daily expenses by date to align with daily sales
         const expenseByDate = new Map<string, number>();

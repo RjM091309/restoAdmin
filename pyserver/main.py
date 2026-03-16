@@ -154,7 +154,7 @@ class ExpenseCategoryRow(BaseModel):
     entry_count: int
     total_amount: float
 
-
+# DASHBOARD
 @app.get("/api/analytics/branch-sales")
 def branch_sales(
     start_date: Optional[str] = None,
