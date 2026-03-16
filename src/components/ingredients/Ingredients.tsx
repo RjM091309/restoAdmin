@@ -20,6 +20,7 @@ import { getInventoryCategories, type InventoryCategory } from '../../services/i
 import { UOM_OPTIONS, getUnitLabel } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
+import { Select2 } from '../ui/Select2';
 
 type IngredientsProps = {
   selectedBranch: Branch | null;
@@ -277,18 +278,20 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
                   className="w-full bg-white border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none"
                 />
               </div>
-              <select
-                value={categoryFilter || ''}
-                onChange={(e) => setCategoryFilter(e.target.value || null)}
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 outline-none min-w-[180px]"
-              >
-                <option value="">All categories</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[220px]">
+                <Select2
+                  options={[
+                    { value: '', label: 'All categories' },
+                    ...categories.map((c) => ({
+                      value: c.id,
+                      label: c.name,
+                    })),
+                  ]}
+                  value={categoryFilter ?? ''}
+                  onChange={(val) => setCategoryFilter(val ? String(val) : null)}
+                  placeholder="All categories"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -349,34 +352,36 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
             <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted mb-1.5">
               Category
             </label>
-            <select
+            <Select2
+              options={[
+                { value: '', label: '— Select category —' },
+                ...categories.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                })),
+              ]}
               value={form.categoryId}
-              onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
-            >
-              <option value="">— Select category —</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(val) =>
+                setForm((f) => ({ ...f, categoryId: val ? String(val) : '' }))
+              }
+              placeholder="— Select category —"
+            />
           </div>
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-brand-muted mb-1.5">
               Unit
             </label>
-            <select
+            <Select2
+              options={UOM_OPTIONS.map((u) => ({
+                value: u,
+                label: getUnitLabel(u),
+              }))}
               value={form.unit}
-              onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
-            >
-              {UOM_OPTIONS.map((u) => (
-                <option key={u} value={u}>
-                  {getUnitLabel(u)}
-                </option>
-              ))}
-            </select>
+              onChange={(val) =>
+                setForm((f) => ({ ...f, unit: (val as string) || 'pcs' }))
+              }
+              placeholder="Select unit"
+            />
           </div>
         </div>
       </SidePanel>

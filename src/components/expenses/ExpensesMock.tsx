@@ -19,6 +19,7 @@ import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X, Search } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
+import { Select2 } from '../ui/Select2';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 type ExpensesMockProps = {
@@ -1632,19 +1633,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
                   Unit <span className="text-red-500">{!editingExpense ? '*' : ''}</span>
                 </label>
-                <select
-                  value={expenseForm.unit}
-                  onChange={(e) => setExpenseForm((prev) => ({ ...prev, unit: e.target.value }))}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-                  required={!editingExpense}
-                >
-                  <option value="">Select unit</option>
-                  {UOM_OPTIONS.map((u) => (
-                    <option key={u} value={u}>
-                      {getUnitLabel(u)}
-                    </option>
-                  ))}
-                </select>
+                <Select2
+                  options={UOM_OPTIONS.map((u) => ({
+                    value: u,
+                    label: getUnitLabel(u),
+                  }))}
+                  value={expenseForm.unit || null}
+                  onChange={(val) =>
+                    setExpenseForm((prev) => ({ ...prev, unit: (val as string) || '' }))
+                  }
+                  placeholder="Select unit"
+                  className="mt-0"
+                />
               </div>
               <div className="space-y-3">
                 <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">

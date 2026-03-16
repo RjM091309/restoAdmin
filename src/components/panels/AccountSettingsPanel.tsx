@@ -106,7 +106,12 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const displayName = user ? `${user.firstname} ${user.lastname}` : 'User';
-  const displayRole = user?.permissions === 1 ? t('account_settings.administrator') : t('account_settings.staff');
+  const displayRole =
+    user?.permissions === 1
+      ? t('account_settings.administrator')
+      : user?.permissions === 3
+        ? t('account_settings.manager', 'Manager')
+        : t('account_settings.staff');
   const avatarSrc = user?.avatar || 'https://picsum.photos/seed/user/100/100';
 
   // Sync form fields when switching to edit view or when user data changes

@@ -144,12 +144,13 @@ export const Header: React.FC<HeaderProps> = ({
     setIsLanguagePanelOpen(false);
   };
 
+  const isAdmin = user?.permissions === 1;
+  const isManager = user?.permissions === 3;
+
   useEffect(() => {
     const fetchBranches = async () => {
       try {
         const token = localStorage.getItem('token');
-        const isAdmin = user?.permissions === 1;
-        const isManager = user?.permissions === 3;
         const res = await fetch('/branch', {
           headers: {
             'Content-Type': 'application/json',
@@ -324,53 +325,68 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           <div className="relative">
-            <button
-              onClick={() => setBranchDropdownOpen((o) => !o)}
-              className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all w-64 justify-between group cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <MapPin size={20} className="text-brand-muted" />
-                <span className="text-sm text-brand-muted">
-                  {selectedBranch
-                    ? (selectedBranch.id === 'all' ? t('header.all_branches') : selectedBranch.name)
-                    : t('header.select_branch')}
-                </span>
-              </div>
-              <ChevronDown
-                size={16}
-                className={clsx(
-                  'text-brand-muted group-hover:text-brand-primary transition-all duration-200',
-                  branchDropdownOpen && 'rotate-180 text-brand-primary'
-                )}
-              />
-            </button>
-
-            {branchDropdownOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setBranchDropdownOpen(false)}
-                  aria-hidden
-                />
-                <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
-                  {branches.map((branch) => (
-                    <button
-                      key={branch.id}
-                      onClick={() => {
-                        openBranchInNewTab(branch);
-                        setBranchDropdownOpen(false);
-                      }}
-                      className={clsx(
-                        'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-primary/5 cursor-pointer',
-                        selectedBranch?.id === branch.id
-                          ? 'text-brand-muted bg-brand-primary/5'
-                          : 'text-brand-text'
-                      )}
-                    >
-                      {branch.id === 'all' ? t('header.all_branches') : branch.name}
-                    </button>
-                  ))}
+            {isManager ? (
+              <div className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 w-64">
+                <div className="flex items-center gap-2">
+                  <MapPin size={20} className="text-brand-muted" />
+                  <span className="text-sm text-brand-muted">
+                    {selectedBranch
+                      ? selectedBranch.name
+                      : t('header.select_branch')}
+                  </span>
                 </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => setBranchDropdownOpen((o) => !o)}
+                  className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl shadow-sm border border-gray-100 hover:border-brand-primary/30 transition-all w-64 justify-between group cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <MapPin size={20} className="text-brand-muted" />
+                    <span className="text-sm text-brand-muted">
+                      {selectedBranch
+                        ? (selectedBranch.id === 'all' ? t('header.all_branches') : selectedBranch.name)
+                        : t('header.select_branch')}
+                    </span>
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    className={clsx(
+                      'text-brand-muted group-hover:text-brand-primary transition-all duration-200',
+                      branchDropdownOpen && 'rotate-180 text-brand-primary'
+                    )}
+                  />
+                </button>
+
+                {branchDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setBranchDropdownOpen(false)}
+                      aria-hidden
+                    />
+                    <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden py-1">
+                      {branches.map((branch) => (
+                        <button
+                          key={branch.id}
+                          onClick={() => {
+                            openBranchInNewTab(branch);
+                            setBranchDropdownOpen(false);
+                          }}
+                          className={clsx(
+                            'w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-brand-primary/5 cursor-pointer',
+                            selectedBranch?.id === branch.id
+                              ? 'text-brand-muted bg-brand-primary/5'
+                              : 'text-brand-text'
+                          )}
+                        >
+                          {branch.id === 'all' ? t('header.all_branches') : branch.name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -405,7 +421,11 @@ export const Header: React.FC<HeaderProps> = ({
                 {user ? `${user.firstname} ${user.lastname}` : t('header.user')}
               </p>
               <p className="text-xs text-brand-muted font-medium">
-                {user?.permissions === 1 ? t('header.admin') : t('header.staff')}
+                {user?.permissions === 1
+                  ? t('header.admin')
+                  : user?.permissions === 3
+                    ? t('header.manager', 'Manager')
+                    : t('header.staff')}
               </p>
             </div>
             <img

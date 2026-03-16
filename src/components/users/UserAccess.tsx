@@ -522,11 +522,12 @@ export const UserAccess: React.FC = () => {
                                 </span>
                                 <span
                                   className={cn(
-                                    'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                    'text-[11px] px-2 py-0.5 rounded-full shrink-0',
                                     active
                                       ? 'bg-brand-orange/15 text-brand-utilities'
                                       : 'bg-gray-100 text-brand-muted',
                                   )}
+                                  title={`${count} menu items visible`}
                                 >
                                   {count}
                                 </span>
