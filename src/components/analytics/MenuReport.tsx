@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
 import { Skeleton } from '../ui/Skeleton';
 import {
@@ -266,44 +267,102 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     },
   ];
 
-  // --- Export Function ---
-  const handleExport = () => {
-    const data = filteredRows.map((row) => ({
-      [t('menu_report.columns.goods')]: row.goods,
-      [t('menu_report.columns.category')]: row.category,
-      [t('menu_report.columns.sales_quantity')]: row.salesQty.toLocaleString(),
-      [t('menu_report.columns.total_sales')]: money(row.totalSales),
-      [t('menu_report.columns.refund_quantity')]: row.refundQty.toLocaleString(),
-      [t('menu_report.columns.refund_amount')]: money(row.refundAmount),
-      [t('menu_report.columns.discounts')]: money(row.discounts),
-      [t('menu_report.columns.net_sales')]: money(row.netSales),
-      [t('menu_report.columns.unit_cost')]: money(row.unitCost),
-      [t('menu_report.columns.total_revenue')]: money(row.totalRevenue),
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(data);
-
-    worksheet['!cols'] = [
-      { wch: 30 },
-      { wch: 25 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 20 },
+  // --- Export Functions (CSV + PDF) ---
+  const handleExportCsv = () => {
+    const headers = [
+      t('menu_report.columns.goods'),
+      t('menu_report.columns.category'),
+      t('menu_report.columns.sales_quantity'),
+      t('menu_report.columns.total_sales'),
+      t('menu_report.columns.refund_quantity'),
+      t('menu_report.columns.refund_amount'),
+      t('menu_report.columns.discounts'),
+      t('menu_report.columns.net_sales'),
+      t('menu_report.columns.unit_cost'),
+      t('menu_report.columns.total_revenue'),
     ];
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Menu Report');
+    const escapeCell = (value: string) => {
+      const needsQuotes = /[",\n]/.test(value);
+      const safe = value.replace(/"/g, '""');
+      return needsQuotes ? `"${safe}"` : safe;
+    };
+
+    const rowsForCsv = filteredRows.map((row) => [
+      row.goods,
+      row.category,
+      row.salesQty.toString(),
+      row.totalSales.toString(),
+      row.refundQty.toString(),
+      row.refundAmount.toString(),
+      row.discounts.toString(),
+      row.netSales.toString(),
+      row.unitCost.toString(),
+      row.totalRevenue.toString(),
+    ]);
+
+    const csv = [
+      headers.map(escapeCell).join(','),
+      ...rowsForCsv.map((r) => r.map(escapeCell).join(',')),
+    ].join('\n');
 
     const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
     const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
-    const filename = `menu_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+    const filename = `menu_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.csv`;
 
-    XLSX.writeFile(workbook, filename);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = () => {
+    const doc = new jsPDF('l', 'pt', 'a4');
+
+    const headers = [
+      t('menu_report.columns.goods'),
+      t('menu_report.columns.category'),
+      t('menu_report.columns.sales_quantity'),
+      t('menu_report.columns.total_sales'),
+      t('menu_report.columns.refund_quantity'),
+      t('menu_report.columns.refund_amount'),
+      t('menu_report.columns.discounts'),
+      t('menu_report.columns.net_sales'),
+      t('menu_report.columns.unit_cost'),
+      t('menu_report.columns.total_revenue'),
+    ];
+
+    const body = filteredRows.map((row) => [
+      row.goods,
+      row.category,
+      row.salesQty.toLocaleString(),
+      money(row.totalSales),
+      row.refundQty.toLocaleString(),
+      money(row.refundAmount),
+      money(row.discounts),
+      money(row.netSales),
+      money(row.unitCost),
+      money(row.totalRevenue),
+    ]);
+
+    autoTable(doc, {
+      head: [headers],
+      body,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [56, 189, 248] },
+      margin: { top: 40 },
+    });
+
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `menu_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.pdf`;
+
+    doc.save(filename);
   };
 
   // Same net sales computation as SalesAnalytics: net_sales = total_sales - refund - discount
@@ -501,28 +560,54 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
             className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
           />
         </div>
-        <button
-          type="button"
-          onClick={handleExport}
-          className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5"
           >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          {t('menu_report.export')}
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            className="text-sm font-semibold text-red-700 hover:text-red-800 transition-colors flex items-center gap-1.5"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
+              <path d="M14 2v6h6"></path>
+              <path d="M9 12h1.5a1.5 1.5 0 0 1 0 3H9v-3z"></path>
+              <path d="M15 12h2"></path>
+              <path d="M15 15h2"></path>
+            </svg>
+            PDF
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden pt-4">

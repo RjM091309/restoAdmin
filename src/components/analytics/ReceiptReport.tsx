@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Search, X } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -196,45 +197,92 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     },
   ];
 
-  // --- Export Function ---
-  const handleExport = () => {
-    // 1. Create data rows for Excel
-    const data = filteredRows.map(row => {
-      const typeLabel = row.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale');
-      return {
-        [t('receipt_report.columns.receipt_number')]: row.receiptNumber,
-        [t('receipt_report.columns.date')]: row.date,
-        [t('receipt_report.columns.employee')]: row.employee,
-        [t('receipt_report.columns.customer')]: row.customer,
-        [t('receipt_report.columns.type')]: typeLabel,
-        [t('receipt_report.columns.total')]: money(row.total),
-      };
-    });
-
-    // 2. Create worksheet
-    const worksheet = XLSX.utils.json_to_sheet(data);
-
-    // 3. Set column widths
-    worksheet['!cols'] = [
-      { wch: 18 }, // Receipt Number
-      { wch: 20 }, // Date
-      { wch: 20 }, // Employee
-      { wch: 18 }, // Customer
-      { wch: 15 }, // Type
-      { wch: 18 }, // Total
+  // --- Export Functions (CSV + PDF) ---
+  const handleExportCsv = () => {
+    const headers = [
+      t('receipt_report.columns.receipt_number'),
+      t('receipt_report.columns.date'),
+      t('receipt_report.columns.employee'),
+      t('receipt_report.columns.customer'),
+      t('receipt_report.columns.type'),
+      t('receipt_report.columns.total'),
     ];
 
-    // 4. Create workbook and add worksheet
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Receipt Report');
+    const escapeCell = (value: string) => {
+      const needsQuotes = /[",\n]/.test(value);
+      const safe = value.replace(/"/g, '""');
+      return needsQuotes ? `"${safe}"` : safe;
+    };
 
-    // 5. Generate descriptive filename
+    const rowsForCsv = filteredRows.map((row) => {
+      const typeLabel = row.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale');
+      return [
+        row.receiptNumber,
+        row.date,
+        row.employee,
+        row.customer,
+        typeLabel,
+        row.total.toString(),
+      ];
+    });
+
+    const csv = [
+      headers.map(escapeCell).join(','),
+      ...rowsForCsv.map((r) => r.map(escapeCell).join(',')),
+    ].join('\n');
+
     const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
     const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
-    const filename = `receipt_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+    const filename = `receipt_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.csv`;
 
-    // 6. Download the file
-    XLSX.writeFile(workbook, filename);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = () => {
+    const doc = new jsPDF('l', 'pt', 'a4');
+
+    const headers = [
+      t('receipt_report.columns.receipt_number'),
+      t('receipt_report.columns.date'),
+      t('receipt_report.columns.employee'),
+      t('receipt_report.columns.customer'),
+      t('receipt_report.columns.type'),
+      t('receipt_report.columns.total'),
+    ];
+
+    const body = filteredRows.map((row) => {
+      const typeLabel = row.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale');
+      return [
+        row.receiptNumber,
+        row.date,
+        row.employee,
+        row.customer,
+        typeLabel,
+        money(row.total),
+      ];
+    });
+
+    autoTable(doc, {
+      head: [headers],
+      body,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [37, 99, 235] },
+      margin: { top: 40 },
+    });
+
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `receipt_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.pdf`;
+
+    doc.save(filename);
   };
 
   return (
@@ -284,10 +332,16 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                   className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-primary/20 outline-none"
                 />
               </div>
-              <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                {t('receipt_report.export')}
-              </button>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={handleExportCsv} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  CSV
+                </button>
+                <button type="button" onClick={handleExportPdf} className="text-sm font-semibold text-red-700 hover:text-red-800 transition-colors flex items-center gap-1.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path><path d="M14 2v6h6"></path><path d="M9 12h1.5a1.5 1.5 0 0 1 0 3H9v-3z"></path><path d="M15 12h2"></path><path d="M15 15h2"></path></svg>
+                  PDF
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <button

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
@@ -493,44 +494,90 @@ const metricConfig = {
     }));
   }, [branchSalesData]);
 
-  // --- Export Function ---
-  const handleExport = useCallback(() => {
-    // 1. Create data rows for Excel
-    const data = salesTableRows.map(row => ({
-      [t('sales_analytics.date')]: row.date,
-      [t('sales_analytics.total_sales')]: money(row.totalSales),
-      [t('sales_analytics.refund')]: money(row.refund),
-      [t('sales_analytics.discount')]: money(row.discount),
-      [t('sales_analytics.net_sales')]: money(row.netSales),
-      [t('sales_analytics.product_unit_price')]: money(row.productUnitPrice),
-      [t('sales_analytics.gross_profit')]: money(row.grossProfit),
-    }));
-
-    // 2. Create worksheet
-    const worksheet = XLSX.utils.json_to_sheet(data);
-
-    // 3. Set column widths
-    worksheet['!cols'] = [
-      { wch: 18 }, // Date
-      { wch: 18 }, // Total Sales
-      { wch: 15 }, // Refund
-      { wch: 15 }, // Discount
-      { wch: 18 }, // Net Sales
-      { wch: 18 }, // Product Unit Price
-      { wch: 18 }, // Gross Profit
+  // --- Export Functions (CSV + PDF) ---
+  const handleExportCsv = useCallback(() => {
+    const headers = [
+      t('sales_analytics.date'),
+      t('sales_analytics.total_sales'),
+      t('sales_analytics.refund'),
+      t('sales_analytics.discount'),
+      t('sales_analytics.net_sales'),
+      t('sales_analytics.product_unit_price'),
+      t('sales_analytics.gross_profit'),
     ];
 
-    // 4. Create workbook and append worksheet
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales Analytics');
+    const escapeCell = (value: string) => {
+      const needsQuotes = /[",\n]/.test(value);
+      const safe = value.replace(/"/g, '""');
+      return needsQuotes ? `"${safe}"` : safe;
+    };
 
-    // 5. Generate descriptive filename with .xlsx extension
+    const rows = salesTableRows.map((row) => [
+      row.date,
+      row.totalSales.toString(),
+      row.refund.toString(),
+      row.discount.toString(),
+      row.netSales.toString(),
+      row.productUnitPrice.toString(),
+      row.grossProfit.toString(),
+    ]);
+
+    const csv = [
+      headers.map(escapeCell).join(','),
+      ...rows.map((r) => r.map(escapeCell).join(',')),
+    ].join('\n');
+
     const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
     const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
-    const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.xlsx`;
+    const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.csv`;
 
-    // 6. Download the file
-    XLSX.writeFile(workbook, filename);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [salesTableRows, selectedBranch, dateRange, t]);
+
+  const handleExportPdf = useCallback(() => {
+    const doc = new jsPDF('l', 'pt', 'a4');
+
+    const headers = [
+      t('sales_analytics.date'),
+      t('sales_analytics.total_sales'),
+      t('sales_analytics.refund'),
+      t('sales_analytics.discount'),
+      t('sales_analytics.net_sales'),
+      t('sales_analytics.product_unit_price'),
+      t('sales_analytics.gross_profit'),
+    ];
+
+    const body = salesTableRows.map((row) => [
+      row.date,
+      money(row.totalSales),
+      money(row.refund),
+      money(row.discount),
+      money(row.netSales),
+      money(row.productUnitPrice),
+      money(row.grossProfit),
+    ]);
+
+    autoTable(doc, {
+      head: [headers],
+      body,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [139, 92, 246] },
+      margin: { top: 40 },
+    });
+
+    const branchNameStr = selectedBranch ? selectedBranch.name : 'All_Branches';
+    const cleanBranchName = branchNameStr.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.pdf`;
+
+    doc.save(filename);
   }, [salesTableRows, selectedBranch, dateRange, t]);
 
   const isPageLoading = dailySalesLoading;
@@ -821,10 +868,24 @@ const metricConfig = {
       {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-          <button type="button" onClick={handleExport} className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            {t('sales_analytics.export')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="text-sm font-semibold text-green-700 hover:text-green-800 transition-colors flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="text-sm font-semibold text-red-700 hover:text-red-800 transition-colors flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path><path d="M14 2v6h6"></path><path d="M9 12h1.5a1.5 1.5 0 0 1 0 3H9v-3z"></path><path d="M15 12h2"></path><path d="M15 15h2"></path></svg>
+              PDF
+            </button>
+          </div>
           <button type="button" className="text-brand-muted hover:text-brand-text transition-colors">
             <LayoutGrid size={18} />
           </button>

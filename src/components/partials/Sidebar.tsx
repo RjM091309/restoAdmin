@@ -303,7 +303,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => onTabChange('User Role')}
             />
             <SubItem
-              label={t('sidebar.control_panel_access', 'Control Panel Access')}
+              label={t('sidebar.control_panel_access', 'Control Panel')}
               active={activeTab === 'User Access'}
               onClick={() => onTabChange('User Access')}
             />

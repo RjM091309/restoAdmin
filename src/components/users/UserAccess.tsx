@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, Shield } from 'lucide-react';
+import { Loader2, Save, Shield, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUser } from '../../context/UserContext';
@@ -46,6 +46,80 @@ type RoleCrudPermissions = {
   };
 };
 
+const areBranchPermissionsEqual = (
+  a: Record<string, string[]>,
+  b: Record<string, string[]>,
+) => {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const aList = a[key] || [];
+    const bList = b[key] || [];
+    if (aList.length !== bList.length) return false;
+    const aSorted = [...aList].sort();
+    const bSorted = [...bList].sort();
+    for (let i = 0; i < aSorted.length; i += 1) {
+      if (aSorted[i] !== bSorted[i]) return false;
+    }
+  }
+  return true;
+};
+
+const areRolePermissionsEqual = (
+  a: RoleCrudPermissions | null,
+  b: RoleCrudPermissions | null,
+) => {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const aMod = a[key as CrudModuleKey] || {};
+    const bMod = b[key as CrudModuleKey] || {};
+    const actions: CrudActionKey[] = ['create', 'update', 'delete'];
+    for (const action of actions) {
+      if (!!aMod[action] !== !!bMod[action]) return false;
+    }
+  }
+  return true;
+};
+
+interface FancyCheckboxProps {
+  checked: boolean;
+  onChange: () => void;
+}
+
+const FancyCheckbox: React.FC<FancyCheckboxProps> = ({ checked, onChange }) => {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      role="switch"
+      aria-checked={checked}
+      className={cn(
+        'inline-flex h-6 w-10 items-center rounded-full border transition-all',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 cursor-pointer',
+        checked
+          ? 'bg-indigo-50 border-indigo-400'
+          : 'bg-gray-100 border-gray-200 hover:bg-gray-200 hover:border-indigo-300',
+      )}
+    >
+      <span
+        className={cn(
+          'inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold transition-transform shadow-sm',
+          checked
+            ? 'bg-indigo-500 text-white translate-x-4'
+            : 'bg-white text-gray-400 translate-x-0.5',
+        )}
+      >
+        {checked && <Check className="h-3 w-3" />}
+      </span>
+    </button>
+  );
+};
+
 export const UserAccess: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useUser();
@@ -55,15 +129,20 @@ export const UserAccess: React.FC = () => {
 
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [permissions, setPermissions] = useState<Record<string, string[]>>({});
+  const [initialPermissions, setInitialPermissions] = useState<Record<string, string[]>>({});
   const [selectedBranchId, setSelectedBranchId] = useState<string | number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // User-role CRUD permissions
   const [roles, setRoles] = useState<RoleSummary[]>([]);
-  const [rolesLoading, setRolesLoading] = useState(false);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [rolePermissions, setRolePermissions] = useState<RoleCrudPermissions | null>(null);
+  const [originalRolePermissions, setOriginalRolePermissions] =
+    useState<RoleCrudPermissions | null>(null);
+  const [rolePermissionsCache, setRolePermissionsCache] = useState<
+    Record<string, RoleCrudPermissions>
+  >({});
   const [rolePermSaving, setRolePermSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -81,7 +160,9 @@ export const UserAccess: React.FC = () => {
         code: b.BRANCH_CODE,
       }));
       setBranches(branchList);
-      setPermissions(data.permissions || {});
+      const perms = data.permissions || {};
+      setPermissions(perms);
+      setInitialPermissions(perms);
     } catch (e: any) {
       console.error('Failed to fetch sidebar permissions', e);
       setError(e.message || t('user_access.failed_to_load', 'Failed to load permissions'));
@@ -96,33 +177,6 @@ export const UserAccess: React.FC = () => {
     } as HeadersInit;
   };
 
-  const fetchRoles = useCallback(async () => {
-    setRolesLoading(true);
-    try {
-      const res = await fetch('/api/user-management/roles', {
-        headers: authHeadersWithToken(),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.message || json.error || `Failed to load roles (${res.status})`);
-      }
-      const data = json.data || json;
-      const mapped: RoleSummary[] = (Array.isArray(data) ? data : []).map((r: any) => ({
-        id: String(r.IDNo ?? r.id ?? r.ID ?? r.role_id),
-        name: r.ROLE || r.role || '—',
-      }));
-      setRoles(mapped);
-      if (!selectedRoleId && mapped.length > 0) {
-        setSelectedRoleId(String(mapped[0].id));
-      }
-    } catch (e: any) {
-      console.error('Failed to fetch roles for User Access', e);
-      toast.error(e.message || t('user_access.failed_to_load_roles', 'Failed to load roles'));
-    } finally {
-      setRolesLoading(false);
-    }
-  }, [selectedRoleId, t]);
-
   const fetchRolePermissions = useCallback(
     async (roleId: string) => {
       try {
@@ -135,8 +189,13 @@ export const UserAccess: React.FC = () => {
             json.message || json.error || `Failed to load role permissions (${res.status})`,
           );
         }
-        const data = json.data || json.permissions || {};
-        setRolePermissions(data as RoleCrudPermissions);
+        const data = (json.data || json.permissions || {}) as RoleCrudPermissions;
+        setRolePermissions(data);
+        setOriginalRolePermissions(data);
+        setRolePermissionsCache((prev) => ({
+          ...prev,
+          [roleId]: data,
+        }));
       } catch (e: any) {
         console.error('Failed to fetch role CRUD permissions', e);
         toast.error(
@@ -151,6 +210,48 @@ export const UserAccess: React.FC = () => {
     [t],
   );
 
+  const fetchRoles = useCallback(async () => {
+    try {
+      const res = await fetch('/api/user-management/roles', {
+        headers: authHeadersWithToken(),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.message || json.error || `Failed to load roles (${res.status})`);
+      }
+      const data = json.data || json;
+      const mapped: RoleSummary[] = (Array.isArray(data) ? data : []).map((r: any) => ({
+        id: String(r.IDNo ?? r.id ?? r.ID ?? r.role_id),
+        name: r.ROLE || r.role || '—',
+      }));
+      // Exclude Administrator / super admin role from CRUD matrix,
+      // since that role should always have full access and controls others.
+      const filtered = mapped.filter((role) => {
+        const name = role.name?.toLowerCase().trim();
+        const id = String(role.id).trim();
+        if (!name) return true;
+        if (name === 'administrator' || name === 'admin') return false;
+        if (id === '1') return false;
+        return true;
+      });
+      setRoles(filtered);
+      if (!selectedRoleId && filtered.length > 0) {
+        const firstId = String(filtered[0].id);
+        setSelectedRoleId(firstId);
+        const cached = rolePermissionsCache[firstId];
+        if (cached) {
+          setRolePermissions(cached);
+          setOriginalRolePermissions(cached);
+        } else {
+          fetchRolePermissions(firstId);
+        }
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch roles for User Access', e);
+      toast.error(e.message || t('user_access.failed_to_load_roles', 'Failed to load roles'));
+    }
+  }, [selectedRoleId, t, fetchRolePermissions, rolePermissionsCache]);
+
   useEffect(() => {
     if (isAdmin) {
       fetchData();
@@ -158,15 +259,9 @@ export const UserAccess: React.FC = () => {
     }
   }, [isAdmin, fetchData, fetchRoles]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    if (selectedRoleId) {
-      fetchRolePermissions(selectedRoleId);
-    } else if (roles.length > 0) {
-      setSelectedRoleId(String(roles[0].id));
-      fetchRolePermissions(String(roles[0].id));
-    }
-  }, [isAdmin, selectedRoleId, roles.length, fetchRolePermissions]);
+  // We fetch role CRUD permissions explicitly when:
+  // - roles first load (default role), and
+  // - user clicks on a role in the list (with cache check in the click handler).
 
   const selectedBranch = branches.find((b) => String(b.id) === String(selectedBranchId)) ?? null;
 
@@ -255,6 +350,7 @@ export const UserAccess: React.FC = () => {
       toast.success(
         t('user_access.role_permissions_saved', 'Role permissions updated.'),
       );
+      setOriginalRolePermissions(rolePermissions || {});
       if (selectedRoleId) {
         fetchRolePermissions(selectedRoleId);
       }
@@ -348,7 +444,7 @@ export const UserAccess: React.FC = () => {
                   {roles.length || '—'}
                 </div>
                 <div className="text-xs text-brand-muted mt-1">
-                  Configure CRUD permissions per role.
+                  Configure add, edit, and delete permissions per role.
                 </div>
               </div>
               <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
@@ -477,7 +573,10 @@ export const UserAccess: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={
+                          saving ||
+                          areBranchPermissionsEqual(permissions, initialPermissions)
+                        }
                         className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:opacity-70 transition-all cursor-pointer disabled:cursor-not-allowed"
                       >
                         {saving ? (
@@ -537,22 +636,18 @@ export const UserAccess: React.FC = () => {
                                         {SIDEBAR_FEATURE_LABELS[featureKey] ?? featureKey}
                                       </td>
                                       <td className="px-4 py-3 bg-white group-hover:bg-brand-bg/50 text-center">
-                                        <label className="inline-flex items-center justify-center cursor-pointer">
-                                          <input
-                                            type="checkbox"
-                                            checked={isChecked(
+                                        <FancyCheckbox
+                                          checked={isChecked(
+                                            selectedBranchId,
+                                            featureKey,
+                                          )}
+                                          onChange={() =>
+                                            togglePermission(
                                               selectedBranchId,
                                               featureKey,
-                                            )}
-                                            onChange={() =>
-                                              togglePermission(
-                                                selectedBranchId,
-                                                featureKey,
-                                              )
-                                            }
-                                            className="w-4 h-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
-                                          />
-                                        </label>
+                                            )
+                                          }
+                                        />
                                       </td>
                                     </tr>
                                   ))}
@@ -591,11 +686,7 @@ export const UserAccess: React.FC = () => {
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-auto custom-scrollbar p-2 space-y-1">
-              {rolesLoading ? (
-                <div className="px-4 py-6 text-sm text-brand-muted">
-                  Loading roles...
-                </div>
-              ) : roles.length === 0 ? (
+              {roles.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-brand-muted">
                   No roles found.
                 </div>
@@ -606,7 +697,17 @@ export const UserAccess: React.FC = () => {
                     <button
                       key={role.id}
                       type="button"
-                      onClick={() => setSelectedRoleId(String(role.id))}
+                      onClick={() => {
+                        const id = String(role.id);
+                        setSelectedRoleId(id);
+                        const cached = rolePermissionsCache[id];
+                        if (cached) {
+                          setRolePermissions(cached);
+                          setOriginalRolePermissions(cached);
+                        } else {
+                          fetchRolePermissions(id);
+                        }
+                      }}
                       className={cn(
                         'w-full text-left px-4 py-3 rounded-xl flex items-center justify-between cursor-pointer transition-colors',
                         active
@@ -624,121 +725,126 @@ export const UserAccess: React.FC = () => {
             </div>
           </section>
 
-          {/* Right: CRUD matrix */}
-          <section className="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
-            <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-black tracking-wide text-brand-text uppercase">
-                  Role Permissions
+          {/* Right: CRUD matrix (match branches layout to avoid scroll flicker) */}
+          <section className="flex-1 min-w-0">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
+              <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-black tracking-wide text-brand-text uppercase">
+                    Role Permissions
+                  </div>
+                  <div className="text-xs text-brand-muted mt-1">
+                    {selectedRoleId
+                      ? 'Toggle which modules this role can Add, Edit, or Delete.'
+                      : 'Select a role to edit its permissions.'}
+                  </div>
                 </div>
-                <div className="text-xs text-brand-muted mt-1">
-                  {selectedRoleId
-                    ? 'Toggle which modules this role can Add, Edit, or Delete.'
-                    : 'Select a role to edit its permissions.'}
+                {selectedRoleId && (
+                  <button
+                    type="button"
+                    onClick={handleSaveRolePermissions}
+                    disabled={
+                      rolePermSaving ||
+                      areRolePermissionsEqual(rolePermissions, originalRolePermissions)
+                    }
+                    className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
+                  >
+                    {rolePermSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    {rolePermSaving ? 'Saving...' : 'Save'}
+                  </button>
+                )}
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <div className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
+                  <AnimatePresence mode="wait">
+                    {!selectedRoleId ? (
+                      <motion.div
+                        key="role-empty"
+                        initial={{ opacity: 0, x: 24 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -24 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
+                        className="px-6 py-10 text-sm text-brand-muted"
+                      >
+                        Choose a role on the left to configure its CRUD permissions.
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key={`role-${selectedRoleId}`}
+                        initial={{ opacity: 0, x: 40 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -40 }}
+                        transition={{ duration: 0.24, ease: 'easeOut' }}
+                        className="p-0"
+                      >
+                        <div className="w-full">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className="bg-white border-b border-gray-100">
+                                  <th className="px-6 py-4 text-[13px] font-medium whitespace-nowrap bg-violet-50 text-brand-text uppercase tracking-wider border-r-[3px] border-white">
+                                    Module
+                                  </th>
+                                  <th className="px-6 py-4 text-[13px] font-medium whitespace-nowrap text-brand-muted uppercase tracking-wider w-24 text-center">
+                                    Add
+                                  </th>
+                                  <th className="px-6 py-4 text-[13px] font-medium whitespace-nowrap text-brand-muted uppercase tracking-wider w-24 text-center">
+                                    Edit
+                                  </th>
+                                  <th className="px-6 py-4 text-[13px] font-medium whitespace-nowrap text-brand-muted uppercase tracking-wider w-24 text-center">
+                                    Delete
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {CRUD_MODULES.map((mod) => {
+                                  const perms = (rolePermissions || {})[mod.key] || {};
+                                  return (
+                                    <tr key={mod.key} className="group transition-colors">
+                                      <td className="px-4 py-3 text-[13px] text-brand-text bg-violet-50 font-medium group-hover:bg-violet-100 border-r-[3px] border-white align-top">
+                                        <div className="font-medium text-brand-text">
+                                          {mod.label}
+                                        </div>
+                                        <div className="text-xs text-brand-muted mt-0.5">
+                                          {mod.description}
+                                        </div>
+                                      </td>
+                                      {(['create', 'update', 'delete'] as CrudActionKey[]).map(
+                                        (action) => (
+                                          <td
+                                            key={action}
+                                            className="px-4 py-3 bg-white group-hover:bg-brand-bg/50 text-center align-middle"
+                                          >
+                                            <FancyCheckbox
+                                              checked={!!perms[action]}
+                                              onChange={() =>
+                                                toggleRolePermission(mod.key, action)
+                                              }
+                                            />
+                                          </td>
+                                        ),
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-brand-muted mt-3 px-6 pb-4">
+                          Unchecking an action will hide the corresponding Add / Edit / Delete
+                          controls for this role in that module.
+                        </p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
-              {selectedRoleId && (
-                <button
-                  type="button"
-                  onClick={handleSaveRolePermissions}
-                  disabled={rolePermSaving}
-                  className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
-                >
-                  {rolePermSaving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  {rolePermSaving ? 'Saving...' : 'Save'}
-                </button>
-              )}
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-auto">
-              <AnimatePresence mode="wait">
-                {!selectedRoleId ? (
-                  <motion.div
-                    key="role-empty"
-                    initial={{ opacity: 0, x: 24 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -24 }}
-                    transition={{ duration: 0.18, ease: 'easeOut' }}
-                    className="px-6 py-10 text-sm text-brand-muted"
-                  >
-                    Choose a role on the left to configure its CRUD permissions.
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key={`role-${selectedRoleId}`}
-                    initial={{ opacity: 0, x: 40 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -40 }}
-                    transition={{ duration: 0.24, ease: 'easeOut' }}
-                    className="p-6"
-                  >
-                    <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="bg-gray-50 border-b border-gray-100">
-                            <th className="px-5 py-3 text-xs font-medium text-brand-muted uppercase tracking-wider">
-                              Module
-                            </th>
-                            <th className="px-5 py-3 text-xs font-medium text-brand-muted uppercase tracking-wider text-center">
-                              Add
-                            </th>
-                            <th className="px-5 py-3 text-xs font-medium text-brand-muted uppercase tracking-wider text-center">
-                              Edit
-                            </th>
-                            <th className="px-5 py-3 text-xs font-medium text-brand-muted uppercase tracking-wider text-center">
-                              Delete
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                          {CRUD_MODULES.map((mod) => {
-                            const perms = (rolePermissions || {})[mod.key] || {};
-                            return (
-                              <tr key={mod.key} className="hover:bg-brand-bg/40">
-                                <td className="px-5 py-3 text-sm">
-                                  <div className="font-medium text-brand-text">
-                                    {mod.label}
-                                  </div>
-                                  <div className="text-xs text-brand-muted mt-0.5">
-                                    {mod.description}
-                                  </div>
-                                </td>
-                                {(['create', 'update', 'delete'] as CrudActionKey[]).map(
-                                  (action) => (
-                                    <td
-                                      key={action}
-                                      className="px-5 py-3 text-center align-middle"
-                                    >
-                                      <label className="inline-flex items-center justify-center cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          className="w-4 h-4 rounded border-gray-300 text-brand-primary focus:ring-brand-primary"
-                                          checked={!!perms[action]}
-                                          onChange={() =>
-                                            toggleRolePermission(mod.key, action)
-                                          }
-                                        />
-                                      </label>
-                                    </td>
-                                  ),
-                                )}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-[11px] text-brand-muted mt-3">
-                      Unchecking an action will hide the corresponding Add / Edit / Delete
-                      controls for this role in that module.
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
           </section>
           </motion.div>
