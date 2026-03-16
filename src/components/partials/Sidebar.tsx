@@ -189,30 +189,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
         )}
-        {isSpecificBranch && hasFeature('expenses') && (
-          <SidebarItem
-            icon={DollarSign}
-            label={t('sidebar.expenses')}
-            active={activeTab === 'Expenses'}
-            onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('inventory') && (
-          <SidebarItem
-            icon={Package}
-            label={t('sidebar.inventory')}
-            active={activeTab === 'Inventory'}
-            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('menu_management') && (
-          <SidebarItem
-            icon={UtensilsCrossed}
-            label={t('sidebar.menu_management')}
-            active={activeTab === 'Menu Management'}
-            onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
         {(hasFeature('sales_report') || hasFeature('sales_analytics') || hasFeature('menu') || hasFeature('category') || hasFeature('payment_type') || hasFeature('receipt')) && (
         <SidebarItem
           icon={BarChart3}
@@ -258,6 +234,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             />
           )}
         </SidebarItem>
+        )}
+        {isSpecificBranch && hasFeature('expenses') && (
+          <SidebarItem
+            icon={DollarSign}
+            label={t('sidebar.expenses')}
+            active={activeTab === 'Expenses'}
+            onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && hasFeature('inventory') && (
+          <SidebarItem
+            icon={Package}
+            label={t('sidebar.inventory')}
+            active={activeTab === 'Inventory'}
+            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
         )}
         {isSpecificBranch && hasFeature('orders') && (
           <SidebarItem
