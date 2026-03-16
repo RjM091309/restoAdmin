@@ -44,6 +44,7 @@ import {
 import { getIngredients } from '../../services/ingredientService';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
+import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 // ---- Props & types ----
 interface MenuProps {
@@ -101,6 +102,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [formAvailable, setFormAvailable] = useState(true);
     const [formImage, setFormImage] = useState<File | null>(null);
     const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
+
+  const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
     // ==================== Data fetching ====================
     const refreshData = useCallback(async () => {
@@ -418,24 +421,28 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     >
                         <ListChecks size={16} />
                     </button>
-                    <button
-                        onClick={() => openEdit(item)}
-                        className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-                        title={t('menu_page.modal.edit_title')}
-                    >
-                        <Edit2 size={16} />
-                    </button>
-                    <button
-                        onClick={() => confirmDelete(item)}
-                        className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-                        title={t('menu_page.messages.delete_title')}
-                    >
-                        <Trash2 size={16} />
-                    </button>
+                    {canUpdate('menu_management') && (
+                      <button
+                          onClick={() => openEdit(item)}
+                          className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+                          title={t('menu_page.modal.edit_title')}
+                      >
+                          <Edit2 size={16} />
+                      </button>
+                    )}
+                    {canDelete('menu_management') && (
+                      <button
+                          onClick={() => confirmDelete(item)}
+                          className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+                          title={t('menu_page.messages.delete_title')}
+                      >
+                          <Trash2 size={16} />
+                      </button>
+                    )}
                 </div>
             ),
         },
-    ], [t]);
+    ], [t, canUpdate, canDelete]);
 
     // ==================== Modal form content ====================
     const modalContent = (
@@ -582,13 +589,15 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     className="w-44"
                                 />
                             </div>
-                            <button
-                                onClick={openCreate}
-                                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-                            >
-                                <Plus size={18} />
-                                {t('menu_page.new_item')}
-                            </button>
+                            {canCreate('menu_management') && (
+                              <button
+                                  onClick={openCreate}
+                                  className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
+                              >
+                                  <Plus size={18} />
+                                  {t('menu_page.new_item')}
+                              </button>
+                            )}
                         </div>
 
                         {/* Error */}

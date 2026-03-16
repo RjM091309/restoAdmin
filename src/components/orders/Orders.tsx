@@ -41,6 +41,7 @@ import {
 } from '../../services/orderService';
 import { getMenus, type MenuRecord } from '../../services/menuService';
 import { type Branch } from '../partials/Header';
+import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 // ---- Props & types ----
 interface OrdersProps {
@@ -113,6 +114,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailSelectedMenuId, setDetailSelectedMenuId] = useState<string>('');
     const [detailAddQty, setDetailAddQty] = useState<number>(1);
     const [detailAdding, setDetailAdding] = useState(false);
+
+  const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
     // ==================== Helper ====================
     const getStatusLabel = (status: number) => {
@@ -648,8 +651,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     >
                         <Eye size={16} />
                     </button>
-                    {/* Confirm button only when Pending; Cancel available until Settled/Cancelled */}
-                    {order.STATUS === ORDER_STATUS.PENDING && (
+                    {/* Confirm / Cancel are treated as updates on the order */}
+                    {canUpdate('orders') && order.STATUS === ORDER_STATUS.PENDING && (
                         <button
                             onClick={() => confirmUpdateStatus(order, ORDER_STATUS.CONFIRMED)}
                             disabled={statusSubmitting}
@@ -659,7 +662,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             <CheckCircle2 size={16} />
                         </button>
                     )}
-                    {order.STATUS !== ORDER_STATUS.SETTLED && order.STATUS !== ORDER_STATUS.CANCELLED && (
+                    {canUpdate('orders') &&
+                      order.STATUS !== ORDER_STATUS.SETTLED &&
+                      order.STATUS !== ORDER_STATUS.CANCELLED && (
                         <button
                             onClick={() => confirmUpdateStatus(order, ORDER_STATUS.CANCELLED)}
                             disabled={statusSubmitting}
@@ -672,7 +677,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 </div>
             ),
         },
-    ], [statusSubmitting, t]);
+    ], [statusSubmitting, t, canUpdate]);
 
     // ==================== RENDER ====================
     return (
@@ -731,13 +736,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     className="w-48"
                                 />
                             </div>
-                            <button
-                                onClick={openNewOrder}
-                                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-                            >
-                                <Plus size={18} />
-                                {t('orders.new_order')}
-                            </button>
+                            {canCreate('orders') && (
+                              <button
+                                  onClick={openNewOrder}
+                                  className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
+                              >
+                                  <Plus size={18} />
+                                  {t('orders.new_order')}
+                              </button>
+                            )}
                         </div>
 
                         {/* Error */}
@@ -1089,7 +1096,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         </div>
 
                         {/* Additional items (add menu to this order) */}
-                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                        {canUpdate('orders') && detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                             <div className="space-y-3 pt-2 border-t border-gray-100">
                                 <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">
                                     {t('orders.additional_items')}
@@ -1141,7 +1148,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </div>
                         )}
 
-                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                        {canUpdate('orders') && detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
                                 {detailOrder.STATUS === ORDER_STATUS.PENDING && (
                                     <button

@@ -167,6 +167,22 @@ router.put("/user-management/roles/:id", authenticateJWT, UserManagementControll
 // DELETE - Soft-delete role (archive)
 router.delete("/user-management/roles/:id", authenticateJWT, UserManagementController.deleteRole);
 
+// GET - Role CRUD permissions (add/edit/delete) per module
+// URL: /api/user-management/roles/:roleId/crud-permissions
+router.get(
+  "/user-management/roles/:roleId/crud-permissions",
+  authenticateJWT,
+  UserManagementController.getRoleCrudPermissions
+);
+
+// PUT - Update Role CRUD permissions
+// URL: /api/user-management/roles/:roleId/crud-permissions
+router.put(
+  "/user-management/roles/:roleId/crud-permissions",
+  authenticateJWT,
+  UserManagementController.updateRoleCrudPermissions
+);
+
 // GET - Get current user info
 // URL: /api/me
 // Headers: Authorization: Bearer <accessToken>

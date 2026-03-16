@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useUser } from '../../context/UserContext';
+import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 interface TableRow {
   id: string | number;
@@ -72,6 +73,8 @@ export const Tables: React.FC = () => {
     capacity: '',
     status: 1,
   });
+
+  const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
   const statusLabel = useCallback(
     (status: number) => {
@@ -340,20 +343,24 @@ export const Tables: React.FC = () => {
       className: 'text-right',
       render: (tbl) => (
         <div className="flex justify-end items-center gap-2">
-          <button
-            onClick={() => handleOpenEditModal(tbl)}
-            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            title={t('table.table_number')}
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            onClick={() => handleOpenDeleteModal(tbl)}
-            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title={t('table.delete_confirmation_title')}
-          >
-            <Trash2 size={16} />
-          </button>
+          {canUpdate('table_settings') && (
+            <button
+              onClick={() => handleOpenEditModal(tbl)}
+              className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+              title={t('table.table_number')}
+            >
+              <Edit2 size={16} />
+            </button>
+          )}
+          {canDelete('table_settings') && (
+            <button
+              onClick={() => handleOpenDeleteModal(tbl)}
+              className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+              title={t('table.delete_confirmation_title')}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -426,13 +433,15 @@ export const Tables: React.FC = () => {
                   className="w-48"
                 />
               </div>
-              <button
-                onClick={handleOpenAddModal}
-                className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-              >
-                <Plus size={18} />
-                {t('table.new_table')}
-              </button>
+              {canCreate('table_settings') && (
+                <button
+                  onClick={handleOpenAddModal}
+                  className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
+                >
+                  <Plus size={18} />
+                  {t('table.new_table')}
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-6">

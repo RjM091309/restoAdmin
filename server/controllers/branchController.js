@@ -2,6 +2,7 @@ const BranchModel = require('../models/branchModel');
 const UserBranchModel = require('../models/userBranchModel');
 const AuditLogModel = require('../models/auditLogModel');
 const UserModel = require('../models/userModel');
+const BranchSidebarPermissionModel = require('../models/branchSidebarPermissionModel');
 const ApiResponse = require('../utils/apiResponse');
 
 class BranchController {
@@ -435,6 +436,50 @@ class BranchController {
 		} catch (error) {
 			console.error('Error setting user branches:', error);
 			return ApiResponse.error(res, 'Failed to set user branches', 500, error.message);
+		}
+	}
+
+	// Get sidebar permissions for one branch (for sidebar filtering)
+	static async getSidebarPermissions(req, res) {
+		try {
+			const { id } = req.params;
+			const branchId = parseInt(id, 10);
+			if (isNaN(branchId)) {
+				return ApiResponse.badRequest(res, 'Invalid branch id');
+			}
+			const features = await BranchSidebarPermissionModel.getByBranchId(branchId);
+			return ApiResponse.success(res, { features }, 'Sidebar permissions retrieved');
+		} catch (error) {
+			console.error('Error fetching sidebar permissions:', error);
+			return ApiResponse.error(res, 'Failed to fetch sidebar permissions', 500, error.message);
+		}
+	}
+
+	// Get all branches' sidebar permissions (admin only, for User Access page)
+	static async getAllSidebarPermissions(req, res) {
+		try {
+			const branches = await BranchModel.getAllActive();
+			const branchIds = (branches || []).map((b) => b.IDNo);
+			const permissions = await BranchSidebarPermissionModel.getAllByBranches(branchIds);
+			return ApiResponse.success(res, { permissions, branches }, 'All sidebar permissions retrieved');
+		} catch (error) {
+			console.error('Error fetching all sidebar permissions:', error);
+			return ApiResponse.error(res, 'Failed to fetch sidebar permissions', 500, error.message);
+		}
+	}
+
+	// Update sidebar permissions for all branches (admin only)
+	static async updateSidebarPermissions(req, res) {
+		try {
+			const { permissions } = req.body || {};
+			if (!permissions || typeof permissions !== 'object') {
+				return ApiResponse.badRequest(res, 'permissions object is required');
+			}
+			await BranchSidebarPermissionModel.setAll(permissions);
+			return ApiResponse.success(res, null, 'Sidebar permissions updated successfully');
+		} catch (error) {
+			console.error('Error updating sidebar permissions:', error);
+			return ApiResponse.error(res, 'Failed to update sidebar permissions', 500, error.message);
 		}
 	}
 }

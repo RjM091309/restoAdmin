@@ -19,6 +19,7 @@ import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X, Search } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
+import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 type ExpensesMockProps = {
   selectedBranch: Branch | null;
@@ -88,6 +89,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     description: '',
     isManualStock: false,
   });
+
+  const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
@@ -394,30 +397,36 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 </>
               ) : (
                 <>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleStartAddSameItemAmount(row); }}
-                    className="p-1.5 rounded-lg text-brand-muted hover:text-green-600 hover:bg-green-50 transition-colors cursor-pointer"
-                    aria-label="Add same item with new amount"
-                  >
-                    <Plus size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleOpenEditExpense(row); }}
-                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                    aria-label="Edit expense"
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setExpenseToDelete(row); }}
-                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                    aria-label="Delete expense"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {canCreate('expenses') && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleStartAddSameItemAmount(row); }}
+                      className="p-1.5 rounded-lg text-brand-muted hover:text-green-600 hover:bg-green-50 transition-colors cursor-pointer"
+                      aria-label="Add same item with new amount"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                  {canUpdate('expenses') && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleOpenEditExpense(row); }}
+                      className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                      aria-label="Edit expense"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  )}
+                  {canDelete('expenses') && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setExpenseToDelete(row); }}
+                      className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                      aria-label="Delete expense"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -1007,14 +1016,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Main Category</div>
               <div className="text-xs text-brand-muted mt-1">Main Category first, then Sub Category.</div>
             </div>
-            <button
-              type="button"
-              onClick={handleOpenAddOperation}
-              className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
-              aria-label="Add main category"
-            >
-              +
-            </button>
+            {canCreate('expenses') && (
+              <button
+                type="button"
+                onClick={handleOpenAddOperation}
+                className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
+                aria-label="Add main category"
+              >
+                +
+              </button>
+            )}
           </div>
         </div>
 
@@ -1052,16 +1063,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                     </span>
                   </div>
                 </button>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
-                  <button
-                    type="button"
-                    onClick={(e) => handleOpenEditOperation(e, op)}
-                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                    aria-label="Edit main category"
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                </div>
+                {canUpdate('expenses') && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenEditOperation(e, op)}
+                      className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                      aria-label="Edit main category"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1075,15 +1088,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Sub Category</div>
               <div className="text-xs text-brand-muted mt-1">Select a Sub Category to show its items.</div>
             </div>
-            <button
-              type="button"
-              onClick={handleOpenAddCategory}
-              className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              aria-label="Add sub category"
-              disabled={!selectedOperationId}
-            >
-              +
-            </button>
+            {canCreate('expenses') && (
+              <button
+                type="button"
+                onClick={handleOpenAddCategory}
+                className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                aria-label="Add sub category"
+                disabled={!selectedOperationId}
+              >
+                +
+              </button>
+            )}
           </div>
         </div>
 
@@ -1155,27 +1170,31 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                             </span>
                           </div>
                         </button>
-                        {cat.masterCategoryId && (
+                        {cat.masterCategoryId && (canUpdate('expenses') || canDelete('expenses')) && (
                           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
-                            <button
-                              type="button"
-                              onClick={(e) => handleOpenEditCategory(e, cat)}
-                              className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                              aria-label="Edit sub category"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setCategoryToDelete(cat);
-                              }}
-                              className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                              aria-label="Delete sub category"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {canUpdate('expenses') && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenEditCategory(e, cat)}
+                                className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                aria-label="Edit sub category"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                            )}
+                            {canDelete('expenses') && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCategoryToDelete(cat);
+                                }}
+                                className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                aria-label="Delete sub category"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1219,14 +1238,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                       className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-44 outline-none"
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleOpenAddExpense}
-                    className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
-                  >
-                    <Plus size={16} />
-                    New Item
-                  </button>
+                  {canCreate('expenses') && (
+                    <button
+                      type="button"
+                      onClick={handleOpenAddExpense}
+                      className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
+                    >
+                      <Plus size={16} />
+                      New Item
+                    </button>
+                  )}
                 </div>
               )}
             </div>

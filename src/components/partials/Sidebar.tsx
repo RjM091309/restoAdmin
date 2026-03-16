@@ -23,6 +23,8 @@ type SidebarProps = {
   activeTab: string;
   onTabChange: (tab: string) => void;
   selectedBranch: Branch | null;
+  /** When set, only show sidebar items whose key is in this array (per-branch permissions from User Access). */
+  allowedFeatures?: string[] | null;
 };
 
 type SidebarItemProps = {
@@ -122,7 +124,7 @@ const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void 
   </button>
 );
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, selectedBranch }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, selectedBranch, allowedFeatures }) => {
   // Menu tab is only visible when a specific branch is selected (not 'all' or null)
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const { logout, user } = useUser();
@@ -130,6 +132,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   const { t } = useTranslation();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
   const [salesReportExpanded, setSalesReportExpanded] = useState(false);
+  // When allowedFeatures is set (per-branch permissions), only show items in the list; otherwise show all for branch
+  const hasFeature = (key: string) =>
+    allowedFeatures == null ? true : allowedFeatures.includes(key);
   const isSalesReportActive =
     activeTab === 'Sales Analytics' ||
     activeTab === 'Menu' ||
@@ -176,48 +181,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
       </div>
 
       <nav className="flex-1 space-y-0.5">
+        {hasFeature('dashboard') && (
         <SidebarItem
           icon={LayoutDashboard}
           label={t('sidebar.dashboard')}
           active={activeTab === 'Dashboard'}
           onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
-
-        <SidebarItem
-          icon={BarChart3}
-          label={t('sidebar.sales_report')}
-          active={isSalesReportActive}
-          isExpandable
-          isExpanded={salesReportExpanded}
-          onClick={handleSalesReportToggle}
-          >
-          <SubItem
-            label={t('sidebar.sales_analytics')}
-            active={activeTab === 'Sales Analytics'}
-            onClick={() => onTabChange('Sales Analytics')}
-          />
-          <SubItem
-            label={t('sidebar.menu')}
-            active={activeTab === 'Menu'}
-            onClick={() => onTabChange('Menu')}
-          />
-          <SubItem
-            label={t('sidebar.category')}
-            active={activeTab === 'Category'}
-            onClick={() => onTabChange('Category')}
-          />
-          <SubItem
-            label={t('sidebar.payment_type')}
-            active={activeTab === 'Payment type'}
-            onClick={() => onTabChange('Payment type')}
-          />
-          <SubItem
-            label={t('sidebar.receipt')}
-            active={activeTab === 'Receipt'}
-            onClick={() => onTabChange('Receipt')}
-          />
-        </SidebarItem>
-        {isSpecificBranch && (
+        )}
+        {isSpecificBranch && hasFeature('expenses') && (
           <SidebarItem
             icon={DollarSign}
             label={t('sidebar.expenses')}
@@ -225,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
-        {isSpecificBranch && (
+        {isSpecificBranch && hasFeature('inventory') && (
           <SidebarItem
             icon={Package}
             label={t('sidebar.inventory')}
@@ -233,7 +205,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
-        {isSpecificBranch && (
+        {isSpecificBranch && hasFeature('menu_management') && (
           <SidebarItem
             icon={UtensilsCrossed}
             label={t('sidebar.menu_management')}
@@ -241,24 +213,69 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
           />
         )}
-        
-        {isSpecificBranch && (
-          <>
-            <SidebarItem
-              icon={ClipboardList}
-              label={t('sidebar.orders')}
-              active={activeTab === 'Orders'}
-              onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+        {(hasFeature('sales_report') || hasFeature('sales_analytics') || hasFeature('menu') || hasFeature('category') || hasFeature('payment_type') || hasFeature('receipt')) && (
+        <SidebarItem
+          icon={BarChart3}
+          label={t('sidebar.sales_report')}
+          active={isSalesReportActive}
+          isExpandable
+          isExpanded={salesReportExpanded}
+          onClick={handleSalesReportToggle}
+        >
+          {hasFeature('sales_analytics') && (
+            <SubItem
+              label={t('sidebar.sales_analytics')}
+              active={activeTab === 'Sales Analytics'}
+              onClick={() => onTabChange('Sales Analytics')}
             />
-            <SidebarItem
-              icon={CreditCard}
-              label={t('Billing')}
-              active={activeTab === 'Billing'}
-              onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          )}
+          {hasFeature('menu') && (
+            <SubItem
+              label={t('sidebar.menu')}
+              active={activeTab === 'Menu'}
+              onClick={() => onTabChange('Menu')}
             />
-          </>
+          )}
+          {hasFeature('category') && (
+            <SubItem
+              label={t('sidebar.category')}
+              active={activeTab === 'Category'}
+              onClick={() => onTabChange('Category')}
+            />
+          )}
+          {hasFeature('payment_type') && (
+            <SubItem
+              label={t('sidebar.payment_type')}
+              active={activeTab === 'Payment type'}
+              onClick={() => onTabChange('Payment type')}
+            />
+          )}
+          {hasFeature('receipt') && (
+            <SubItem
+              label={t('sidebar.receipt')}
+              active={activeTab === 'Receipt'}
+              onClick={() => onTabChange('Receipt')}
+            />
+          )}
+        </SidebarItem>
         )}
-        {isSpecificBranch && (
+        {isSpecificBranch && hasFeature('orders') && (
+          <SidebarItem
+            icon={ClipboardList}
+            label={t('sidebar.orders')}
+            active={activeTab === 'Orders'}
+            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && hasFeature('billing') && (
+          <SidebarItem
+            icon={CreditCard}
+            label={t('Billing')}
+            active={activeTab === 'Billing'}
+            onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
+          />
+        )}
+        {isSpecificBranch && hasFeature('ingredients') && (
           <SidebarItem
             icon={FlaskConical}
             label="Ingredients"
@@ -286,7 +303,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => onTabChange('User Role')}
             />
             <SubItem
-              label={t('sidebar.user_access')}
+              label={t('sidebar.control_panel_access', 'Control Panel Access')}
               active={activeTab === 'User Access'}
               onClick={() => onTabChange('User Access')}
             />
@@ -297,12 +314,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
             />
           </SidebarItem>
         )}
+        {hasFeature('table_settings') && (
         <SidebarItem
           icon={ClipboardList}
           label="Table Settings"
           active={activeTab === 'Tables'}
           onClick={() => { onTabChange('Tables'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
         />
+        )}
       </nav>
 
       <div className="mt-auto px-4">

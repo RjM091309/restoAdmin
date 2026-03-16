@@ -1,6 +1,7 @@
 const UserModel = require('../models/userModel');
 const UserRoleModel = require('../models/userRoleModel');
 const UserBranchModel = require('../models/userBranchModel');
+const RoleCrudPermissionModel = require('../models/roleCrudPermissionModel');
 const argon2 = require('argon2');
 
 class UserManagementController {
@@ -25,6 +26,49 @@ class UserManagementController {
     static async getRoles(req, res) {
         // Alias for API consistency
         return UserManagementController.getUserRoleData(req, res);
+    }
+
+    // --- Role CRUD Permissions (per-module add/edit/delete) ---
+
+    static async getRoleCrudPermissions(req, res) {
+        try {
+            const roleId = parseInt(req.params.roleId);
+            if (!roleId || Number.isNaN(roleId)) {
+                return res.status(400).json({ success: false, error: 'Invalid role ID' });
+            }
+
+            const data = await RoleCrudPermissionModel.getByRoleId(roleId);
+            return res.json({ success: true, data });
+        } catch (error) {
+            console.error('Error fetching role CRUD permissions:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Error fetching role CRUD permissions',
+            });
+        }
+    }
+
+    static async updateRoleCrudPermissions(req, res) {
+        try {
+            const roleId = parseInt(req.params.roleId);
+            if (!roleId || Number.isNaN(roleId)) {
+                return res.status(400).json({ success: false, error: 'Invalid role ID' });
+            }
+
+            const permissions = req.body?.permissions || req.body;
+            await RoleCrudPermissionModel.setForRole(roleId, permissions || {});
+
+            return res.json({
+                success: true,
+                message: 'Role CRUD permissions updated successfully',
+            });
+        } catch (error) {
+            console.error('Error updating role CRUD permissions:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Error updating role CRUD permissions',
+            });
+        }
     }
 
     static async addUserRole(req, res) {

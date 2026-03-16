@@ -250,18 +250,23 @@ export const Header: React.FC<HeaderProps> = ({
     window.open(url.toString(), '_blank', 'noopener,noreferrer');
   };
 
+  // Prevent showing duplicated breadcrumbs like "User Management / User Management"
+  const cleanedBreadcrumbs = breadcrumbs.filter(
+    (crumb, idx) => idx === 0 || crumb !== breadcrumbs[idx - 1]
+  );
+
   return (
     <>
       <header className="relative z-40 h-20 bg-brand-bg px-8 flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-3xl font-bold flex items-center gap-2">
-            {breadcrumbs.length > 0 ? (
-              breadcrumbs.map((crumb, idx) => (
+            {cleanedBreadcrumbs.length > 0 ? (
+              cleanedBreadcrumbs.map((crumb, idx) => (
                 <React.Fragment key={idx}>
-                  <span className={idx === breadcrumbs.length - 1 ? "text-brand-text" : "text-brand-muted"}>
+                  <span className={idx === cleanedBreadcrumbs.length - 1 ? "text-brand-text" : "text-brand-muted"}>
                     {labelForTab(crumb)}
                   </span>
-                  {idx < breadcrumbs.length - 1 && (
+                  {idx < cleanedBreadcrumbs.length - 1 && (
                     <span className="text-brand-muted text-xl mx-1">/</span>
                   )}
                 </React.Fragment>

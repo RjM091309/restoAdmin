@@ -19,6 +19,7 @@ import {
 import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
 import { UOM_OPTIONS, getUnitLabel } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
+import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 
 type IngredientsProps = {
   selectedBranch: Branch | null;
@@ -37,6 +38,8 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [form, setForm] = useState({ name: '', categoryId: '', unit: 'pcs' });
+
+  const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const branchId = String(selectedBranch?.id || '');
@@ -178,20 +181,24 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
       header: 'Action',
       render: (row) => (
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleOpenEdit(row)}
-            className="p-2 rounded-lg text-brand-muted hover:bg-brand-primary/10 hover:text-brand-primary transition-colors"
-            title="Edit"
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            onClick={() => setToDelete(row)}
-            className="p-2 rounded-lg text-brand-muted hover:bg-red-50 hover:text-red-500 transition-colors"
-            title="Delete"
-          >
-            <Trash2 size={16} />
-          </button>
+          {canUpdate('ingredients') && (
+            <button
+              onClick={() => handleOpenEdit(row)}
+              className="p-2 rounded-lg text-brand-muted hover:bg-brand-primary/10 hover:text-brand-primary transition-colors"
+              title="Edit"
+            >
+              <Edit2 size={16} />
+            </button>
+          )}
+          {canDelete('ingredients') && (
+            <button
+              onClick={() => setToDelete(row)}
+              className="p-2 rounded-lg text-brand-muted hover:bg-red-50 hover:text-red-500 transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -247,13 +254,15 @@ export const Ingredients: React.FC<IngredientsProps> = ({ selectedBranch }) => {
                   <RefreshCw size={16} className={cn(isSyncing && 'animate-spin')} />
                   Sync from Expenses
                 </button>
-                <button
-                  onClick={handleOpenAdd}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90 font-bold text-sm shadow-lg shadow-brand-primary/30 transition-all"
-                >
-                  <Plus size={18} />
-                  Add Ingredient
-                </button>
+                {canCreate('ingredients') && (
+                  <button
+                    onClick={handleOpenAdd}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-primary text-white hover:bg-brand-primary/90 font-bold text-sm shadow-lg shadow-brand-primary/30 transition-all"
+                  >
+                    <Plus size={18} />
+                    Add Ingredient
+                  </button>
+                )}
               </div>
             </div>
 

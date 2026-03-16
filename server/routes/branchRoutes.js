@@ -21,6 +21,12 @@ router.post('/set-current', authenticate, BranchController.setCurrentBranch);
 // Get branches (admin sees all; non-admin sees assigned)
 router.get('/', authenticate, BranchController.getAll);
 
+// Sidebar permissions (User Access): get all branches' permissions (admin only)
+router.get('/sidebar-permissions/all', authenticate, requireAdmin, BranchController.getAllSidebarPermissions);
+router.put('/sidebar-permissions', authenticate, requireAdmin, BranchController.updateSidebarPermissions);
+// Get sidebar permissions for one branch (for sidebar filtering)
+router.get('/:id/sidebar-permissions', authenticate, BranchController.getSidebarPermissions);
+
 // Admin-only: view branches for a user (used by web UI)
 router.get('/user/:userId/branches', authenticate, requireAdmin, BranchController.getBranchesByUser);
 

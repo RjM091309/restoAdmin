@@ -35,6 +35,7 @@ import { ExpensesMock } from './components/expenses/ExpensesMock';
 import { Ingredients } from './components/ingredients/Ingredients';
 import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
+import { UserAccess } from './components/users/UserAccess';
 import { Branches } from './components/users/Branches';
 import { Tables } from './components/users/Tables';
 import { Menu } from './components/menu/Menu';
@@ -361,6 +362,7 @@ export default function App() {
   const [isSystemSettingsOpen, setIsSystemSettingsOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(() => parseBranchFromSearch(location.search));
+  const [branchSidebarPermissions, setBranchSidebarPermissions] = useState<string[] | null>(null);
   const [inventoryCrumbById, setInventoryCrumbById] = useState<Record<string, string>>({});
 
   const handleInventoryCategoryResolved = useCallback((id: string, name: string) => {
@@ -375,6 +377,25 @@ export default function App() {
       return resolved;
     });
   }, [location.search]);
+
+  // Fetch sidebar permissions for selected branch (so sidebar shows only allowed items per branch)
+  useEffect(() => {
+    const branchId = selectedBranch?.id;
+    if (branchId == null || branchId === 'all') {
+      setBranchSidebarPermissions(null);
+      return;
+    }
+    const token = localStorage.getItem('token');
+    fetch(`/branch/${branchId}/sidebar-permissions`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        const list = json?.data?.features ?? json?.features;
+        setBranchSidebarPermissions(Array.isArray(list) ? list : null);
+      })
+      .catch(() => setBranchSidebarPermissions(null));
+  }, [selectedBranch?.id]);
 
   // Parse active tab from URL path
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -473,7 +494,12 @@ export default function App() {
     <ProtectedRoute>
       <Toaster position="top-right" richColors />
       <div className="flex h-screen overflow-hidden bg-brand-bg">
-        <Sidebar activeTab={displayActiveTab} onTabChange={handleTabChange} selectedBranch={selectedBranch} />
+        <Sidebar
+          activeTab={displayActiveTab}
+          onTabChange={handleTabChange}
+          selectedBranch={selectedBranch}
+          allowedFeatures={branchSidebarPermissions}
+        />
 
         <main className="flex-1 flex flex-col overflow-hidden">
           <Header
@@ -598,9 +624,8 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="flex items-center justify-center h-64 text-brand-muted font-bold"
                   >
-                    User Access Management is coming soon...
+                    <UserAccess />
                   </motion.div>
                 } />
                 <Route path="/users/branches" element={
