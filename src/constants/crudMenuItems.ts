@@ -1,19 +1,12 @@
-export type CrudModuleKey =
-  | 'expenses'
-  | 'menu_management'
-  | 'orders'
-  | 'ingredients'
-  | 'table_settings';
-
 export type CrudActionKey = 'create' | 'update' | 'delete';
 
-export interface CrudModuleConfig {
-  key: CrudModuleKey;
+export interface CrudModuleConfig<K extends string = string> {
+  key: K;
   label: string;
   description: string;
 }
 
-export const CRUD_MODULES: CrudModuleConfig[] = [
+export const CRUD_MODULES = [
   {
     key: 'expenses',
     label: 'Expenses',
@@ -39,7 +32,9 @@ export const CRUD_MODULES: CrudModuleConfig[] = [
     label: 'Table Settings',
     description: 'Restaurant tables and capacities.',
   },
-];
+] as const satisfies readonly CrudModuleConfig[];
+
+export type CrudModuleKey = (typeof CRUD_MODULES)[number]['key'];
 
 export const CRUD_ACTION_LABELS: Record<CrudActionKey, string> = {
   create: 'Add',

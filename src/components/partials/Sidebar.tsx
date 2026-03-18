@@ -18,6 +18,7 @@ import {
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
 import { type Branch } from './Header';
+import { SIDEBAR_FEATURES, type SidebarFeatureConfig } from '../../constants/sidebarFeatures';
 
 type SidebarProps = {
   activeTab: string;
@@ -135,12 +136,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   // When allowedFeatures is set (per-branch permissions), only show items in the list; otherwise show all for branch
   const hasFeature = (key: string) =>
     allowedFeatures == null ? true : allowedFeatures.includes(key);
-  const isSalesReportActive =
-    activeTab === 'Sales Analytics' ||
-    activeTab === 'Menu' ||
-    activeTab === 'Category' ||
-    activeTab === 'Payment type' ||
-    activeTab === 'Receipt';
+  const salesReportFeature = SIDEBAR_FEATURES.find((f) => f.key === 'sales_report') ?? null;
+  const salesReportTabs = (salesReportFeature?.children || [])
+    .map((c) => c.tab)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  const isSalesReportActive = salesReportTabs.includes(activeTab);
 
   const isUserMgmtActive =
     activeTab.startsWith('User') ||
@@ -168,6 +168,32 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
     });
   };
 
+  const iconMap: Record<string, SidebarItemProps['icon']> = {
+    LayoutDashboard,
+    BarChart3,
+    DollarSign,
+    Package,
+    UtensilsCrossed,
+    ClipboardList,
+    CreditCard,
+    FlaskConical,
+    Users,
+  };
+
+  const getSidebarLabel = (item: SidebarFeatureConfig) =>
+    item.i18nKey ? t(item.i18nKey, item.label) : item.label;
+
+  const isItemVisible = (item: SidebarFeatureConfig) => {
+    if (item.kind === 'admin-only') return false;
+    if (item.requiresSpecificBranch && !isSpecificBranch) return false;
+    if (item.kind === 'item') return hasFeature(item.key);
+    if (item.kind === 'group') {
+      const children = item.children || [];
+      return children.some((c) => c.kind === 'item' && hasFeature(c.key));
+    }
+    return false;
+  };
+
   return (
     <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
       <div className="px-8 mb-10 flex items-center gap-3">
@@ -181,108 +207,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
       </div>
 
       <nav className="flex-1 space-y-0.5">
-        {hasFeature('dashboard') && (
-        <SidebarItem
-          icon={LayoutDashboard}
-          label={t('sidebar.dashboard')}
-          active={activeTab === 'Dashboard'}
-          onClick={() => { onTabChange('Dashboard'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-        />
-        )}
-        {(hasFeature('sales_report') || hasFeature('sales_analytics') || hasFeature('menu') || hasFeature('category') || hasFeature('payment_type') || hasFeature('receipt')) && (
-        <SidebarItem
-          icon={BarChart3}
-          label={t('sidebar.sales_report')}
-          active={isSalesReportActive}
-          isExpandable
-          isExpanded={salesReportExpanded}
-          onClick={handleSalesReportToggle}
-        >
-          {hasFeature('sales_analytics') && (
-            <SubItem
-              label={t('sidebar.sales_analytics')}
-              active={activeTab === 'Sales Analytics'}
-              onClick={() => onTabChange('Sales Analytics')}
+        {SIDEBAR_FEATURES.filter(isItemVisible).map((item) => {
+          if (item.kind === 'group') {
+            const children = (item.children || []).filter(
+              (c) => c.kind === 'item' && hasFeature(c.key),
+            );
+            const Icon = item.icon ? iconMap[item.icon] : BarChart3;
+            return (
+              <SidebarItem
+                key={item.key}
+                icon={Icon}
+                label={getSidebarLabel(item)}
+                active={isSalesReportActive}
+                isExpandable
+                isExpanded={salesReportExpanded}
+                onClick={handleSalesReportToggle}
+              >
+                {children.map((child) => (
+                  <SubItem
+                    key={child.key}
+                    label={getSidebarLabel(child)}
+                    active={activeTab === child.tab}
+                    onClick={() => {
+                      if (child.tab) onTabChange(child.tab);
+                    }}
+                  />
+                ))}
+              </SidebarItem>
+            );
+          }
+
+          const Icon = item.icon ? iconMap[item.icon] : LayoutDashboard;
+          return (
+            <SidebarItem
+              key={item.key}
+              icon={Icon}
+              label={getSidebarLabel(item)}
+              active={item.tab ? activeTab === item.tab : false}
+              onClick={() => {
+                if (item.tab) onTabChange(item.tab);
+                setUserMgmtExpanded(false);
+                setSalesReportExpanded(false);
+              }}
             />
-          )}
-          {hasFeature('menu') && (
-            <SubItem
-              label={t('sidebar.menu')}
-              active={activeTab === 'Menu'}
-              onClick={() => onTabChange('Menu')}
-            />
-          )}
-          {hasFeature('category') && (
-            <SubItem
-              label={t('sidebar.category')}
-              active={activeTab === 'Category'}
-              onClick={() => onTabChange('Category')}
-            />
-          )}
-          {hasFeature('payment_type') && (
-            <SubItem
-              label={t('sidebar.payment_type')}
-              active={activeTab === 'Payment type'}
-              onClick={() => onTabChange('Payment type')}
-            />
-          )}
-          {hasFeature('receipt') && (
-            <SubItem
-              label={t('sidebar.receipt')}
-              active={activeTab === 'Receipt'}
-              onClick={() => onTabChange('Receipt')}
-            />
-          )}
-        </SidebarItem>
-        )}
-        {isSpecificBranch && hasFeature('expenses') && (
-          <SidebarItem
-            icon={DollarSign}
-            label={t('sidebar.expenses')}
-            active={activeTab === 'Expenses'}
-            onClick={() => { onTabChange('Expenses'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('inventory') && (
-          <SidebarItem
-            icon={Package}
-            label={t('sidebar.inventory')}
-            active={activeTab === 'Inventory'}
-            onClick={() => { onTabChange('Inventory'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('menu_management') && (
-          <SidebarItem
-            icon={UtensilsCrossed}
-            label={t('sidebar.menu_management')}
-            active={activeTab === 'Menu Management'}
-            onClick={() => { onTabChange('Menu Management'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('orders') && (
-          <SidebarItem
-            icon={ClipboardList}
-            label={t('sidebar.orders')}
-            active={activeTab === 'Orders'}
-            onClick={() => { onTabChange('Orders'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('billing') && (
-          <SidebarItem
-            icon={CreditCard}
-            label={t('Billing')}
-            active={activeTab === 'Billing'}
-            onClick={() => { onTabChange('Billing'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
-        {isSpecificBranch && hasFeature('ingredients') && (
-          <SidebarItem
-            icon={FlaskConical}
-            label="Ingredients"
-            active={activeTab === 'Ingredients'}
-            onClick={() => { onTabChange('Ingredients'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-          />
-        )}
+          );
+        })}
         {isAdmin && !isSpecificBranch && (
           <SidebarItem
             icon={Users}
@@ -313,14 +282,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => onTabChange('Branches')}
             />
           </SidebarItem>
-        )}
-        {hasFeature('table_settings') && (
-        <SidebarItem
-          icon={ClipboardList}
-          label="Table Settings"
-          active={activeTab === 'Tables'}
-          onClick={() => { onTabChange('Tables'); setUserMgmtExpanded(false); setSalesReportExpanded(false); }}
-        />
         )}
       </nav>
 
