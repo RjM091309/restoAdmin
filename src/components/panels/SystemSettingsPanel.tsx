@@ -542,6 +542,11 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             const res = await fetch('/api/loyverse/sync', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ incremental: true }) });
             const data = await res.json();
             if (data.success) {
+                if (data.data?.alreadyRunning) {
+                    if (data.data?.status) setStatus(data.data.status);
+                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
+                    return;
+                }
                 const s = data.data?.stats;
                 const msg = s
                     ? `${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
@@ -565,6 +570,11 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             });
             const data = await res.json();
             if (data.success) {
+                if (data.data?.alreadyRunning) {
+                    if (data.data?.status) setStatus(data.data.status);
+                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
+                    return;
+                }
                 const s = data.data?.stats;
                 const msg = s
                     ? `Full sync: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
@@ -603,6 +613,11 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             });
             const data = await res.json();
             if (data.success) {
+                if (data.data?.alreadyRunning) {
+                    if (data.data?.status) setStatus(data.data.status);
+                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
+                    return;
+                }
                 const s = data.data?.stats;
                 const msg = s
                     ? `Sync Jan 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`

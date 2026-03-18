@@ -22,6 +22,11 @@ class LoyverseService {
 		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // 30 seconds default
 		this.autoSyncLimit = parseInt(process.env.LOYVERSE_AUTO_SYNC_LIMIT) || 500;
 		this.syncSince = process.env.LOYVERSE_SYNC_SINCE || '';
+		// Prevent noisy debug logs: remember which raw receipts we already logged (in-memory).
+		// Only used for RAW RECEIPT debug line; does not affect syncing behavior.
+		this.rawReceiptLogCache = new Map(); // key -> lastSeenMs
+		this.rawReceiptLogTtlMs = parseInt(process.env.LOYVERSE_RAW_RECEIPT_LOG_TTL_MS, 10) || (24 * 60 * 60 * 1000); // 24h
+		this.rawReceiptLogMax = parseInt(process.env.LOYVERSE_RAW_RECEIPT_LOG_MAX, 10) || 5000;
 		// Safety limits (0 = no limit). Useful when you have very large datasets.
 		this.maxSyncReceipts = parseInt(process.env.LOYVERSE_SYNC_MAX_RECEIPTS) || 0;
 		this.maxSyncPages = parseInt(process.env.LOYVERSE_SYNC_MAX_PAGES) || 0;
@@ -51,6 +56,38 @@ class LoyverseService {
 		if (!raw) return null;
 		const d = new Date(raw);
 		return Number.isNaN(d.getTime()) ? null : d;
+	}
+
+	_makeRawReceiptLogKey(receipt) {
+		const receiptNumber = receipt?.receipt_number || 'unknown';
+		const stamp = receipt?.updated_at || receipt?.created_at || receipt?.receipt_date || '';
+		const total = receipt?.total_money ?? '';
+		const refundFor = receipt?.refund_for ?? '';
+		return `${receiptNumber}|${stamp}|${total}|${refundFor}`;
+	}
+
+	_shouldLogRawReceipt(receipt) {
+		const now = Date.now();
+		const key = this._makeRawReceiptLogKey(receipt);
+		const last = this.rawReceiptLogCache.get(key);
+
+		if (last != null && (now - last) < this.rawReceiptLogTtlMs) {
+			return false;
+		}
+
+		this.rawReceiptLogCache.set(key, now);
+
+		// Lightweight cleanup to keep memory bounded
+		if (this.rawReceiptLogCache.size > this.rawReceiptLogMax) {
+			const minKeep = Math.floor(this.rawReceiptLogMax * 0.8);
+			const entries = Array.from(this.rawReceiptLogCache.entries());
+			entries.sort((a, b) => a[1] - b[1]); // oldest first
+			for (let i = 0; i < entries.length - minKeep; i++) {
+				this.rawReceiptLogCache.delete(entries[i][0]);
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -236,19 +273,6 @@ class LoyverseService {
 
 			const targetBranchId = branchId || this.defaultBranchId;
 			const receiptNumber = receipt.receipt_number;
-
-			// Debug: log key fields from raw receipt so we can verify how data maps into DB
-			console.log('[Loyverse Sync][RAW RECEIPT]', JSON.stringify({
-				receipt_number: receipt.receipt_number,
-				receipt_type: receipt.receipt_type,
-				transaction_type: receipt.transaction_type,
-				refund_for: receipt.refund_for,
-				total_money: receipt.total_money,
-				total_tax: receipt.total_tax,
-				total_discount: receipt.total_discount,
-				receipt_date: receipt.receipt_date,
-				created_at: receipt.created_at,
-			}));
 			let orderNo;
 			let existingOrderId;
 			const receiptType = String(receipt.receipt_type || '').toUpperCase();
@@ -355,6 +379,21 @@ class LoyverseService {
 			// For regular sales receipts or other types
 			orderNo = `LOY-${receiptNumber}`; // Prefix to identify Loyverse orders
 			existingOrderId = await this.orderExists(orderNo);
+
+			// Debug: log raw receipt only when it's new to our DB (prevents spam on periodic sync)
+			if (!existingOrderId && this._shouldLogRawReceipt(receipt)) {
+				console.log('[Loyverse Sync][RAW RECEIPT]', JSON.stringify({
+					receipt_number: receipt.receipt_number,
+					receipt_type: receipt.receipt_type,
+					transaction_type: receipt.transaction_type,
+					refund_for: receipt.refund_for,
+					total_money: receipt.total_money,
+					total_tax: receipt.total_tax,
+					total_discount: receipt.total_discount,
+					receipt_date: receipt.receipt_date,
+					created_at: receipt.created_at,
+				}));
+			}
 
 			if (existingOrderId && receipt.cancelled_at) {
 				// Handle cancellation
