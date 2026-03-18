@@ -135,10 +135,15 @@ const mapCategoryRecord = (row: CategoryApiRecord): MenuCategory => ({
 
 // ---- Public API ----
 
-export const getMenus = async (branchId?: string): Promise<MenuRecord[]> => {
+export const getMenus = async (
+    branchId?: string,
+    options?: { includeDescription?: boolean }
+): Promise<MenuRecord[]> => {
     // Always send branch_id so the backend doesn't fall back to session branch
+    const includeDescription = options?.includeDescription === true;
     const params: Record<string, string> = {
         branch_id: branchId && branchId !== 'all' ? branchId : 'all',
+        include_description: includeDescription ? '1' : '0',
     };
     const response = await fetch(buildUrl('/menus', params), {
         credentials: 'include',
@@ -146,6 +151,15 @@ export const getMenus = async (branchId?: string): Promise<MenuRecord[]> => {
     });
     const data = await handleResponse<MenuApiRecord[]>(response);
     return data.map(mapMenuRecord);
+};
+
+export const getMenuById = async (id: string): Promise<Pick<MenuRecord, 'description'>> => {
+    const response = await fetch(buildUrl(`/menu/${id}`), {
+        credentials: 'include',
+        headers: authHeaders(),
+    });
+    const data = await handleResponse<{ MENU_DESCRIPTION?: string | null }>(response);
+    return { description: data?.MENU_DESCRIPTION ?? null };
 };
 
 export const getMenuCategories = async (branchId?: string): Promise<MenuCategory[]> => {

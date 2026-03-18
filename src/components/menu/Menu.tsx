@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
-    Filter,
     Plus,
     Edit2,
     Trash2,
@@ -15,15 +14,15 @@ import {
     Loader2,
     ImageIcon,
     ListChecks,
-    FolderPlus,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { DataTable, type ColumnDef } from '../ui/DataTable';
+import { type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { Select2 } from '../ui/Select2';
-import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
+import { SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import {
     getMenus,
+    getMenuById,
     getMenuCategories,
     createMenu,
     createMenuCategory,
@@ -65,6 +64,7 @@ type SwalState = {
 export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
+    const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
     // ----- Data -----
     const [menus, setMenus] = useState<MenuRecord[]>([]);
@@ -116,7 +116,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setError(null);
         try {
             const [menuData, catData] = await Promise.all([
-                getMenus(branchId),
+                getMenus(branchId, { includeDescription: false }),
                 getMenuCategories(branchId),
             ]);
             setMenus(Array.isArray(menuData) ? menuData : []);
@@ -140,7 +140,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const filteredMenus = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
         return menus.filter((m) => {
-            const matchSearch = !term || m.name.toLowerCase().includes(term) || (m.description && m.description.toLowerCase().includes(term)) || m.categoryName.toLowerCase().includes(term);
+            const matchSearch =
+                !term ||
+                m.name.toLowerCase().includes(term) ||
+                m.categoryName.toLowerCase().includes(term);
             const matchCat = selectedCategory === 'all' || m.categoryId === selectedCategory;
             const matchAvail = availFilter === 'all' || (availFilter === 'available' ? m.isAvailable : !m.isAvailable);
             return matchSearch && matchCat && matchAvail;
@@ -148,12 +151,37 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     }, [menus, searchTerm, selectedCategory, availFilter]);
 
     // ==================== Stats ====================
-    const stats = useMemo(() => ({
-        total: menus.length,
-        available: menus.filter((m) => m.isAvailable).length,
-        unavailable: menus.filter((m) => !m.isAvailable).length,
-        categories: new Set(menus.map((m) => m.categoryId).filter(Boolean)).size,
-    }), [menus]);
+    const stats = useMemo(() => {
+        const total = menus.length;
+        const selectedCount = filteredMenus.length;
+        const available = menus.filter((m) => m.isAvailable).length;
+        return { total, selectedCount, available };
+    }, [menus, filteredMenus]);
+
+    const selectedCategoryLabel = useMemo(() => {
+        if (selectedCategory === 'all') return t('menu_page.all_categories');
+        return categories.find((c) => c.id === selectedCategory)?.name ?? t('menu_page.all_categories');
+    }, [categories, selectedCategory, t]);
+
+    const ITEMS_PER_PAGE = 50;
+    const shouldPaginate = filteredMenus.length > ITEMS_PER_PAGE;
+    const [currentPage, setCurrentPage] = useState(1);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [selectedCategory, availFilter]);
+
+    const pagedMenus = useMemo(() => {
+        if (!shouldPaginate) return filteredMenus;
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        return filteredMenus.slice(startIndex, endIndex);
+    }, [currentPage, filteredMenus, shouldPaginate]);
+
+    const totalPages = useMemo(() => {
+        if (!shouldPaginate) return 1;
+        return Math.max(1, Math.ceil(filteredMenus.length / ITEMS_PER_PAGE));
+    }, [filteredMenus.length, shouldPaginate]);
 
     // ==================== Form helpers ====================
     const resetForm = () => {
@@ -166,15 +194,23 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setIsCreateOpen(true);
     };
 
-    const openEdit = (item: MenuRecord) => {
+    const openEdit = async (item: MenuRecord) => {
         setFormName(item.name);
-        setFormDesc(item.description || '');
+        setFormDesc('');
         setFormCategory(item.categoryId || '');
         setFormPrice(String(item.price));
         setFormAvailable(item.isAvailable);
         setFormImage(null);
         setFormImagePreview(item.imageUrl ? resolveImageUrl(item.imageUrl) : null);
         setEditingItem(item);
+
+        // Menu list fetch intentionally omits description; load it on-demand for editing
+        try {
+            const full = await getMenuById(item.id);
+            setFormDesc(full.description || '');
+        } catch {
+            // Leave description empty if it fails to load
+        }
     };
 
     const closeModal = () => {
@@ -420,7 +456,6 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     </div>
                     <div className="min-w-0">
                         <p className="text-sm font-bold text-brand-text truncate">{item.name}</p>
-                        {item.description && <p className="text-[10px] text-brand-muted truncate max-w-[200px]">{item.description}</p>}
                     </div>
                 </div>
             ),
@@ -567,93 +602,65 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     );
 
     // ==================== RENDER ====================
-    return (
-        <div className="pt-6">
-            <AnimatePresence mode="wait">
-                {loading ? (
-                    <motion.div
-                        key="skeleton"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.3 }}
-                        className="space-y-8"
-                    >
-                        <SkeletonPageHeader />
-                        <SkeletonStatCards />
-                        <div className="bg-white rounded-2xl shadow-sm p-6">
-                            <SkeletonTable columns={5} rows={10} />
+    const menuSkeleton = (
+        <div className="pt-6 overflow-x-hidden space-y-6 animate-in fade-in duration-300">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <SkeletonCard className="rounded-2xl" />
+                <SkeletonCard className="rounded-2xl" />
+            </div>
+            <div className="flex gap-6 items-stretch min-h-[560px]">
+                <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                    <div className="px-5 py-4 border-b border-gray-100">
+                        <div className="space-y-2">
+                            <div className="h-4 w-28 bg-gray-100 rounded" />
+                            <div className="h-3 w-40 bg-gray-100 rounded" />
                         </div>
-                    </motion.div>
-                ) : (
-                    <motion.div
-                        key="content"
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5, ease: 'easeOut' }}
-                        className="space-y-8"
-                    >
-                        {/* Top bar: Filter + Search + Action */}
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="bg-white p-3 rounded-xl shadow-sm">
-                                    <Filter size={18} className="text-brand-muted" />
-                                </div>
-                                <div className="relative">
-                                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
-                                    <input
-                                        type="text"
-                                        placeholder={t('menu_page.search_placeholder')}
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="bg-white border-none rounded-xl pl-10 pr-4 py-2.5 text-base w-80 shadow-sm focus:ring-2 focus:ring-brand-orange/20 outline-none"
-                                    />
-                                </div>
-                                <Select2
-                                    options={[{ value: 'all', label: t('menu_page.all_categories') }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
-                                    value={selectedCategory}
-                                    onChange={(v) => setSelectedCategory(v ? String(v) : 'all')}
-                                    placeholder={t('menu_page.all_categories')}
-                                    className="w-48"
-                                />
-                                <Select2
-                                    options={[
-                                        { value: 'all', label: t('menu_page.all_status') },
-                                        { value: 'available', label: t('menu_page.status.available') },
-                                        { value: 'unavailable', label: t('menu_page.status.unavailable') },
-                                    ]}
-                                    value={availFilter}
-                                    onChange={(v) => setAvailFilter(v ? String(v) : 'all')}
-                                    placeholder={t('menu_page.all_status')}
-                                    className="w-44"
-                                />
-                            </div>
-                            <div className="flex items-center gap-3">
-                                {canCreate('menu_management') && (
-                                    <>
-                                        <button
-                                            type="button"
-                                            onClick={openCategoryModal}
-                                            className="bg-white border-2 border-brand-primary text-brand-primary px-5 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-sm hover:bg-brand-primary/5 transition-all"
-                                        >
-                                            <FolderPlus size={18} />
-                                            {t('categories.add_new_category')}
-                                        </button>
-                                        <button
-                                            onClick={openCreate}
-                                            className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-                                        >
-                                            <Plus size={18} />
-                                            {t('menu_page.new_item')}
-                                        </button>
-                                    </>
-                                )}
+                    </div>
+                    <div className="p-4 space-y-2">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                            <div key={i} className="h-12 w-full rounded-xl bg-gray-100" />
+                        ))}
+                    </div>
+                </section>
+                <section className="flex-1 min-w-0">
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
+                        <div className="px-6 py-5 border-b border-gray-100">
+                            <div className="space-y-2">
+                                <div className="h-4 w-32 bg-gray-100 rounded" />
+                                <div className="h-3 w-56 bg-gray-100 rounded" />
                             </div>
                         </div>
+                        <div className="p-6">
+                            <SkeletonTable columns={4} rows={8} showToolbar={false} />
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    );
 
+    return (
+        <SkeletonTransition
+            loading={loading}
+            minDelayMs={400}
+            fadeOutMs={250}
+            skeleton={menuSkeleton}
+            className="block"
+        >
+            <>
+                {!isSpecificBranch && (
+                    <div className="pt-6">
+                        <div className="bg-white rounded-2xl shadow-sm p-6 text-brand-muted font-bold">
+                            Please select a specific branch (not “All Branches”) to manage menu items.
+                        </div>
+                    </div>
+                )}
+
+                {isSpecificBranch && (
+                    <div className="pt-6 overflow-x-hidden">
                         {/* Error */}
                         {error && (
-                            <div className="flex items-start gap-3 bg-red-50 border border-red-100 text-red-700 p-4 rounded-2xl">
+                            <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-100 text-red-700 p-4 rounded-2xl">
                                 <AlertTriangle size={18} className="mt-0.5 shrink-0" />
                                 <div className="text-sm">
                                     <p className="font-bold">{t('menu_page.messages.load_error')}</p>
@@ -662,38 +669,280 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                             </div>
                         )}
 
-                        {/* Stat Cards */}
-                        <div className="grid grid-cols-4 gap-6">
-                            <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">{t('menu_page.stats.total_items')}</p>
-                                <h3 className="text-3xl font-bold">{stats.total}</h3>
-                            </div>
-                            <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">{t('menu_page.stats.available')}</p>
-                                <h3 className="text-3xl font-bold text-green-500">{stats.available}</h3>
-                            </div>
-                            <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">{t('menu_page.stats.unavailable')}</p>
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-3xl font-bold text-red-500">{stats.unavailable}</h3>
-                                    {stats.unavailable > 0 && <AlertTriangle size={18} className="text-red-500" />}
+                        {/* Stats (Expenses-style cards) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">
+                                            {t('menu_page.stats.total_items')}
+                                        </div>
+                                        <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
+                                            {stats.total}
+                                        </div>
+                                        <div className="text-xs text-brand-muted mt-1">
+                                            {t('menu_page.stats.available')}: <span className="font-bold text-brand-text">{stats.available}</span>
+                                        </div>
+                                    </div>
+                                    <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
+                                        <div className="h-5 w-5 rounded-full bg-brand-primary/70" />
+                                    </div>
                                 </div>
                             </div>
-                            <div className="bg-white p-6 rounded-2xl shadow-sm">
-                                <p className="text-brand-muted text-sm font-medium mb-1">{t('menu_page.stats.categories')}</p>
-                                <h3 className="text-3xl font-bold">{stats.categories}</h3>
+
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">
+                                            Selected Total
+                                        </div>
+                                        <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
+                                            {stats.selectedCount}
+                                        </div>
+                                        <div className="text-xs text-brand-muted mt-1">
+                                            Category: <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>
+                                        </div>
+                                    </div>
+                                    <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
+                                        <div className="h-5 w-5 rounded-full bg-brand-orange/70" />
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Data Table */}
-                        <DataTable
-                            data={filteredMenus}
-                            columns={columns}
-                            keyExtractor={(item) => item.id}
-                        />
-                    </motion.div>
+                        <div className="flex gap-6 items-stretch min-h-[560px]">
+                            {/* Main Category (Categories list) */}
+                            <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                <div className="px-5 py-4 border-b border-gray-100">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-black tracking-wide text-brand-text uppercase">
+                                                Main Category
+                                            </div>
+                                            <div className="text-xs text-brand-muted mt-1">
+                                                Select a Category to show its menu items.
+                                            </div>
+                                        </div>
+                                        {canCreate('menu_management') && (
+                                            <button
+                                                type="button"
+                                                onClick={openCategoryModal}
+                                                className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
+                                                aria-label="Add category"
+                                                disabled={branchId === 'all'}
+                                            >
+                                                +
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                    {[
+                                        { id: 'all', name: t('menu_page.all_categories') },
+                                        ...categories.map((c) => ({ id: c.id, name: c.name })),
+                                    ].map((cat) => {
+                                        const active = cat.id === selectedCategory;
+                                        const count =
+                                            cat.id === 'all'
+                                                ? menus.length
+                                                : menus.filter((m) => m.categoryId === cat.id).length;
+                                        return (
+                                            <div
+                                                key={cat.id}
+                                                className={cn(
+                                                    'group flex items-center rounded-xl transition-colors relative',
+                                                    active ? 'bg-brand-primary/10' : 'hover:bg-brand-bg',
+                                                )}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedCategory(cat.id)}
+                                                    className={cn(
+                                                        'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
+                                                        active ? 'text-brand-primary' : 'text-brand-text',
+                                                    )}
+                                                >
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className={cn('flex-1 font-bold break-words', active ? '' : 'font-semibold')}>
+                                                            {cat.name}
+                                                        </span>
+                                                        <span
+                                                            className={cn(
+                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                                                active ? 'bg-brand-primary/15 text-brand-primary' : 'bg-gray-100 text-brand-muted',
+                                                            )}
+                                                        >
+                                                            {count}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+
+                            {/* Table Items */}
+                            <section className="flex-1 min-w-0">
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden h-full flex flex-col">
+                                    <div className="px-6 py-5 border-b border-gray-100">
+                                        <div className="flex items-end justify-between gap-4">
+                                            <div>
+                                                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Table Items</div>
+                                                <div className="text-xs text-brand-muted mt-1">
+                                                    Showing items for <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>.
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="relative">
+                                                    <Search
+                                                        size={14}
+                                                        className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={searchTerm}
+                                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                                        placeholder="Search item..."
+                                                        className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-44 outline-none"
+                                                    />
+                                                </div>
+                                                <Select2
+                                                    options={[
+                                                        { value: 'all', label: t('menu_page.all_status') },
+                                                        { value: 'available', label: t('menu_page.status.available') },
+                                                        { value: 'unavailable', label: t('menu_page.status.unavailable') },
+                                                    ]}
+                                                    value={availFilter}
+                                                    onChange={(v) => setAvailFilter(v ? String(v) : 'all')}
+                                                    placeholder={t('menu_page.all_status')}
+                                                    className="w-44"
+                                                />
+                                                {canCreate('menu_management') && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={openCreate}
+                                                        className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
+                                                    >
+                                                        <Plus size={16} />
+                                                        {t('menu_page.new_item')}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex-1 min-h-0 overflow-hidden">
+                                        <div className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
+                                            <AnimatePresence mode="wait">
+                                                <motion.div
+                                                    key={`table-${selectedCategory}-${availFilter}`}
+                                                    initial={{ opacity: 0, x: 40 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    exit={{ opacity: 0, x: -40 }}
+                                                    transition={{ duration: 0.24, ease: 'easeOut' }}
+                                                    className="w-full"
+                                                >
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full text-left">
+                                                            <thead>
+                                                                <tr className="bg-white border-b border-gray-100">
+                                                                    {columns.map((col, i) => (
+                                                                        <th
+                                                                            key={String(col.header)}
+                                                                            className={cn(
+                                                                                'px-6 py-4 text-[13px] font-medium whitespace-nowrap',
+                                                                                i === 0
+                                                                                    ? 'bg-violet-50 text-brand-text uppercase tracking-wider'
+                                                                                    : 'text-brand-muted uppercase tracking-wider',
+                                                                                col.className,
+                                                                                col.headerClassName,
+                                                                                i === 0 && 'border-r-[3px] border-white',
+                                                                            )}
+                                                                        >
+                                                                            {col.header}
+                                                                        </th>
+                                                                    ))}
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-gray-50">
+                                                                {pagedMenus.map((row) => (
+                                                                    <tr key={row.id} className="group transition-colors">
+                                                                        {columns.map((col, i) => (
+                                                                            <td
+                                                                                key={i}
+                                                                                className={cn(
+                                                                                    'px-4 py-2 text-[11px] text-brand-text',
+                                                                                    i === 0
+                                                                                        ? 'bg-violet-50 font-medium group-hover:bg-violet-100'
+                                                                                        : 'bg-white group-hover:bg-brand-bg/50',
+                                                                                    col.className,
+                                                                                    col.cellClassName,
+                                                                                    i === 0 && 'border-r-[3px] border-white',
+                                                                                )}
+                                                                            >
+                                                                                {col.render
+                                                                                    ? col.render(row)
+                                                                                    : col.accessorKey
+                                                                                        ? (row[col.accessorKey] as React.ReactNode)
+                                                                                        : null}
+                                                                            </td>
+                                                                        ))}
+                                                                    </tr>
+                                                                ))}
+
+                                                                {pagedMenus.length === 0 && (
+                                                                    <tr>
+                                                                        <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted">
+                                                                            No data
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+
+                                                    {shouldPaginate && (
+                                                        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white">
+                                                            <div className="text-sm text-brand-muted">
+                                                                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{' '}
+                                                                {Math.min(currentPage * ITEMS_PER_PAGE, filteredMenus.length)} of {filteredMenus.length}{' '}
+                                                                entries
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                                                    disabled={currentPage === 1}
+                                                                    className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                                                >
+                                                                    Prev
+                                                                </button>
+                                                                <div className="px-3 py-2 rounded-lg text-sm font-black bg-brand-primary text-white">
+                                                                    {currentPage}
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                                                                    disabled={currentPage === totalPages}
+                                                                    className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                                                >
+                                                                    Next
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </motion.div>
+                                            </AnimatePresence>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
                 )}
-            </AnimatePresence>
+            </>
 
             {/* Create / Edit Modal */}
             <Modal
@@ -986,6 +1235,6 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div>
+        </SkeletonTransition>
     );
 };
