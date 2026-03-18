@@ -62,6 +62,11 @@ export type CreateOrderPayload = {
     items?: CreateOrderItemPayload[];
 };
 
+export type CreateManualSettledOrderPayload = CreateOrderPayload & {
+    payment_method?: string;
+    payment_ref?: string | null;
+};
+
 // ---- API internals ----
 
 type ApiResponse<T> = {
@@ -191,6 +196,26 @@ export async function createOrder(payload: CreateOrderPayload): Promise<{ id: nu
         body: JSON.stringify(payload),
     });
     const json = (await response.json()) as ApiResponse<{ id: number; order_no: string }> & { insufficient?: InventoryInsufficientItem[] };
+    if (!response.ok || !json.success) {
+        if (json.insufficient?.length) {
+            throw new InventoryInsufficientError(json.error || 'Insufficient inventory', json.insufficient);
+        }
+        throw new Error(json.error || 'Request failed');
+    }
+    return json.data!;
+}
+
+export async function createManualSettledOrder(payload: CreateManualSettledOrderPayload): Promise<{ id: number; order_no: string; status: number }> {
+    const response = await fetch(buildUrl('/orders/manual-settled'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify(payload),
+    });
+    const json = (await response.json()) as ApiResponse<{ id: number; order_no: string; status: number }> & { insufficient?: InventoryInsufficientItem[] };
     if (!response.ok || !json.success) {
         if (json.insufficient?.length) {
             throw new InventoryInsufficientError(json.error || 'Insufficient inventory', json.insufficient);

@@ -1110,6 +1110,11 @@
 		"close": "닫기"
 	},
 	"orders": {
+		"manual_order": "수동 주문",
+		"manual_order_helper": "결제(청구) 처리 없이 즉시 정산(완료)되는 주문을 생성합니다.",
+		"create_manual_order": "수동 주문 생성(즉시 정산)",
+		"create_manual_order_btn": "생성 및 정산",
+		"manual_order_payment_helper": "이 주문은 즉시 결제 완료 및 정산 완료로 표시됩니다.",
 		"new_order": "새 주문",
 		"edit_order": "주문 편집",
 		"order_items": "주문 항목",
@@ -1202,6 +1207,7 @@
 			"add_items_text": "항목을 하나 이상 추가하세요.",
 			"created_title": "생성됨!",
 			"created_text": "주문 {{orderNo}}가 생성되었습니다.",
+			"manual_created_text": "수동 주문 {{orderNo}}가 생성되고 정산되었습니다.",
 			"create_failed": "주문 생성 실패",
 			"ok": "확인"
 		}

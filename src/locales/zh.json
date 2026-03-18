@@ -1110,6 +1110,11 @@
 		"close": "关闭"
 	},
 	"orders": {
+		"manual_order": "手工订单",
+		"manual_order_helper": "创建后立即结算，无需在账单里再处理付款。",
+		"create_manual_order": "创建手工订单（立即结算）",
+		"create_manual_order_btn": "创建并结算",
+		"manual_order_payment_helper": "该订单将立即标记为已付款并已结算。",
 		"new_order": "新订单",
 		"edit_order": "编辑订单",
 		"order_items": "订单项目",

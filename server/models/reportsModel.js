@@ -675,6 +675,20 @@ class ReportsModel {
 	// Aggregates sales by goods/product
 	static async syncOrderToGoodsSalesReport(orderId) {
 		try {
+			// NO-OP if legacy table doesn't exist (newer DBs removed it).
+			// Do a lightweight existence check up-front to avoid noisy logs.
+			try {
+				await pool.execute(`SELECT 1 FROM goods_sales_report LIMIT 1`);
+			} catch (e) {
+				if (e && e.code === 'ER_NO_SUCH_TABLE') {
+					return {
+						success: false,
+						message: 'goods_sales_report table has been removed; syncOrderToGoodsSalesReport is disabled.',
+					};
+				}
+				throw e;
+			}
+
 			// Get order details with billing info
 			const [orderRows] = await pool.execute(`
 				SELECT 
@@ -808,6 +822,10 @@ class ReportsModel {
 
 			return { success: true, message: 'Order synced to goods_sales_report', goods: goodsMap.size };
 		} catch (error) {
+			// Avoid spamming logs when legacy tables are missing.
+			if (error && error.code === 'ER_NO_SUCH_TABLE') {
+				return { success: false, message: 'goods_sales_report table has been removed; syncOrderToGoodsSalesReport is disabled.' };
+			}
 			console.error('Error syncing order to goods_sales_report:', error);
 			// Don't throw - this is a background sync operation
 			return { success: false, message: error.message };

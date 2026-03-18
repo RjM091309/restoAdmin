@@ -1109,6 +1109,11 @@
 		"close": "閉じる"
 	},
 	"orders": {
+		"manual_order": "手動注文",
+		"manual_order_helper": "請求処理なしで、即時に決済済み（Settled）として作成します。",
+		"create_manual_order": "手動注文を作成（即時決済）",
+		"create_manual_order_btn": "作成して決済",
+		"manual_order_payment_helper": "この注文は即時に支払済み・決済済みとして記録されます。",
 		"new_order": "新規注文",
 		"edit_order": "注文編集",
 		"order_items": "注文項目",

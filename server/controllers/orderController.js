@@ -12,6 +12,7 @@ const TableModel = require('../models/tableModel');
 const NotificationModel = require('../models/notificationModel');
 const InventoryDeductionService = require('../services/inventoryDeductionService');
 const InventoryDeductionModel = require('../models/inventoryDeductionModel');
+const ReportsModel = require('../models/reportsModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
 
@@ -157,6 +158,184 @@ class OrderController {
 		} catch (error) {
 			console.error('Error creating order:', error);
 			return ApiResponse.error(res, 'Failed to create order', 500, error.message);
+		}
+	}
+
+	/**
+	 * Manual order: create order that is immediately SETTLED.
+	 * This bypasses the Billing UI flow by:
+	 * - creating order + order_items
+	 * - validating and deducting inventory (same as CONFIRMED flow)
+	 * - setting order status to SETTLED (1)
+	 * - creating/updating billing record as PAID (1) with amount_paid = amount_due
+	 * - recording a billing transaction row
+	 * - syncing reports tables (best-effort)
+	 */
+	static async createManualSettled(req, res) {
+		try {
+			// Branch resolution:
+			// - Admin (permissions=1): allow explicit branch_id from body to override session branch.
+			// - Non-admin: do NOT allow overriding; always use session/user branch.
+			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
+			const explicitBranchIdRaw = req.body?.BRANCH_ID ?? req.body?.branch_id ?? null;
+			const sessionBranchIdRaw = req.session?.branch_id ?? req.user?.branch_id ?? req.query?.branch_id ?? null;
+			const resolvedBranchId = (isAdmin && explicitBranchIdRaw != null && String(explicitBranchIdRaw).trim() !== '' && String(explicitBranchIdRaw) !== 'all')
+				? explicitBranchIdRaw
+				: sessionBranchIdRaw;
+
+			if (!resolvedBranchId) {
+				return ApiResponse.badRequest(res, 'Branch ID is required. Please select a branch first.');
+			}
+
+			const items = Array.isArray(req.body.ORDER_ITEMS)
+				? req.body.ORDER_ITEMS
+				: (Array.isArray(req.body.items) ? req.body.items : []);
+			if (!items.length) {
+				return ApiResponse.badRequest(res, 'At least one order item is required');
+			}
+
+			const userId = req.session?.user_id || req.user?.user_id;
+			const paymentMethod = (req.body.payment_method || req.body.PAYMENT_METHOD || 'CASH');
+			const paymentRef = req.body.payment_ref || req.body.PAYMENT_REF || 'Manual order (settled)';
+
+			// Validate inventory against the full items list (same as create)
+			const validation = await InventoryDeductionService.validateOrderItemsForInventory(resolvedBranchId, items);
+			if (!validation.valid) {
+				return res.status(200).json({
+					success: false,
+					error: 'Insufficient inventory for order items',
+					insufficient: validation.insufficient,
+				});
+			}
+
+			const payload = {
+				BRANCH_ID: resolvedBranchId,
+				ORDER_NO: (req.body.ORDER_NO || req.body.order_no || '').trim(),
+				TABLE_ID: req.body.TABLE_ID ?? req.body.table_id ?? null,
+				ORDER_TYPE: req.body.ORDER_TYPE ?? req.body.order_type ?? null,
+				// create as CONFIRMED first so inventory deductions get STATUS=2,
+				// then we will mark them settled and update order to STATUS=1
+				STATUS: 2,
+				SUBTOTAL: parseFloat(req.body.SUBTOTAL ?? req.body.subtotal) || 0,
+				TAX_AMOUNT: parseFloat(req.body.TAX_AMOUNT ?? req.body.tax_amount) || 0,
+				SERVICE_CHARGE: parseFloat(req.body.SERVICE_CHARGE ?? req.body.service_charge) || 0,
+				DISCOUNT_AMOUNT: parseFloat(req.body.DISCOUNT_AMOUNT ?? req.body.discount_amount) || 0,
+				GRAND_TOTAL: parseFloat(req.body.GRAND_TOTAL ?? req.body.grand_total) || 0,
+				user_id: userId,
+			};
+
+			if (!payload.ORDER_NO) {
+				return ApiResponse.badRequest(res, 'Order number is required');
+			}
+
+			// Normalize items to match expected schema in OrderItemsModel
+			const itemsNormalized = items.map((it) => {
+				const qty = Number(it.qty ?? it.QTY) || 1;
+				const unitPrice = Number(it.unit_price ?? it.UNIT_PRICE) || 0;
+				return {
+					menu_id: Number(it.menu_id ?? it.MENU_ID),
+					qty,
+					unit_price: unitPrice,
+					line_total: Number(it.line_total ?? it.LINE_TOTAL) || (qty * unitPrice),
+					status: it.status != null ? Number(it.status) : 3,
+					remarks: it.remarks ?? it.REMARKS ?? null,
+				};
+			});
+
+			const orderId = await OrderModel.create(payload);
+			await OrderItemsModel.createForOrder(orderId, itemsNormalized, userId);
+
+			// Deduct inventory and record inventory_deductions at STATUS=2, then mark as settled
+			await InventoryDeductionService.deductOnOrderConfirmed(Number(orderId), userId);
+			await InventoryDeductionModel.updateStatusByOrderId(Number(orderId), 1, userId);
+
+			// Mark order as SETTLED
+			await OrderModel.updateStatus(orderId, 1, userId);
+
+			// Billing: create or update to PAID
+			const amountDue = Number(payload.GRAND_TOTAL) || 0;
+			const existingBilling = await BillingModel.getByOrderId(orderId);
+			if (existingBilling) {
+				await BillingModel.updateForOrder(orderId, {
+					status: 1,
+					amount_due: amountDue,
+					amount_paid: amountDue,
+					payment_method: paymentMethod,
+					payment_ref: paymentRef || null,
+				});
+			} else {
+				await BillingModel.createForOrder({
+					branch_id: payload.BRANCH_ID,
+					order_id: orderId,
+					payment_method: paymentMethod,
+					amount_due: amountDue,
+					amount_paid: amountDue,
+					payment_ref: paymentRef || null,
+					status: 1,
+					user_id: userId,
+				});
+			}
+
+			try {
+				await BillingModel.recordTransaction({
+					order_id: orderId,
+					payment_method: paymentMethod,
+					amount_paid: amountDue,
+					payment_ref: paymentRef || null,
+					user_id: userId,
+				});
+			} catch (e) {
+				console.error('[MANUAL ORDER] Failed to record billing transaction:', e?.message || e);
+			}
+
+			// Table becomes AVAILABLE immediately (since settled)
+			if (payload.TABLE_ID) {
+				try {
+					await TableModel.updateStatus(payload.TABLE_ID, 1);
+				} catch (e) {
+					console.error('[MANUAL ORDER] Failed to update table status:', e?.message || e);
+				}
+			}
+
+			// Best-effort report sync:
+			// - Legacy tables like sales_hourly_summary may not exist in newer DBs.
+			// - Guard each optional sync function so missing tables/functions don't spam logs.
+			try {
+				if (ReportsModel && typeof ReportsModel.syncOrderToGoodsSalesReport === 'function') {
+					await ReportsModel.syncOrderToGoodsSalesReport(orderId);
+				}
+				// Keep backward-compatible no-op sync if present (won't throw).
+				if (ReportsModel && typeof ReportsModel.syncOrderToSalesCategoryReport === 'function') {
+					await ReportsModel.syncOrderToSalesCategoryReport(orderId);
+				}
+			} catch (e) {
+				console.warn('[MANUAL ORDER] Report sync skipped/failed:', e?.message || e);
+			}
+
+			// Emit socket event for order creation + settled status
+			try {
+				const orderItems = await OrderItemsModel.getByOrderId(orderId);
+				socketService.emitOrderCreated(orderId, {
+					order_id: orderId,
+					order_no: payload.ORDER_NO,
+					table_id: payload.TABLE_ID,
+					status: 1,
+					grand_total: payload.GRAND_TOTAL,
+					items: orderItems,
+					items_count: itemsNormalized.length,
+				});
+			} catch (e) {
+				console.error('[MANUAL ORDER] Socket emit failed:', e?.message || e);
+			}
+
+			return ApiResponse.created(
+				res,
+				{ id: orderId, order_no: payload.ORDER_NO, status: 1 },
+				'Manual order created and settled successfully'
+			);
+		} catch (error) {
+			console.error('Error creating manual settled order:', error);
+			return ApiResponse.error(res, 'Failed to create manual settled order', 500, error.message);
 		}
 	}
 

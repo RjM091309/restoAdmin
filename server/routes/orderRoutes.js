@@ -17,6 +17,8 @@ router.get('/orders/:id', authenticate, OrderController.getById);
 router.get('/orders/:id/items', authenticate, OrderController.getItems);
 
 router.post('/orders', authenticate, OrderController.create);
+// Manual Order: creates an order that is immediately SETTLED (no billing process needed)
+router.post('/orders/manual-settled', authenticate, OrderController.createManualSettled);
 router.post('/orders/:id/items', authenticate, OrderController.addItemsToOrder);
 router.put('/orders/:id', authenticate, OrderController.update);
 router.patch('/orders/:id/status', authenticate, OrderController.updateStatus);

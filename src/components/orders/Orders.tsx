@@ -29,6 +29,7 @@ import {
     getOrderItems,
     getOrderById,
     createOrder,
+    createManualSettledOrder,
     updateOrderStatus,
     deleteOrderItem,
     updateOrderItemQuantity,
@@ -42,6 +43,7 @@ import {
 import { getMenus, type MenuRecord } from '../../services/menuService';
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
+import { useUser } from '../../context/UserContext';
 
 // ---- Props & types ----
 interface OrdersProps {
@@ -71,7 +73,16 @@ type NewOrderItem = {
 
 export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => {
     const { t } = useTranslation();
-    const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
+    const { user } = useUser();
+    const isAdmin = user?.permissions === 1;
+
+    // Prefer URL branchId to stay consistent with Header behavior (opens new tab with ?branchId=...).
+    // Fallback to selectedBranch, then 'all'.
+    const branchIdFromUrl = new URLSearchParams(window.location.search).get('branchId');
+    const branchId = selectedBranch ? String(selectedBranch.id) : (branchIdFromUrl ? String(branchIdFromUrl) : 'all');
+
+    // Only admin can operate in "all branches" mode; non-admins should never see branch chooser here.
+    const isAllBranches = isAdmin && branchId === 'all';
 
     // ----- Data -----
     const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -107,6 +118,23 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [newOrderItems, setNewOrderItems] = useState<NewOrderItem[]>([]);
     const [newOrderSelectedMenuId, setNewOrderSelectedMenuId] = useState<string>('');
     const [newOrderQty, setNewOrderQty] = useState<number>(1);
+
+    // ----- Manual order modal (settled immediately) -----
+    const [manualOrderOpen, setManualOrderOpen] = useState(false);
+    const [manualOrderSubmitting, setManualOrderSubmitting] = useState(false);
+    const [manualOrderMenus, setManualOrderMenus] = useState<MenuRecord[]>([]);
+    const [manualOrderLoadingRefs, setManualOrderLoadingRefs] = useState(false);
+    const [manualOrderNo, setManualOrderNo] = useState('');
+    const [manualOrderBranchId, setManualOrderBranchId] = useState<string>('');
+    const [manualBranchOptions, setManualBranchOptions] = useState<{ value: string; label: string }[]>([]);
+    const [manualOrderType, setManualOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
+    const [manualOrderTableId, setManualOrderTableId] = useState<string>('');
+    const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [manualOrderItems, setManualOrderItems] = useState<NewOrderItem[]>([]);
+    const [manualOrderSelectedMenuId, setManualOrderSelectedMenuId] = useState<string>('');
+    const [manualOrderQty, setManualOrderQty] = useState<number>(1);
+    const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'CARD' | 'GCASH' | 'BANK'>('CASH');
+    const [manualPaymentRef, setManualPaymentRef] = useState<string>('');
 
     // ----- Add items to existing order (detail modal) -----
     const [detailMenus, setDetailMenus] = useState<MenuRecord[]>([]);
@@ -376,6 +404,99 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const closeNewOrder = () => { if (newOrderSubmitting) return; setNewOrderOpen(false); };
 
+    const openManualOrder = () => {
+        setManualOrderNo(generateOrderNo());
+        setManualOrderType('DINE_IN');
+        setManualOrderItems([]);
+        setManualOrderSelectedMenuId('');
+        setManualOrderQty(1);
+        setManualOrderTableId('');
+        setManualPaymentMethod('CASH');
+        setManualPaymentRef('');
+        setManualOrderBranchId('');
+        setManualBranchTables([]);
+        setManualOrderOpen(true);
+    };
+
+    const closeManualOrder = () => { if (manualOrderSubmitting) return; setManualOrderOpen(false); };
+
+    // Branch options for manual order (only needed when viewing ALL branches)
+    useEffect(() => {
+        if (!manualOrderOpen) return;
+        if (!isAllBranches) return;
+        let cancelled = false;
+        const fetchBranches = async () => {
+            try {
+                const res = await fetch('/branch/', {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(localStorage.getItem('token') ? { Authorization: `Bearer ${localStorage.getItem('token')}` } : {}),
+                    },
+                });
+                const json = await res.json();
+                if (!res.ok || json?.success === false) {
+                    throw new Error(json?.error || json?.message || 'Failed to load branches');
+                }
+                const raw = json.data ?? json;
+                const mapped = (Array.isArray(raw) ? raw : [])
+                    .filter((b: any) => (b.ACTIVE ?? b.active ?? 1) === 1)
+                    .map((b: any) => ({
+                        value: String(b.IDNo ?? b.id),
+                        label: String(b.BRANCH_LABEL ?? b.BRANCH_NAME ?? b.name ?? `Branch ${b.IDNo ?? ''}`),
+                    }));
+                if (!cancelled) setManualBranchOptions(mapped);
+            } catch (e) {
+                if (!cancelled) setManualBranchOptions([]);
+                console.error('Failed to load branches for manual order', e);
+            }
+        };
+        fetchBranches();
+        return () => { cancelled = true; };
+    }, [manualOrderOpen, isAllBranches]);
+
+    const effectiveManualBranchId = isAllBranches ? manualOrderBranchId : branchId;
+
+    // Tables for selected branch (manual order)
+    useEffect(() => {
+        if (!manualOrderOpen) return;
+        if (!effectiveManualBranchId) {
+            setManualBranchTables([]);
+            return;
+        }
+        let cancelled = false;
+        const fetchTablesForManualBranch = async () => {
+            try {
+                const params = new URLSearchParams();
+                if (effectiveManualBranchId && effectiveManualBranchId !== 'all') {
+                    params.set('branch_id', effectiveManualBranchId);
+                }
+                const qs = params.toString();
+                const res = await fetch(`/data-api/restaurant_tables${qs ? `?${qs}` : ''}`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const json = await res.json();
+                if (!res.ok) {
+                    throw new Error(json.error || json.message || 'Failed to load tables');
+                }
+                const raw = json.data ?? json;
+                const mapped: { value: string; label: string }[] = (Array.isArray(raw) ? raw : [])
+                    .filter((t: any) => t.STATUS === 1) // available only
+                    .map((t: any) => ({
+                        value: String(t.IDNo),
+                        label: `Table ${t.TABLE_NUMBER}`,
+                    }));
+                if (!cancelled) setManualBranchTables(mapped);
+            } catch (e) {
+                if (!cancelled) setManualBranchTables([]);
+                console.error('Failed to load tables for manual order', e);
+            }
+        };
+        fetchTablesForManualBranch();
+        return () => { cancelled = true; };
+    }, [manualOrderOpen, effectiveManualBranchId]);
+
     useEffect(() => {
         if (!newOrderOpen) return;
         let cancelled = false;
@@ -478,6 +599,127 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             }
         } finally {
             setNewOrderSubmitting(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!manualOrderOpen) return;
+        if (!effectiveManualBranchId) {
+            setManualOrderMenus([]);
+            return;
+        }
+        let cancelled = false;
+        setManualOrderLoadingRefs(true);
+        getMenus(effectiveManualBranchId)
+            .then((menus) => {
+                if (cancelled) return;
+                setManualOrderMenus((Array.isArray(menus) ? menus : []).filter((m) => m.active && (m.effectiveAvailable ?? m.isAvailable)));
+            })
+            .catch(() => { if (!cancelled) setManualOrderMenus([]); })
+            .finally(() => { if (!cancelled) setManualOrderLoadingRefs(false); });
+        return () => { cancelled = true; };
+    }, [manualOrderOpen, effectiveManualBranchId]);
+
+    const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
+
+    const addManualOrderItem = () => {
+        if (!manualOrderSelectedMenuId) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.select_item_title'),
+                text: t('orders.swal.select_item_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
+        const qty = Number(manualOrderQty);
+        if (!Number.isFinite(qty) || qty <= 0) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.invalid_qty_title'),
+                text: t('orders.swal.invalid_qty_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
+        const menu = manualOrderMenus.find((m) => m.id === manualOrderSelectedMenuId);
+        if (!menu) return;
+        setManualOrderItems((prev) => {
+            const idx = prev.findIndex((p) => p.menuId === manualOrderSelectedMenuId);
+            if (idx >= 0) { const copy = [...prev]; copy[idx] = { ...copy[idx], qty: copy[idx].qty + qty }; return copy; }
+            return [...prev, { menuId: manualOrderSelectedMenuId, name: menu.name, unitPrice: Number(menu.price || 0), qty }];
+        });
+        setManualOrderSelectedMenuId(''); setManualOrderQty(1);
+    };
+
+    const removeManualOrderItem = (menuId: string) => setManualOrderItems((prev) => prev.filter((p) => p.menuId !== menuId));
+
+    const submitManualOrder = async () => {
+        if (isAllBranches && !manualOrderBranchId) {
+            setSwal({
+                type: 'warning',
+                title: t('header.select_branch'),
+                text: t('categories.messages.select_branch'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
+        if (!manualOrderNo.trim()) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.order_no_required_title'),
+                text: t('orders.swal.order_no_required_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
+        if (manualOrderItems.length === 0) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.add_items_title'),
+                text: t('orders.swal.add_items_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
+        setManualOrderSubmitting(true);
+        try {
+            const items = manualOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
+            await createManualSettledOrder({
+                ORDER_NO: manualOrderNo.trim(), order_no: manualOrderNo.trim(),
+                BRANCH_ID: effectiveManualBranchId, branch_id: effectiveManualBranchId,
+                TABLE_ID: manualOrderTableId ? Number(manualOrderTableId) : null,
+                ORDER_TYPE: manualOrderType, order_type: manualOrderType,
+                STATUS: ORDER_STATUS.SETTLED,
+                SUBTOTAL: manualOrderSubtotal,
+                TAX_AMOUNT: 0, SERVICE_CHARGE: 0, DISCOUNT_AMOUNT: 0, GRAND_TOTAL: manualOrderSubtotal,
+                ORDER_ITEMS: items, items,
+                payment_method: manualPaymentMethod,
+                payment_ref: manualPaymentRef?.trim() ? manualPaymentRef.trim() : null,
+            });
+            setManualOrderOpen(false);
+            setManualOrderTableId('');
+            await loadOrders();
+            toast.success(t('orders.swal.manual_created_text', { orderNo: manualOrderNo.trim() }));
+        } catch (e) {
+            if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
+                const list = e.insufficient.map((i) => t('orders.swal.insufficient_inventory_item', {
+                    name: i.ingredientName,
+                    required: i.required,
+                    available: i.available,
+                    unit: i.unit,
+                })).join('\n');
+                setSwal({
+                    type: 'warning',
+                    title: t('orders.swal.insufficient_inventory_title'),
+                    text: `${t('orders.swal.insufficient_inventory_text')}\n\n${list}`,
+                    onConfirm: () => setSwal(null),
+                });
+            } else {
+                toast.error(e instanceof Error ? e.message : t('orders.swal.create_failed'));
+            }
+        } finally {
+            setManualOrderSubmitting(false);
         }
     };
 
@@ -737,13 +979,23 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 />
                             </div>
                             {canCreate('orders') && (
-                              <button
-                                  onClick={openNewOrder}
-                                  className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
-                              >
-                                  <Plus size={18} />
-                                  {t('orders.new_order')}
-                              </button>
+                              <div className="flex items-center gap-3">
+                                <button
+                                    onClick={openNewOrder}
+                                    className="bg-brand-primary text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all"
+                                >
+                                    <Plus size={18} />
+                                    {t('orders.new_order')}
+                                </button>
+                                <button
+                                    onClick={openManualOrder}
+                                    className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all"
+                                    title={t('orders.manual_order_helper')}
+                                >
+                                    <CheckCircle2 size={18} />
+                                    {t('orders.manual_order')}
+                                </button>
+                              </div>
                             )}
                         </div>
 
@@ -941,6 +1193,214 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <td className="px-4 py-2 text-right font-extrabold text-brand-primary">
                                                     ₱
                                                     {newOrderSubtotal.toLocaleString(undefined, {
+                                                        minimumFractionDigits: 2,
+                                                    })}
+                                                </td>
+                                                <td></td>
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Manual Order Modal (Settled immediately) */}
+            <Modal
+                isOpen={manualOrderOpen}
+                onClose={closeManualOrder}
+                title={t('orders.create_manual_order')}
+                maxWidth="2xl"
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button onClick={closeManualOrder} disabled={manualOrderSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50">
+                            {t('orders.cancel')}
+                        </button>
+                        <button onClick={submitManualOrder} disabled={manualOrderSubmitting} className="px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2">
+                            {manualOrderSubmitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('orders.create_manual_order_btn')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-6">
+                    {/* Header / basic info */}
+                    <div className="grid grid-cols-3 gap-5">
+                        {isAllBranches && (
+                            <div className="space-y-2">
+                                <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                    {t('header.select_branch')}
+                                </label>
+                                <Select2
+                                    options={manualBranchOptions}
+                                    value={manualOrderBranchId || null}
+                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); }}
+                                    placeholder={t('header.select_branch')}
+                                />
+                            </div>
+                        )}
+                        <div className="space-y-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('orders.order_no_label')}
+                            </label>
+                            <input
+                                type="text"
+                                value={manualOrderNo}
+                                onChange={(e) => setManualOrderNo(e.target.value)}
+                                placeholder={t('orders.order_no_placeholder')}
+                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('orders.order_type')}
+                            </label>
+                            <Select2
+                                options={[
+                                    { value: 'DINE_IN', label: t('orders.dine_in') },
+                                    { value: 'TAKE_OUT', label: t('orders.take_out') },
+                                    { value: 'DELIVERY', label: t('orders.delivery') },
+                                ]}
+                                value={manualOrderType}
+                                onChange={(v) =>
+                                    setManualOrderType((v as typeof manualOrderType) || 'DINE_IN')
+                                }
+                                placeholder={t('orders.select_type')}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('table.table_number')}
+                            </label>
+                            <Select2
+                                options={isAllBranches ? manualBranchTables : branchTables}
+                                value={manualOrderTableId || null}
+                                onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
+                                placeholder={t('table.table_number')}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Payment */}
+                    <div className="grid grid-cols-3 gap-5">
+                        <div className="space-y-2 col-span-1">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('billing.payment_method')}
+                            </label>
+                            <Select2
+                                options={[
+                                    { value: 'CASH', label: 'CASH' },
+                                    { value: 'CARD', label: 'CARD' },
+                                    { value: 'GCASH', label: 'GCASH' },
+                                    { value: 'BANK', label: 'BANK' },
+                                ]}
+                                value={manualPaymentMethod}
+                                onChange={(v) => setManualPaymentMethod((v as any) || 'CASH')}
+                                placeholder={t('billing.payment_method')}
+                            />
+                        </div>
+                        <div className="space-y-2 col-span-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('billing.payment_reference')}
+                            </label>
+                            <input
+                                type="text"
+                                value={manualPaymentRef}
+                                onChange={(e) => setManualPaymentRef(e.target.value)}
+                                placeholder={t('billing.payment_reference_placeholder')}
+                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                            />
+                            <p className="text-[11px] text-brand-muted">
+                                {t('orders.manual_order_payment_helper')}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Items section */}
+                    <div className="space-y-3">
+                        <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
+                        <div className="grid grid-cols-12 gap-3 items-end">
+                            <div className="col-span-7">
+                                <Select2
+                                    options={manualOrderMenus.map((m) => ({ value: m.id, label: `${m.name} — ₱${Number(m.price).toLocaleString()}` }))}
+                                    value={manualOrderSelectedMenuId || null}
+                                    onChange={(v) => setManualOrderSelectedMenuId(v ? String(v) : '')}
+                                    placeholder={manualOrderLoadingRefs ? t('orders.loading_menu') : t('orders.select_item')}
+                                    disabled={manualOrderLoadingRefs}
+                                />
+                            </div>
+                            <div className="col-span-2">
+                                <input type="number" min={1} value={manualOrderQty} onChange={(e) => setManualOrderQty(Number(e.target.value))}
+                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all" />
+                            </div>
+                            <div className="col-span-3">
+                                <button type="button" onClick={addManualOrderItem} disabled={manualOrderLoadingRefs}
+                                    className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1">
+                                    <Plus size={14} /> {t('orders.add')}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden bg-white">
+                            {manualOrderItems.length === 0 ? (
+                                <div className="p-4 text-sm text-brand-muted text-center">
+                                    {t('orders.no_items_added')}
+                                </div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead className="bg-gray-50">
+                                        <tr>
+                                            <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
+                                                {t('orders.item')}
+                                            </th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
+                                                {t('orders.qty')}
+                                            </th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
+                                                {t('orders.unit')}
+                                            </th>
+                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
+                                                {t('orders.line_total')}
+                                            </th>
+                                            <th className="px-4 py-2 w-12"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                        {manualOrderItems.map((it) => (
+                                            <tr key={it.menuId}>
+                                                <td className="px-4 py-2 font-medium">{it.name}</td>
+                                                <td className="px-4 py-2 text-right">{it.qty}</td>
+                                                <td className="px-4 py-2 text-right">
+                                                    ₱{Number(it.unitPrice).toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-2 text-right font-bold">
+                                                    ₱{Number(it.qty * it.unitPrice).toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-2 text-right">
+                                                    <button
+                                                        onClick={() => removeManualOrderItem(it.menuId)}
+                                                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {manualOrderItems.length > 0 && (
+                                        <tfoot className="bg-gray-50">
+                                            <tr>
+                                                <td
+                                                    className="px-4 py-2 text-right font-bold text-brand-text"
+                                                    colSpan={3}
+                                                >
+                                                    {t('orders.grand_total')}
+                                                </td>
+                                                <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
+                                                    ₱
+                                                    {manualOrderSubtotal.toLocaleString(undefined, {
                                                         minimumFractionDigits: 2,
                                                     })}
                                                 </td>

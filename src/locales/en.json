@@ -1118,6 +1118,11 @@
 		"close": "Close"
 	},
 	"orders": {
+		"manual_order": "Manual Order",
+		"manual_order_helper": "Creates an order that is settled immediately (no Billing processing).",
+		"create_manual_order": "Create Manual Order (Settled)",
+		"create_manual_order_btn": "Create & Settle",
+		"manual_order_payment_helper": "This order will be marked as paid and settled immediately.",
 		"new_order": "New Order",
 		"edit_order": "Edit Order",
 		"order_items": "Order Items",
@@ -1211,6 +1216,7 @@
 			"add_items_text": "Please add at least one item.",
 			"created_title": "Created!",
 			"created_text": "Order {{orderNo}} has been created.",
+			"manual_created_text": "Manual order {{orderNo}} has been created and settled.",
 			"create_failed": "Failed to create order",
 			"remove_item_title": "Remove Item?",
 			"remove_item_text": "Remove \"{{itemName}}\" from this order?",
