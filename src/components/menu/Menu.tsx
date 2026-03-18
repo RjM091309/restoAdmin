@@ -471,12 +471,6 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             ),
         },
         {
-            header: t('menu_page.table.category'),
-            render: (item) => (
-                <span className="text-xs font-bold bg-gray-100 px-2 py-1 rounded-lg">{item.categoryName}</span>
-            ),
-        },
-        {
             header: t('menu_page.table.price'),
             render: (item) => (
                 <span className="text-sm font-bold text-brand-text">{t('common.currency_symbol')}{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -779,8 +773,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                         </span>
                                                         <span
                                                             className={cn(
-                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
-                                                                active ? 'bg-brand-primary/15 text-brand-primary' : 'bg-gray-100 text-brand-muted',
+                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-colors',
+                                                                active
+                                                                    ? 'bg-brand-primary/15 text-brand-primary'
+                                                                    : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
                                                             )}
                                                         >
                                                             {count}
