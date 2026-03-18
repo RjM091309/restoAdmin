@@ -74,7 +74,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     // ----- Filters -----
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<string>('all');
+    const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [availFilter, setAvailFilter] = useState<string>('all');
 
     // ----- Modals -----
@@ -132,9 +132,19 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     useEffect(() => {
         refreshData();
         setSearchTerm('');
-        setSelectedCategory('all');
+        setSelectedCategory(null);
         setAvailFilter('all');
     }, [refreshData]);
+
+    // Auto-select first category (removes "All Categories" view)
+    useEffect(() => {
+        if (!isSpecificBranch) return;
+        if (categories.length === 0) {
+            setSelectedCategory(null);
+            return;
+        }
+        setSelectedCategory((prev) => (prev && categories.some((c) => c.id === prev) ? prev : categories[0].id));
+    }, [categories, isSpecificBranch]);
 
     // ==================== Filtering ====================
     const filteredMenus = useMemo(() => {
@@ -144,7 +154,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 !term ||
                 m.name.toLowerCase().includes(term) ||
                 m.categoryName.toLowerCase().includes(term);
-            const matchCat = selectedCategory === 'all' || m.categoryId === selectedCategory;
+            const matchCat = selectedCategory ? m.categoryId === selectedCategory : false;
             const matchAvail = availFilter === 'all' || (availFilter === 'available' ? m.isAvailable : !m.isAvailable);
             return matchSearch && matchCat && matchAvail;
         });
@@ -159,8 +169,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     }, [menus, filteredMenus]);
 
     const selectedCategoryLabel = useMemo(() => {
-        if (selectedCategory === 'all') return t('menu_page.all_categories');
-        return categories.find((c) => c.id === selectedCategory)?.name ?? t('menu_page.all_categories');
+        if (!selectedCategory) return '';
+        return categories.find((c) => c.id === selectedCategory)?.name ?? '';
     }, [categories, selectedCategory, t]);
 
     const ITEMS_PER_PAGE = 50;
@@ -694,14 +704,20 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                 <div className="flex items-start justify-between gap-4">
                                     <div>
                                         <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">
-                                            Selected Total
+                                            Selected Items
                                         </div>
                                         <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
                                             {stats.selectedCount}
                                         </div>
-                                        <div className="text-xs text-brand-muted mt-1">
-                                            Category: <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>
-                                        </div>
+                                            <div className="text-xs text-brand-muted mt-1">
+                                                {selectedCategory ? (
+                                                    <>
+                                                        Menu Category: <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>
+                                                    </>
+                                                ) : (
+                                                    <>Select a Menu Category</>
+                                                )}
+                                            </div>
                                     </div>
                                     <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
                                         <div className="h-5 w-5 rounded-full bg-brand-orange/70" />
@@ -717,10 +733,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
                                             <div className="text-sm font-black tracking-wide text-brand-text uppercase">
-                                                Main Category
+                                                Menu Category
                                             </div>
                                             <div className="text-xs text-brand-muted mt-1">
-                                                Select a Category to show its menu items.
+                                                Select a Menu Category to show items.
                                             </div>
                                         </div>
                                         {canCreate('menu_management') && (
@@ -738,15 +754,9 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                 </div>
 
                                 <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
-                                    {[
-                                        { id: 'all', name: t('menu_page.all_categories') },
-                                        ...categories.map((c) => ({ id: c.id, name: c.name })),
-                                    ].map((cat) => {
+                                    {categories.map((cat) => {
                                         const active = cat.id === selectedCategory;
-                                        const count =
-                                            cat.id === 'all'
-                                                ? menus.length
-                                                : menus.filter((m) => m.categoryId === cat.id).length;
+                                        const count = menus.filter((m) => m.categoryId === cat.id).length;
                                         return (
                                             <div
                                                 key={cat.id}
@@ -780,6 +790,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                             </div>
                                         );
                                     })}
+
+                                    {categories.length === 0 && (
+                                        <div className="px-4 py-6 text-sm text-brand-muted">
+                                            No Menu Category.
+                                        </div>
+                                    )}
                                 </div>
                             </section>
 
@@ -789,12 +805,19 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     <div className="px-6 py-5 border-b border-gray-100">
                                         <div className="flex items-end justify-between gap-4">
                                             <div>
-                                                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Table Items</div>
+                                                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Menu Items</div>
                                                 <div className="text-xs text-brand-muted mt-1">
-                                                    Showing items for <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>.
+                                                    {selectedCategory ? (
+                                                        <>
+                                                            Showing items for <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>.
+                                                        </>
+                                                    ) : (
+                                                        <>Select a Menu Category to display menu items.</>
+                                                    )}
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            {selectedCategory && (
+                                                <div className="flex items-center gap-3">
                                                 <div className="relative">
                                                     <Search
                                                         size={14}
@@ -805,7 +828,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                         value={searchTerm}
                                                         onChange={(e) => setSearchTerm(e.target.value)}
                                                         placeholder="Search item..."
-                                                        className="bg-brand-bg border-none rounded-lg pl-8 pr-3 py-1.5 text-xs w-44 outline-none"
+                                                        className="h-[38px] bg-gray-50 border border-gray-200 rounded-xl pl-8 pr-3 text-xs w-52 outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50"
                                                     />
                                                 </div>
                                                 <Select2
@@ -818,18 +841,21 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                     onChange={(v) => setAvailFilter(v ? String(v) : 'all')}
                                                     placeholder={t('menu_page.all_status')}
                                                     className="w-44"
+                                                    clearable={false}
+                                                    variant="compact"
                                                 />
                                                 {canCreate('menu_management') && (
                                                     <button
                                                         type="button"
                                                         onClick={openCreate}
-                                                        className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
+                                                        className="h-[38px] bg-brand-primary text-white px-4 rounded-xl text-xs font-black tracking-wide uppercase flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 transition-all cursor-pointer"
                                                     >
                                                         <Plus size={16} />
-                                                        {t('menu_page.new_item')}
+                                                        Add New Item
                                                     </button>
                                                 )}
-                                            </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
@@ -837,101 +863,109 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                         <div className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
                                             <AnimatePresence mode="wait">
                                                 <motion.div
-                                                    key={`table-${selectedCategory}-${availFilter}`}
+                                                    key={`table-${selectedCategory ?? 'none'}-${availFilter}`}
                                                     initial={{ opacity: 0, x: 40 }}
                                                     animate={{ opacity: 1, x: 0 }}
                                                     exit={{ opacity: 0, x: -40 }}
                                                     transition={{ duration: 0.24, ease: 'easeOut' }}
                                                     className="w-full"
                                                 >
-                                                    <div className="overflow-x-auto">
-                                                        <table className="w-full text-left">
-                                                            <thead>
-                                                                <tr className="bg-white border-b border-gray-100">
-                                                                    {columns.map((col, i) => (
-                                                                        <th
-                                                                            key={String(col.header)}
-                                                                            className={cn(
-                                                                                'px-6 py-4 text-[13px] font-medium whitespace-nowrap',
-                                                                                i === 0
-                                                                                    ? 'bg-violet-50 text-brand-text uppercase tracking-wider'
-                                                                                    : 'text-brand-muted uppercase tracking-wider',
-                                                                                col.className,
-                                                                                col.headerClassName,
-                                                                                i === 0 && 'border-r-[3px] border-white',
-                                                                            )}
-                                                                        >
-                                                                            {col.header}
-                                                                        </th>
-                                                                    ))}
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody className="divide-y divide-gray-50">
-                                                                {pagedMenus.map((row) => (
-                                                                    <tr key={row.id} className="group transition-colors">
-                                                                        {columns.map((col, i) => (
-                                                                            <td
-                                                                                key={i}
-                                                                                className={cn(
-                                                                                    'px-4 py-2 text-[11px] text-brand-text',
-                                                                                    i === 0
-                                                                                        ? 'bg-violet-50 font-medium group-hover:bg-violet-100'
-                                                                                        : 'bg-white group-hover:bg-brand-bg/50',
-                                                                                    col.className,
-                                                                                    col.cellClassName,
-                                                                                    i === 0 && 'border-r-[3px] border-white',
-                                                                                )}
-                                                                            >
-                                                                                {col.render
-                                                                                    ? col.render(row)
-                                                                                    : col.accessorKey
-                                                                                        ? (row[col.accessorKey] as React.ReactNode)
-                                                                                        : null}
-                                                                            </td>
-                                                                        ))}
-                                                                    </tr>
-                                                                ))}
-
-                                                                {pagedMenus.length === 0 && (
-                                                                    <tr>
-                                                                        <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted">
-                                                                            No data
-                                                                        </td>
-                                                                    </tr>
-                                                                )}
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-
-                                                    {shouldPaginate && (
-                                                        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white">
-                                                            <div className="text-sm text-brand-muted">
-                                                                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{' '}
-                                                                {Math.min(currentPage * ITEMS_PER_PAGE, filteredMenus.length)} of {filteredMenus.length}{' '}
-                                                                entries
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                                                                    disabled={currentPage === 1}
-                                                                    className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
-                                                                >
-                                                                    Prev
-                                                                </button>
-                                                                <div className="px-3 py-2 rounded-lg text-sm font-black bg-brand-primary text-white">
-                                                                    {currentPage}
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                                                                    disabled={currentPage === totalPages}
-                                                                    className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
-                                                                >
-                                                                    Next
-                                                                </button>
-                                                            </div>
+                                                    {!selectedCategory ? (
+                                                        <div className="px-6 py-10 text-sm text-brand-muted">
+                                                            Select a Menu Category to load menu items.
                                                         </div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="overflow-x-auto">
+                                                                <table className="w-full text-left">
+                                                                    <thead>
+                                                                        <tr className="bg-white border-b border-gray-100">
+                                                                            {columns.map((col, i) => (
+                                                                                <th
+                                                                                    key={String(col.header)}
+                                                                                    className={cn(
+                                                                                        'px-6 py-4 text-[13px] font-medium whitespace-nowrap',
+                                                                                        i === 0
+                                                                                            ? 'bg-violet-50 text-brand-text uppercase tracking-wider'
+                                                                                            : 'text-brand-muted uppercase tracking-wider',
+                                                                                        col.className,
+                                                                                        col.headerClassName,
+                                                                                        i === 0 && 'border-r-[3px] border-white',
+                                                                                    )}
+                                                                                >
+                                                                                    {col.header}
+                                                                                </th>
+                                                                            ))}
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody className="divide-y divide-gray-50">
+                                                                        {pagedMenus.map((row) => (
+                                                                            <tr key={row.id} className="group transition-colors">
+                                                                                {columns.map((col, i) => (
+                                                                                    <td
+                                                                                        key={i}
+                                                                                        className={cn(
+                                                                                            'px-4 py-2 text-[11px] text-brand-text',
+                                                                                            i === 0
+                                                                                                ? 'bg-violet-50 font-medium group-hover:bg-violet-100'
+                                                                                                : 'bg-white group-hover:bg-brand-bg/50',
+                                                                                            col.className,
+                                                                                            col.cellClassName,
+                                                                                            i === 0 && 'border-r-[3px] border-white',
+                                                                                        )}
+                                                                                    >
+                                                                                        {col.render
+                                                                                            ? col.render(row)
+                                                                                            : col.accessorKey
+                                                                                                ? (row[col.accessorKey] as React.ReactNode)
+                                                                                                : null}
+                                                                                    </td>
+                                                                                ))}
+                                                                            </tr>
+                                                                        ))}
+
+                                                                        {pagedMenus.length === 0 && (
+                                                                            <tr>
+                                                                                <td colSpan={columns.length} className="px-6 py-8 text-center text-brand-muted">
+                                                                                    No data
+                                                                                </td>
+                                                                            </tr>
+                                                                        )}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+
+                                                            {shouldPaginate && (
+                                                                <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white">
+                                                                    <div className="text-sm text-brand-muted">
+                                                                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{' '}
+                                                                        {Math.min(currentPage * ITEMS_PER_PAGE, filteredMenus.length)} of {filteredMenus.length}{' '}
+                                                                        entries
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                                                            disabled={currentPage === 1}
+                                                                            className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                                                        >
+                                                                            Prev
+                                                                        </button>
+                                                                        <div className="px-3 py-2 rounded-lg text-sm font-black bg-brand-primary text-white">
+                                                                            {currentPage}
+                                                                        </div>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                                                                            disabled={currentPage === totalPages}
+                                                                            className="px-3 py-2 rounded-lg text-sm font-bold text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                                                        >
+                                                                            Next
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </motion.div>
                                             </AnimatePresence>

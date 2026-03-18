@@ -16,6 +16,8 @@ interface Select2Props {
   className?: string;
   disabled?: boolean;
   leftIcon?: React.ReactNode;
+  clearable?: boolean;
+  variant?: 'default' | 'compact';
 }
 
 const Control = ({ children, ...props }: ControlProps<Option, false>) => {
@@ -50,10 +52,14 @@ export const Select2: React.FC<Select2Props> = ({
   placeholder,
   className,
   disabled = false,
-  leftIcon
+  leftIcon,
+  clearable = true,
+  variant = 'default',
 }) => {
   const { t } = useTranslation();
   const selectedOption = options.find(opt => opt.value === value) || null;
+
+  const isCompact = variant === 'compact';
 
   return (
     <div className={cn("w-full", className)}>
@@ -63,7 +69,7 @@ export const Select2: React.FC<Select2Props> = ({
         options={options}
         placeholder={placeholder || t('common.select_placeholder')}
         isDisabled={disabled}
-        isClearable
+        isClearable={clearable}
         isSearchable
         // @ts-ignore - passing custom prop to components
         leftIcon={leftIcon}
@@ -72,17 +78,21 @@ export const Select2: React.FC<Select2Props> = ({
           SingleValue
         }}
         classNames={{
-          control: () => '!min-h-[48px] !rounded-xl !border-gray-200 !bg-gray-50 !shadow-none !cursor-pointer',
-          placeholder: () => '!text-gray-400 !text-sm',
-          input: () => '!text-brand-text !text-sm',
-          singleValue: () => '!text-brand-text !text-sm',
+          control: () =>
+            cn(
+              '!rounded-xl !border-gray-200 !bg-gray-50 !shadow-none !cursor-pointer',
+              isCompact ? '!min-h-[38px]' : '!min-h-[48px]',
+            ),
+          placeholder: () => cn('!text-gray-400', isCompact ? '!text-xs' : '!text-sm'),
+          input: () => cn('!text-brand-text', isCompact ? '!text-xs' : '!text-sm'),
+          singleValue: () => cn('!text-brand-text', isCompact ? '!text-xs' : '!text-sm'),
           menu: () => '!rounded-xl !border !border-gray-100 !shadow-xl !mt-2 !overflow-hidden',
           option: ({ isSelected, isFocused }) => cn(
             '!py-2.5 !px-4 !text-sm !cursor-pointer !transition-colors',
             isSelected ? '!bg-brand-primary/10 !text-brand-primary !font-bold' :
               isFocused ? '!bg-brand-primary/5 !text-brand-text' : '!text-brand-text'
           ),
-          valueContainer: () => '!px-2',
+          valueContainer: () => cn(isCompact ? '!px-2 !py-0' : '!px-2'),
           clearIndicator: () => '!text-gray-400 hover:!text-red-500 !p-1',
           dropdownIndicator: () => '!text-gray-400 !p-1',
         }}
