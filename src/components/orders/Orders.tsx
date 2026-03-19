@@ -17,6 +17,8 @@ import {
     Clock,
     Pencil,
     Check,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -135,6 +137,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualRowFlash, setManualRowFlash] = useState<{ menuId: string; nonce: number } | null>(null);
     const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'CARD' | 'GCASH' | 'BANK'>('CASH');
     const [manualPaymentRef, setManualPaymentRef] = useState<string>('');
+    const [manualMenuPage, setManualMenuPage] = useState(1);
 
     // ----- Add items to existing order (detail modal) -----
     const [detailMenus, setDetailMenus] = useState<MenuRecord[]>([]);
@@ -658,6 +661,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         if (!q) return base;
         return base.filter((m) => String(m.name || '').toLowerCase().includes(q));
     }, [manualMenuQuery, manualOrderMenus]);
+
+    const MANUAL_MENU_PAGE_SIZE = 20;
+    const manualMenuTotalPages = useMemo(
+        () => Math.max(1, Math.ceil(filteredManualMenus.length / MANUAL_MENU_PAGE_SIZE)),
+        [filteredManualMenus.length]
+    );
+    const paginatedManualMenus = useMemo(() => {
+        const page = Math.min(Math.max(1, manualMenuPage), manualMenuTotalPages);
+        const start = (page - 1) * MANUAL_MENU_PAGE_SIZE;
+        return filteredManualMenus.slice(start, start + MANUAL_MENU_PAGE_SIZE);
+    }, [filteredManualMenus, manualMenuPage, manualMenuTotalPages]);
+
+    useEffect(() => {
+        setManualMenuPage(1);
+    }, [manualOrderOpen, manualMenuQuery, effectiveManualBranchId]);
+
+    useEffect(() => {
+        setManualMenuPage((prev) => Math.min(prev, manualMenuTotalPages));
+    }, [manualMenuTotalPages]);
 
     useEffect(() => {
         if (!manualRowFlash) return;
@@ -1226,10 +1248,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 maxWidth="6xl"
                 footer={
                     <div className="flex items-center justify-end gap-3">
-                        <button onClick={closeManualOrder} disabled={manualOrderSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50">
+                        <button onClick={closeManualOrder} disabled={manualOrderSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed">
                             {t('orders.cancel')}
                         </button>
-                        <button onClick={submitManualOrder} disabled={manualOrderSubmitting} className="px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2">
+                        <button onClick={submitManualOrder} disabled={manualOrderSubmitting} className="px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed">
                             {manualOrderSubmitting && <Loader2 size={16} className="animate-spin" />}
                             {t('orders.create_manual_order_btn')}
                         </button>
@@ -1237,104 +1259,35 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 }
             >
                 <div className="space-y-6">
-                    {/* Header / basic info */}
-                    <div className="grid grid-cols-3 gap-5">
-                        {isAllBranches && (
-                            <div className="space-y-2">
-                                <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                    {t('header.select_branch')}
-                                </label>
-                                <Select2
-                                    options={manualBranchOptions}
-                                    value={manualOrderBranchId || null}
-                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); }}
-                                    placeholder={t('header.select_branch')}
-                                />
-                            </div>
-                        )}
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('orders.order_no_label')}
-                            </label>
-                            <input
-                                type="text"
-                                value={manualOrderNo}
-                                onChange={(e) => setManualOrderNo(e.target.value)}
-                                placeholder={t('orders.order_no_placeholder')}
-                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('orders.order_type')}
-                            </label>
-                            <Select2
-                                options={[
-                                    { value: 'DINE_IN', label: t('orders.dine_in') },
-                                    { value: 'TAKE_OUT', label: t('orders.take_out') },
-                                    { value: 'DELIVERY', label: t('orders.delivery') },
-                                ]}
-                                value={manualOrderType}
-                                onChange={(v) =>
-                                    setManualOrderType((v as typeof manualOrderType) || 'DINE_IN')
-                                }
-                                placeholder={t('orders.select_type')}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('table.table_number')}
-                            </label>
-                            <Select2
-                                options={isAllBranches ? manualBranchTables : branchTables}
-                                value={manualOrderTableId || null}
-                                onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
-                                placeholder={t('table.table_number')}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Payment */}
-                    <div className="grid grid-cols-3 gap-5">
-                        <div className="space-y-2 col-span-1">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('billing.payment_method')}
-                            </label>
-                            <Select2
-                                options={[
-                                    { value: 'CASH', label: 'CASH' },
-                                    { value: 'CARD', label: 'CARD' },
-                                    { value: 'GCASH', label: 'GCASH' },
-                                    { value: 'BANK', label: 'BANK' },
-                                ]}
-                                value={manualPaymentMethod}
-                                onChange={(v) => setManualPaymentMethod((v as any) || 'CASH')}
-                                placeholder={t('billing.payment_method')}
-                            />
-                        </div>
-                        <div className="space-y-2 col-span-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('billing.payment_reference')}
-                            </label>
-                            <input
-                                type="text"
-                                value={manualPaymentRef}
-                                onChange={(e) => setManualPaymentRef(e.target.value)}
-                                placeholder={t('billing.payment_reference_placeholder')}
-                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                            />
-                            <p className="text-[11px] text-brand-muted">
-                                {t('orders.manual_order_payment_helper')}
-                            </p>
-                        </div>
-                    </div>
-
                     {/* Items section */}
                     <div className="space-y-3">
                         <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
                         <div className="grid grid-cols-12 gap-4">
                             <div className="col-span-5">
-                                <div className="space-y-3">
+                                <div className="space-y-3 h-[680px] flex flex-col">
+                                    <div className="flex items-center justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setManualMenuPage((prev) => Math.max(1, prev - 1))}
+                                            disabled={manualMenuPage <= 1}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-brand-muted hover:bg-gray-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                                        >
+                                            <ChevronLeft size={14} />
+                                            Prev
+                                        </button>
+                                        <span className="text-[11px] font-bold text-brand-muted min-w-[72px] text-center">
+                                            {manualMenuPage} / {manualMenuTotalPages}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setManualMenuPage((prev) => Math.min(manualMenuTotalPages, prev + 1))}
+                                            disabled={manualMenuPage >= manualMenuTotalPages}
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-brand-muted hover:bg-gray-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                                        >
+                                            Next
+                                            <ChevronRight size={14} />
+                                        </button>
+                                    </div>
                                     <div className="relative">
                                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
                                         <input
@@ -1345,8 +1298,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                                         />
                                     </div>
-                                    <div className="border border-gray-100 rounded-2xl bg-white overflow-hidden">
-                                        <div className="max-h-[360px] overflow-y-auto custom-scrollbar p-3">
+                                    <div className="border border-gray-100 rounded-2xl bg-white overflow-hidden flex-1 min-h-0">
+                                        <div className="h-full p-3">
                                             {manualOrderLoadingRefs ? (
                                                 <div className="flex items-center justify-center py-10 text-brand-muted text-sm">
                                                     <Loader2 size={18} className="animate-spin mr-2" />
@@ -1357,23 +1310,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                     {t('orders.no_items_added')}
                                                 </div>
                                             ) : (
-                                                <div className="grid grid-cols-1 gap-2">
-                                                    {filteredManualMenus.map((m) => (
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    {paginatedManualMenus.map((m) => (
                                                         <button
                                                             key={m.id}
                                                             type="button"
                                                             onClick={() => addManualMenuById(String(m.id), 1)}
-                                                            className="w-full text-left p-3 rounded-xl border border-gray-100 hover:border-brand-primary/30 hover:bg-brand-primary/5 transition-colors"
+                                                            className="w-full text-left p-3 rounded-xl border border-gray-100 hover:border-brand-primary/30 hover:bg-brand-primary/5 transition-colors cursor-pointer"
                                                         >
                                                             <div className="flex items-center justify-between gap-3">
                                                                 <div className="min-w-0">
                                                                     <p className="text-sm font-bold text-brand-text truncate">{m.name}</p>
-                                                                    <p className="text-[11px] text-brand-muted">
-                                                                        ₱{Number(m.price || 0).toLocaleString()}
-                                                                    </p>
                                                                 </div>
                                                                 <div className="shrink-0 text-xs font-bold text-brand-primary">
-                                                                    +1
+                                                                    ₱{Number(m.price || 0).toLocaleString()}
                                                                 </div>
                                                             </div>
                                                         </button>
@@ -1388,7 +1338,100 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 </div>
                             </div>
                             <div className="col-span-7">
-                                <div className="mt-0 border border-gray-100 rounded-xl overflow-hidden bg-white">
+                                <div className="space-y-4">
+                                    {/* Header / basic info */}
+                                    <div className="grid grid-cols-12 gap-3">
+                                        {isAllBranches && (
+                                            <div className="space-y-1.5 col-span-3">
+                                                <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                    {t('header.select_branch')}
+                                                </label>
+                                                <Select2
+                                                    options={manualBranchOptions}
+                                                    value={manualOrderBranchId || null}
+                                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); }}
+                                                    placeholder={t('header.select_branch')}
+                                                />
+                                            </div>
+                                        )}
+                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('orders.order_no_label')}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={manualOrderNo}
+                                                onChange={(e) => setManualOrderNo(e.target.value)}
+                                                placeholder={t('orders.order_no_placeholder')}
+                                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                                            />
+                                        </div>
+                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('orders.order_type')}
+                                            </label>
+                                            <Select2
+                                                options={[
+                                                    { value: 'DINE_IN', label: t('orders.dine_in') },
+                                                    { value: 'TAKE_OUT', label: t('orders.take_out') },
+                                                    { value: 'DELIVERY', label: t('orders.delivery') },
+                                                ]}
+                                                value={manualOrderType}
+                                                onChange={(v) =>
+                                                    setManualOrderType((v as typeof manualOrderType) || 'DINE_IN')
+                                                }
+                                                placeholder={t('orders.select_type')}
+                                            />
+                                        </div>
+                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('table.table_number')}
+                                            </label>
+                                            <Select2
+                                                options={isAllBranches ? manualBranchTables : branchTables}
+                                                value={manualOrderTableId || null}
+                                                onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
+                                                placeholder={t('table.table_number')}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Payment */}
+                                    <div className="grid grid-cols-12 gap-3">
+                                        <div className="space-y-1.5 col-span-4">
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('billing.payment_method')}
+                                            </label>
+                                            <Select2
+                                                options={[
+                                                    { value: 'CASH', label: 'CASH' },
+                                                    { value: 'CARD', label: 'CARD' },
+                                                    { value: 'GCASH', label: 'GCASH' },
+                                                    { value: 'BANK', label: 'BANK' },
+                                                ]}
+                                                value={manualPaymentMethod}
+                                                onChange={(v) => setManualPaymentMethod((v as any) || 'CASH')}
+                                                placeholder={t('billing.payment_method')}
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5 col-span-8">
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('billing.payment_reference')}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={manualPaymentRef}
+                                                onChange={(e) => setManualPaymentRef(e.target.value)}
+                                                placeholder={t('billing.payment_reference_placeholder')}
+                                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                                            />
+                                            <p className="text-[11px] text-brand-muted">
+                                                {t('orders.manual_order_payment_helper')}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden bg-white">
                                     {manualOrderItems.length === 0 ? (
                                         <div className="p-4 text-sm text-brand-muted text-center">
                                             {t('orders.no_items_added')}
@@ -1427,7 +1470,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => decManualOrderItemQty(it.menuId)}
-                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold"
+                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
                                                                     title="Decrease"
                                                                 >
                                                                     −
@@ -1438,7 +1481,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => addManualMenuById(it.menuId, 1)}
-                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold"
+                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
                                                                     title="Increase"
                                                                 >
                                                                     +
@@ -1454,7 +1497,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         <td className="px-4 py-2 text-right">
                                                             <button
                                                                 onClick={() => removeManualOrderItem(it.menuId)}
-                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg cursor-pointer"
                                                             >
                                                                 <Trash2 size={16} />
                                                             </button>

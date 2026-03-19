@@ -196,8 +196,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const LoginView = () => {
   const navigate = useNavigate();
   const { login } = useUser();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -270,7 +270,7 @@ const LoginView = () => {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
+                placeholder="Enter username"
                 disabled={isLoading}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
@@ -282,7 +282,7 @@ const LoginView = () => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Enter password"
                 disabled={isLoading}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400 disabled:opacity-50"
               />
