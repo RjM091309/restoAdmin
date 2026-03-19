@@ -17,7 +17,8 @@ class MenuController {
 			const rawBranch = req.query.branch_id ?? req.body.branch_id ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
 			// If 'all' is passed, fetch menus for ALL branches (admin view)
 			const branchId = (rawBranch === 'all' || rawBranch === '') ? null : rawBranch;
-			const menus = await MenuModel.getAll(branchId);
+			const includeDescription = !['0', 'false', 'no'].includes(String(req.query.include_description ?? '').toLowerCase());
+			const menus = await MenuModel.getAll(branchId, { includeDescription });
 
 			// Get target language from query parameter, cookie, or default to 'en'
 			// If user selected Korean in UI, show original Korean text (no translation)
@@ -30,27 +31,29 @@ class MenuController {
 			const translateRequested = ['1', 'true', 'yes'].includes(String(req.query.translate || '').toLowerCase());
 			if (TranslationService.isAvailable() && translateRequested) {
 				// First, translate descriptions (always, regardless of target language)
-				try {
-					const descTextsToTranslate = [];
-					const descTextMapping = [];
+				if (includeDescription) {
+					try {
+						const descTextsToTranslate = [];
+						const descTextMapping = [];
 
-					menus.forEach(menu => {
-						if (menu.MENU_DESCRIPTION) {
-							descTextsToTranslate.push(menu.MENU_DESCRIPTION);
-							descTextMapping.push({ menu: menu });
-						}
-					});
-
-					if (descTextsToTranslate.length > 0) {
-						const descTranslations = await TranslationService.translateBatch(descTextsToTranslate, targetLanguage);
-						descTranslations.forEach((translation, index) => {
-							if (descTextMapping[index]) {
-								descTextMapping[index].menu.MENU_DESCRIPTION = translation || descTextMapping[index].menu.MENU_DESCRIPTION;
+						menus.forEach(menu => {
+							if (menu.MENU_DESCRIPTION) {
+								descTextsToTranslate.push(menu.MENU_DESCRIPTION);
+								descTextMapping.push({ menu: menu });
 							}
 						});
+
+						if (descTextsToTranslate.length > 0) {
+							const descTranslations = await TranslationService.translateBatch(descTextsToTranslate, targetLanguage);
+							descTranslations.forEach((translation, index) => {
+								if (descTextMapping[index]) {
+									descTextMapping[index].menu.MENU_DESCRIPTION = translation || descTextMapping[index].menu.MENU_DESCRIPTION;
+								}
+							});
+						}
+					} catch (descError) {
+						console.error('[MENU CONTROLLER] Description translation error:', descError.message);
 					}
-				} catch (descError) {
-					console.error('[MENU CONTROLLER] Description translation error:', descError.message);
 				}
 
 				// Then, translate menu names and category names
@@ -201,8 +204,8 @@ class MenuController {
 			}
 
 			const user_id = req.session.user_id || req.user?.user_id;
-			// Prioritize session branch_id
-			const branchId = req.session?.branch_id || req.body.BRANCH_ID || req.query.branch_id || req.user?.branch_id;
+			// Prioritize explicit branch (admin branch selector), then fall back to session/user
+			const branchId = req.body.BRANCH_ID || req.query.branch_id || req.session?.branch_id || req.user?.branch_id;
 			if (!branchId) {
 				return ApiResponse.badRequest(res, 'Branch ID is required. Please select a branch first.');
 			}

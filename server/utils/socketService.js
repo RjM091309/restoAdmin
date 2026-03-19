@@ -6,6 +6,8 @@
 // ============================================
 
 let io = null;
+const SOCKET_LOG_EMITS = String(process.env.SOCKET_LOG_EMITS || '').toLowerCase() === 'true';
+const SOCKET_LOG_CONNECTIONS = String(process.env.SOCKET_LOG_CONNECTIONS || '').toLowerCase() !== 'false';
 
 // Initialize socket.io
 function initializeSocket(server) {
@@ -21,26 +23,34 @@ function initializeSocket(server) {
   });
 
   io.on('connection', (socket) => {
-    console.log(`[SOCKET] Client connected: ${socket.id}`);
+    if (SOCKET_LOG_CONNECTIONS) {
+      console.log(`[SOCKET] Client connected: ${socket.id}`);
+    }
 
     // Handle order room joining
     socket.on('join_order', (orderId) => {
       const room = `order_${orderId}`;
       socket.join(room);
-      console.log(`[SOCKET] Client ${socket.id} joined room: ${room}`);
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} joined room: ${room}`);
+      }
     });
 
     // Handle order room leaving
     socket.on('leave_order', (orderId) => {
       const room = `order_${orderId}`;
       socket.leave(room);
-      console.log(`[SOCKET] Client ${socket.id} left room: ${room}`);
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} left room: ${room}`);
+      }
     });
 
     // Handle kitchen room joining
     socket.on('join_kitchen', () => {
       socket.join('kitchen');
-      console.log(`[SOCKET] Client ${socket.id} joined kitchen room`);
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} joined kitchen room`);
+      }
     });
 
     // Handle user room joining (for real-time notifications)
@@ -48,16 +58,22 @@ function initializeSocket(server) {
       if (userId != null && userId !== '') {
         const room = `user_${userId}`;
         socket.join(room);
-        console.log(`[SOCKET] Client ${socket.id} joined user room: ${room}`);
+        if (SOCKET_LOG_CONNECTIONS) {
+          console.log(`[SOCKET] Client ${socket.id} joined user room: ${room}`);
+        }
       }
     });
 
     socket.on('disconnect', () => {
-      console.log(`[SOCKET] Client disconnected: ${socket.id}`);
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client disconnected: ${socket.id}`);
+      }
     });
   });
 
-  console.log('[SOCKET] Socket.io server initialized');
+  if (SOCKET_LOG_CONNECTIONS) {
+    console.log('[SOCKET] Socket.io server initialized');
+  }
   return io;
 }
 
@@ -89,7 +105,9 @@ function emitOrderUpdate(orderId, orderData) {
   // Also emit to kitchen room
   io.to('kitchen').emit('order_updated', payload);
 
-  console.log(`[SOCKET] Emitted order_updated to room: ${room} and kitchen`);
+  if (SOCKET_LOG_EMITS) {
+    console.log(`[SOCKET] Emitted order_updated to room: ${room} and kitchen`);
+  }
 }
 
 // Emit order created event
@@ -115,7 +133,9 @@ function emitOrderCreated(orderId, orderData) {
   // Also emit globally for safety
   io.emit('order_created', payload);
 
-  console.log(`[SOCKET] Emitted order_created to room: ${room} and kitchen`);
+  if (SOCKET_LOG_EMITS) {
+    console.log(`[SOCKET] Emitted order_created to room: ${room} and kitchen`);
+  }
 }
 
 // Emit order items added event
@@ -139,7 +159,9 @@ function emitOrderItemsAdded(orderId, orderData) {
   // Also emit to kitchen room
   io.to('kitchen').emit('order_items_added', payload);
 
-  console.log(`[SOCKET] Emitted order_items_added to room: ${room} and kitchen`);
+  if (SOCKET_LOG_EMITS) {
+    console.log(`[SOCKET] Emitted order_items_added to room: ${room} and kitchen`);
+  }
 }
 
 // Emit table updated event
@@ -158,7 +180,9 @@ function emitTableUpdated(tableData, action = 'updated') {
   };
 
   io.emit('table_updated', payload);
-  console.log(`[SOCKET] Emitted table_updated (${action}) for table: ${tableId}`);
+  if (SOCKET_LOG_EMITS) {
+    console.log(`[SOCKET] Emitted table_updated (${action}) for table: ${tableId}`);
+  }
 }
 
 // Emit new notification to a specific user (restoadmin bell)
@@ -169,7 +193,9 @@ function emitNotificationCreated(userId, notification) {
   }
   const room = `user_${userId}`;
   io.to(room).emit('notification_new', notification);
-  console.log(`[SOCKET] Emitted notification_new to room: ${room}`);
+  if (SOCKET_LOG_EMITS) {
+    console.log(`[SOCKET] Emitted notification_new to room: ${room}`);
+  }
 }
 
 // Get socket.io instance

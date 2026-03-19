@@ -9,7 +9,8 @@ const pool = require('../config/db');
 
 class MenuModel {
 	// Get all active menus with category name
-	static async getAll(branchId = null) {
+	static async getAll(branchId = null, options = {}) {
+		const includeDescription = options.includeDescription !== false;
 		let query = `
 			SELECT 
 				m.IDNo,
@@ -20,7 +21,7 @@ class MenuModel {
 				m.CATEGORY_ID,
 				c.CAT_NAME AS CATEGORY_NAME,
 				m.MENU_NAME,
-				m.MENU_DESCRIPTION,
+				${includeDescription ? 'm.MENU_DESCRIPTION,' : ''}
 				m.MENU_IMG,
 				m.MENU_PRICE,
 				m.IS_AVAILABLE,

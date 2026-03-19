@@ -9,6 +9,10 @@ const loyverseService = require('../utils/loyverseService');
 const ApiResponse = require('../utils/apiResponse');
 
 class LoyverseController {
+	static isSyncInProgressError(error) {
+		return String(error?.message || '').toLowerCase().includes('sync already in progress');
+	}
+
 	/**
 	 * Get sync status
 	 * GET /api/loyverse/status
@@ -43,6 +47,15 @@ class LoyverseController {
 				message: `Sync completed: ${stats.totalInserted} inserted, ${stats.totalUpdated} updated, ${stats.totalErrors} errors`
 			}, 'Sync completed successfully');
 		} catch (error) {
+			if (LoyverseController.isSyncInProgressError(error)) {
+				// Common case (auto-sync/manual sync overlap): don't treat as server failure
+				const status = loyverseService.getSyncStatus();
+				return ApiResponse.success(res, {
+					alreadyRunning: true,
+					status,
+					message: 'Sync already in progress. Please wait for it to finish.'
+				}, 'Sync already running');
+			}
 			return ApiResponse.error(res, error.message, 500);
 		}
 	}
@@ -66,6 +79,14 @@ class LoyverseController {
 				message: `Full sync completed: ${stats.totalInserted} inserted, ${stats.totalUpdated} updated, ${stats.totalErrors} errors`
 			}, 'Full sync completed successfully');
 		} catch (error) {
+			if (LoyverseController.isSyncInProgressError(error)) {
+				const status = loyverseService.getSyncStatus();
+				return ApiResponse.success(res, {
+					alreadyRunning: true,
+					status,
+					message: 'Sync already in progress. Please wait for it to finish.'
+				}, 'Sync already running');
+			}
 			return ApiResponse.error(res, error.message, 500);
 		}
 	}
@@ -113,6 +134,14 @@ class LoyverseController {
 				message: `Sync completed: ${stats.totalInserted} inserted, ${stats.totalUpdated} updated, ${stats.totalErrors} errors`
 			}, 'Sync range completed successfully');
 		} catch (error) {
+			if (LoyverseController.isSyncInProgressError(error)) {
+				const status = loyverseService.getSyncStatus();
+				return ApiResponse.success(res, {
+					alreadyRunning: true,
+					status,
+					message: 'Sync already in progress. Please wait for it to finish.'
+				}, 'Sync already running');
+			}
 			return ApiResponse.error(res, error.message, 500);
 		}
 	}
