@@ -131,8 +131,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualOrderTableId, setManualOrderTableId] = useState<string>('');
     const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string }[]>([]);
     const [manualOrderItems, setManualOrderItems] = useState<NewOrderItem[]>([]);
-    const [manualOrderSelectedMenuId, setManualOrderSelectedMenuId] = useState<string>('');
-    const [manualOrderQty, setManualOrderQty] = useState<number>(1);
+    const [manualMenuQuery, setManualMenuQuery] = useState('');
+    const [manualRowFlash, setManualRowFlash] = useState<{ menuId: string; nonce: number } | null>(null);
     const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'CARD' | 'GCASH' | 'BANK'>('CASH');
     const [manualPaymentRef, setManualPaymentRef] = useState<string>('');
 
@@ -408,8 +408,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualOrderNo(generateOrderNo());
         setManualOrderType('DINE_IN');
         setManualOrderItems([]);
-        setManualOrderSelectedMenuId('');
-        setManualOrderQty(1);
+        setManualMenuQuery('');
         setManualOrderTableId('');
         setManualPaymentMethod('CASH');
         setManualPaymentRef('');
@@ -622,37 +621,49 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
-    const addManualOrderItem = () => {
-        if (!manualOrderSelectedMenuId) {
-            setSwal({
-                type: 'warning',
-                title: t('orders.swal.select_item_title'),
-                text: t('orders.swal.select_item_text'),
-                onConfirm: () => setSwal(null)
-            });
-            return;
-        }
-        const qty = Number(manualOrderQty);
-        if (!Number.isFinite(qty) || qty <= 0) {
-            setSwal({
-                type: 'warning',
-                title: t('orders.swal.invalid_qty_title'),
-                text: t('orders.swal.invalid_qty_text'),
-                onConfirm: () => setSwal(null)
-            });
-            return;
-        }
-        const menu = manualOrderMenus.find((m) => m.id === manualOrderSelectedMenuId);
+    const addManualMenuById = (menuId: string, qtyToAdd = 1) => {
+        const menu = manualOrderMenus.find((m) => m.id === menuId);
         if (!menu) return;
+        const qty = Number(qtyToAdd);
+        if (!Number.isFinite(qty) || qty <= 0) return;
         setManualOrderItems((prev) => {
-            const idx = prev.findIndex((p) => p.menuId === manualOrderSelectedMenuId);
-            if (idx >= 0) { const copy = [...prev]; copy[idx] = { ...copy[idx], qty: copy[idx].qty + qty }; return copy; }
-            return [...prev, { menuId: manualOrderSelectedMenuId, name: menu.name, unitPrice: Number(menu.price || 0), qty }];
+            const idx = prev.findIndex((p) => p.menuId === menuId);
+            if (idx >= 0) {
+                const copy = [...prev];
+                copy[idx] = { ...copy[idx], qty: Math.max(1, copy[idx].qty + qty) };
+                return copy;
+            }
+            return [{ menuId, name: menu.name, unitPrice: Number(menu.price || 0), qty }, ...prev];
         });
-        setManualOrderSelectedMenuId(''); setManualOrderQty(1);
+        // Briefly highlight the affected row so users can track what was just added.
+        setManualRowFlash({ menuId, nonce: Date.now() });
     };
 
     const removeManualOrderItem = (menuId: string) => setManualOrderItems((prev) => prev.filter((p) => p.menuId !== menuId));
+    const decManualOrderItemQty = (menuId: string) =>
+        setManualOrderItems((prev) => {
+            const idx = prev.findIndex((p) => p.menuId === menuId);
+            if (idx < 0) return prev;
+            const nextQty = (prev[idx].qty || 1) - 1;
+            if (nextQty <= 0) return prev.filter((p) => p.menuId !== menuId);
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], qty: nextQty };
+            return copy;
+        });
+
+    const filteredManualMenus = useMemo(() => {
+        const q = manualMenuQuery.trim().toLowerCase();
+        const base = (Array.isArray(manualOrderMenus) ? manualOrderMenus : [])
+            .filter((m) => m.active && (m.effectiveAvailable ?? m.isAvailable));
+        if (!q) return base;
+        return base.filter((m) => String(m.name || '').toLowerCase().includes(q));
+    }, [manualMenuQuery, manualOrderMenus]);
+
+    useEffect(() => {
+        if (!manualRowFlash) return;
+        const timer = window.setTimeout(() => setManualRowFlash(null), 900);
+        return () => window.clearTimeout(timer);
+    }, [manualRowFlash]);
 
     const submitManualOrder = async () => {
         if (isAllBranches && !manualOrderBranchId) {
@@ -1212,7 +1223,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 isOpen={manualOrderOpen}
                 onClose={closeManualOrder}
                 title={t('orders.create_manual_order')}
-                maxWidth="2xl"
+                maxWidth="6xl"
                 footer={
                     <div className="flex items-center justify-end gap-3">
                         <button onClick={closeManualOrder} disabled={manualOrderSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50">
@@ -1321,96 +1332,161 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     {/* Items section */}
                     <div className="space-y-3">
                         <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
-                        <div className="grid grid-cols-12 gap-3 items-end">
+                        <div className="grid grid-cols-12 gap-4">
+                            <div className="col-span-5">
+                                <div className="space-y-3">
+                                    <div className="relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-muted" />
+                                        <input
+                                            type="text"
+                                            value={manualMenuQuery}
+                                            onChange={(e) => setManualMenuQuery(e.target.value)}
+                                            placeholder={t('orders.search_placeholder')}
+                                            className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                                        />
+                                    </div>
+                                    <div className="border border-gray-100 rounded-2xl bg-white overflow-hidden">
+                                        <div className="max-h-[360px] overflow-y-auto custom-scrollbar p-3">
+                                            {manualOrderLoadingRefs ? (
+                                                <div className="flex items-center justify-center py-10 text-brand-muted text-sm">
+                                                    <Loader2 size={18} className="animate-spin mr-2" />
+                                                    {t('orders.loading_menu')}
+                                                </div>
+                                            ) : filteredManualMenus.length === 0 ? (
+                                                <div className="py-10 text-center text-sm text-brand-muted">
+                                                    {t('orders.no_items_added')}
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-1 gap-2">
+                                                    {filteredManualMenus.map((m) => (
+                                                        <button
+                                                            key={m.id}
+                                                            type="button"
+                                                            onClick={() => addManualMenuById(String(m.id), 1)}
+                                                            className="w-full text-left p-3 rounded-xl border border-gray-100 hover:border-brand-primary/30 hover:bg-brand-primary/5 transition-colors"
+                                                        >
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="min-w-0">
+                                                                    <p className="text-sm font-bold text-brand-text truncate">{m.name}</p>
+                                                                    <p className="text-[11px] text-brand-muted">
+                                                                        ₱{Number(m.price || 0).toLocaleString()}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="shrink-0 text-xs font-bold text-brand-primary">
+                                                                    +1
+                                                                </div>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <p className="text-[11px] text-brand-muted">
+                                        Click item para auto-add. Click ulit para dagdag qty.
+                                    </p>
+                                </div>
+                            </div>
                             <div className="col-span-7">
-                                <Select2
-                                    options={manualOrderMenus.map((m) => ({ value: m.id, label: `${m.name} — ₱${Number(m.price).toLocaleString()}` }))}
-                                    value={manualOrderSelectedMenuId || null}
-                                    onChange={(v) => setManualOrderSelectedMenuId(v ? String(v) : '')}
-                                    placeholder={manualOrderLoadingRefs ? t('orders.loading_menu') : t('orders.select_item')}
-                                    disabled={manualOrderLoadingRefs}
-                                />
-                            </div>
-                            <div className="col-span-2">
-                                <input type="number" min={1} value={manualOrderQty} onChange={(e) => setManualOrderQty(Number(e.target.value))}
-                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all" />
-                            </div>
-                            <div className="col-span-3">
-                                <button type="button" onClick={addManualOrderItem} disabled={manualOrderLoadingRefs}
-                                    className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1">
-                                    <Plus size={14} /> {t('orders.add')}
-                                </button>
+                                <div className="mt-0 border border-gray-100 rounded-xl overflow-hidden bg-white">
+                                    {manualOrderItems.length === 0 ? (
+                                        <div className="p-4 text-sm text-brand-muted text-center">
+                                            {t('orders.no_items_added')}
+                                        </div>
+                                    ) : (
+                                        <table className="w-full text-sm">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
+                                                        {t('orders.item')}
+                                                    </th>
+                                                    <th className="px-3 py-2 text-center font-bold text-brand-muted text-xs w-[120px]">
+                                                        {t('orders.qty')}
+                                                    </th>
+                                                    <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
+                                                        {t('orders.unit')}
+                                                    </th>
+                                                    <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
+                                                        {t('orders.line_total')}
+                                                    </th>
+                                                    <th className="px-4 py-2 w-12"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-50">
+                                                {manualOrderItems.map((it) => (
+                                                    <tr
+                                                        key={it.menuId}
+                                                        className={cn(
+                                                            'transition-colors duration-700',
+                                                            manualRowFlash?.menuId === it.menuId && 'bg-indigo-50'
+                                                        )}
+                                                    >
+                                                        <td className="px-4 py-2 font-medium">{it.name}</td>
+                                                        <td className="px-3 py-2 text-center">
+                                                            <div className="flex items-center justify-center gap-3">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => decManualOrderItemQty(it.menuId)}
+                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold"
+                                                                    title="Decrease"
+                                                                >
+                                                                    −
+                                                                </button>
+                                                                <span className="inline-block w-8 text-center font-bold">
+                                                                    {it.qty}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => addManualMenuById(it.menuId, 1)}
+                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold"
+                                                                    title="Increase"
+                                                                >
+                                                                    +
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right">
+                                                            ₱{Number(it.unitPrice).toLocaleString()}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right font-bold">
+                                                            ₱{Number(it.qty * it.unitPrice).toLocaleString()}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right">
+                                                            <button
+                                                                onClick={() => removeManualOrderItem(it.menuId)}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            {manualOrderItems.length > 0 && (
+                                                <tfoot className="bg-gray-50">
+                                                    <tr>
+                                                        <td
+                                                            className="px-4 py-2 text-right font-bold text-brand-text"
+                                                            colSpan={3}
+                                                        >
+                                                            {t('orders.grand_total')}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
+                                                            ₱
+                                                            {manualOrderSubtotal.toLocaleString(undefined, {
+                                                                minimumFractionDigits: 2,
+                                                            })}
+                                                        </td>
+                                                        <td></td>
+                                                    </tr>
+                                                </tfoot>
+                                            )}
+                                        </table>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden bg-white">
-                            {manualOrderItems.length === 0 ? (
-                                <div className="p-4 text-sm text-brand-muted text-center">
-                                    {t('orders.no_items_added')}
-                                </div>
-                            ) : (
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
-                                                {t('orders.item')}
-                                            </th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
-                                                {t('orders.qty')}
-                                            </th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
-                                                {t('orders.unit')}
-                                            </th>
-                                            <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
-                                                {t('orders.line_total')}
-                                            </th>
-                                            <th className="px-4 py-2 w-12"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-50">
-                                        {manualOrderItems.map((it) => (
-                                            <tr key={it.menuId}>
-                                                <td className="px-4 py-2 font-medium">{it.name}</td>
-                                                <td className="px-4 py-2 text-right">{it.qty}</td>
-                                                <td className="px-4 py-2 text-right">
-                                                    ₱{Number(it.unitPrice).toLocaleString()}
-                                                </td>
-                                                <td className="px-4 py-2 text-right font-bold">
-                                                    ₱{Number(it.qty * it.unitPrice).toLocaleString()}
-                                                </td>
-                                                <td className="px-4 py-2 text-right">
-                                                    <button
-                                                        onClick={() => removeManualOrderItem(it.menuId)}
-                                                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
-                                                    >
-                                                        <Trash2 size={16} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {manualOrderItems.length > 0 && (
-                                        <tfoot className="bg-gray-50">
-                                            <tr>
-                                                <td
-                                                    className="px-4 py-2 text-right font-bold text-brand-text"
-                                                    colSpan={3}
-                                                >
-                                                    {t('orders.grand_total')}
-                                                </td>
-                                                <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
-                                                    ₱
-                                                    {manualOrderSubtotal.toLocaleString(undefined, {
-                                                        minimumFractionDigits: 2,
-                                                    })}
-                                                </td>
-                                                <td></td>
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            )}
-                        </div>
                     </div>
                 </div>
             </Modal>
