@@ -176,6 +176,7 @@ export const getMenuCategories = async (branchId?: string): Promise<MenuCategory
 };
 
 export type CreateMenuCategoryPayload = { name: string; description?: string | null };
+export type UpdateMenuCategoryPayload = { name: string; description?: string | null };
 
 export async function createMenuCategory(branchId: string | null, payload: CreateMenuCategoryPayload): Promise<{ id: number }> {
     const body: Record<string, string | number | null> = {
@@ -195,6 +196,37 @@ export async function createMenuCategory(branchId: string | null, payload: Creat
         throw new Error((json as { error?: string }).error || 'Failed to create category');
     }
     return json.data as { id: number };
+}
+
+export async function updateMenuCategory(
+    id: string,
+    payload: UpdateMenuCategoryPayload
+): Promise<void> {
+    const response = await fetch(buildUrl(`/category/${id}`), {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            CAT_NAME: payload.name.trim(),
+            CAT_DESC: payload.description?.trim() || null,
+        }),
+    });
+    const json = (await response.json()) as ApiResponse<null> & { error?: string };
+    if (!response.ok || !json.success) {
+        throw new Error(json.error || 'Failed to update category');
+    }
+}
+
+export async function deleteMenuCategory(id: string): Promise<void> {
+    const response = await fetch(buildUrl(`/category/${id}`), {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: authHeaders(),
+    });
+    const json = (await response.json()) as ApiResponse<null> & { error?: string };
+    if (!response.ok || !json.success) {
+        throw new Error(json.error || 'Failed to delete category');
+    }
 }
 
 // --- Create / Update / Delete ---

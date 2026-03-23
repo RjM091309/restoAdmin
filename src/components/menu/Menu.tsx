@@ -26,6 +26,8 @@ import {
     getMenuCategories,
     createMenu,
     createMenuCategory,
+    updateMenuCategory,
+    deleteMenuCategory,
     updateMenu,
     deleteMenu,
     resolveImageUrl,
@@ -83,6 +85,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [submitting, setSubmitting] = useState(false);
     const [swal, setSwal] = useState<SwalState>(null);
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
     const [categoryName, setCategoryName] = useState('');
     const [categoryDesc, setCategoryDesc] = useState('');
     const [categorySubmitting, setCategorySubmitting] = useState(false);
@@ -231,6 +234,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     };
 
     const openCategoryModal = () => {
+        setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
         setIsCategoryModalOpen(true);
@@ -239,11 +243,55 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const closeCategoryModal = () => {
         if (categorySubmitting) return;
         setIsCategoryModalOpen(false);
+        setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
     };
 
-    const handleCreateCategory = async () => {
+    const handleOpenEditCategory = (e: React.MouseEvent, category: MenuCategory) => {
+        e.stopPropagation();
+        setEditingCategory(category);
+        setCategoryName(category.name || '');
+        setCategoryDesc('');
+        setIsCategoryModalOpen(true);
+    };
+
+    const handleDeleteCategory = (e: React.MouseEvent, category: MenuCategory) => {
+        e.stopPropagation();
+        setSwal({
+            type: 'question',
+            title: t('menu_page.messages.delete_title'),
+            text: `Delete category "${category.name}"?`,
+            showCancel: true,
+            confirmText: t('menu_page.messages.delete_confirm_btn'),
+            onConfirm: async () => {
+                setSwal(null);
+                setCategorySubmitting(true);
+                try {
+                    await deleteMenuCategory(category.id);
+                    await refreshData();
+                    setSwal({
+                        type: 'success',
+                        title: t('menu_page.messages.deleted_title'),
+                        text: `Category "${category.name}" deleted.`,
+                        onConfirm: () => setSwal(null),
+                    });
+                } catch (err) {
+                    setSwal({
+                        type: 'error',
+                        title: t('menu_page.messages.error_title'),
+                        text: err instanceof Error ? err.message : 'Failed to delete category',
+                        onConfirm: () => setSwal(null),
+                    });
+                } finally {
+                    setCategorySubmitting(false);
+                }
+            },
+            onCancel: () => setSwal(null),
+        });
+    };
+
+    const handleSaveCategory = async () => {
         const name = categoryName.trim();
         if (!name) {
             setSwal({ type: 'warning', title: t('category.manage_category'), text: t('categories.messages.name_required'), onConfirm: () => setSwal(null) });
@@ -255,10 +303,38 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         }
         setCategorySubmitting(true);
         try {
-            await createMenuCategory(branchId, { name, description: categoryDesc.trim() || null });
-            setSwal({ type: 'success', title: t('category.category_created_successfully'), text: '', onConfirm: () => { setSwal(null); closeCategoryModal(); refreshData(); } });
+            if (editingCategory) {
+                await updateMenuCategory(editingCategory.id, { name, description: categoryDesc.trim() || null });
+                setSwal({
+                    type: 'success',
+                    title: 'Category updated successfully',
+                    text: '',
+                    onConfirm: () => {
+                        setSwal(null);
+                        closeCategoryModal();
+                        refreshData();
+                    },
+                });
+            } else {
+                await createMenuCategory(branchId, { name, description: categoryDesc.trim() || null });
+                setSwal({
+                    type: 'success',
+                    title: t('category.category_created_successfully'),
+                    text: '',
+                    onConfirm: () => {
+                        setSwal(null);
+                        closeCategoryModal();
+                        refreshData();
+                    },
+                });
+            }
         } catch (e) {
-            setSwal({ type: 'error', title: t('category.failed_to_create_category'), text: e instanceof Error ? e.message : 'Failed to create category', onConfirm: () => setSwal(null) });
+            setSwal({
+                type: 'error',
+                title: editingCategory ? 'Failed to update category' : t('category.failed_to_create_category'),
+                text: e instanceof Error ? e.message : editingCategory ? 'Failed to update category' : 'Failed to create category',
+                onConfirm: () => setSwal(null),
+            });
         } finally {
             setCategorySubmitting(false);
         }
@@ -773,7 +849,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                         </span>
                                                         <span
                                                             className={cn(
-                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-colors',
+                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
                                                                 active
                                                                     ? 'bg-brand-primary/15 text-brand-primary'
                                                                     : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
@@ -783,6 +859,30 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                         </span>
                                                     </div>
                                                 </button>
+                                                {(canUpdate('menu_management') || canDelete('menu_management')) && (
+                                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                                                        {canUpdate('menu_management') && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleOpenEditCategory(e, cat)}
+                                                                className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                                                aria-label="Edit menu category"
+                                                            >
+                                                                <Edit2 size={14} />
+                                                            </button>
+                                                        )}
+                                                        {canDelete('menu_management') && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => handleDeleteCategory(e, cat)}
+                                                                className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                                                aria-label="Delete menu category"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })}
@@ -1003,11 +1103,11 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 {modalContent}
             </Modal>
 
-            {/* Add New Category Modal */}
+            {/* Add/Edit Category Modal */}
             <Modal
                 isOpen={isCategoryModalOpen}
                 onClose={closeCategoryModal}
-                title={t('categories.add_new_category')}
+                title={editingCategory ? 'Edit Category' : t('categories.add_new_category')}
                 maxWidth="md"
                 footer={
                     <div className="flex items-center justify-end gap-3">
@@ -1021,12 +1121,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         </button>
                         <button
                             type="button"
-                            onClick={handleCreateCategory}
+                            onClick={handleSaveCategory}
                             disabled={categorySubmitting}
                             className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                         >
                             {categorySubmitting && <Loader2 size={16} className="animate-spin" />}
-                            {t('categories.save_category')}
+                            {editingCategory ? 'Update' : t('categories.save_category')}
                         </button>
                     </div>
                 }
