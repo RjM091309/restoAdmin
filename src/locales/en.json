@@ -1396,6 +1396,8 @@
 		"unknown": "Unknown",
 		"table_number": "Table Number",
 		"capacity": "Capacity",
+		"room_charge": "Room charge",
+		"room_charge_placeholder": "0.00 (optional)",
 		"date_created": "Date Created",
 		"action": "Action",
 		"success": "Success!",

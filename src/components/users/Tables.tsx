@@ -18,6 +18,7 @@ interface TableRow {
   branchName: string;
   tableNumber: string;
   capacity: number;
+  roomCharge: number | null;
   status: number;
   encodedAt: string | null;
 }
@@ -66,11 +67,13 @@ export const Tables: React.FC = () => {
     branchId: string | number | null;
     tableNumber: string;
     capacity: string;
+    roomCharge: string;
     status: number;
   }>({
     branchId: null,
     tableNumber: '',
     capacity: '',
+    roomCharge: '',
     status: 1,
   });
 
@@ -148,6 +151,10 @@ export const Tables: React.FC = () => {
         branchName: rt.BRANCH_LABEL || '—',
         tableNumber: String(rt.TABLE_NUMBER ?? '—'),
         capacity: Number(rt.CAPACITY ?? 0),
+        roomCharge:
+          rt.ROOM_CHARGE != null && rt.ROOM_CHARGE !== ''
+            ? Number(rt.ROOM_CHARGE)
+            : null,
         status: Number(rt.STATUS ?? 0),
         encodedAt: rt.ENCODED_DT || null,
       }));
@@ -169,11 +176,16 @@ export const Tables: React.FC = () => {
   const filtered = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
     return tables.filter((tbl) => {
+      const chargeStr =
+        tbl.roomCharge != null && !Number.isNaN(tbl.roomCharge)
+          ? String(tbl.roomCharge)
+          : '';
       const matchesSearch =
         !term ||
         tbl.tableNumber.toLowerCase().includes(term) ||
         tbl.branchName.toLowerCase().includes(term) ||
-        String(tbl.capacity).includes(term);
+        String(tbl.capacity).includes(term) ||
+        chargeStr.includes(term);
       const matchesStatus =
         statusFilter === 'all' || String(tbl.status) === statusFilter;
       return matchesSearch && matchesStatus;
@@ -190,6 +202,7 @@ export const Tables: React.FC = () => {
       branchId: isAdmin ? null : user?.branch_id || null,
       tableNumber: '',
       capacity: '',
+      roomCharge: '',
       status: 1,
     });
     setIsModalOpen(true);
@@ -201,6 +214,10 @@ export const Tables: React.FC = () => {
       branchId: table.branchId,
       tableNumber: table.tableNumber === '—' ? '' : table.tableNumber,
       capacity: table.capacity ? String(table.capacity) : '',
+      roomCharge:
+        table.roomCharge != null && !Number.isNaN(table.roomCharge)
+          ? String(table.roomCharge)
+          : '',
       status: table.status ?? 1,
     });
     setIsModalOpen(true);
@@ -228,6 +245,7 @@ export const Tables: React.FC = () => {
       const payload: any = {
         TABLE_NUMBER: formData.tableNumber.trim(),
         CAPACITY: formData.capacity || '0',
+        ROOM_CHARGE: formData.roomCharge.trim(),
         STATUS: formData.status,
       };
       if (isAdmin && formData.branchId) {
@@ -335,6 +353,19 @@ export const Tables: React.FC = () => {
       ),
     },
     {
+      header: t('table.room_charge'),
+      render: (tbl) => (
+        <span className="text-sm font-medium tabular-nums">
+          {tbl.roomCharge != null && !Number.isNaN(tbl.roomCharge)
+            ? tbl.roomCharge.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })
+            : '—'}
+        </span>
+      ),
+    },
+    {
       header: t('table.status'),
       render: (tbl) => statusBadge(tbl.status),
     },
@@ -381,7 +412,7 @@ export const Tables: React.FC = () => {
             <SkeletonPageHeader />
             <SkeletonStatCards />
             <div className="bg-white rounded-2xl shadow-sm p-6">
-              <SkeletonTable columns={6} rows={10} />
+              <SkeletonTable columns={7} rows={10} />
             </div>
           </motion.div>
         ) : error ? (
@@ -488,6 +519,7 @@ export const Tables: React.FC = () => {
               branchId: isAdmin ? null : user?.branch_id || null,
               tableNumber: '',
               capacity: '',
+              roomCharge: '',
               status: 1,
             });
           }
@@ -610,6 +642,26 @@ export const Tables: React.FC = () => {
                 }
               />
             </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+              {t('table.room_charge')}
+            </label>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder={t('table.room_charge_placeholder')}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+              value={formData.roomCharge}
+              onChange={(e) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  roomCharge: e.target.value,
+                }))
+              }
+            />
           </div>
         </form>
       </Modal>

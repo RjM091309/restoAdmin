@@ -1342,6 +1342,8 @@
 		"unknown": "未知",
 		"table_number": "桌子编号",
 		"capacity": "容量",
+		"room_charge": "房费",
+		"room_charge_placeholder": "0.00（可选）",
 		"date_created": "创建日期",
 		"action": "操作",
 		"success": "成功！",

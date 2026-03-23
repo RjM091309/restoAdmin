@@ -1379,6 +1379,8 @@
 		"unknown": "알 수 없음",
 		"table_number": "테이블 번호",
 		"capacity": "수용 인원",
+		"room_charge": "룸 차지",
+		"room_charge_placeholder": "0.00 (선택)",
 		"date_created": "생성 날짜",
 		"action": "작업",
 		"success": "성공!",

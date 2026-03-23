@@ -99,6 +99,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailOrder, setDetailOrder] = useState<OrderRecord | null>(null);
     const [detailItems, setDetailItems] = useState<OrderItemRecord[]>([]);
     const [detailLoading, setDetailLoading] = useState(false);
+    const [detailRoomChargeUnit, setDetailRoomChargeUnit] = useState<number>(0);
 
     // ----- Status update & item actions -----
     const [statusSubmitting, setStatusSubmitting] = useState(false);
@@ -132,11 +133,14 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualOrderType, setManualOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [manualOrderTableId, setManualOrderTableId] = useState<string>('');
     const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [manualBranchTablesRoomChargeById, setManualBranchTablesRoomChargeById] = useState<Record<string, number>>({});
+    const [manualRoomChargeQty, setManualRoomChargeQty] = useState<number>(1);
     const [manualOrderItems, setManualOrderItems] = useState<NewOrderItem[]>([]);
     const [manualMenuQuery, setManualMenuQuery] = useState('');
     const [manualRowFlash, setManualRowFlash] = useState<{ menuId: string; nonce: number } | null>(null);
     const [manualPaymentMethod, setManualPaymentMethod] = useState<'CASH' | 'CARD' | 'GCASH' | 'BANK'>('CASH');
     const [manualPaymentRef, setManualPaymentRef] = useState<string>('');
+    const [manualDiscountAmount, setManualDiscountAmount] = useState<string>('0');
     const [manualMenuPage, setManualMenuPage] = useState(1);
 
     // ----- Add items to existing order (detail modal) -----
@@ -271,6 +275,61 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     };
 
     const closeDetail = () => { setDetailOrder(null); setDetailItems([]); };
+
+    // Load ROOM_CHARGE for the selected table so we can render "Room charge"
+    // row (derived from SERVICE_CHARGE) with correct qty/unit/line_total.
+    useEffect(() => {
+        if (!detailOrder) {
+            setDetailRoomChargeUnit(0);
+            return;
+        }
+
+        const status = Number(detailOrder.STATUS);
+        const isSettledLike = status === ORDER_STATUS.SETTLED || status === ORDER_STATUS.CANCELLED;
+        if (!isSettledLike) {
+            setDetailRoomChargeUnit(0);
+            return;
+        }
+
+        const tableId = detailOrder.TABLE_ID != null ? Number(detailOrder.TABLE_ID) : NaN;
+        if (!Number.isFinite(tableId) || tableId <= 0) {
+            setDetailRoomChargeUnit(0);
+            return;
+        }
+
+        let cancelled = false;
+        const fetchRoomCharge = async () => {
+            try {
+                const branchId = detailOrder.BRANCH_ID != null ? String(detailOrder.BRANCH_ID) : '';
+                const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+
+                const res = await fetch(`/data-api/restaurant_tables${qs}`, {
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const json = await res.json();
+                if (!res.ok) throw new Error(json?.error || json?.message || 'Failed to load tables');
+
+                const raw = json.data ?? json;
+                const tables = Array.isArray(raw) ? raw : [];
+                const table = tables.find((t: any) => Number(t?.IDNo) === tableId);
+                const rcRaw = table?.ROOM_CHARGE;
+                const rc = rcRaw != null && rcRaw !== '' ? Number(rcRaw) : 0;
+                if (!cancelled) setDetailRoomChargeUnit(Number.isFinite(rc) ? rc : 0);
+            } catch (e) {
+                if (!cancelled) setDetailRoomChargeUnit(0);
+            }
+        };
+
+        fetchRoomCharge();
+        return () => {
+            cancelled = true;
+        };
+    }, [detailOrder?.IDNo, detailOrder?.TABLE_ID, detailOrder?.BRANCH_ID, detailOrder?.STATUS]);
+
+    const detailServiceCharge = detailOrder ? Number(detailOrder.SERVICE_CHARGE ?? 0) : 0;
+    const detailRoomChargeUnitForRow = detailRoomChargeUnit > 0 ? detailRoomChargeUnit : detailServiceCharge;
+    const detailRoomChargeQtyForRow =
+        detailRoomChargeUnitForRow > 0 ? Math.max(1, Math.round(detailServiceCharge / detailRoomChargeUnitForRow)) : 1;
 
     // ==================== Remove order item ====================
     const confirmRemoveItem = (item: OrderItemRecord) => {
@@ -413,8 +472,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualOrderItems([]);
         setManualMenuQuery('');
         setManualOrderTableId('');
+        setManualRoomChargeQty(1);
         setManualPaymentMethod('CASH');
         setManualPaymentRef('');
+        setManualDiscountAmount('0');
         setManualOrderBranchId('');
         setManualBranchTables([]);
         setManualOrderOpen(true);
@@ -463,6 +524,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         if (!manualOrderOpen) return;
         if (!effectiveManualBranchId) {
             setManualBranchTables([]);
+            setManualBranchTablesRoomChargeById({});
             return;
         }
         let cancelled = false;
@@ -489,15 +551,38 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         value: String(t.IDNo),
                         label: `Table ${t.TABLE_NUMBER}`,
                     }));
-                if (!cancelled) setManualBranchTables(mapped);
+                const roomChargeById: Record<string, number> = {};
+                for (const t of (Array.isArray(raw) ? raw : [])) {
+                    if (t?.STATUS !== 1) continue;
+                    const id = String(t?.IDNo);
+                    if (!id) continue;
+                    const rcRaw = t?.ROOM_CHARGE;
+                    const rc =
+                        rcRaw != null && rcRaw !== '' && !Number.isNaN(Number(rcRaw))
+                            ? Number(rcRaw)
+                            : 0;
+                    roomChargeById[id] = rc;
+                }
+
+                if (!cancelled) {
+                    setManualBranchTables(mapped);
+                    setManualBranchTablesRoomChargeById(roomChargeById);
+                }
             } catch (e) {
                 if (!cancelled) setManualBranchTables([]);
+                if (!cancelled) setManualBranchTablesRoomChargeById({});
                 console.error('Failed to load tables for manual order', e);
             }
         };
         fetchTablesForManualBranch();
         return () => { cancelled = true; };
     }, [manualOrderOpen, effectiveManualBranchId]);
+
+    // Default room charge qty is always 1 when user selects a table.
+    useEffect(() => {
+        if (!manualOrderOpen) return;
+        setManualRoomChargeQty(1);
+    }, [manualOrderTableId, manualOrderOpen]);
 
     useEffect(() => {
         if (!newOrderOpen) return;
@@ -624,6 +709,30 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
+    const MANUAL_ROOM_CHARGE_ITEM_ID = '__ROOM_CHARGE__';
+    const manualRoomCharge = !!manualOrderTableId && Object.prototype.hasOwnProperty.call(manualBranchTablesRoomChargeById, manualOrderTableId)
+        ? Number(manualBranchTablesRoomChargeById[manualOrderTableId])
+        : 0;
+    const hasManualRoomChargeRow = !!manualOrderTableId && Number.isFinite(manualRoomCharge) && manualRoomCharge > 0;
+    const manualDisplayOrderItems: NewOrderItem[] = hasManualRoomChargeRow
+        ? [
+            {
+                menuId: MANUAL_ROOM_CHARGE_ITEM_ID,
+                name: t('table.room_charge'),
+                unitPrice: manualRoomCharge,
+                qty: manualRoomChargeQty,
+            },
+            ...manualOrderItems,
+        ]
+        : manualOrderItems;
+    const manualGrandTotalBase = manualOrderSubtotal + (hasManualRoomChargeRow ? manualRoomChargeQty * manualRoomCharge : 0);
+    const manualDiscountNumber = (() => {
+        const n = parseFloat(String(manualDiscountAmount ?? '').trim());
+        return Number.isFinite(n) ? n : 0;
+    })();
+    const manualDiscountApplied = Math.max(0, manualDiscountNumber);
+    const manualGrandTotalPreview = Math.max(0, manualGrandTotalBase - manualDiscountApplied);
+
     const addManualMenuById = (menuId: string, qtyToAdd = 1) => {
         const menu = manualOrderMenus.find((m) => m.id === menuId);
         if (!menu) return;
@@ -718,6 +827,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualOrderSubmitting(true);
         try {
             const items = manualOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
+            // Backend always adds table ROOM_CHARGE once.
+            // To make qty > 1 work, we add extra service charge: (qty - 1) * roomCharge
+            // so final becomes: roomCharge + extra = qty * roomCharge.
+            const roomChargeAdditionalService =
+                hasManualRoomChargeRow ? Math.max(0, manualRoomChargeQty - 1) * manualRoomCharge : 0;
+            const manualGrandTotal = Math.max(0, manualGrandTotalPreview);
             await createManualSettledOrder({
                 ORDER_NO: manualOrderNo.trim(), order_no: manualOrderNo.trim(),
                 BRANCH_ID: effectiveManualBranchId, branch_id: effectiveManualBranchId,
@@ -725,7 +840,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 ORDER_TYPE: manualOrderType, order_type: manualOrderType,
                 STATUS: ORDER_STATUS.SETTLED,
                 SUBTOTAL: manualOrderSubtotal,
-                TAX_AMOUNT: 0, SERVICE_CHARGE: 0, DISCOUNT_AMOUNT: 0, GRAND_TOTAL: manualOrderSubtotal,
+                TAX_AMOUNT: 0,
+                SERVICE_CHARGE: roomChargeAdditionalService,
+                DISCOUNT_AMOUNT: manualDiscountApplied,
+                GRAND_TOTAL: manualGrandTotal,
                 ORDER_ITEMS: items, items,
                 payment_method: manualPaymentMethod,
                 payment_ref: manualPaymentRef?.trim() ? manualPaymentRef.trim() : null,
@@ -1428,11 +1546,26 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             <p className="text-[11px] text-brand-muted">
                                                 {t('orders.manual_order_payment_helper')}
                                             </p>
+
+                                            <div className="space-y-1.5 mt-2">
+                                                <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                    {t('orders.discount')}
+                                                </label>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    step="0.01"
+                                                    value={manualDiscountAmount}
+                                                    onChange={(e) => setManualDiscountAmount(e.target.value)}
+                                                    placeholder="0.00"
+                                                    className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                                 <div className="mt-4 border border-gray-100 rounded-xl overflow-hidden bg-white">
-                                    {manualOrderItems.length === 0 ? (
+                                    {manualDisplayOrderItems.length === 0 ? (
                                         <div className="p-4 text-sm text-brand-muted text-center">
                                             {t('orders.no_items_added')}
                                         </div>
@@ -1456,7 +1589,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-50">
-                                                {manualOrderItems.map((it) => (
+                                                {manualDisplayOrderItems.map((it) => {
+                                                    const isRoomChargeRow = it.menuId === MANUAL_ROOM_CHARGE_ITEM_ID;
+                                                    return (
                                                     <tr
                                                         key={it.menuId}
                                                         className={cn(
@@ -1466,27 +1601,58 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                     >
                                                         <td className="px-4 py-2 font-medium">{it.name}</td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="flex items-center justify-center gap-3">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => decManualOrderItemQty(it.menuId)}
-                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
-                                                                    title="Decrease"
-                                                                >
-                                                                    −
-                                                                </button>
-                                                                <span className="inline-block w-8 text-center font-bold">
-                                                                    {it.qty}
-                                                                </span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => addManualMenuById(it.menuId, 1)}
-                                                                    className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
-                                                                    title="Increase"
-                                                                >
-                                                                    +
-                                                                </button>
-                                                            </div>
+                                                            {isRoomChargeRow ? (
+                                                                <div className="flex items-center justify-center gap-3">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setManualRoomChargeQty((prev) => Math.max(1, prev - 1));
+                                                                            setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
+                                                                        }}
+                                                                        disabled={it.qty <= 1}
+                                                                        className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                        title="Decrease"
+                                                                    >
+                                                                        −
+                                                                    </button>
+                                                                    <span className="inline-block w-8 text-center font-bold">
+                                                                        {it.qty}
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setManualRoomChargeQty((prev) => prev + 1);
+                                                                            setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
+                                                                        }}
+                                                                        className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
+                                                                        title="Increase"
+                                                                    >
+                                                                        +
+                                                                    </button>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center justify-center gap-3">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => decManualOrderItemQty(it.menuId)}
+                                                                        className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
+                                                                        title="Decrease"
+                                                                    >
+                                                                        −
+                                                                    </button>
+                                                                    <span className="inline-block w-8 text-center font-bold">
+                                                                        {it.qty}
+                                                                    </span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => addManualMenuById(it.menuId, 1)}
+                                                                        className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
+                                                                        title="Increase"
+                                                                    >
+                                                                        +
+                                                                    </button>
+                                                                </div>
+                                                            )}
                                                         </td>
                                                         <td className="px-4 py-2 text-right">
                                                             ₱{Number(it.unitPrice).toLocaleString()}
@@ -1495,17 +1661,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                             ₱{Number(it.qty * it.unitPrice).toLocaleString()}
                                                         </td>
                                                         <td className="px-4 py-2 text-right">
-                                                            <button
-                                                                onClick={() => removeManualOrderItem(it.menuId)}
-                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg cursor-pointer"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
+                                                            {isRoomChargeRow ? null : (
+                                                                <button
+                                                                    onClick={() => removeManualOrderItem(it.menuId)}
+                                                                    className="p-2 text-red-500 hover:bg-red-50 rounded-lg cursor-pointer"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            )}
                                                         </td>
                                                     </tr>
-                                                ))}
+                                                    );
+                                                })}
                                             </tbody>
-                                            {manualOrderItems.length > 0 && (
+                                            {manualDisplayOrderItems.length > 0 && (
                                                 <tfoot className="bg-gray-50">
                                                     <tr>
                                                         <td
@@ -1516,7 +1685,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         </td>
                                                         <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
                                                             ₱
-                                                            {manualOrderSubtotal.toLocaleString(undefined, {
+                                                            {manualGrandTotalPreview.toLocaleString(undefined, {
                                                                 minimumFractionDigits: 2,
                                                             })}
                                                         </td>
@@ -1583,7 +1752,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             <label className="block text-sm font-bold text-brand-text mb-2">{t('orders.order_items')}</label>
                             {detailLoading ? (
                                 <div className="flex items-center justify-center py-8"><Loader2 size={24} className="animate-spin text-brand-primary" /></div>
-                            ) : detailItems.length === 0 ? (
+                            ) : detailItems.length === 0 &&
+                                !((detailOrder?.STATUS === ORDER_STATUS.SETTLED || detailOrder?.STATUS === ORDER_STATUS.CANCELLED) && Number(detailOrder?.SERVICE_CHARGE) > 0) ? (
                                 <p className="text-sm text-brand-muted py-4">{t('orders.no_items_added')}</p>
                             ) : (
                                 <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
@@ -1600,6 +1770,18 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
+                                            {(detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) &&
+                                                Number(detailOrder.SERVICE_CHARGE) > 0 && (
+                                                    <tr key="__ROOM_CHARGE__">
+                                                        <td className="px-4 py-2 font-medium">{t('table.room_charge') ?? 'Room charge'}</td>
+                                                        <td className="px-4 py-2 text-right">{detailRoomChargeQtyForRow}</td>
+                                                        <td className="px-4 py-2 text-right">₱{Number(detailRoomChargeUnitForRow).toLocaleString()}</td>
+                                                        <td className="px-4 py-2 text-right font-bold">₱{Number(detailServiceCharge).toLocaleString()}</td>
+                                                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                            <td className="px-4 py-2 text-right"></td>
+                                                        )}
+                                                    </tr>
+                                                )}
                                             {detailItems.map((item) => {
                                                 const isEditing = editingItemId === item.IDNo;
                                                 return (

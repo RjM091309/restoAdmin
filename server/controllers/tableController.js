@@ -44,6 +44,7 @@ class TableController {
 			const {
 				TABLE_NUMBER,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS
 			} = req.body;
 
@@ -74,6 +75,7 @@ class TableController {
 				BRANCH_ID: branchId,
 				TABLE_NUMBER: normalizedTableNumber,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS,
 				user_id
 			});
@@ -92,6 +94,7 @@ class TableController {
 			const {
 				TABLE_NUMBER,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS
 			} = req.body;
 
@@ -102,6 +105,7 @@ class TableController {
 			const updated = await TableModel.update(id, {
 				TABLE_NUMBER,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS
 			});
 

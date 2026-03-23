@@ -20,6 +20,7 @@ class TableModel {
 				b.BRANCH_NAME AS BRANCH_LABEL,
 				rt.TABLE_NUMBER,
 				rt.CAPACITY,
+				rt.ROOM_CHARGE,
 				rt.STATUS,
 				rt.ENCODED_BY,
 				rt.ENCODED_DT
@@ -48,6 +49,7 @@ class TableModel {
 				BRANCH_ID,
 				TABLE_NUMBER,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS
 			FROM restaurant_tables
 			WHERE IDNo = ?
@@ -73,25 +75,28 @@ class TableModel {
 
 	// Create new restaurant table
 	static async create(data) {
-		const { TABLE_NUMBER, CAPACITY, STATUS, BRANCH_ID, user_id } = data;
+		const { TABLE_NUMBER, CAPACITY, ROOM_CHARGE, STATUS, BRANCH_ID, user_id } = data;
 		const currentDate = new Date();
+		const roomChargeSql = TableModel.normalizeRoomCharge(ROOM_CHARGE);
 
 		const query = `
 			INSERT INTO restaurant_tables (
 				BRANCH_ID,
 				TABLE_NUMBER,
 				CAPACITY,
+				ROOM_CHARGE,
 				STATUS,
 				ACTIVE,
 				ENCODED_BY,
 				ENCODED_DT
-			) VALUES (?, ?, ?, ?, 1, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
 		`;
 
 		const [result] = await pool.execute(query, [
 			BRANCH_ID,
 			TABLE_NUMBER,
 			parseInt(CAPACITY) || 0,
+			roomChargeSql,
 			parseInt(STATUS) || 1,
 			user_id,
 			currentDate
@@ -105,6 +110,7 @@ class TableModel {
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
 					capacity: table.CAPACITY,
+					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
 					branch_id: table.BRANCH_ID ?? null
 				}, 'created');
@@ -115,12 +121,14 @@ class TableModel {
 
 	// Update restaurant table
 	static async update(id, data) {
-		const { TABLE_NUMBER, CAPACITY, STATUS } = data;
+		const { TABLE_NUMBER, CAPACITY, ROOM_CHARGE, STATUS } = data;
+		const roomChargeSql = TableModel.normalizeRoomCharge(ROOM_CHARGE);
 
 		const query = `
 			UPDATE restaurant_tables SET
 				TABLE_NUMBER = ?,
 				CAPACITY = ?,
+				ROOM_CHARGE = ?,
 				STATUS = ?
 			WHERE IDNo = ?
 		`;
@@ -128,6 +136,7 @@ class TableModel {
 		const [result] = await pool.execute(query, [
 			TABLE_NUMBER,
 			parseInt(CAPACITY) || 0,
+			roomChargeSql,
 			parseInt(STATUS) || 1,
 			id
 		]);
@@ -139,6 +148,7 @@ class TableModel {
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
 					capacity: table.CAPACITY,
+					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
 					branch_id: table.BRANCH_ID ?? null
 				}, 'updated');
@@ -163,6 +173,7 @@ class TableModel {
 				id,
 				table_number: table?.TABLE_NUMBER,
 				capacity: table?.CAPACITY,
+				room_charge: table?.ROOM_CHARGE,
 				status: table?.STATUS,
 				branch_id: table?.BRANCH_ID ?? null
 			}, 'deleted');
@@ -185,12 +196,22 @@ class TableModel {
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
 					capacity: table.CAPACITY,
+					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
 					branch_id: table.BRANCH_ID ?? null
 				}, 'updated');
 			}
 		}
 		return updated;
+	}
+
+	/** @param {unknown} value */
+	static normalizeRoomCharge(value) {
+		if (value === undefined || value === null || value === '') {
+			return null;
+		}
+		const n = parseFloat(String(value));
+		return Number.isFinite(n) ? n : null;
 	}
 
 	// Get transaction history for a specific table

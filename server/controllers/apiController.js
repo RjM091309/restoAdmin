@@ -735,6 +735,14 @@ class ApiController {
 				user_id: user_id
 			};
 
+			orderData.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(orderData.TABLE_ID, service_charge);
+			orderData.GRAND_TOTAL = OrderModel.computeGrandTotal(
+				orderData.SUBTOTAL,
+				orderData.TAX_AMOUNT,
+				orderData.SERVICE_CHARGE,
+				orderData.DISCOUNT_AMOUNT
+			);
+
 			const orderId = await OrderModel.create(orderData);
 			await OrderItemsModel.createForOrder(orderId, newOrderItems, user_id);
 			await BillingModel.createForOrder({ branch_id: orderData.BRANCH_ID, order_id: orderId, amount_due: orderData.GRAND_TOTAL, amount_paid: 0, status: 3, user_id: user_id });

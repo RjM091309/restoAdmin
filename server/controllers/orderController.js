@@ -80,6 +80,14 @@ class OrderController {
 				user_id: req.session.user_id || req.user?.user_id
 			};
 
+			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(payload.TABLE_ID, req.body.SERVICE_CHARGE);
+			payload.GRAND_TOTAL = OrderModel.computeGrandTotal(
+				payload.SUBTOTAL,
+				payload.TAX_AMOUNT,
+				payload.SERVICE_CHARGE,
+				payload.DISCOUNT_AMOUNT
+			);
+
 			const orderId = await OrderModel.create(payload);
 			if (items.length) {
 				await OrderItemsModel.createForOrder(orderId, items, req.session.user_id);
@@ -224,6 +232,17 @@ class OrderController {
 				user_id: userId,
 			};
 
+			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(
+				payload.TABLE_ID,
+				req.body.SERVICE_CHARGE ?? req.body.service_charge
+			);
+			payload.GRAND_TOTAL = OrderModel.computeGrandTotal(
+				payload.SUBTOTAL,
+				payload.TAX_AMOUNT,
+				payload.SERVICE_CHARGE,
+				payload.DISCOUNT_AMOUNT
+			);
+
 			if (!payload.ORDER_NO) {
 				return ApiResponse.badRequest(res, 'Order number is required');
 			}
@@ -347,6 +366,11 @@ class OrderController {
 				return res.status(404).json({ error: 'Order not found' });
 			}
 
+			const effectiveTableId =
+				req.body.TABLE_ID !== undefined && req.body.TABLE_ID !== '' && req.body.TABLE_ID != null
+					? req.body.TABLE_ID
+					: oldOrder.TABLE_ID;
+
 			const payload = {
 				TABLE_ID: req.body.TABLE_ID,
 				ORDER_TYPE: req.body.ORDER_TYPE,
@@ -358,6 +382,14 @@ class OrderController {
 				GRAND_TOTAL: parseFloat(req.body.GRAND_TOTAL) || 0,
 				user_id: req.session?.user_id || req.user?.user_id
 			};
+
+			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(effectiveTableId, req.body.SERVICE_CHARGE);
+			payload.GRAND_TOTAL = OrderModel.computeGrandTotal(
+				payload.SUBTOTAL,
+				payload.TAX_AMOUNT,
+				payload.SERVICE_CHARGE,
+				payload.DISCOUNT_AMOUNT
+			);
 
 			if (payload.STATUS === 1) {
 				await InventoryDeductionModel.updateStatusByOrderId(Number(id), 1, payload.user_id);

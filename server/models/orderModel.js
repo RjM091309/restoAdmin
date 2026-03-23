@@ -6,6 +6,7 @@
 // ============================================
 
 const pool = require('../config/db');
+const TableModel = require('./tableModel');
 
 class OrderModel {
 	static async getAll(branchId = null) {
@@ -340,6 +341,31 @@ class OrderModel {
 
 		const [rows] = await pool.execute(query, params);
 		return rows;
+	}
+
+	// Merge restaurant_tables.ROOM_CHARGE into orders.SERVICE_CHARGE
+	// so GRAND_TOTAL always follows: SUBTOTAL + TAX + SERVICE_CHARGE - DISCOUNT.
+	static async resolveServiceChargeWithRoomCharge(tableId, explicitServiceCharge) {
+		const explicit = parseFloat(explicitServiceCharge) || 0;
+		const id = tableId != null && tableId !== '' ? parseInt(tableId, 10) : NaN;
+		if (!Number.isFinite(id) || id <= 0) {
+			return Number(explicit.toFixed(2));
+		}
+
+		const table = await TableModel.getById(id);
+		const room = parseFloat(table?.ROOM_CHARGE) || 0;
+		return Number((room + explicit).toFixed(2));
+	}
+
+	static computeGrandTotal(subtotal, taxAmount, serviceCharge, discountAmount) {
+		return Number(
+			(
+				(parseFloat(subtotal) || 0) +
+				(parseFloat(taxAmount) || 0) +
+				(parseFloat(serviceCharge) || 0) -
+				(parseFloat(discountAmount) || 0)
+			).toFixed(2)
+		);
 	}
 }
 
