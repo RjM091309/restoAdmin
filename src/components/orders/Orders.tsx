@@ -142,6 +142,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualPaymentRef, setManualPaymentRef] = useState<string>('');
     const [manualDiscountAmount, setManualDiscountAmount] = useState<string>('0');
     const [manualMenuPage, setManualMenuPage] = useState(1);
+    const [manualOrderDate, setManualOrderDate] = useState<string>('');
 
     // ----- Add items to existing order (detail modal) -----
     const [detailMenus, setDetailMenus] = useState<MenuRecord[]>([]);
@@ -475,6 +476,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualRoomChargeQty(1);
         setManualPaymentMethod('CASH');
         setManualPaymentRef('');
+        // Default: present date only (YYYY-MM-DD), time will be current timestamp.
+        const now = new Date();
+        const pad2 = (n: number) => String(n).padStart(2, '0');
+        setManualOrderDate(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
         setManualDiscountAmount('0');
         setManualOrderBranchId('');
         setManualBranchTables([]);
@@ -827,6 +832,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
         setManualOrderSubmitting(true);
         try {
+            const now = new Date();
+            const pad2 = (n: number) => String(n).padStart(2, '0');
+            const selectedDate = (manualOrderDate && manualOrderDate.trim()) ? manualOrderDate : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+            const [yy, mm, dd] = selectedDate.split('-').map((x) => Number(x));
+            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+
             const items = manualOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
             // Backend always adds table ROOM_CHARGE once.
             // To make qty > 1 work, we add extra service charge: (qty - 1) * roomCharge
@@ -839,6 +850,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 BRANCH_ID: effectiveManualBranchId, branch_id: effectiveManualBranchId,
                 TABLE_ID: manualOrderTableId ? Number(manualOrderTableId) : null,
                 ORDER_TYPE: manualOrderType, order_type: manualOrderType,
+                ENCODED_DT: encodedDt,
                 STATUS: ORDER_STATUS.SETTLED,
                 SUBTOTAL: manualOrderSubtotal,
                 TAX_AMOUNT: 0,
@@ -1511,6 +1523,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 value={manualOrderTableId || null}
                                                 onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
                                                 placeholder={t('table.table_number')}
+                                            />
+                                        </div>
+                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('orders.date') ?? 'Date'}
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={manualOrderDate}
+                                                onChange={(e) => setManualOrderDate(e.target.value)}
+                                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                                             />
                                         </div>
                                     </div>

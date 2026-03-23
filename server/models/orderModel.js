@@ -87,26 +87,26 @@ class OrderModel {
 			SERVICE_CHARGE,
 			DISCOUNT_AMOUNT,
 			GRAND_TOTAL,
+			ENCODED_DT,
 			user_id
 		} = data;
 
-		const query = `
-			INSERT INTO orders (
-				BRANCH_ID,
-				ORDER_NO,
-				TABLE_ID,
-				ORDER_TYPE,
-				STATUS,
-				SUBTOTAL,
-				TAX_AMOUNT,
-				SERVICE_CHARGE,
-				DISCOUNT_AMOUNT,
-				GRAND_TOTAL,
-				ENCODED_BY
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`;
+		const hasEncodedDt = ENCODED_DT != null && String(ENCODED_DT).trim() !== '';
 
-		const values = [
+		const columnsBase = [
+			'BRANCH_ID',
+			'ORDER_NO',
+			'TABLE_ID',
+			'ORDER_TYPE',
+			'STATUS',
+			'SUBTOTAL',
+			'TAX_AMOUNT',
+			'SERVICE_CHARGE',
+			'DISCOUNT_AMOUNT',
+			'GRAND_TOTAL',
+			'ENCODED_BY',
+		];
+		const valuesBase = [
 			BRANCH_ID,
 			ORDER_NO,
 			TABLE_ID || null,
@@ -117,8 +117,25 @@ class OrderModel {
 			SERVICE_CHARGE || 0,
 			DISCOUNT_AMOUNT || 0,
 			GRAND_TOTAL || 0,
-			user_id
+			user_id,
 		];
+
+		const query = hasEncodedDt
+			? `
+				INSERT INTO orders (
+					${columnsBase.slice(0, -1).join(', ')},
+					ENCODED_DT,
+					${columnsBase[columnsBase.length - 1]}
+				) VALUES (${valuesBase.slice(0, -1).map(() => '?').join(', ')}, ?, ?) `
+			: `
+				INSERT INTO orders (
+					${columnsBase.join(', ')}
+				) VALUES (${valuesBase.map(() => '?').join(', ')})
+			`;
+
+		const values = hasEncodedDt
+			? valuesBase.slice(0, -1).concat([ENCODED_DT, valuesBase[valuesBase.length - 1]])
+			: valuesBase;
 
 		const [result] = await pool.execute(query, values);
 		return result.insertId;

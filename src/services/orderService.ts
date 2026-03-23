@@ -54,6 +54,7 @@ export type CreateOrderPayload = {
     SERVICE_CHARGE?: number;
     DISCOUNT_AMOUNT?: number;
     GRAND_TOTAL?: number;
+    ENCODED_DT?: string;
     ORDER_ITEMS?: CreateOrderItemPayload[];
     order_no?: string;
     branch_id?: string | number;

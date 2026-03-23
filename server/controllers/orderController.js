@@ -221,6 +221,7 @@ class OrderController {
 				ORDER_NO: (req.body.ORDER_NO || req.body.order_no || '').trim(),
 				TABLE_ID: req.body.TABLE_ID ?? req.body.table_id ?? null,
 				ORDER_TYPE: req.body.ORDER_TYPE ?? req.body.order_type ?? null,
+				ENCODED_DT: req.body.ENCODED_DT ?? req.body.encoded_dt ?? null,
 				// create as CONFIRMED first so inventory deductions get STATUS=2,
 				// then we will mark them settled and update order to STATUS=1
 				STATUS: 2,
