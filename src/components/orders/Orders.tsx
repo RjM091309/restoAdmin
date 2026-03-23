@@ -329,7 +329,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const detailServiceCharge = detailOrder ? Number(detailOrder.SERVICE_CHARGE ?? 0) : 0;
     const detailRoomChargeUnitForRow = detailRoomChargeUnit > 0 ? detailRoomChargeUnit : detailServiceCharge;
     const detailRoomChargeQtyForRow =
-        detailRoomChargeUnitForRow > 0 ? Math.max(1, Math.round(detailServiceCharge / detailRoomChargeUnitForRow)) : 1;
+        detailRoomChargeUnitForRow > 0 ? Math.max(0.5, Math.round((detailServiceCharge / detailRoomChargeUnitForRow) * 2) / 2) : 0.5;
 
     // ==================== Remove order item ====================
     const confirmRemoveItem = (item: OrderItemRecord) => {
@@ -710,6 +710,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
     const MANUAL_ROOM_CHARGE_ITEM_ID = '__ROOM_CHARGE__';
+    const roundToHalf = (v: number) => Math.round(v * 2) / 2;
     const manualRoomCharge = !!manualOrderTableId && Object.prototype.hasOwnProperty.call(manualBranchTablesRoomChargeById, manualOrderTableId)
         ? Number(manualBranchTablesRoomChargeById[manualOrderTableId])
         : 0;
@@ -831,7 +832,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             // To make qty > 1 work, we add extra service charge: (qty - 1) * roomCharge
             // so final becomes: roomCharge + extra = qty * roomCharge.
             const roomChargeAdditionalService =
-                hasManualRoomChargeRow ? Math.max(0, manualRoomChargeQty - 1) * manualRoomCharge : 0;
+                hasManualRoomChargeRow ? (manualRoomChargeQty - 1) * manualRoomCharge : 0;
             const manualGrandTotal = Math.max(0, manualGrandTotalPreview);
             await createManualSettledOrder({
                 ORDER_NO: manualOrderNo.trim(), order_no: manualOrderNo.trim(),
@@ -1605,11 +1606,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 <div className="flex items-center justify-center gap-3">
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => {
-                                                                            setManualRoomChargeQty((prev) => Math.max(1, prev - 1));
-                                                                            setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
-                                                                        }}
-                                                                        disabled={it.qty <= 1}
+                                                                            onClick={() => {
+                                                                                setManualRoomChargeQty((prev) => roundToHalf(Math.max(0.5, prev - 0.5)));
+                                                                                setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
+                                                                            }}
+                                                                            disabled={it.qty <= 0.5}
                                                                         className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                                                         title="Decrease"
                                                                     >
@@ -1620,10 +1621,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                     </span>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={() => {
-                                                                            setManualRoomChargeQty((prev) => prev + 1);
-                                                                            setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
-                                                                        }}
+                                                                            onClick={() => {
+                                                                                setManualRoomChargeQty((prev) => roundToHalf(prev + 0.5));
+                                                                                setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
+                                                                            }}
                                                                         className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer"
                                                                         title="Increase"
                                                                     >
