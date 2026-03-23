@@ -374,10 +374,11 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
         const totalSales = Number(item.total_sales || 0);
         const refund = Number((item as any).refund ?? 0);
         const discount = Number((item as any).discount ?? 0);
-        const netSales =
+        const rawNetSales =
           (item as any).net_sales != null
             ? Number((item as any).net_sales)
             : Math.max(0, totalSales - refund - discount);
+        const netSales = Math.max(0, rawNetSales);
         return { label, netSales };
       }),
     [dailySalesCurrent]
@@ -419,7 +420,8 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const baseTopProducts: TopProductRow[] = useMemo(
     () =>
       topSellingData.map((item, index) => {
-        const menuRow = rows.find((r) => r.goods === item.MENU_NAME);
+        const targetName = String(item.MENU_NAME ?? '').trim().toLowerCase();
+        const menuRow = rows.find((r) => String(r.goods ?? '').trim().toLowerCase() === targetName);
         const netSales = menuRow != null ? menuRow.netSales : item.total_revenue;
         return {
           key: String(item.IDNo ?? index),
@@ -469,21 +471,10 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   }, [trendData, baseTopProducts, productShares]);
 
   const topProductRows: TopProductRow[] = useMemo(() => {
-    if (!baseTopProducts.length || !productGraphData.length) return baseTopProducts;
-
-    const totals: Record<string, number> = {};
-    productGraphData.forEach((day) => {
-      baseTopProducts.forEach((p) => {
-        const value = Number((day as any)[p.key] || 0);
-        totals[p.key] = (totals[p.key] || 0) + value;
-      });
-    });
-
-    return baseTopProducts.map((p) => ({
-      ...p,
-      netSales: totals[p.key] || 0,
-    }));
-  }, [baseTopProducts, productGraphData]);
+    // Use exact menu-report netSales so it matches the DataTable's net sales.
+    // productGraphData is a rounded allocation for the chart, so summing it can drift.
+    return baseTopProducts;
+  }, [baseTopProducts]);
 
   const tooltipProps = {
     formatter: (value: number) => money(Number(value)),
