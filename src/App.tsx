@@ -527,7 +527,11 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     {selectedBranch && selectedBranch.id === 'all' ? (
-                      <AdminDashboard selectedBranch={selectedBranch} dateRange={dateRange} />
+                      <AdminDashboard
+                        selectedBranch={selectedBranch}
+                        dateRange={dateRange}
+                        onDateRangeChange={setDateRange}
+                      />
                     ) : (
                       <Dashboard
                         selectedBranch={selectedBranch}

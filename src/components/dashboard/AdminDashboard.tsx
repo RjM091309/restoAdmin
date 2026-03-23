@@ -30,6 +30,7 @@ type AdminDashboardProps = {
     start: string;
     end: string;
   };
+  onDateRangeChange: (range: DateRange) => void;
 };
 
 type SummaryData = {
@@ -116,7 +117,7 @@ const getCurrentMonthRange = (): DateRange => {
   };
 };
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange, onDateRangeChange }) => {
   const { t } = useTranslation();
   const { user } = useUser();
   const isAdmin = user?.permissions === 1;
@@ -471,19 +472,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       : `${selectedCompareBranches.slice(0, 2).map((branch) => branch.name).join(' vs ')} +${selectedCount - 2} more`;
   const benchmarkRows: ComparisonRow[] = [
     {
-      id: 'totalRevenue',
-      label: t('admin_dashboard.total_revenue'),
-      values: selectedCompareBranches.map((branch) => {
-        const branchMap = expenseCategoryByBranch[branch.id];
-        const expensesFromBreakdown = branchMap
-          ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
-          : 0;
-        const totalExpenses = expensesFromBreakdown || branch.totalExpenses || 0;
-        return branch.totalSales - totalExpenses;
-      }),
-      bestMode: 'max' as const,
-    },
-    {
       id: 'totalSales',
       label: t('admin_dashboard.total_sales'),
       values: selectedCompareBranches.map((branch) => branch.totalSales),
@@ -500,6 +488,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         return expensesFromBreakdown || branch.totalExpenses || 0;
       }),
       bestMode: 'min' as const,
+    },
+    {
+      id: 'totalRevenue',
+      label: 'Total Profit',
+      values: selectedCompareBranches.map((branch) => {
+        const branchMap = expenseCategoryByBranch[branch.id];
+        const expensesFromBreakdown = branchMap
+          ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
+          : 0;
+        const totalExpenses = expensesFromBreakdown || branch.totalExpenses || 0;
+        return branch.totalSales - totalExpenses;
+      }),
+      bestMode: 'max' as const,
     },
   ];
 
@@ -708,10 +709,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
     const [s, e] = update ?? [null, null];
-    setCompareDateRange({
+    const nextRange = {
       start: s ? toYYYYMMDD(s) : '',
       end: e ? toYYYYMMDD(e) : '',
-    });
+    };
+    setCompareDateRange(nextRange);
+    onDateRangeChange(nextRange);
     if (s && e) setIsCompareDateOpen(false);
   };
 
@@ -827,12 +830,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             {summaryData && (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
               <SummaryCard 
-                title="Total Profit"
-                value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-                icon={DollarSign}
-                color="bg-green-500"
-              />
-              <SummaryCard 
                 title={t('admin_dashboard.total_sales')}
                 value={`₱${summaryData.totalSales.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 icon={TrendingUp}
@@ -843,6 +840,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 value={`₱${summaryData.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 icon={TrendingDown}
                 color="bg-[rgb(245,158,11)]"
+              />
+              <SummaryCard 
+                title="Total Profit"
+                value={`₱${summaryData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                icon={DollarSign}
+                color="bg-green-500"
               />
               </div>
             )}

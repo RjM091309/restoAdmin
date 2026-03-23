@@ -87,15 +87,9 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
           </div>
         </div>
 
-        {/* Horizontal metrics: Profit, Sales, Expenses */}
+        {/* Horizontal metrics: Sales, Expenses, Profit */}
         <div className="mt-auto">
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5 text-[12px]">
-            <div className="flex items-baseline justify-between">
-              <p className="text-[11px] text-brand-muted">Total Profit</p>
-              <p className="font-bold text-[12px] text-brand-text text-right">
-                ₱{netRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </p>
-            </div>
             <div className="flex items-baseline justify-between">
               <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
               <p className="font-bold text-[12px] text-brand-text text-right">
@@ -106,6 +100,12 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
               <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_expenses')}</p>
               <p className="font-bold text-[12px] text-brand-text text-right">
                 ₱{branch.totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </p>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <p className="text-[11px] text-brand-muted">Total Profit</p>
+              <p className="font-bold text-[12px] text-brand-text text-right">
+                ₱{netRevenue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
             </div>
           </div>
