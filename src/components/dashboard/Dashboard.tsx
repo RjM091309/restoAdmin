@@ -84,7 +84,7 @@ const formatDateLabel = (dateStr: string) => {
   });
 };
 
-const TOP_CATEGORY_COLORS = ['#0f172a', '#4f46e5', '#e2e8f0', '#c7d2fe', '#6366f1'];
+const TOP_CATEGORY_COLORS = ['#0f172a', '#2563eb', '#f97316', '#16a34a', '#7c3aed', '#e11d48'];
 
 const DEFAULT_TRENDING_IMAGE =
   'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?q=80&w=800&auto=format&fit=crop';
@@ -829,6 +829,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         }}
                         labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
+                        itemSorter={(item: any) => -Number(item?.value ?? 0)}
                         formatter={(value: number, _name: string, props: any) => [
                           formatCurrency(value as number),
                           props.dataKey === 'income'
