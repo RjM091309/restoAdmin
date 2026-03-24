@@ -314,7 +314,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
             <span className="text-sm font-bold text-brand-text">
               ₱
               {Math.max(0, remaining).toLocaleString(undefined, {
-                minimumFractionDigits: 2,
+                minimumFractionDigits: 0,
               })}
             </span>
           );
@@ -326,7 +326,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
           <span className="text-sm font-bold text-green-600">
             ₱
             {Number(r.AMOUNT_PAID).toLocaleString(undefined, {
-              minimumFractionDigits: 2,
+              minimumFractionDigits: 0,
             })}
           </span>
         ),
@@ -339,7 +339,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
             <span className="text-sm font-bold text-orange-500">
               ₱
               {bal.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
+                minimumFractionDigits: 0,
               })}
             </span>
           );
@@ -455,7 +455,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                 <h3 className="text-2xl font-bold text-brand-text">
                   ₱
                   {stats.totalDue.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
+                    minimumFractionDigits: 0,
                   })}
                 </h3>
               </div>
@@ -466,7 +466,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                 <h3 className="text-2xl font-bold text-emerald-600">
                   ₱
                   {stats.totalPaid.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
+                    minimumFractionDigits: 0,
                   })}
                 </h3>
               </div>
@@ -540,14 +540,14 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                   <span className="font-semibold">
                     ₱
                     {activeRecord.AMOUNT_DUE.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
+                      minimumFractionDigits: 0,
                     })}
                   </span>{' '}
                   · {t('billing.amount_paid_label')}:{' '}
                   <span className="font-semibold text-emerald-600">
                     ₱
                     {activeRecord.AMOUNT_PAID.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
+                      minimumFractionDigits: 0,
                     })}
                   </span>
                 </p>
@@ -661,7 +661,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                     <td className="px-4 py-2 text-right font-bold">
                       ₱
                       {row.AMOUNT_PAID.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
+                        minimumFractionDigits: 0,
                       })}
                     </td>
                     <td className="px-4 py-2 text-xs text-brand-muted">

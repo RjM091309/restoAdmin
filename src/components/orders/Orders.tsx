@@ -1042,7 +1042,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         {
             header: t('orders.grand_total'),
             render: (order) => (
-                <span className="text-sm font-bold text-brand-text">₱{Number(order.GRAND_TOTAL).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="text-sm font-bold text-brand-text">₱{Number(order.GRAND_TOTAL).toLocaleString(undefined, { minimumFractionDigits: 0 })}</span>
             ),
         },
         {
@@ -1357,7 +1357,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <td className="px-4 py-2 text-right font-extrabold text-brand-primary">
                                                     ₱
                                                     {newOrderSubtotal.toLocaleString(undefined, {
-                                                        minimumFractionDigits: 2,
+                                                        minimumFractionDigits: 0,
                                                     })}
                                                 </td>
                                                 <td></td>
@@ -1710,7 +1710,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
                                                             ₱
                                                             {manualGrandTotalPreview.toLocaleString(undefined, {
-                                                                minimumFractionDigits: 2,
+                                                                minimumFractionDigits: 0,
                                                             })}
                                                         </td>
                                                         <td></td>
@@ -1765,7 +1765,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 <p className="text-2xl font-extrabold text-brand-primary mt-0.5">
                                     ₱
                                     {Number(detailOrder.GRAND_TOTAL).toLocaleString(undefined, {
-                                        minimumFractionDigits: 2,
+                                        minimumFractionDigits: 0,
                                     })}
                                 </p>
                             </div>
