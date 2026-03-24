@@ -591,8 +591,8 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         }
     };
 
-    /** Sync only from Jan 1 (current year) through today — no checkpoint reset. Supports abort via Stop. */
-    const handleSyncFeb1ToToday = async () => {
+    /** Sync only from March 1 (current year) through today — no checkpoint reset. Supports abort via Stop. */
+    const handleSyncMarch1ToToday = async () => {
         if (rangeSyncLoading) return;
         const ac = new AbortController();
         rangeSyncAbortRef.current = ac;
@@ -600,12 +600,15 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         try {
             const now = new Date();
             const year = now.getFullYear();
-            const jan1 = new Date(year, 0, 1, 0, 0, 0, 0); // Jan 1 this year
+            let march1 = new Date(year, 2, 1, 0, 0, 0, 0); // March 1 this year
+            if (now < march1) {
+                march1 = new Date(year - 1, 2, 1, 0, 0, 0, 0); // before Mar 1: use previous year's Mar 1
+            }
             const res = await fetch('/api/loyverse/sync-range', {
                 method: 'POST',
                 headers: authHeaders(),
                 body: JSON.stringify({
-                    created_at_min: jan1.toISOString(),
+                    created_at_min: march1.toISOString(),
                     created_at_max: now.toISOString(),
                     limit: 250,
                 }),
@@ -620,7 +623,7 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                 }
                 const s = data.data?.stats;
                 const msg = s
-                    ? `Sync Jan 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
+                    ? `Sync Mar 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
                     : (data.data?.message || 'Sync completed.');
                 setToast({ type: 'success', message: msg });
                 fetchStatus();
@@ -733,7 +736,7 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             {syncing ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.syncing')}...</> : <><RefreshCw size={16} /> {t('system_settings.sync_now')}</>}
                         </button>
 
-                        {/* Sync this year (Jan 1 – today, no full reset); show Stop when syncing */}
+                        {/* Sync March 1 – today (no full reset); show Stop when syncing */}
                         {rangeSyncLoading ? (
                             <div className="flex gap-2">
                                 <button
@@ -752,15 +755,15 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             </div>
                         ) : (
                             <button
-                                onClick={handleSyncFeb1ToToday}
+                                onClick={handleSyncMarch1ToToday}
                                 disabled={syncing || fullSyncLoading}
                                 className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                             >
-                                <RefreshCw size={16} /> Sync this year (Jan 1 – today)
+                                <RefreshCw size={16} /> Sync (Mar 1 – today)
                             </button>
                         )}
                         <p className="text-xs text-emerald-800/80 text-center font-medium">
-                            Syncs only receipts from Jan 1 (this year) to now. Does not reset checkpoint.
+                            Syncs only receipts from March 1 (this year) to now. Does not reset checkpoint.
                         </p>
 
                         {/* Full re-sync (after DB wipe) */}

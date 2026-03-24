@@ -112,8 +112,8 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
     })}`;
 
   useEffect(() => {
@@ -433,42 +433,23 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     [topSellingData, rows]
   );
 
-  const productShares = useMemo(() => {
-    if (!baseTopProducts.length) return {} as Record<string, number>;
-    const totalRevenue = baseTopProducts.reduce((sum, p) => sum + (p.netSales || 0), 0);
-    if (totalRevenue <= 0) {
-      const equalShare = 1 / baseTopProducts.length;
-      return Object.fromEntries(
-        baseTopProducts.map((p) => [p.key, equalShare])
-      ) as Record<string, number>;
-    }
-    return Object.fromEntries(
-      baseTopProducts.map((p) => [p.key, (p.netSales || 0) / totalRevenue])
-    ) as Record<string, number>;
-  }, [baseTopProducts]);
-
   const productGraphData = useMemo(() => {
     if (!baseTopProducts.length || !trendData.length) return [];
+    const totalTrendNetSales = trendData.reduce((sum, row) => sum + (row.netSales || 0), 0);
+    const dayWeights =
+      totalTrendNetSales > 0
+        ? trendData.map((row) => (row.netSales || 0) / totalTrendNetSales)
+        : trendData.map(() => 1 / trendData.length);
 
-    const totalShare = Object.values(productShares).reduce((sum, v) => sum + v, 0) || 1;
-    const normalizedShares: Record<string, number> = {};
-    baseTopProducts.forEach((p) => {
-      const raw = productShares[p.key] ?? 0;
-      normalizedShares[p.key] = raw / totalShare;
-    });
-
-    return trendData.map((row) => {
-      const total = row.netSales || 0;
+    return trendData.map((row, dayIndex) => {
       const entry: Record<string, number | string> = { label: row.label };
-
       baseTopProducts.forEach((p) => {
-        const share = normalizedShares[p.key] ?? 1 / baseTopProducts.length;
-        entry[p.key] = Math.round(total * share);
+        const weight = dayWeights[dayIndex] ?? 0;
+        entry[p.key] = (p.netSales || 0) * weight;
       });
-
       return entry;
     });
-  }, [trendData, baseTopProducts, productShares]);
+  }, [trendData, baseTopProducts]);
 
   const topProductRows: TopProductRow[] = useMemo(() => {
     // Use exact menu-report netSales so it matches the DataTable's net sales.

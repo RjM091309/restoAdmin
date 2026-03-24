@@ -147,6 +147,28 @@ const parseDateSafe = (value: string) => {
 const formatDateLabel = (date: Date) =>
   date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
+const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
+  const totalSales = Number(item.total_sales || 0);
+  const discount = Number((item as any).discount ?? 0);
+  const apiRefund = Number((item as any).refund ?? 0);
+  const apiNetSales = Number((item as any).net_sales ?? 0);
+  const hasApiNetSales = Number.isFinite(apiNetSales) && (item as any).net_sales != null;
+
+  // Loyverse-consistent source of truth: refund = total - discount - net.
+  const derivedRefund = hasApiNetSales ? totalSales - discount - apiNetSales : NaN;
+  const refund = Number.isFinite(derivedRefund) ? Math.max(0, derivedRefund) : Math.max(0, apiRefund);
+  const netSales = hasApiNetSales ? Math.max(0, apiNetSales) : Math.max(0, totalSales - refund - discount);
+  const grossProfit = netSales;
+
+  return {
+    totalSales,
+    refund,
+    discount: Math.max(0, discount),
+    netSales,
+    grossProfit,
+  };
+};
+
 const money = (value: number) =>
   `₱${Number(value || 0).toLocaleString(undefined, {
     minimumFractionDigits: 0,
@@ -194,38 +216,25 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
             const tableDate = parsed
               ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
               : item.sale_date;
+            const normalized = normalizeDailySalesItem(item);
             return {
               label,
               tableDate,
-              sales: item.total_sales,
-              refund: (item as any).refund ?? 0,
-              discount: (item as any).discount ?? 0,
-              netSales: (item as any).net_sales ?? item.total_sales,
-              grossProfit: (item as any).gross_profit ?? (item as any).net_sales ?? item.total_sales,
+              totalSales: normalized.totalSales,
+              refund: normalized.refund,
+              discount: normalized.discount,
+              netSales: normalized.netSales,
+              grossProfit: normalized.grossProfit,
             };
           })
         : [];
-
-    // Loyverse-style computation: Net sales = Total sales - Refund - Discount; Gross profit = Net sales
-    const withMetrics = baseData.map((row) => {
-      const totalSales = Number(row.sales || 0);
-      const refund = Number(row.refund || 0);
-      const discount = Number(row.discount || 0);
-      const netSales = Math.max(0, totalSales - refund - discount);
-      const grossProfit = netSales;
-      return {
-        label: row.label,
-        tableDate: row.tableDate,
-        totalSales,
-        refund,
-        discount,
-        netSales,
-        grossProfit,
-      };
-    });
-
-    return withMetrics;
+    return baseData;
   }, [dailySalesCurrent]);
+
+  const previousTrendData = useMemo(() => {
+    if (dailySalesPrevious.length === 0) return [];
+    return dailySalesPrevious.map((item) => normalizeDailySalesItem(item));
+  }, [dailySalesPrevious]);
 
   useEffect(() => { setTablePage(0); }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
 
@@ -411,28 +420,31 @@ const metricConfig = {
   const topStatItems = useMemo(() => {
     const makeItem = (key: MetricKey, label: string) => {
       const cfg = metricConfig[key];
-      // Aggregate totals from daily series (current vs previous period)
-      const aggregateMetric = (items: ApiDailySalesItem[], metricKey: MetricKey) => {
-        return items.reduce((sum, item) => {
+      // Aggregate totals from normalized series (current vs previous period)
+      const aggregateMetric = (
+        items: Array<{ totalSales: number; refund: number; discount: number; netSales: number; grossProfit: number }>,
+        metricKey: MetricKey
+      ) => {
+        return items.reduce((sum, row) => {
           switch (metricKey) {
             case 'totalSales':
-              return sum + (Number(item.total_sales) || 0);
+              return sum + row.totalSales;
             case 'refund':
-              return sum + (Number((item as any).refund ?? 0) || 0);
+              return sum + row.refund;
             case 'discount':
-              return sum + (Number((item as any).discount ?? 0) || 0);
+              return sum + row.discount;
             case 'netSales':
-              return sum + (Number((item as any).net_sales ?? 0) || 0);
+              return sum + row.netSales;
             case 'grossProfit':
-              return sum + (Number((item as any).gross_profit ?? 0) || 0);
+              return sum + row.grossProfit;
             default:
               return sum;
           }
         }, 0);
       };
 
-      const current = aggregateMetric(dailySalesCurrent, key);
-      const previous = aggregateMetric(dailySalesPrevious, key);
+      const current = aggregateMetric(trendData, key);
+      const previous = aggregateMetric(previousTrendData, key);
       const diff = current - previous;
       const hasPrev = previous > 0;
       const percent = hasPrev ? (diff / previous) * 100 : 0;
@@ -459,7 +471,7 @@ const metricConfig = {
       makeItem('netSales', t('sales_analytics.net_sales')),
       makeItem('grossProfit', t('sales_analytics.gross_profit')),
     ];
-  }, [baseSales, baseSalesPrevious, metricConfig, t]);
+  }, [trendData, previousTrendData, metricConfig, t]);
   const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || t('sales_analytics.total_sales');
   const LoyverseTooltip: React.FC<{
     active?: boolean;
