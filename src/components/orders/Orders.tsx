@@ -477,9 +477,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualPaymentMethod('CASH');
         setManualPaymentRef('');
         // Default: present date only (YYYY-MM-DD), time will be current timestamp.
-        const now = new Date();
-        const pad2 = (n: number) => String(n).padStart(2, '0');
-        setManualOrderDate(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
+        // Preserve user's previously selected date across multiple manual orders.
+        if (!manualOrderDate) {
+            const now = new Date();
+            const pad2 = (n: number) => String(n).padStart(2, '0');
+            setManualOrderDate(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
+        }
         setManualDiscountAmount('0');
         setManualOrderBranchId('');
         setManualBranchTables([]);
@@ -834,9 +837,38 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         try {
             const now = new Date();
             const pad2 = (n: number) => String(n).padStart(2, '0');
-            const selectedDate = (manualOrderDate && manualOrderDate.trim()) ? manualOrderDate : `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+
+            // Use Asia/Manila time consistently so ENCODED_DT matches backend timestamps (EDITED_DT).
+            const getManilaParts = (d: Date) => {
+                const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Asia/Manila',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).formatToParts(d);
+                const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+                return {
+                    year: get('year'),
+                    month: get('month'),
+                    day: get('day'),
+                    hour: get('hour'),
+                    minute: get('minute'),
+                    second: get('second'),
+                };
+            };
+
+            const manilaNow = getManilaParts(now);
+            const todayStr = `${manilaNow.year}-${pad2(manilaNow.month)}-${pad2(manilaNow.day)}`;
+            const selectedDate = (manualOrderDate && manualOrderDate.trim()) ? manualOrderDate : todayStr;
             const [yy, mm, dd] = selectedDate.split('-').map((x) => Number(x));
-            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+
+            // Date comes from the picker; time-of-day comes from current time in Asia/Manila.
+            const timePart = `${pad2(manilaNow.hour)}:${pad2(manilaNow.minute)}:${pad2(manilaNow.second)}`;
+            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
 
             const items = manualOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
             // Backend always adds table ROOM_CHARGE once.
