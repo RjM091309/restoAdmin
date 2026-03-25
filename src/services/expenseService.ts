@@ -120,6 +120,8 @@ export type CreateExpensePayload = {
   expAmount: number;
   expQty?: number | null;
   expSource: string | null;
+  // MySQL DATETIME/TIMESTAMP format: "YYYY-MM-DD HH:mm:ss"
+  encodedDt?: string | null;
 };
 
 export async function createExpense(payload: CreateExpensePayload): Promise<number> {
@@ -134,6 +136,7 @@ export async function createExpense(payload: CreateExpensePayload): Promise<numb
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
+      ENCODED_DT: payload.encodedDt ?? null,
     }),
   });
   const json = (await response.json()) as ApiResponse<{ id: number }>;

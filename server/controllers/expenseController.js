@@ -103,6 +103,12 @@ class ExpenseController {
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const encodedBy = userId || req.user?.username || 'system';
+			const encodedDtRaw =
+				req.body?.ENCODED_DT ??
+				req.body?.encoded_dt ??
+				req.body?.encodedDt ??
+				null;
+			const encodedDt = encodedDtRaw && String(encodedDtRaw).trim() !== '' ? String(encodedDtRaw) : null;
 			const id = await ExpenseModel.create({
 				BRANCH_ID: branchId,
 				MASTER_CAT_ID: masterCategory.IDNo,
@@ -112,6 +118,7 @@ class ExpenseController {
 				EXP_SOURCE: payload.EXP_SOURCE,
 				user_id: userId,
 				ENCODED_BY: encodedBy,
+				ENCODED_DT: encodedDt,
 			});
 
 			return ApiResponse.created(res, { id }, 'Expense created successfully');

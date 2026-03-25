@@ -72,7 +72,15 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const [isExpensePanelOpen, setIsExpensePanelOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [expenseToDelete, setExpenseToDelete] = useState<ExpenseRecord | null>(null);
-  const [expenseForm, setExpenseForm] = useState({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
+  const [expenseForm, setExpenseForm] = useState({
+    expDesc: '',
+    expAmount: '',
+    expSource: '',
+    stockQty: '',
+    unit: '',
+    // Stored as YYYY-MM-DD (from <input type="date" />)
+    encodedDate: '',
+  });
   const [addingAmountForId, setAddingAmountForId] = useState<string | null>(null);
   const [addingAmountValue, setAddingAmountValue] = useState('');
   const [addingQtyValue, setAddingQtyValue] = useState('');
@@ -99,6 +107,40 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     () => expenses.reduce((sum, row) => sum + row.expAmount, 0),
     [expenses],
   );
+
+  // Keep ENCODED_DT consistent with Orders UI using Asia/Manila.
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const getManilaParts = (d: Date) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+    return {
+      year: get('year'),
+      month: get('month'),
+      day: get('day'),
+      hour: get('hour'),
+      minute: get('minute'),
+      second: get('second'),
+    };
+  };
+  const getManilaDateStr = (d: Date) => {
+    const p = getManilaParts(d);
+    return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+  };
+  const toManilaDateTimeStr = (dateStr: string) => {
+    const [yy, mm, dd] = dateStr.split('-').map((x) => Number(x));
+    const p = getManilaParts(new Date());
+    const timePart = `${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}`;
+    return `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
+  };
 
   // Load operations from operation_category table and categories from master_categories (by BRANCH_ID)
   useEffect(() => {
@@ -525,7 +567,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const handleOpenAddExpense = () => {
     setEditingExpense(null);
-    setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
+    setExpenseForm({
+      expDesc: '',
+      expAmount: '',
+      expSource: '',
+      stockQty: '',
+      unit: '',
+      encodedDate: getManilaDateStr(new Date()),
+    });
     setIsExpensePanelOpen(true);
   };
 
@@ -537,6 +586,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       expSource: row.expSource ?? '',
       stockQty: row.stockQty != null ? String(row.stockQty) : '',
       unit: row.unit ?? 'pcs',
+      encodedDate: row.encodedDt ? getManilaDateStr(new Date(row.encodedDt)) : getManilaDateStr(new Date()),
     });
     setIsExpensePanelOpen(true);
   };
@@ -545,7 +595,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     if (!isSubmitting) {
       setIsExpensePanelOpen(false);
       setEditingExpense(null);
-      setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '' });
+      setExpenseForm({ expDesc: '', expAmount: '', expSource: '', stockQty: '', unit: '', encodedDate: getManilaDateStr(new Date()) });
     }
   };
 
@@ -563,6 +613,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     const qtyRaw = expenseForm.stockQty.trim();
     const hasQty = qtyRaw !== '';
     const qty = hasQty ? Number(qtyRaw) : NaN;
+    const selectedDateStr = expenseForm.encodedDate?.trim() ? expenseForm.encodedDate.trim() : getManilaDateStr(new Date());
+    const encodedDt = toManilaDateTimeStr(selectedDateStr);
     setIsSubmitting(true);
     try {
       if (editingExpense) {
@@ -600,6 +652,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           expAmount: amount,
           expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
+          encodedDt,
         });
         const list = await getExpenses(branchId);
         const filtered = list.filter((e) => String(e.branchId) === branchId);
@@ -706,6 +759,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     }
     setIsSubmitting(true);
     try {
+      const encodedDt = toManilaDateTimeStr(getManilaDateStr(new Date()));
       const newId = await createExpense({
         branchId,
         masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
@@ -713,6 +767,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         expAmount: amount,
         expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
         expSource: row.expSource ?? null,
+        encodedDt,
       });
       if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
         try {
@@ -1625,6 +1680,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               onChange={(e) => setExpenseForm((prev) => ({ ...prev, expAmount: e.target.value }))}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
               placeholder="0.00"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+              Encoded Date
+            </label>
+            <input
+              type="date"
+              value={expenseForm.encodedDate}
+              onChange={(e) => setExpenseForm((prev) => ({ ...prev, encodedDate: e.target.value }))}
+              disabled={!!editingExpense}
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
           {isInventoryCategory && (
