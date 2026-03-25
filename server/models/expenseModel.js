@@ -205,6 +205,8 @@ class ExpenseModel {
 	static async create(data) {
 		await ExpenseModel.ensureSchema();
 		const encodedBy = String(data.ENCODED_BY ?? data.user_id ?? 'system').trim() || 'system';
+		const encodedDtRaw = data.ENCODED_DT ?? data.encoded_dt ?? data.encodedDt ?? null;
+		const encodedDt = encodedDtRaw && String(encodedDtRaw).trim() !== '' ? String(encodedDtRaw) : null;
 		const masterCatId = Number(data.MASTER_CAT_ID);
 		const expQty = data.EXP_QTY != null && Number.isFinite(Number(data.EXP_QTY)) ? Number(data.EXP_QTY) : null;
 		const values = [
@@ -215,6 +217,7 @@ class ExpenseModel {
 			expQty,
 			data.EXP_SOURCE || null,
 			encodedBy,
+			encodedDt,
 		];
 		try {
 			const [result] = await pool.execute(
@@ -229,7 +232,7 @@ class ExpenseModel {
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+				) VALUES (?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 				`,
 				values
 			);
@@ -254,7 +257,7 @@ class ExpenseModel {
 						ACTIVE,
 						ENCODED_BY,
 						ENCODED_DT
-					) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+					) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 					`,
 					[nextId, ...values]
 				);
@@ -262,9 +265,17 @@ class ExpenseModel {
 			}
 			if (msg.includes('EXP_QTY') || msg.includes('Unknown column')) {
 				// Fallback when EXP_QTY column doesn't exist yet
-				const valuesNoQty = [Number(data.BRANCH_ID), masterCatId, data.EXP_DESC || null, Number(data.EXP_AMOUNT), data.EXP_SOURCE || null, encodedBy];
+				const valuesNoQty = [
+					Number(data.BRANCH_ID),
+					masterCatId,
+					data.EXP_DESC || null,
+					Number(data.EXP_AMOUNT),
+					data.EXP_SOURCE || null,
+					encodedBy,
+					encodedDt,
+				];
 				const [result] = await pool.execute(
-					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_SOURCE, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)`,
+					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_SOURCE, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
 					valuesNoQty
 				);
 				return result.insertId;
