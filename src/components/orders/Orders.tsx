@@ -824,7 +824,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             });
             return;
         }
-        if (manualOrderItems.length === 0) {
+        // Allow creating the order when room charge exists (room charge is injected separately)
+        // so the user can proceed even if the manual items list is empty.
+        if (manualOrderItems.length === 0 && !hasManualRoomChargeRow) {
             setSwal({
                 type: 'warning',
                 title: t('orders.swal.add_items_title'),
@@ -1557,7 +1559,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 placeholder={t('table.table_number')}
                                             />
                                         </div>
-                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                        {/* Keep date on its own row for cleaner alignment */}
+                                        <div className="space-y-1.5 col-span-12">
                                             <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
                                                 {t('orders.date') ?? 'Date'}
                                             </label>
@@ -1602,21 +1605,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             <p className="text-[11px] text-brand-muted">
                                                 {t('orders.manual_order_payment_helper')}
                                             </p>
-
-                                            <div className="space-y-1.5 mt-2">
-                                                <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
-                                                    {t('orders.discount')}
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    step="0.01"
-                                                    value={manualDiscountAmount}
-                                                    onChange={(e) => setManualDiscountAmount(e.target.value)}
-                                                    placeholder="0.00"
-                                                    className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                                                />
-                                            </div>
+                                        </div>
+                                        <div className="space-y-1.5 col-span-12">
+                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                {t('orders.discount')}
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                step="0.01"
+                                                value={manualDiscountAmount}
+                                                onChange={(e) => setManualDiscountAmount(e.target.value)}
+                                                placeholder="0.00"
+                                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                                            />
                                         </div>
                                     </div>
                                 </div>

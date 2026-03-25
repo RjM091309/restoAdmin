@@ -199,21 +199,35 @@ class OrderController {
 				? req.body.ORDER_ITEMS
 				: (Array.isArray(req.body.items) ? req.body.items : []);
 			if (!items.length) {
-				return ApiResponse.badRequest(res, 'At least one order item is required');
+				// Allow "room charge only" orders (no menu items) when the selected table has a room charge.
+				const tableIdRaw = req.body?.TABLE_ID ?? req.body?.table_id ?? null;
+				const tableId = tableIdRaw != null && String(tableIdRaw).trim() !== '' ? Number(tableIdRaw) : null;
+				if (!tableId || !Number.isFinite(tableId)) {
+					return ApiResponse.badRequest(res, 'At least one order item is required');
+				}
+
+				const table = await TableModel.getById(tableId);
+				const roomCharge = table ? parseFloat(table.ROOM_CHARGE) : 0;
+				if (!Number.isFinite(roomCharge) || roomCharge <= 0) {
+					return ApiResponse.badRequest(res, 'At least one order item is required');
+				}
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id;
 			const paymentMethod = (req.body.payment_method || req.body.PAYMENT_METHOD || 'CASH');
 			const paymentRef = req.body.payment_ref || req.body.PAYMENT_REF || 'Manual order (settled)';
 
-			// Validate inventory against the full items list (same as create)
-			const validation = await InventoryDeductionService.validateOrderItemsForInventory(resolvedBranchId, items);
-			if (!validation.valid) {
-				return res.status(200).json({
-					success: false,
-					error: 'Insufficient inventory for order items',
-					insufficient: validation.insufficient,
-				});
+			// Validate inventory against the full items list (same as create).
+			// If there are no items (room charge only), skip validation.
+			if (items.length) {
+				const validation = await InventoryDeductionService.validateOrderItemsForInventory(resolvedBranchId, items);
+				if (!validation.valid) {
+					return res.status(200).json({
+						success: false,
+						error: 'Insufficient inventory for order items',
+						insufficient: validation.insufficient,
+					});
+				}
 			}
 
 			const payload = {
