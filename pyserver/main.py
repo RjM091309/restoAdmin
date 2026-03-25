@@ -1,6 +1,7 @@
 from typing import List, Optional
 import os
 from pathlib import Path
+import time
 
 import mysql.connector
 from mysql.connector import pooling
@@ -33,9 +34,31 @@ db_pool: Optional[pooling.MySQLConnectionPool] = None
 
 
 def get_connection():
+    """
+    Get a DB connection from the pool.
+
+    The mobile app can burst many parallel analytics requests (swipe + prefetch).
+    With a small pool, MySQLConnectionPool can temporarily exhaust and raise.
+    We retry briefly, then fall back to a direct connection to avoid intermittent 0/blank charts.
+    """
     if db_pool is None:
-        raise RuntimeError("Database pool is not initialized")
-    return db_pool.get_connection()
+        # Fallback: try a direct connection rather than crashing the whole request.
+        return mysql.connector.connect(**db_config)
+
+    last_exc: Exception | None = None
+    for _ in range(4):
+        try:
+            return db_pool.get_connection()
+        except Exception as exc:
+            last_exc = exc
+            time.sleep(0.05)
+
+    # Last resort: direct connect (may be slower, but avoids flakiness)
+    try:
+        return mysql.connector.connect(**db_config)
+    except Exception:
+        # Re-raise original pool error so endpoints can report it
+        raise last_exc or RuntimeError("Failed to get database connection")
 
 
 app = FastAPI(title="RESTO Analytics PyServer", version="0.2.0")
@@ -58,7 +81,9 @@ def init_db_pool():
     try:
         db_pool = pooling.MySQLConnectionPool(
             pool_name="resto_pool",
-            pool_size=5,
+            # Increase pool to better handle parallel analytics bursts.
+            pool_size=int(os.getenv("DB_POOL_SIZE", "20")),
+            pool_reset_session=True,
             **db_config,
         )
         conn = db_pool.get_connection()
