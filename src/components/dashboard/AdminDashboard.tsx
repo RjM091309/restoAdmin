@@ -67,6 +67,7 @@ type MonthlyData = {
   name: string;
   totalSales: number;
   totalExpenses: number;
+  date?: string; // ISO yyyy-mm-dd when available (used for weekly tooltip correctness)
 };
 
 type TrendPeriod = 'weekly' | 'monthly' | 'yearly';
@@ -111,6 +112,47 @@ const toYYYYMMDD = (d: Date): string =>
   String(d.getMonth() + 1).padStart(2, '0') +
   '-' +
   String(d.getDate()).padStart(2, '0');
+
+const WEEKDAY_ABBR_TO_JS_DAY: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+const normalizeTickLabel = (value: unknown): string => String(value ?? '').trim();
+
+const parseDateFromTickLabel = (label: string, fallbackYear: number): Date | null => {
+  // Common case: ISO date
+  if (/^\d{4}-\d{2}-\d{2}$/.test(label)) {
+    const d = new Date(`${label}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Day-of-month only (e.g. "1", "01", "31") will be handled by caller
+  // because we need a reference month (from selected date range).
+
+  // If label already includes a year (e.g. "Mar 1, 2026"), rely on Date.parse
+  const direct = new Date(label);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  // If label looks like "Mar 1" (no year), attach a fallback year.
+  const withYear = new Date(`${label} ${fallbackYear}`);
+  if (!Number.isNaN(withYear.getTime())) return withYear;
+
+  return null;
+};
+
+const weekendStyleForDay = (jsDay: number): { fill: string; marker: string } | null => {
+  if (jsDay === 6) return { fill: '#ef4444', marker: '●' }; // Sat (red)
+  if (jsDay === 0) return { fill: '#22c55e', marker: '●' }; // Sun (green)
+  return null;
+};
+
+const weekdayAbbrFromJsDay = (jsDay: number): string => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][jsDay] ?? '';
 
 const getCurrentMonthRange = (): DateRange => {
   const today = new Date();
@@ -233,8 +275,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             ? 'Today'
             : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][todayIdxMon0] ?? rotated[rotated.length - 1].name;
 
-          rotated[rotated.length - 1] = { ...rotated[rotated.length - 1], name: anchorName };
-          setMonthlyData(rotated);
+          // Attach real dates so tooltip & weekend logic match the actual calendar.
+          const anchorMidday = new Date(anchor);
+          anchorMidday.setHours(12, 0, 0, 0);
+          const withDates = rotated.map((row, idx) => {
+            const offsetDays = idx - (rotated.length - 1); // last index = anchor day
+            const d = new Date(anchorMidday.getFullYear(), anchorMidday.getMonth(), anchorMidday.getDate() + offsetDays, 12, 0, 0);
+            return { ...row, date: toYYYYMMDD(d) };
+          });
+
+          withDates[withDates.length - 1] = { ...withDates[withDates.length - 1], name: anchorName };
+          setMonthlyData(withDates);
           return;
         }
 
@@ -781,6 +832,203 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     if (s && e) setIsCompareDateOpen(false);
   };
 
+  const trendAnchorDate = useMemo(() => {
+    // For weekly, the chart is rotated so that the "anchor" day is rightmost.
+    // Use same fallback order as the rotation logic.
+    return (
+      (compareDateRange.end ? new Date(compareDateRange.end) : null) ??
+      (compareDateRange.start ? new Date(compareDateRange.start) : null) ??
+      new Date()
+    );
+  }, [compareDateRange.end, compareDateRange.start]);
+
+  const trendFallbackYear = useMemo(() => {
+    const base = (compareDateRange.start ? new Date(compareDateRange.start) : null) ?? trendAnchorDate;
+    return base.getFullYear();
+  }, [compareDateRange.start, trendAnchorDate]);
+
+  const trendRangeStart = useMemo(() => (compareDateRange.start ? new Date(`${compareDateRange.start}T00:00:00`) : null), [
+    compareDateRange.start,
+  ]);
+  const trendRangeEnd = useMemo(() => (compareDateRange.end ? new Date(`${compareDateRange.end}T23:59:59`) : null), [
+    compareDateRange.end,
+  ]);
+
+  const TrendXAxisTick = useMemo(() => {
+    // Recharts tick renderer. Returns SVG nodes.
+    const Tick = (props: any) => {
+      const { x, y, payload } = props ?? {};
+      const label = normalizeTickLabel(payload?.value);
+
+      let jsDay: number | null = null;
+      let showMarker = false;
+
+      // Weekly labels: "Mon".."Sun" (or "Today").
+      const abbr = label.slice(0, 3);
+      if (label === 'Today') {
+        jsDay = trendAnchorDate.getDay();
+        showMarker = true;
+      } else if (WEEKDAY_ABBR_TO_JS_DAY[abbr] != null) {
+        jsDay = WEEKDAY_ABBR_TO_JS_DAY[abbr]!;
+        showMarker = true;
+      } else {
+        // Monthly/yearly labels vary by backend. Only color when we can confidently
+        // interpret the label as an actual day on the calendar.
+        let parsed: Date | null = null;
+
+        // Day-of-month only (e.g. "1", "12", "31") → use anchor month/year.
+        if (/^\d{1,2}$/.test(label)) {
+          const dayOfMonth = Number(label);
+          if (dayOfMonth >= 1 && dayOfMonth <= 31) {
+            parsed = new Date(
+              trendAnchorDate.getFullYear(),
+              trendAnchorDate.getMonth(),
+              dayOfMonth,
+              12,
+              0,
+              0,
+            );
+          }
+        } else if (
+          // Likely date strings: ISO, has comma year, or "MonName day" formats
+          /^\d{4}-\d{2}-\d{2}$/.test(label) ||
+          /,\s*\d{4}\s*$/.test(label) ||
+          /[A-Za-z]{3,}\s+\d{1,2}/.test(label)
+        ) {
+          parsed = parseDateFromTickLabel(label, trendFallbackYear);
+        }
+
+        // If we have a selected range, require parsed date to fall inside it to avoid
+        // accidentally coloring month labels like "Jan", "Feb", etc.
+        if (parsed) {
+          if (trendRangeStart && parsed < trendRangeStart) parsed = null;
+          if (trendRangeEnd && parsed > trendRangeEnd) parsed = null;
+        }
+
+        if (parsed) jsDay = parsed.getDay();
+      }
+
+      const weekend = jsDay == null ? null : weekendStyleForDay(jsDay);
+      const fill = weekend?.fill ?? '#94a3b8';
+      // Weekly: always show a dot marker. Color follows the same fill.
+      const marker = showMarker ? '●' : '';
+
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={16} textAnchor="middle" fill={fill} fontSize={12} fontWeight={weekend ? 800 : 500}>
+            {marker ? `${marker} ${label}` : label}
+          </text>
+        </g>
+      );
+    };
+
+    return Tick;
+  }, [trendAnchorDate, trendFallbackYear, trendRangeEnd, trendRangeStart]);
+
+  const TrendTooltipContent = useMemo(() => {
+    const Content = (props: any) => {
+      const { active, payload, label } = props ?? {};
+      if (!active || !payload || payload.length === 0) return null;
+
+      const labelRaw = normalizeTickLabel(label);
+      const dataPoint = payload?.[0]?.payload as MonthlyData | undefined;
+
+      const parseIso = (iso: string): Date | null => {
+        if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+        const d = new Date(`${iso}T12:00:00`);
+        return Number.isNaN(d.getTime()) ? null : d;
+      };
+
+      let labelText = labelRaw;
+      let labelJsDay: number | null = null;
+
+      if (trendPeriod === 'yearly') {
+        labelText = labelRaw;
+        labelJsDay = null;
+      } else if (trendPeriod === 'weekly') {
+        const iso = dataPoint?.date;
+        const d = iso ? parseIso(iso) : null;
+        if (d) {
+          labelJsDay = d.getDay();
+          labelText = `${d.getDate()} - ${weekdayAbbrFromJsDay(labelJsDay)}`;
+        } else {
+          // Fallback: if no date, keep label.
+          labelText = labelRaw;
+        }
+      } else {
+        // Monthly
+        let parsed: Date | null = null;
+        if (/^\d{1,2}$/.test(labelRaw)) {
+          const dayOfMonth = Number(labelRaw);
+          if (dayOfMonth >= 1 && dayOfMonth <= 31) {
+            parsed = new Date(trendAnchorDate.getFullYear(), trendAnchorDate.getMonth(), dayOfMonth, 12, 0, 0);
+          }
+        } else {
+          parsed = parseDateFromTickLabel(labelRaw, trendFallbackYear);
+        }
+
+        if (parsed && !Number.isNaN(parsed.getTime())) {
+          if (trendRangeStart && parsed < trendRangeStart) parsed = null;
+          if (trendRangeEnd && parsed > trendRangeEnd) parsed = null;
+        }
+
+        if (parsed) {
+          labelJsDay = parsed.getDay();
+          labelText = `${parsed.getDate()} - ${weekdayAbbrFromJsDay(labelJsDay)}`;
+        } else {
+          labelText = labelRaw;
+        }
+      }
+
+      const weekend = labelJsDay == null ? null : weekendStyleForDay(labelJsDay);
+      const labelStyle: { color?: string; fontWeight?: number } =
+        weekend && trendPeriod !== 'yearly' ? { color: weekend.fill, fontWeight: 800 } : {};
+
+      const getName = (dataKey: string) => {
+        if (dataKey === 'totalSales') return t('admin_dashboard.total_sales');
+        if (dataKey === 'negativeExpenses') return t('admin_dashboard.total_expenses');
+        return dataKey;
+      };
+
+      const formatMoney = (v: any) =>
+        `₱${Math.trunc(Math.abs(Number(v) || 0)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+
+      const sorted = [...payload].sort((a, b) => (a?.dataKey === 'totalSales' ? -1 : b?.dataKey === 'totalSales' ? 1 : 0));
+
+      return (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: '12px',
+            border: 'none',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            padding: '10px 12px',
+          }}
+        >
+          <div style={{ marginBottom: 8, ...labelStyle, fontSize: 12 }}>
+            {labelText}
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {sorted.map((item: any, idx: number) => {
+              const color = item?.color || '#64748b';
+              const name = getName(String(item?.dataKey ?? item?.name ?? ''));
+              const valueText = formatMoney(item?.value);
+              return (
+                <div key={`${item?.dataKey ?? item?.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 9999, background: color, display: 'inline-block' }} />
+                  <span style={{ fontSize: 12, color: '#475569', minWidth: 86 }}>{name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{valueText}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    return Content;
+  }, [t, trendAnchorDate, trendFallbackYear, trendPeriod, trendRangeEnd, trendRangeStart]);
+
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
       <div
@@ -968,7 +1216,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   >
                     <XAxis 
                       dataKey="name" 
-                      tick={{ fontSize: 12, fill: '#94a3b8' }} 
+                      tick={TrendXAxisTick}
                       axisLine={false}
                       tickLine={false}
                       interval={0}
@@ -981,21 +1229,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       tickLine={false}
                     />
                     <Tooltip 
-                      formatter={(value, name) => {
-                        const originalValue = `₱${Math.trunc(Math.abs(Number(value))).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-                        if (name === 'totalSales') return [originalValue, t('admin_dashboard.total_sales')];
-                        if (name === 'negativeExpenses') return [originalValue, t('admin_dashboard.total_expenses')];
-                        return [originalValue, name];
-                      }}
-                      // Keep tooltip order aligned with chart:
-                      // Sales (top bar) first, Expenses (bottom bar) last.
-                      itemSorter={(item) => (item?.dataKey === 'totalSales' ? 0 : 1)}
+                      content={TrendTooltipContent}
                       cursor={{ fill: 'transparent' }}
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: 'none',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      }}
                     />
                     <Legend 
                       iconType="circle" 
