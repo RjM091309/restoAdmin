@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { SidePanel } from '../ui/SidePanel';
 import { Select2 } from '../ui/Select2';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { cn } from '../../lib/utils';
@@ -62,6 +63,12 @@ const authHeaders = (): HeadersInit => {
 export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
   const { t } = useTranslation();
   const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
+
+  const formatMoneyNoDecimals = useCallback((value: unknown) => {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return Math.trunc(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }, []);
 
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -276,6 +283,12 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
     }
   };
 
+  const canSubmitPayment = useMemo(() => {
+    if (!activeRecord) return false;
+    const amount = Number(paymentAmount);
+    return Number.isFinite(amount) && amount > 0;
+  }, [activeRecord, paymentAmount]);
+
   const columns: ColumnDef<BillingRecord>[] = useMemo(
     () => [
       {
@@ -313,9 +326,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
           return (
             <span className="text-sm font-bold text-brand-text">
               ₱
-              {Math.max(0, remaining).toLocaleString(undefined, {
-                minimumFractionDigits: 0,
-              })}
+              {formatMoneyNoDecimals(Math.max(0, remaining))}
             </span>
           );
         },
@@ -325,9 +336,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
         render: (r) => (
           <span className="text-sm font-bold text-green-600">
             ₱
-            {Number(r.AMOUNT_PAID).toLocaleString(undefined, {
-              minimumFractionDigits: 0,
-            })}
+            {formatMoneyNoDecimals(r.AMOUNT_PAID)}
           </span>
         ),
       },
@@ -338,9 +347,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
           return (
             <span className="text-sm font-bold text-orange-500">
               ₱
-              {bal.toLocaleString(undefined, {
-                minimumFractionDigits: 0,
-              })}
+              {formatMoneyNoDecimals(bal)}
             </span>
           );
         },
@@ -378,7 +385,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
         ),
       },
     ],
-    [t],
+    [t, formatMoneyNoDecimals],
   );
 
   return (
@@ -454,9 +461,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                 </p>
                 <h3 className="text-2xl font-bold text-brand-text">
                   ₱
-                  {stats.totalDue.toLocaleString(undefined, {
-                    minimumFractionDigits: 0,
-                  })}
+                  {formatMoneyNoDecimals(stats.totalDue)}
                 </h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
@@ -465,9 +470,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                 </p>
                 <h3 className="text-2xl font-bold text-emerald-600">
                   ₱
-                  {stats.totalPaid.toLocaleString(undefined, {
-                    minimumFractionDigits: 0,
-                  })}
+                  {formatMoneyNoDecimals(stats.totalPaid)}
                 </h3>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm">
@@ -514,7 +517,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
             </button>
             <button
               onClick={handleProcessPayment}
-              disabled={submittingPayment}
+              disabled={submittingPayment || !canSubmitPayment}
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-emerald-600 shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {submittingPayment && (
@@ -539,16 +542,12 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                   {t('billing.amount_due_label')}:{' '}
                   <span className="font-semibold">
                     ₱
-                    {activeRecord.AMOUNT_DUE.toLocaleString(undefined, {
-                      minimumFractionDigits: 0,
-                    })}
+                    {formatMoneyNoDecimals(activeRecord.AMOUNT_DUE)}
                   </span>{' '}
                   · {t('billing.amount_paid_label')}:{' '}
                   <span className="font-semibold text-emerald-600">
                     ₱
-                    {activeRecord.AMOUNT_PAID.toLocaleString(undefined, {
-                      minimumFractionDigits: 0,
-                    })}
+                    {formatMoneyNoDecimals(activeRecord.AMOUNT_PAID)}
                   </span>
                 </p>
               </div>
@@ -602,12 +601,12 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
         )}
       </Modal>
 
-      {/* Payment History Modal */}
-      <Modal
+      {/* Payment History Side Panel */}
+      <SidePanel
         isOpen={historyModalOpen}
         onClose={closeHistoryModal}
         title={t('billing.payment_breakdown')}
-        maxWidth="md"
+        width="md"
         footer={
           <div className="flex items-center justify-end gap-3">
             <button
@@ -628,52 +627,57 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
             {t('billing.no_payments_found')}
           </div>
         ) : (
-          <div className="border border-gray-100 rounded-xl overflow-hidden bg-white">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
-                    {t('billing.date')}
-                  </th>
-                  <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
-                    {t('billing.method')}
-                  </th>
-                  <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">
-                    {t('billing.amount')}
-                  </th>
-                  <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">
-                    {t('billing.reference')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {historyRows.map((row) => (
-                  <tr key={row.IDNo}>
-                    <td className="px-4 py-2 text-xs text-brand-muted">
+          <div className="space-y-3">
+            {historyRows.map((row) => (
+              <div
+                key={row.IDNo}
+                className="rounded-xl border border-gray-100 bg-white p-4"
+              >
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-bold uppercase tracking-wider text-brand-muted">
+                      {t('billing.date')}
+                    </p>
+                    <p className="mt-1 text-brand-muted">
                       {row.ENCODED_DT
                         ? new Date(row.ENCODED_DT).toLocaleString(undefined, {
                             dateStyle: 'short',
                             timeStyle: 'short',
                           })
                         : t('billing.n_a')}
-                    </td>
-                    <td className="px-4 py-2">{row.PAYMENT_METHOD}</td>
-                    <td className="px-4 py-2 text-right font-bold">
-                      ₱
-                      {row.AMOUNT_PAID.toLocaleString(undefined, {
-                        minimumFractionDigits: 0,
-                      })}
-                    </td>
-                    <td className="px-4 py-2 text-xs text-brand-muted">
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold uppercase tracking-wider text-brand-muted">
+                      {t('billing.reference')}
+                    </p>
+                    <p className="mt-1 text-brand-muted break-all">
                       {row.PAYMENT_REF || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </p>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="font-bold uppercase tracking-wider text-brand-muted">
+                      {t('billing.method')}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-brand-text break-words">
+                      {row.PAYMENT_METHOD || t('billing.n_a')}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold uppercase tracking-wider text-brand-muted">
+                      {t('billing.amount')}
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-brand-text">
+                      ₱{formatMoneyNoDecimals(row.AMOUNT_PAID)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
-      </Modal>
+      </SidePanel>
     </div>
   );
 };
