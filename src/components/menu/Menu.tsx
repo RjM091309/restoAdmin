@@ -110,6 +110,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [formAvailable, setFormAvailable] = useState(true);
     const [formImage, setFormImage] = useState<File | null>(null);
     const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
+    const [hoverPreview, setHoverPreview] = useState<{ src: string; alt: string; top: number; left: number } | null>(null);
 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
@@ -527,18 +528,49 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         });
     };
 
+    const handleImageHoverEnter = useCallback((e: React.MouseEvent<HTMLDivElement>, item: MenuRecord) => {
+        const src = item.imageUrl ? resolveImageUrl(item.imageUrl) : null;
+        if (!src) return;
+
+        const previewSize = 288;
+        const viewportPadding = 16;
+        const gap = 12;
+        const rect = e.currentTarget.getBoundingClientRect();
+
+        const top = Math.min(
+            window.innerHeight - previewSize - viewportPadding,
+            Math.max(viewportPadding, rect.top + rect.height / 2 - previewSize / 2),
+        );
+        const left = Math.min(
+            window.innerWidth - previewSize - viewportPadding,
+            rect.right + gap,
+        );
+
+        setHoverPreview({ src, alt: item.name, top, left });
+    }, []);
+
+    const handleImageHoverLeave = useCallback(() => {
+        setHoverPreview(null);
+    }, []);
+
     // ==================== Table columns ====================
     const columns: ColumnDef<MenuRecord>[] = useMemo(() => [
         {
             header: t('menu_page.table.menu_item'),
             render: (item) => (
                 <div className="flex items-center gap-3 min-w-[200px]">
-                    <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
-                        {item.imageUrl ? (
-                            <img src={resolveImageUrl(item.imageUrl) || ''} alt={item.name} className="w-full h-full object-cover" />
-                        ) : (
-                            <UtensilsCrossed size={16} className="text-brand-muted" />
-                        )}
+                    <div
+                        className="relative shrink-0"
+                        onMouseEnter={(e) => handleImageHoverEnter(e, item)}
+                        onMouseLeave={handleImageHoverLeave}
+                    >
+                        <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden">
+                            {item.imageUrl ? (
+                                <img src={resolveImageUrl(item.imageUrl) || ''} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <UtensilsCrossed size={16} className="text-brand-muted" />
+                            )}
+                        </div>
                     </div>
                     <div className="min-w-0">
                         <p className="text-sm font-bold text-brand-text truncate">{item.name}</p>
@@ -596,7 +628,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 </div>
             ),
         },
-    ], [t, canUpdate, canDelete]);
+    ], [t, canUpdate, canDelete, handleImageHoverEnter, handleImageHoverLeave]);
 
     // ==================== Modal form content ====================
     const modalContent = (
@@ -1073,6 +1105,24 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     </div>
                 )}
             </>
+
+            {hoverPreview && (
+                <div
+                    className="pointer-events-none fixed z-50 rounded-xl overflow-hidden border border-gray-200 bg-white shadow-xl p-2"
+                    style={{
+                        top: hoverPreview.top,
+                        left: hoverPreview.left,
+                        width: '18rem',
+                        height: '18rem',
+                    }}
+                >
+                    <img
+                        src={hoverPreview.src}
+                        alt={hoverPreview.alt}
+                        className="w-full h-full object-contain bg-white"
+                    />
+                </div>
+            )}
 
             {/* Create / Edit Modal */}
             <Modal

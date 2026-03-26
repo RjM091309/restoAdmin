@@ -49,6 +49,10 @@ class LoyverseController {
 		} catch (error) {
 			if (LoyverseController.isSyncInProgressError(error)) {
 				// Common case (auto-sync/manual sync overlap): don't treat as server failure
+				console.log('[LoyverseController] Sync request received but sync already running.', {
+					path: req.originalUrl,
+					branchId: req.body.branch_id || req.query.branch_id || null,
+				});
 				const status = loyverseService.getSyncStatus();
 				return ApiResponse.success(res, {
 					alreadyRunning: true,

@@ -22,6 +22,11 @@ class LoyverseService {
 		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // 30 seconds default
 		this.autoSyncLimit = parseInt(process.env.LOYVERSE_AUTO_SYNC_LIMIT) || 500;
 		this.syncSince = process.env.LOYVERSE_SYNC_SINCE || '';
+		// When true, syncing is append-only: existing imported orders are never updated/overwritten.
+		// New receipts (including refunds) will be inserted as new rows only.
+		this.appendOnly =
+			process.env.LOYVERSE_APPEND_ONLY === '1' ||
+			String(process.env.LOYVERSE_APPEND_ONLY || '').toLowerCase() === 'true';
 		// Prevent noisy debug logs: remember which raw receipts we already logged (in-memory).
 		// Only used for RAW RECEIPT debug line; does not affect syncing behavior.
 		this.rawReceiptLogCache = new Map(); // key -> lastSeenMs
@@ -31,6 +36,9 @@ class LoyverseService {
 		this.maxSyncReceipts = parseInt(process.env.LOYVERSE_SYNC_MAX_RECEIPTS) || 0;
 		this.maxSyncPages = parseInt(process.env.LOYVERSE_SYNC_MAX_PAGES) || 0;
 		this.isSyncing = false;
+		// Cancel signal for in-flight sync loops (used by stopAutoSync and can be extended).
+		this.cancelSyncRequested = false;
+		this.cancelSyncReason = null;
 		this.lastSyncTime = null;
 		this.syncStats = {
 			totalFetched: 0,
@@ -283,6 +291,143 @@ class LoyverseService {
 				(receipt.total_money || 0) < 0;
 
 			if (isRefund) {
+				// Append-only mode: never mutate an existing sale order to apply refunds.
+				// Instead, create a standalone refund order + billing row so reports change
+				// without rewriting historical sales rows.
+				if (this.appendOnly) {
+					const refundAmountAbs = Math.abs(receipt.total_money || 0);
+					const refundTotal = -refundAmountAbs; // negative to reduce revenue in billing/order sums
+					const refundDt = new Date(receipt.receipt_date || receipt.created_at);
+
+					const refundOrderNo = `LOY-R-${receiptNumber}`;
+					const maybeExistingRefundOrderId = await this.orderExists(refundOrderNo);
+					if (maybeExistingRefundOrderId) {
+						await connection.commit();
+						return { action: 'skipped_existing_refund', orderId: maybeExistingRefundOrderId };
+					}
+
+					const orderValues = [
+						targetBranchId,
+						refundOrderNo,
+						null,
+						'REFUND',
+						1,
+						refundTotal,
+						0,
+						0,
+						0,
+						refundTotal,
+						0,
+						refundDt
+					];
+
+					let refundOrderId;
+					try {
+						const [orderResult] = await connection.execute(
+							`INSERT INTO orders (
+								BRANCH_ID,
+								ORDER_NO,
+								TABLE_ID,
+								ORDER_TYPE,
+								STATUS,
+								SUBTOTAL,
+								TAX_AMOUNT,
+								SERVICE_CHARGE,
+								DISCOUNT_AMOUNT,
+								GRAND_TOTAL,
+								ENCODED_BY,
+								ENCODED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+							orderValues
+						);
+						refundOrderId = orderResult.insertId;
+					} catch (orderInsertErr) {
+						const msg = String(orderInsertErr.message || '');
+						if (msg.includes("IDNo") && msg.includes("default")) {
+							const [nextIdRows] = await connection.execute(
+								`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders`
+							);
+							const nextId = Number(nextIdRows[0]?.nextId ?? nextIdRows[0]?.nextid ?? 1) || 1;
+							await connection.execute(
+								`INSERT INTO orders (
+									IDNo,
+									BRANCH_ID,
+									ORDER_NO,
+									TABLE_ID,
+									ORDER_TYPE,
+									STATUS,
+									SUBTOTAL,
+									TAX_AMOUNT,
+									SERVICE_CHARGE,
+									DISCOUNT_AMOUNT,
+									GRAND_TOTAL,
+									ENCODED_BY,
+									ENCODED_DT
+								) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+								[nextId, ...orderValues]
+							);
+							refundOrderId = nextId;
+						} else {
+							throw orderInsertErr;
+						}
+					}
+
+					const paymentMethod = this.mapPaymentMethod(receipt.payments?.[0]?.type);
+					const billingValues = [
+						targetBranchId,
+						refundOrderId,
+						paymentMethod,
+						refundTotal,
+						refundTotal,
+						1,
+						0,
+						refundDt
+					];
+					try {
+						await connection.execute(
+							`INSERT INTO billing (
+								BRANCH_ID,
+								ORDER_ID,
+								PAYMENT_METHOD,
+								AMOUNT_DUE,
+								AMOUNT_PAID,
+								STATUS,
+								ENCODED_BY,
+								ENCODED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+							billingValues
+						);
+					} catch (billingErr) {
+						const msg = String(billingErr.message || '');
+						if (msg.includes("IDNo") && msg.includes("default")) {
+							const [rows] = await connection.execute(
+								`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing`
+							);
+							const nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
+							await connection.execute(
+								`INSERT INTO billing (
+									IDNo,
+									BRANCH_ID,
+									ORDER_ID,
+									PAYMENT_METHOD,
+									AMOUNT_DUE,
+									AMOUNT_PAID,
+									STATUS,
+									ENCODED_BY,
+									ENCODED_DT
+								) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+								[nextId, ...billingValues]
+							);
+						} else {
+							throw billingErr;
+						}
+					}
+
+					await connection.commit();
+					return { action: 'refund_created', orderId: refundOrderId };
+				}
+
+				// Default mode: link refund to original sale when possible and update billing (mutates existing order's billing refund fields).
 				// Prefer linking to original order when refund_for is present
 				const originalReceiptNumber = receipt.refund_for;
 				if (originalReceiptNumber) {
@@ -397,6 +542,10 @@ class LoyverseService {
 
 			if (existingOrderId && receipt.cancelled_at) {
 				// Handle cancellation
+				if (this.appendOnly) {
+					await connection.commit();
+					return { action: 'skipped_existing_cancel', orderId: existingOrderId };
+				}
 				await connection.execute(
 					`UPDATE orders SET STATUS = -1 WHERE IDNo = ?`,
 					[existingOrderId]
@@ -406,6 +555,10 @@ class LoyverseService {
 			}
 
 			if (existingOrderId) {
+				if (this.appendOnly) {
+					await connection.commit();
+					return { action: 'skipped_existing', orderId: existingOrderId };
+				}
 				// Update existing order
 				await connection.execute(
 					`UPDATE orders SET 
@@ -756,6 +909,7 @@ class LoyverseService {
 		const refundAmount = Math.abs(receipt.total_money || 0); 
 		const refundDt = new Date(receipt.receipt_date || receipt.created_at);
 		const refundReason = receipt.receipt_type_reason || 'Loyverse Refund'; // Assuming a reason field
+		const refundReceiptNumber = receipt.receipt_number || null;
 
 		// Debug: log raw refund mapping before writing to billing
 		console.log('[Loyverse Sync][REFUND MAP]', JSON.stringify({
@@ -776,7 +930,7 @@ class LoyverseService {
 
 		try {
 			// Update the billing record for the existing order
-			await BillingModel.updateRefundForOrder(existingOrderId, refundAmount, refundDt, refundReason);
+			await BillingModel.updateRefundForOrder(existingOrderId, refundAmount, refundDt, refundReason, refundReceiptNumber);
 			return { action: 'refund_updated', orderId: existingOrderId };
 		} catch (error) {
 			console.error(`[Loyverse Sync] Error syncing refund for order ${existingOrderId}:`, error.message);
@@ -789,10 +943,31 @@ class LoyverseService {
 	 */
 	async syncAllReceipts(branchId = null, limit = 50, options = {}) {
 		if (this.isSyncing) {
+			console.log('[Loyverse Sync] Rejecting new sync request: sync already in progress.', {
+				branchId: branchId || this.defaultBranchId,
+				limit,
+				incremental: options.incremental ?? options.realtime ?? null,
+				since: options.since ?? options.from ?? null,
+				lastSyncTime: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
+			});
 			throw new Error('Sync already in progress');
 		}
 
 		this.isSyncing = true;
+		// Reset cancel state at the start of a new run (previous stop signals should not affect new runs).
+		this.cancelSyncRequested = false;
+		this.cancelSyncReason = null;
+		const syncRunId = `sync_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+		const startTs = Date.now();
+		console.log('[Loyverse Sync] Sync started.', {
+			syncRunId,
+			branchId: branchId || this.defaultBranchId,
+			limit,
+			incremental: options.incremental ?? options.realtime ?? null,
+			created_at_min: options.created_at_min ?? null,
+			created_at_max: options.created_at_max ?? null,
+			appendOnly: this.appendOnly,
+		});
 		this.syncStats = {
 			totalFetched: 0,
 			totalInserted: 0,
@@ -803,6 +978,7 @@ class LoyverseService {
 		};
 
 		const abortedCheck = options.abortedCheck || (() => false);
+		const shouldCancel = () => abortedCheck() || this.cancelSyncRequested === true;
 
 		try {
 			let cursor = null;
@@ -849,9 +1025,12 @@ class LoyverseService {
 			let maxUpdatedAtSeen = lastUpdatedAt;
 
 			while (hasMore) {
-				if (abortedCheck()) {
+				if (shouldCancel()) {
 					this.syncStats.cancelled = true;
-					console.log('[Loyverse Sync] Sync cancelled by client (request aborted).');
+					console.log('[Loyverse Sync] Sync cancelled.', {
+						by: abortedCheck() ? 'client_abort' : 'server_cancel',
+						reason: this.cancelSyncReason || null,
+					});
 					hasMore = false;
 					break;
 				}
@@ -863,9 +1042,12 @@ class LoyverseService {
 				let skippedOldInPage = 0;
 
 				for (const receipt of receipts) {
-					if (abortedCheck()) {
+					if (shouldCancel()) {
 						this.syncStats.cancelled = true;
-						console.log('[Loyverse Sync] Sync cancelled by client (request aborted).');
+						console.log('[Loyverse Sync] Sync cancelled.', {
+							by: abortedCheck() ? 'client_abort' : 'server_cancel',
+							reason: this.cancelSyncReason || null,
+						});
 						hasMore = false;
 						break;
 					}
@@ -967,6 +1149,16 @@ class LoyverseService {
 			throw error;
 		} finally {
 			this.isSyncing = false;
+			// Clear cancel request after completing this run so next run isn't affected.
+			this.cancelSyncRequested = false;
+			this.cancelSyncReason = null;
+			const elapsedMs = Date.now() - startTs;
+			console.log('[Loyverse Sync] Sync finished.', {
+				syncRunId,
+				elapsedMs,
+				stats: this.syncStats,
+				lastSyncTime: this.lastSyncTime ? this.lastSyncTime.toISOString() : null,
+			});
 		}
 	}
 
@@ -1015,6 +1207,12 @@ class LoyverseService {
 			clearInterval(this.autoSyncInterval);
 			this.autoSyncInterval = null;
 			console.log('[Loyverse Sync] Auto-sync stopped');
+		}
+		// Also cancel any in-flight sync loop so manual sync can start immediately.
+		if (this.isSyncing) {
+			this.cancelSyncRequested = true;
+			this.cancelSyncReason = 'auto_sync_stopped';
+			console.log('[Loyverse Sync] Cancel requested for in-flight sync due to stopAutoSync().');
 		}
 	}
 

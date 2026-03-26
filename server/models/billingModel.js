@@ -8,6 +8,24 @@
 const pool = require('../config/db');
 
 class BillingModel {
+	static async ensureLoyverseRefundsTable() {
+		// Stores which Loyverse refund receipts have already been applied, to keep refund sync idempotent.
+		// Without this, auto-sync/manual refresh will keep adding the same refund repeatedly.
+		const sql = `
+			CREATE TABLE IF NOT EXISTS loyverse_refund_receipts (
+				refund_receipt_number VARCHAR(64) NOT NULL,
+				order_id INT NOT NULL,
+				branch_id INT NULL,
+				refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+				refund_dt DATETIME NULL,
+				refund_reason VARCHAR(255) NULL,
+				created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (refund_receipt_number),
+				KEY idx_loyverse_refund_order (order_id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+		`;
+		await pool.execute(sql);
+	}
 	static async getAll(branchId = null) {
 		let query = `
 			SELECT 
@@ -196,16 +214,67 @@ class BillingModel {
 		}
 
 		await pool.execute(query, params);
+
+		// If we track idempotent Loyverse refund receipts, clear the tracker rows in the same window,
+		// otherwise range re-sync will reset billing refunds but then refuse to re-apply them (looks like "refund disappeared").
+		try {
+			await this.ensureLoyverseRefundsTable();
+			let delQuery = `
+				DELETE FROM loyverse_refund_receipts
+				WHERE refund_dt IS NOT NULL
+				AND DATE(refund_dt) >= DATE(?)
+				AND DATE(refund_dt) <= DATE(?)
+			`;
+			const delParams = [start, end];
+			if (branchId) {
+				delQuery += ' AND branch_id = ?';
+				delParams.push(branchId);
+			}
+			await pool.execute(delQuery, delParams);
+		} catch (e) {
+			// Best-effort: if table doesn't exist or DB user lacks perms, don't fail the whole sync.
+			console.warn('[BillingModel.resetRefundsInRange] Failed to clear loyverse_refund_receipts tracker:', e?.message || e);
+		}
 	}
 
-	static async updateRefundForOrder(orderId, refundAmount, refundDt, refundReason) {
+	static async updateRefundForOrder(orderId, refundAmount, refundDt, refundReason, refundReceiptNumber = null) {
 		// Debug: log intent before applying refund
 		console.log('[BillingModel.updateRefundForOrder] Incoming refund payload:', {
 			orderId,
 			refundAmount,
 			refundDt,
-			refundReason
+			refundReason,
+			refundReceiptNumber
 		});
+
+		// Idempotency guard: record this refund receipt number once.
+		// If we've already applied it, do nothing.
+		if (refundReceiptNumber) {
+			await this.ensureLoyverseRefundsTable();
+
+			// Try to capture branch_id for reference (best-effort)
+			let branchId = null;
+			try {
+				const [orderRows] = await pool.execute(
+					`SELECT BRANCH_ID FROM orders WHERE IDNo = ? LIMIT 1`,
+					[orderId]
+				);
+				branchId = orderRows[0]?.BRANCH_ID ?? null;
+			} catch (_) {}
+
+			const [ins] = await pool.execute(
+				`INSERT IGNORE INTO loyverse_refund_receipts
+				 (refund_receipt_number, order_id, branch_id, refund_amount, refund_dt, refund_reason)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
+				[refundReceiptNumber, orderId, branchId, refundAmount, refundDt, refundReason]
+			);
+
+			// If insert didn't happen, we've already processed this refund receipt.
+			if (!ins?.affectedRows) {
+				console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
+				return true;
+			}
+		}
 
 		// Try to update existing billing row first: accumulate refunds per order
 		const updateQuery = `
