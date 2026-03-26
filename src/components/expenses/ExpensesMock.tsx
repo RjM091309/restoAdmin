@@ -48,10 +48,15 @@ const ITEMS_PER_PAGE = 50;
 
 // Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(
-    Number.isFinite(value) ? value : 0,
-  );
+const formatCurrency = (value: number) => {
+  const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(safe);
+};
 
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) => {
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -368,7 +373,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         : []),
       {
         header: 'Amount',
-        render: (row) => <span>{new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number.isFinite(row.expAmount) ? row.expAmount : 0)}</span>,
+        render: (row) => {
+          const safe = Number.isFinite(row.expAmount) ? Math.trunc(row.expAmount) : 0;
+          return (
+            <span>
+              {new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(safe)}
+            </span>
+          );
+        },
         className: 'text-right',
         headerClassName: 'text-right',
         cellClassName: 'text-right',

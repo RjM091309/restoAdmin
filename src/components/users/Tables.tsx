@@ -37,6 +37,12 @@ export const Tables: React.FC = () => {
   const isAdmin = user?.permissions === 1;
   const location = useLocation();
 
+  const formatMoneyNoDecimals = useCallback((value: unknown) => {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return Math.trunc(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }, []);
+
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search]
@@ -356,12 +362,7 @@ export const Tables: React.FC = () => {
       header: t('table.room_charge'),
       render: (tbl) => (
         <span className="text-sm font-medium tabular-nums">
-          {tbl.roomCharge != null && !Number.isNaN(tbl.roomCharge)
-            ? tbl.roomCharge.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })
-            : '—'}
+          {tbl.roomCharge != null ? formatMoneyNoDecimals(tbl.roomCharge) : '—'}
         </span>
       ),
     },

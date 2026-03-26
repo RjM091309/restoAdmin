@@ -48,6 +48,12 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
   const [adjustQty, setAdjustQty] = useState('');
   const [adjustSubmitting, setAdjustSubmitting] = useState(false);
 
+  const formatMoneyNoDecimals = (value: unknown) => {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return Math.trunc(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+
   const currentCategory = useMemo(
     () => (categoryId && categories.find((c) => c.id === categoryId)) || null,
     [categories, categoryId]
@@ -151,10 +157,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
       header: t('inventory_page.table.unit_cost'),
       render: (item) => (
         <span className="text-sm font-bold text-brand-text">
-          {Number(item.unitCost || 0).toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
+          {formatMoneyNoDecimals(item.unitCost || 0)}
         </span>
       ),
     },
@@ -282,7 +285,7 @@ export const Inventory: React.FC<InventoryProps> = ({ onBack, selectedBranch = n
               <div className="bg-white p-6 rounded-2xl shadow-sm">
                 <p className="text-brand-muted text-sm font-medium mb-1">{t('inventory_page.stats.total_value')}</p>
                 <h3 className="text-3xl font-bold">
-                  {t('inventory_page.currency_symbol')}{stats.totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {t('inventory_page.currency_symbol')}{formatMoneyNoDecimals(stats.totalValue)}
                 </h3>
               </div>
             </div>

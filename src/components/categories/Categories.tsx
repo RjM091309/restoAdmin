@@ -133,11 +133,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     return 'en-US';
   };
 
-  const formatValue = (value: number) =>
-    `${t('common.currency_symbol')}${Number(value || 0).toLocaleString(localeForLanguage(i18n.language), {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+  const formatValue = (value: number) => {
+    const n = Number(value || 0);
+    const safe = Number.isFinite(n) ? Math.trunc(n) : 0;
+    return `${t('common.currency_symbol')}${safe.toLocaleString(localeForLanguage(i18n.language), {
+      maximumFractionDigits: 0,
     })}`;
+  };
 
   const columns: ColumnDef<InventoryCategory>[] = [
     {

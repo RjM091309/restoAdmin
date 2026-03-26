@@ -68,6 +68,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
     const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
+    const formatPriceNoDecimals = useCallback((value: unknown) => {
+        const n = typeof value === 'number' ? value : Number(value);
+        if (!Number.isFinite(n)) return '0';
+        return Math.trunc(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }, []);
+
     // ----- Data -----
     const [menus, setMenus] = useState<MenuRecord[]>([]);
     const [categories, setCategories] = useState<MenuCategory[]>([]);
@@ -581,7 +587,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         {
             header: t('menu_page.table.price'),
             render: (item) => (
-                <span className="text-sm font-bold text-brand-text">{t('common.currency_symbol')}{Number(item.price).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="text-sm font-bold text-brand-text">
+                    {t('common.currency_symbol')}
+                    {formatPriceNoDecimals(item.price)}
+                </span>
             ),
         },
         {
@@ -628,7 +637,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 </div>
             ),
         },
-    ], [t, canUpdate, canDelete, handleImageHoverEnter, handleImageHoverLeave]);
+    ], [t, canUpdate, canDelete, handleImageHoverEnter, handleImageHoverLeave, formatPriceNoDecimals]);
 
     // ==================== Modal form content ====================
     const modalContent = (
