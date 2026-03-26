@@ -280,14 +280,37 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         resetForm();
     };
 
+    const sortedCategories = useMemo(() => {
+        const splitLeadingNumber = (name: string) => {
+            const s = String(name || '').trim();
+            const m = s.match(/^(\d+)\s*[\.\)\-]?\s*(.*)$/);
+            if (!m) return { hasNum: false, num: Number.POSITIVE_INFINITY, rest: s };
+            return { hasNum: true, num: Number(m[1]), rest: (m[2] || '').trim() };
+        };
+
+        return [...categories].sort((a, b) => {
+            const A = splitLeadingNumber(String(a.name || ''));
+            const B = splitLeadingNumber(String(b.name || ''));
+
+            if (A.hasNum && B.hasNum && A.num !== B.num) return A.num - B.num;
+            if (A.hasNum !== B.hasNum) return A.hasNum ? -1 : 1; // numbered first
+
+            return A.rest.localeCompare(B.rest, undefined, { sensitivity: 'base', numeric: true });
+        });
+    }, [categories]);
+
     const canSubmitItem = useMemo(() => {
-        const valid = !!formName.trim() && !!formPrice && Number(formPrice) > 0;
+        const baselinePrice = Number(itemBaseline.price || 0);
+        const effectivePrice = formPrice === '' ? baselinePrice : Number(formPrice);
+        // For edit: allow saving other changes even if price is 0 (some items legitimately have 0).
+        // For create: still require a valid price > 0.
+        const valid = !!formName.trim() && Number.isFinite(effectivePrice) && (editingItem ? effectivePrice >= 0 : effectivePrice > 0);
         if (!valid) return false;
         const baselineMatch =
             formName === itemBaseline.name &&
             formDesc === itemBaseline.desc &&
             (formCategory || '') === (itemBaseline.categoryId || '') &&
-            formPrice === itemBaseline.price &&
+            (formPrice === '' ? itemBaseline.price : formPrice) === itemBaseline.price &&
             formAvailable === itemBaseline.available &&
             formImagePreview === itemBaseline.imagePreview &&
             formImage == null;
@@ -301,6 +324,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         formImage,
         formImagePreview,
         itemBaseline,
+        editingItem,
     ]);
 
     const openCategoryModal = () => {
@@ -552,19 +576,17 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             toast.error(t('menu_page.messages.name_required_msg'));
             return;
         }
-        if (!formPrice || Number(formPrice) <= 0) {
-            toast.error(t('menu_page.messages.price_required_msg'));
-            return;
-        }
 
         setSubmitting(true);
         try {
             if (editingItem) {
+                const baselinePrice = Number(itemBaseline.price || 0);
+                const effectivePrice = formPrice === '' ? baselinePrice : Number(formPrice);
                 const payload: UpdateMenuPayload = {
                     categoryId: formCategory || null,
                     name: formName.trim(),
                     description: formDesc.trim() || null,
-                    price: Number(formPrice),
+                    price: effectivePrice,
                     isAvailable: formAvailable,
                     existingImagePath: editingItem.imageUrl,
                     imageFile: formImage,
@@ -572,6 +594,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 await updateMenu(editingItem.id, payload);
                 toast.success(t('menu_page.messages.updated_msg', { name: formName.trim() }));
             } else {
+                if (!formPrice || Number(formPrice) <= 0) {
+                    toast.error(t('menu_page.messages.price_required_msg'));
+                    return;
+                }
                 const payload: CreateMenuPayload = {
                     branchId,
                     categoryId: formCategory || null,
@@ -733,7 +759,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <div>
                 <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.category')}</label>
                 <Select2
-                    options={[{ value: '', label: t('menu_page.modal.uncategorized') }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
+                    options={[{ value: '', label: t('menu_page.modal.uncategorized') }, ...sortedCategories.map((c) => ({ value: c.id, label: c.name }))]}
                     value={formCategory || ''}
                     onChange={(v) => setFormCategory(v ? String(v) : '')}
                     placeholder={t('menu_page.modal.select_category')}
@@ -901,7 +927,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
                         <div className="flex gap-6 items-stretch min-h-[560px]">
                             {/* Main Category (Categories list) */}
-                            <section className="w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                            <section className="w-[320px] xl:w-[420px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
                                 <div className="px-5 py-4 border-b border-gray-100">
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
@@ -927,7 +953,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                 </div>
 
                                 <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
-                                    {categories.map((cat) => {
+                                    {sortedCategories.map((cat) => {
                                         const active = cat.id === selectedCategory;
                                         const count = menus.filter((m) => m.categoryId === cat.id).length;
                                         return (
