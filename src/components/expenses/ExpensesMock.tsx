@@ -45,6 +45,7 @@ type Category = {
 };
 
 const ITEMS_PER_PAGE = 50;
+const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'];
 
 // Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
 
@@ -66,6 +67,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tableItemsNameFilter, setTableItemsNameFilter] = useState<Set<string> | null>(null);
 
   const [isOperationPanelOpen, setIsOperationPanelOpen] = useState(false);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
@@ -313,6 +315,88 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         return ad < bd ? 1 : -1;
       });
   }, [expenses, masterCategories, selectedCategory, selectedOperationId]);
+
+  const expenseBreakdown = useMemo(() => {
+    // Build a simple breakdown based on current selection.
+    // - If a main category is selected (no sub category): group by CATEGORY_TYPE (sub-category).
+    // - If a sub category is selected: group by "table items" (expense item names) under that sub category.
+    // - Else: group by main category (operation).
+    type Row = { name: string; value: number };
+
+    const add = (map: Map<string, number>, key: string, amount: number) => {
+      const k = (key || 'Unknown').trim() || 'Unknown';
+      map.set(k, (map.get(k) || 0) + (Number(amount) || 0));
+    };
+
+    const map = new Map<string, number>();
+
+    if (selectedCategory) {
+      // Sub category selected → strictly mirror the table items list
+      for (const exp of itemsForCategory) {
+        const amount = Number(exp.expAmount) || 0;
+        if (amount <= 0) continue;
+        const rawLabel = (exp.expDesc || exp.expName || exp.expSource || 'Unknown') as string;
+        const label = rawLabel && rawLabel.trim() ? rawLabel.trim() : 'Unknown';
+        // If backend stored the sub-category label as the item name, fall back to source/desc for better variety.
+        const finalLabel =
+          label === selectedCategory.name
+            ? ((exp.expDesc || exp.expSource || exp.expName || 'Unknown') as string).trim() || 'Unknown'
+            : label;
+        add(map, finalLabel, amount);
+      }
+    } else {
+      const masterById = new Map<string, InventoryCategory>();
+      for (const mc of masterCategories) {
+        masterById.set(String(mc.id), mc);
+      }
+
+      const opById = new Map<string, Operation>();
+      for (const op of operations) {
+        opById.set(String(op.id), op);
+      }
+
+      for (const exp of expenses) {
+        const amount = Number(exp.expAmount) || 0;
+        if (amount <= 0) continue;
+
+        const mc = exp.masterCatId != null ? masterById.get(String(exp.masterCatId)) : undefined;
+
+        if (selectedOperationId) {
+          // Under the selected main category, group by CATEGORY_TYPE
+          if (mc?.opCategoryId == null || String(mc.opCategoryId) !== String(selectedOperationId)) continue;
+          add(map, (mc.categoryType || mc.name || 'Unknown') as string, amount);
+          continue;
+        }
+
+        // Nothing selected: group by main category (operation name)
+        const opId = mc?.opCategoryId != null ? String(mc.opCategoryId) : '';
+        const opName = opById.get(opId)?.name || 'Uncategorized';
+        add(map, opName, amount);
+      }
+    }
+
+    const rows: Row[] = Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .filter((r) => r.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    // Keep the chart readable: top 6 + Others
+    const top = rows.slice(0, 6);
+    const rest = rows.slice(6);
+    const restSum = rest.reduce((s, r) => s + r.value, 0);
+
+    const topKeys = new Set(top.map((r) => r.name));
+    const othersKeys = new Set(rest.map((r) => r.name));
+
+    const output = restSum > 0 ? [...top, { name: 'Others', value: restSum }] : top;
+
+    return {
+      rows: output,
+      topKeys,
+      othersKeys,
+      hasOthers: restSum > 0,
+    };
+  }, [expenses, itemsForCategory, masterCategories, operations, selectedCategory, selectedOperationId]);
 
   // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
   const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
@@ -939,12 +1023,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const filteredItemsForCategory = useMemo(() => {
     const term = tableSearch.trim().toLowerCase();
-    if (!term) return itemsForCategory;
-    return itemsForCategory.filter((row) => {
+    const base = itemsForCategory;
+    const byNameSet =
+      tableItemsNameFilter && tableItemsNameFilter.size > 0
+        ? base.filter((row) => tableItemsNameFilter.has(String(row.expDesc || row.expName || '').trim()))
+        : base;
+
+    if (!term) return byNameSet;
+    return byNameSet.filter((row) => {
       const name = (row.expDesc || row.expName || '').toLowerCase();
       return name.includes(term);
     });
-  }, [itemsForCategory, tableSearch]);
+  }, [itemsForCategory, tableItemsNameFilter, tableSearch]);
 
   const shouldPaginate = filteredItemsForCategory.length > ITEMS_PER_PAGE;
   const [currentPage, setCurrentPage] = useState(1);
@@ -964,6 +1054,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   React.useEffect(() => {
     setCurrentPage(1);
     setTableSearch('');
+    setTableItemsNameFilter(null);
   }, [selectedCategoryId]);
 
   if (!isSpecificBranch) {
@@ -1030,48 +1121,167 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     >
       <>
     <div className="pt-6 overflow-x-hidden">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Grand Total Expenses</div>
-              <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
-                {formatCurrency(grandTotalExpenses)}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 items-stretch">
+        <div className="md:col-span-4 flex flex-col gap-4 h-full">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 flex-1">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Grand Total Expenses</div>
+                <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
+                  {formatCurrency(grandTotalExpenses)}
+                </div>
+                <div className="text-xs text-brand-muted mt-1">
+                  All Main Categories
+                </div>
               </div>
-              <div className="text-xs text-brand-muted mt-1">
-                All Main Categories
+              <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
+                <div className="h-5 w-5 rounded-full bg-brand-primary/70" />
               </div>
             </div>
-            <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
-              <div className="h-5 w-5 rounded-full bg-brand-primary/70" />
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 flex-1">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Selected Total</div>
+                <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
+                  {formatCurrency(totalForView)}
+                </div>
+                <div className="text-xs text-brand-muted mt-1">
+                  {selectedCategory ? (
+                    <>
+                      Sub Category: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
+                    </>
+                  ) : selectedOperation ? (
+                    <>
+                      Main Category: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
+                    </>
+                  ) : (
+                    'Select a Main Category or Sub Category'
+                  )}
+                </div>
+              </div>
+              <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
+                <div className="h-5 w-5 rounded-full bg-brand-orange/70" />
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5">
+        <div className="md:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 h-full flex flex-col">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Selected Total</div>
-              <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
-                {formatCurrency(totalForView)}
-              </div>
+              <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Expense Breakdown</div>
               <div className="text-xs text-brand-muted mt-1">
-                {selectedCategory ? (
-                  <>
-                    Sub Category: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
-                  </>
-                ) : selectedOperation ? (
-                  <>
-                    Main Category: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
-                  </>
-                ) : (
-                  'Select a Main Category or Sub Category'
-                )}
+                {selectedCategory
+                  ? `By table items • ${selectedCategory.name}`
+                  : selectedOperation
+                    ? `By sub category • ${selectedOperation.name}`
+                    : 'By main category'}
               </div>
             </div>
-            <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
-              <div className="h-5 w-5 rounded-full bg-brand-orange/70" />
-            </div>
+          </div>
+
+          <div className="mt-3 flex-1 w-full min-w-0 min-h-[210px] flex flex-col">
+            {expenseBreakdown.rows.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-brand-muted">
+                No data to display
+              </div>
+            ) : (
+              <div className="w-full">
+                  {(() => {
+                    const maxVal = Math.max(...expenseBreakdown.rows.map((r) => Number(r.value) || 0), 1);
+                    return (
+                      <ul className="space-y-2.5">
+                        {expenseBreakdown.rows.map((row, idx) => {
+                          const value = Number(row.value) || 0;
+                          const pct = Math.max(0, Math.min(100, (value / maxVal) * 100));
+                          const color = PIE_COLORS[idx % PIE_COLORS.length];
+                          const isOthers = row.name === 'Others';
+                          const canClickOthers = Boolean(selectedCategory) && isOthers && expenseBreakdown.othersKeys.size > 0;
+                          return (
+                            <li
+                              key={`${row.name}-${idx}`}
+                              className="grid items-center gap-3"
+                              style={{ gridTemplateColumns: 'minmax(260px, 1.7fr) minmax(420px, 4.2fr) minmax(160px, 1fr)' }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!canClickOthers) return;
+                                  setCurrentPage(1);
+                                  setTableSearch('');
+                                  setTableItemsNameFilter((prev) => {
+                                    // toggle: click again to clear
+                                    if (prev && prev.size === expenseBreakdown.othersKeys.size) {
+                                      let same = true;
+                                      for (const k of expenseBreakdown.othersKeys) {
+                                        if (!prev.has(k)) { same = false; break; }
+                                      }
+                                      if (same) return null;
+                                    }
+                                    return new Set(expenseBreakdown.othersKeys);
+                                  });
+                                }}
+                                disabled={!canClickOthers}
+                                className={cn(
+                                  'flex items-center gap-2 min-w-0 text-left',
+                                  canClickOthers ? 'cursor-pointer hover:opacity-90' : 'cursor-default',
+                                )}
+                                aria-label={canClickOthers ? 'Filter table items by Others group' : undefined}
+                              >
+                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                <span className="text-xs font-semibold text-slate-700 truncate">{row.name}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!canClickOthers) return;
+                                  setCurrentPage(1);
+                                  setTableSearch('');
+                                  setTableItemsNameFilter((prev) => {
+                                    // toggle: click again to clear
+                                    if (prev && prev.size === expenseBreakdown.othersKeys.size) {
+                                      let same = true;
+                                      for (const k of expenseBreakdown.othersKeys) {
+                                        if (!prev.has(k)) { same = false; break; }
+                                      }
+                                      if (same) return null;
+                                    }
+                                    return new Set(expenseBreakdown.othersKeys);
+                                  });
+                                }}
+                                disabled={!canClickOthers}
+                                className={cn(
+                                  'w-full',
+                                  canClickOthers ? 'cursor-pointer' : 'cursor-default',
+                                )}
+                                aria-label={canClickOthers ? 'Filter table items by Others group' : undefined}
+                              >
+                                <div className={cn('h-2.5 rounded-full bg-slate-100 overflow-hidden', canClickOthers ? 'hover:bg-slate-200/60 transition-colors' : '')}>
+                                  <motion.div
+                                    className="h-full rounded-full"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${pct}%` }}
+                                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                                    style={{ backgroundColor: color }}
+                                  />
+                                </div>
+                              </button>
+
+                              <div className="text-right text-xs font-bold text-slate-500 tabular-nums">
+                                {formatCurrency(value)}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+              </div>
+            )}
+
           </div>
         </div>
       </div>
