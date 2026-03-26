@@ -63,6 +63,33 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
+const WEEKDAY_ABBR_TO_JS_DAY: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+const weekdayAbbrFromJsDay = (jsDay: number): string =>
+  ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][jsDay] ?? '';
+
+const weekendStyleForDay = (jsDay: number): { fill: string } | null => {
+  if (jsDay === 6) return { fill: '#ef4444' }; // Sat (red)
+  if (jsDay === 0) return { fill: '#22c55e' }; // Sun (green)
+  return null;
+};
+
+const normalizeTickLabel = (value: unknown): string => String(value ?? '').trim();
+
+const parseIsoDate = (iso: string): Date | null => {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 const getCurrentMonthRange = () => {
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -109,6 +136,7 @@ type DashboardStats = {
 
 type RevenuePoint = {
   name: string;
+  date?: string; // ISO yyyy-mm-dd for tooltip/weekend styling
   income: number;
   expense: number;
 };
@@ -330,6 +358,116 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(false);
   const [menuImageByName, setMenuImageByName] = React.useState<Record<string, string>>({});
 
+  const RevenueXAxisTick = React.useMemo(() => {
+    const Tick = (props: any) => {
+      const { x, y, payload } = props ?? {};
+      const iso = normalizeTickLabel(payload?.value);
+      const d = iso ? parseIsoDate(iso) : null;
+      const jsDay = d ? d.getDay() : null;
+      const weekend = jsDay == null ? null : weekendStyleForDay(jsDay);
+      const fill = weekend?.fill ?? '#64748b';
+      const label = d ? String(d.getDate()) : iso;
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={16} textAnchor="middle" fill={fill} fontSize={12} fontWeight={weekend ? 800 : 500}>
+            {label}
+          </text>
+        </g>
+      );
+    };
+    return Tick;
+  }, []);
+
+  const OrdersXAxisTick = React.useMemo(() => {
+    const Tick = (props: any) => {
+      const { x, y, payload } = props ?? {};
+      const label = normalizeTickLabel(payload?.value);
+      const iso = payload?.payload?.date as string | undefined;
+      const d = iso ? parseIsoDate(iso) : null;
+      const jsDay = d ? d.getDay() : WEEKDAY_ABBR_TO_JS_DAY[label.slice(0, 3)] ?? null;
+      const weekend = jsDay == null ? null : weekendStyleForDay(jsDay);
+      const fill = weekend?.fill ?? '#64748b';
+      // Weekly requirement: dot marker for all days, dot uses same color as label.
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <text x={0} y={0} dy={16} textAnchor="middle" fill={fill} fontSize={12} fontWeight={weekend ? 800 : 600}>
+            {`● ${label}`}
+          </text>
+        </g>
+      );
+    };
+    return Tick;
+  }, []);
+
+  const RevenueTooltipContent = React.useMemo(() => {
+    const Content = (props: any) => {
+      const { active, payload } = props ?? {};
+      if (!active || !payload?.length) return null;
+      const point = payload?.[0]?.payload as RevenuePoint | undefined;
+      const d = point?.date ? parseIsoDate(point.date) : null;
+      const labelText = d ? `${d.getDate()} - ${weekdayAbbrFromJsDay(d.getDay())}` : normalizeTickLabel(point?.name);
+      const weekend = d ? weekendStyleForDay(d.getDay()) : null;
+      const labelStyle: React.CSSProperties = weekend ? { color: weekend.fill, fontWeight: 800 } : { fontWeight: 800 };
+
+      const sorted = [...payload].sort((a, b) => -Number((a?.value ?? 0) as any) + Number((b?.value ?? 0) as any));
+      const rowLabel = (dataKey: string) => (dataKey === 'income' ? t('dashboard.income') : t('dashboard.expense'));
+
+      return (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 12,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            padding: '10px 12px',
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 12, ...labelStyle }}>{labelText}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {sorted.map((it: any, idx: number) => (
+              <div key={`${it?.dataKey}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 9999, background: it?.color || '#64748b', display: 'inline-block' }} />
+                <span style={{ fontSize: 12, color: '#475569', minWidth: 70 }}>{rowLabel(String(it?.dataKey))}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{formatCurrency(Number(it?.value ?? 0))}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+    return Content;
+  }, [t]);
+
+  const OrdersTooltipContent = React.useMemo(() => {
+    const Content = (props: any) => {
+      const { active, payload } = props ?? {};
+      if (!active || !payload?.length) return null;
+      const point = payload?.[0]?.payload as { name?: string; date?: string; orders?: number } | undefined;
+      const d = point?.date ? parseIsoDate(point.date) : null;
+      const labelText = d ? `${d.getDate()} - ${weekdayAbbrFromJsDay(d.getDay())}` : normalizeTickLabel(point?.name);
+      const weekend = d ? weekendStyleForDay(d.getDay()) : null;
+      const labelStyle: React.CSSProperties = weekend ? { color: weekend.fill, fontWeight: 800 } : { fontWeight: 800 };
+      const value = Number(payload?.[0]?.value ?? 0);
+      return (
+        <div
+          style={{
+            background: '#fff',
+            borderRadius: 12,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            padding: '10px 12px',
+          }}
+        >
+          <div style={{ marginBottom: 8, fontSize: 12, ...labelStyle }}>{labelText}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#4f46e5', display: 'inline-block' }} />
+            <span style={{ fontSize: 12, color: '#475569', minWidth: 86 }}>{t('dashboard.total_orders')}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{value}</span>
+          </div>
+        </div>
+      );
+    };
+    return Content;
+  }, [t]);
+
   React.useEffect(() => {
     const loadBranchDashboard = async () => {
       if (!selectedBranch) {
@@ -407,20 +545,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           revenueData = dailySales.map((item) => {
             const key = item.sale_date;
             const dailyExpense = expenseByDate.get(key) ?? 0;
+            const d = new Date(item.sale_date);
             return {
-              name: new Date(item.sale_date).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              }),
+              // X-axis: show day-of-month only so all labels fit (e.g. "1", "2", ...).
+              // Tooltip uses the attached ISO date.
+              name: Number.isNaN(d.getTime()) ? item.sale_date : String(d.getDate()),
+              date: item.sale_date,
               income: item.total_sales,
               expense: dailyExpense,
             };
           });
         } else if (totalExpenses > 0) {
           // No sales data but we have expenses: show a single point using the start date as label
+          const d = new Date(start);
           revenueData = [
             {
-              name: formatDateLabel(start),
+              name: Number.isNaN(d.getTime()) ? formatDateLabel(start) : String(d.getDate()),
+              date: start,
               income: 0,
               expense: totalExpenses,
             },
@@ -429,13 +570,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
 
         const last7Days = dailyOrders.slice(-7);
         const ordersOverview = last7Days.map((item) => ({
-          name: new Date(item.sale_date).toLocaleDateString('en-US', {
-            weekday: 'short',
-          }),
+          name: new Date(item.sale_date).toLocaleDateString('en-US', { weekday: 'short' }),
+          date: item.sale_date,
           orders: item.order_count,
         }));
 
-        setDashboardData({
+          setDashboardData({
           stats: {
             totalOrders,
             totalSales,
@@ -797,7 +937,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                     </div>
                   ) : (
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <ComposedChart data={dashboardData.revenueData}>
+                    <ComposedChart data={dashboardData.revenueData} margin={{ top: 8, right: 6, bottom: 6, left: 6 }}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
@@ -810,36 +950,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
-                        dataKey="name"
+                        dataKey="date"
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        tick={RevenueXAxisTick}
                         dy={10}
+                        interval={0}
+                        minTickGap={0}
+                        tickMargin={6}
                       />
                       <YAxis
+                        hide
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
-                        tickFormatter={(value: number) =>
-                          value === 0 ? '' : formatCurrency(value as number)
-                        }
+                        width={0}
                       />
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: 'none',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                        }}
-                        labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
-                        itemSorter={(item: any) => -Number(item?.value ?? 0)}
-                        formatter={(value: number, _name: string, props: any) => [
-                          formatCurrency(value as number),
-                          props.dataKey === 'income'
-                            ? t('dashboard.income')
-                            : t('dashboard.expense'),
-                        ]}
-                        labelFormatter={(label: string) => label}
-                      />
+                      <Tooltip content={RevenueTooltipContent} />
                       <Area
                         type="monotone"
                         dataKey="income"
@@ -957,7 +1083,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         dataKey="name"
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fontSize: 12, fill: '#64748b' }}
+                        tick={OrdersXAxisTick}
                         dy={10}
                       />
                       <YAxis
@@ -965,21 +1091,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         tickLine={false}
                         tick={{ fontSize: 12, fill: '#64748b' }}
                       />
-                      <Tooltip
-                        cursor={{ fill: '#4f46e5', opacity: 0.1 }}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: 'none',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                        }}
-                        labelStyle={{ fontWeight: 'bold', marginBottom: '4px' }}
-                        itemStyle={{ color: '#4f46e5'}}
-                        formatter={(value: number) => [
-                          value,
-                          t('dashboard.total_orders'),
-                        ]}
-                        labelFormatter={(label: string) => label}
-                      />
+                      <Tooltip cursor={{ fill: '#4f46e5', opacity: 0.1 }} content={OrdersTooltipContent} />
                       <Bar
                         dataKey="orders"
                         name={t('dashboard.total_orders')}

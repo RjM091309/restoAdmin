@@ -187,7 +187,7 @@
 		}
 	},
 	"admin_dashboard": {
-		"total_revenue": "Total Revenue",
+		"total_revenue": "Total Profit",
 		"total_sales": "Total Sales",
 		"total_expenses": "Total Expenses",
 		"performance_trend": "Overall Performance Trend",
@@ -230,7 +230,7 @@
 	"dashboard": {
 		"total_orders": "Total Orders",
 		"total_customer": "Total Customer",
-		"total_revenue": "Total Revenue",
+		"total_revenue": "Total Profit",
 		"income": "Income",
 		"expense": "Expense",
 		"last_8_months": "Last 8 Months",
@@ -444,7 +444,7 @@
 			"discounts": "Discounts",
 			"net_sales": "Net sales",
 			"unit_cost": "Unit cost",
-			"total_revenue": "Total revenue"
+			"total_revenue": "Total Profit"
 		}
 	},
 	"menu_report": {
@@ -460,7 +460,7 @@
 			"discounts": "Discounts",
 			"net_sales": "Net sales",
 			"unit_cost": "Unit cost",
-			"total_revenue": "Total Revenue"
+			"total_revenue": "Total Profit"
 		}
 	},
 	"payment_report": {
