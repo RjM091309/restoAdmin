@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Literal, Dict
 import os
 from pathlib import Path
 import time
+from datetime import datetime, timedelta, date
 
 import mysql.connector
 from mysql.connector import pooling
@@ -178,6 +179,44 @@ class ExpenseCategoryRow(BaseModel):
     exp_name: str
     entry_count: int
     total_amount: float
+
+
+class PerformanceTrendRow(BaseModel):
+    name: str
+    totalSales: float
+    totalExpenses: float
+
+
+def _safe_parse_yyyy_mm_dd(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _default_range_for_period(period: str) -> tuple[str, str]:
+    # Use PH-local "today" approximation (server-local date). For consistent bucketing,
+    # the sales query uses +08:00 conversion on billing timestamps.
+    today = datetime.now().date()
+
+    if period == "weekly":
+        # Current week Monday..Sunday
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6)
+    elif period == "monthly":
+        # Current month 1..last day
+        start = today.replace(day=1)
+        next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end = next_month - timedelta(days=1)
+    else:
+        # Yearly: rolling last 12 months including current month
+        start = (today.replace(day=1) - timedelta(days=365)).replace(day=1)
+        end = today
+
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
 
 # DASHBOARD
 @app.get("/api/analytics/branch-sales")
@@ -979,6 +1018,185 @@ def expense_breakdown(
         )
 
     return {"success": True, "data": {"data": [item.model_dump() for item in data]}}
+
+
+@app.get("/api/analytics/performance-trend")
+def performance_trend(
+    period: Literal["weekly", "monthly", "yearly"] = "yearly",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Unified performance trend for admin dashboard chart:
+    - weekly: Mon..Sun (bucket by weekday)
+    - monthly: 1..31 (bucket by day-of-month)
+    - yearly: Jan..Dec (bucket by month)
+
+    Returns rows with name, totalSales (gross, aligned with daily-sales), totalExpenses.
+    """
+    try:
+        effective_start = _safe_parse_yyyy_mm_dd(start_date)
+        effective_end = _safe_parse_yyyy_mm_dd(end_date)
+        if not effective_start or not effective_end:
+            s, e = _default_range_for_period(period)
+            effective_start = _safe_parse_yyyy_mm_dd(s)
+            effective_end = _safe_parse_yyyy_mm_dd(e)
+
+        # Ensure start <= end
+        if effective_start and effective_end and effective_start > effective_end:
+            effective_start, effective_end = effective_end, effective_start
+
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+        orders_local_dt = """COALESCE(
+            CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+
+        if period == "weekly":
+            sales_bucket = f"WEEKDAY({billing_local_dt})"  # 0=Mon .. 6=Sun
+            discount_bucket = f"WEEKDAY({orders_local_dt})"
+            expense_bucket = "WEEKDAY(DATE(e.ENCODED_DT))"
+        elif period == "monthly":
+            sales_bucket = f"DAY({billing_local_dt})"  # 1..31
+            discount_bucket = f"DAY({orders_local_dt})"
+            expense_bucket = "DAY(DATE(e.ENCODED_DT))"
+        else:
+            sales_bucket = f"MONTH({billing_local_dt})"  # 1..12
+            discount_bucket = f"MONTH({orders_local_dt})"
+            expense_bucket = "MONTH(DATE(e.ENCODED_DT))"
+
+        # Sales (paid) by bucket
+        sales_where = ["b.STATUS IN (1, 2)"]
+        sales_params: List[object] = []
+        if effective_start and effective_end:
+            sales_where.append(f"DATE({billing_local_dt}) BETWEEN %s AND %s")
+            sales_params.extend([effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")])
+        if branch_id:
+            sales_where.append("b.BRANCH_ID = %s")
+            sales_params.append(branch_id)
+
+        sales_query = f"""
+            SELECT
+                {sales_bucket} AS bucket,
+                COALESCE(SUM(b.AMOUNT_PAID), 0) AS paid_total
+            FROM billing b
+            WHERE {" AND ".join(sales_where)}
+            GROUP BY bucket
+        """
+        cur.execute(sales_query, sales_params)
+        sales_rows = cur.fetchall()
+
+        # Discounts by bucket (aligned with daily-sales)
+        disc_where = ["1=1"]
+        disc_params: List[object] = []
+        if effective_start and effective_end:
+            disc_where.append(f"DATE({orders_local_dt}) BETWEEN %s AND %s")
+            disc_params.extend([effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")])
+        if branch_id:
+            disc_where.append("o.BRANCH_ID = %s")
+            disc_params.append(branch_id)
+
+        disc_query = f"""
+            SELECT
+                {discount_bucket} AS bucket,
+                COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount_total
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            WHERE {" AND ".join(disc_where)}
+            GROUP BY bucket
+        """
+        cur.execute(disc_query, disc_params)
+        disc_rows = cur.fetchall()
+
+        # Expenses by bucket
+        exp_where = ["e.ACTIVE = 1", "oc.ACTIVE = 1"]
+        exp_params: List[object] = []
+        if branch_id:
+            exp_where.append("e.BRANCH_ID = %s")
+            exp_params.append(branch_id)
+        if effective_start:
+            exp_where.append("DATE(e.ENCODED_DT) >= %s")
+            exp_params.append(effective_start.strftime("%Y-%m-%d"))
+        if effective_end:
+            exp_where.append("DATE(e.ENCODED_DT) <= %s")
+            exp_params.append(effective_end.strftime("%Y-%m-%d"))
+
+        exp_query = f"""
+            SELECT
+                {expense_bucket} AS bucket,
+                COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
+            FROM expenses e
+            LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+            INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+            WHERE {" AND ".join(exp_where)}
+            GROUP BY bucket
+        """
+        cur.execute(exp_query, exp_params)
+        exp_rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] performance-trend query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch performance trend",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    sales_map: Dict[int, float] = {}
+    for r in sales_rows:
+        try:
+            k = int(r.get("bucket"))
+        except Exception:
+            continue
+        sales_map[k] = float(r.get("paid_total") or 0.0)
+
+    disc_map: Dict[int, float] = {}
+    for r in disc_rows:
+        try:
+            k = int(r.get("bucket"))
+        except Exception:
+            continue
+        disc_map[k] = float(r.get("discount_total") or 0.0)
+
+    exp_map: Dict[int, float] = {}
+    for r in exp_rows:
+        try:
+            k = int(r.get("bucket"))
+        except Exception:
+            continue
+        exp_map[k] = float(r.get("total_expense") or 0.0)
+
+    if period == "weekly":
+        labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        keys = list(range(0, 7))
+    elif period == "monthly":
+        keys = list(range(1, 32))
+        labels = [str(k) for k in keys]
+    else:
+        keys = list(range(1, 13))
+        labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    rows_out: List[PerformanceTrendRow] = []
+    for idx, k in enumerate(keys):
+        name = labels[idx] if idx < len(labels) else str(k)
+        paid_total = float(sales_map.get(k, 0.0) or 0.0)
+        discount_total = float(disc_map.get(k, 0.0) or 0.0)
+        total_sales = paid_total + discount_total
+        total_exp = float(exp_map.get(k, 0.0) or 0.0)
+        rows_out.append(
+            PerformanceTrendRow(name=name, totalSales=total_sales, totalExpenses=total_exp)
+        )
+
+    return {"success": True, "data": {"data": [r.model_dump() for r in rows_out]}}
 
 
 # Attach analytics report routes (menu, category, payment, receipt)

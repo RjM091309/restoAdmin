@@ -127,6 +127,12 @@ export type ApiDailyExpenseItem = {
   total_expense: number;
 };
 
+export type ApiPerformanceTrendRow = {
+  name: string;
+  totalSales: number;
+  totalExpenses: number;
+};
+
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
   try {
@@ -310,6 +316,19 @@ export async function fetchExpenseCategoryBreakdownApi(
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiExpenseCategoryRow[];
+  }
+  return [];
+}
+
+export async function fetchPerformanceTrendApi(params: URLSearchParams): Promise<ApiPerformanceTrendRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/performance-trend?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics performance-trend failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiPerformanceTrendRow[];
   }
   return [];
 }

@@ -18,6 +18,8 @@ import {
   type ApiExpenseSummary,
   fetchExpenseCategoryBreakdownApi,
   type ApiExpenseCategoryRow,
+  fetchPerformanceTrendApi,
+  type ApiPerformanceTrendRow,
 } from '../../services/analyticsService';
 import { useUser } from '../../context/UserContext';
 
@@ -66,6 +68,8 @@ type MonthlyData = {
   totalSales: number;
   totalExpenses: number;
 };
+
+type TrendPeriod = 'weekly' | 'monthly' | 'yearly';
 
 type DateRange = {
   start: string;
@@ -127,6 +131,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>([]);
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('monthly');
+  const [trendLoading, setTrendLoading] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
   const [compareBranchIds, setCompareBranchIds] = useState<number[]>([]);
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
@@ -155,16 +161,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const fetchData = async () => {
       try {
         const token = localStorage.getItem('token');
-        const monthlyUrl = activeBranchId 
-          ? `/api/admin/monthly-performance?branchId=${activeBranchId}`
-          : '/api/admin/monthly-performance';
-
-        // Fetch in parallel
-        const [perfRes, monthlyRes] = await Promise.all([
+        // Fetch in parallel (legacy Node dashboard endpoints)
+        const [perfRes] = await Promise.all([
           fetch('/api/admin/branch-performance', {
-            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          }),
-          fetch(monthlyUrl, {
             headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           }),
         ]);
@@ -172,11 +171,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         const perfJson = await perfRes.json();
         if (perfJson.success) {
           setPerformanceData(perfJson.data.branches);
-        }
-
-        const monthlyJson = await monthlyRes.json();
-        if (monthlyJson.success) {
-          setMonthlyData(monthlyJson.data);
         }
 
       } catch (error) {
@@ -188,6 +182,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
     fetchData();
   }, [activeBranchId]);
+
+  // Load performance trend chart from Python analytics (weekly/monthly/yearly)
+  useEffect(() => {
+    const loadTrend = async () => {
+      setTrendLoading(true);
+      try {
+        const currentRange = getCurrentMonthRange();
+        const start = compareDateRange.start || currentRange.start;
+        const end = compareDateRange.end || currentRange.end;
+
+        const params = new URLSearchParams();
+        params.set('period', trendPeriod);
+        params.set('start_date', start);
+        params.set('end_date', end);
+        if (activeBranchId) {
+          params.set('branch_id', String(activeBranchId));
+        }
+
+        const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
+
+        const normalized: MonthlyData[] = rows.map((r) => ({
+          name: r.name,
+          totalSales: Number(r.totalSales || 0),
+          totalExpenses: Number(r.totalExpenses || 0),
+        }));
+
+        // Weekly UX requirement:
+        // Always show the anchor day as the last (rightmost) bar.
+        // Anchor day = selected range end date (fallback: start date, else real today).
+        // Example: if anchor is Thu, order should be Fri Sat Sun Mon Tue Wed <anchor>.
+        if (trendPeriod === 'weekly' && normalized.length === 7) {
+          const anchor =
+            (compareDateRange.end ? new Date(compareDateRange.end) : null) ??
+            (compareDateRange.start ? new Date(compareDateRange.start) : null) ??
+            new Date();
+
+          const jsDay = anchor.getDay(); // 0=Sun..6=Sat
+          const todayIdxMon0 = (jsDay + 6) % 7; // 0=Mon..6=Sun
+          const startIdx = (todayIdxMon0 + 1) % 7; // start from "tomorrow"
+          const rotated = [...normalized.slice(startIdx), ...normalized.slice(0, startIdx)];
+
+          const now = new Date();
+          const isAnchorToday =
+            anchor.getFullYear() === now.getFullYear() &&
+            anchor.getMonth() === now.getMonth() &&
+            anchor.getDate() === now.getDate();
+
+          const anchorName = isAnchorToday
+            ? 'Today'
+            : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][todayIdxMon0] ?? rotated[rotated.length - 1].name;
+
+          rotated[rotated.length - 1] = { ...rotated[rotated.length - 1], name: anchorName };
+          setMonthlyData(rotated);
+          return;
+        }
+
+        setMonthlyData(normalized);
+      } catch (error) {
+        console.error('[AdminDashboard] Failed to load performance trend:', error);
+        setMonthlyData([]);
+      } finally {
+        setTrendLoading(false);
+      }
+    };
+
+    void loadTrend();
+  }, [activeBranchId, compareDateRange.start, compareDateRange.end, trendPeriod]);
 
   // Keep internal compareDateRange in sync with global dateRange from Header
   useEffect(() => {
@@ -853,11 +914,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             )}
             
             <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.performance_trend')}</h3>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <h3 className="text-lg font-bold text-slate-800">
+                  {t('admin_dashboard.performance_trend')}
+                </h3>
+
+                <div className="inline-flex items-center rounded-2xl bg-slate-50 p-1 border border-slate-200 shadow-sm">
+                  <button
+                    type="button"
+                    aria-pressed={trendPeriod === 'weekly'}
+                    onClick={() => setTrendPeriod('weekly')}
+                    className={`cursor-pointer px-3 py-1.5 rounded-xl text-sm font-semibold border transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40 ${
+                      trendPeriod === 'weekly'
+                        ? 'bg-white text-brand-primary shadow-sm border-slate-200'
+                        : 'bg-transparent text-slate-600 border-transparent hover:text-slate-900 hover:bg-white/70'
+                    }`}
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={trendPeriod === 'monthly'}
+                    onClick={() => setTrendPeriod('monthly')}
+                    className={`cursor-pointer px-3 py-1.5 rounded-xl text-sm font-semibold border transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40 ${
+                      trendPeriod === 'monthly'
+                        ? 'bg-white text-brand-primary shadow-sm border-slate-200'
+                        : 'bg-transparent text-slate-600 border-transparent hover:text-slate-900 hover:bg-white/70'
+                    }`}
+                  >
+                    Monthly
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={trendPeriod === 'yearly'}
+                    onClick={() => setTrendPeriod('yearly')}
+                    className={`cursor-pointer px-3 py-1.5 rounded-xl text-sm font-semibold border transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40 ${
+                      trendPeriod === 'yearly'
+                        ? 'bg-white text-brand-primary shadow-sm border-slate-200'
+                        : 'bg-transparent text-slate-600 border-transparent hover:text-slate-900 hover:bg-white/70'
+                    }`}
+                  >
+                    Yearly
+                  </button>
+                </div>
+              </div>
               <div className="w-full min-w-0 h-96 min-h-[384px]">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={384}>
                   <BarChart
-                    key={activeBranchId || 'all'}
+                    key={`${activeBranchId || 'all'}-${trendPeriod}`}
                     data={monthlyData.map(d => ({ ...d, negativeExpenses: -d.totalExpenses }))}
                     margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
                     stackOffset="sign"
@@ -867,6 +971,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
                       axisLine={false}
                       tickLine={false}
+                      interval={0}
+                      minTickGap={0}
                     />
                     <YAxis 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
@@ -881,6 +987,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         if (name === 'negativeExpenses') return [originalValue, t('admin_dashboard.total_expenses')];
                         return [originalValue, name];
                       }}
+                      // Keep tooltip order aligned with chart:
+                      // Sales (top bar) first, Expenses (bottom bar) last.
+                      itemSorter={(item) => (item?.dataKey === 'totalSales' ? 0 : 1)}
                       cursor={{ fill: 'transparent' }}
                       contentStyle={{
                         borderRadius: '12px',
@@ -901,7 +1010,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       name="totalSales" 
                       fill="rgb(139, 92, 246)" 
                       radius={[6, 6, 0, 0]}
-                      barSize={32}
+                      barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
                     />
                     <Bar 
@@ -909,7 +1018,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       name="negativeExpenses" 
                       fill="rgb(245, 158, 11)" 
                       radius={[6, 6, 0, 0]}
-                      barSize={32}
+                      barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
                     />
                   </BarChart>
