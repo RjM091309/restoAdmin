@@ -62,8 +62,10 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const money = (value: number) =>
-    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const money = (value: number) => {
+    const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+    return `${t('common.currency_symbol')}${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
 
   const headerTextClass = 'text-[13px] font-medium whitespace-nowrap bg-white';
   const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';

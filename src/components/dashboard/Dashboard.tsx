@@ -72,8 +72,10 @@ const getCurrentMonthRange = () => {
   };
 };
 
-const formatCurrency = (value: number) =>
-  `₱${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+const formatCurrency = (value: number) => {
+  const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+  return `₱${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+};
 
 const formatDateLabel = (dateStr: string) => {
   const d = new Date(dateStr);

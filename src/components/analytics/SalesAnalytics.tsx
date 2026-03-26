@@ -170,14 +170,14 @@ const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
 };
 
 const money = (value: number) =>
-  `₱${Number(value || 0).toLocaleString(undefined, {
+  `₱${Math.trunc(Number(value || 0)).toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
 const moneyTooltip = (value: number) =>
-  `₱${Number(value || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+  `₱${Math.trunc(Number(value || 0)).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   })}`;
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
 

@@ -39,8 +39,10 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const [rows, setRows] = useState<CategoryReportRow[]>([]);
   const [reportLoading, setReportLoading] = useState(true);
 
-  const money = (value: number) =>
-    `${t('common.currency_symbol')}${value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const money = (value: number) => {
+    const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+    return `${t('common.currency_symbol')}${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
 
   useEffect(() => {
     const load = async () => {
