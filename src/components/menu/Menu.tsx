@@ -8,9 +8,6 @@ import {
     Trash2,
     UtensilsCrossed,
     AlertTriangle,
-    CheckCircle2,
-    X,
-    AlertCircle,
     Loader2,
     ImageIcon,
     ListChecks,
@@ -18,6 +15,7 @@ import {
 import { cn } from '../../lib/utils';
 import { type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
+import { SidePanel } from '../ui/SidePanel';
 import { Select2 } from '../ui/Select2';
 import { SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import {
@@ -47,21 +45,12 @@ import { getIngredients } from '../../services/ingredientService';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
+import { toast } from 'sonner';
 
 // ---- Props & types ----
 interface MenuProps {
     selectedBranch: Branch | null;
 }
-
-type SwalState = {
-    type: 'question' | 'success' | 'error' | 'warning';
-    title: string;
-    text: string;
-    showCancel?: boolean;
-    confirmText?: string;
-    onConfirm?: () => void | Promise<void>;
-    onCancel?: () => void;
-} | null;
 
 export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
@@ -86,19 +75,24 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [availFilter, setAvailFilter] = useState<string>('all');
 
     // ----- Modals -----
-    const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<MenuRecord | null>(null);
     const [submitting, setSubmitting] = useState(false);
-    const [swal, setSwal] = useState<SwalState>(null);
-    const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+    const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState<MenuCategory | null>(null);
     const [categoryName, setCategoryName] = useState('');
     const [categoryDesc, setCategoryDesc] = useState('');
     const [categorySubmitting, setCategorySubmitting] = useState(false);
+    const [categoryToDelete, setCategoryToDelete] = useState<MenuCategory | null>(null);
+    const [categoryBaseline, setCategoryBaseline] = useState<{
+        id: string | null;
+        name: string;
+        desc: string;
+    }>({ id: null, name: '', desc: '' });
 
     // ----- Ingredients modal -----
     const [ingredientsForMenu, setIngredientsForMenu] = useState<MenuRecord | null>(null);
     const [menuIngredients, setMenuIngredients] = useState<MenuIngredientRecord[]>([]);
+    const [menuIngredientsBaseline, setMenuIngredientsBaseline] = useState<MenuIngredientRecord[]>([]);
     const [ingredientsLoading, setIngredientsLoading] = useState(false);
     const [ingredientsSubmitting, setIngredientsSubmitting] = useState(false);
     const [allIngredients, setAllIngredients] = useState<{ id: string; name: string; unit: string }[]>([]);
@@ -107,6 +101,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [editingIngredientId, setEditingIngredientId] = useState<string | null>(null);
     const [editingQty, setEditingQty] = useState('');
     const [editingUnit, setEditingUnit] = useState('');
+    const [pendingIngredientEdits, setPendingIngredientEdits] = useState<Record<string, { qtyPerServe: number; unit: string }>>({});
 
     // ----- Form -----
     const [formName, setFormName] = useState('');
@@ -117,6 +112,26 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [formImage, setFormImage] = useState<File | null>(null);
     const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
     const [hoverPreview, setHoverPreview] = useState<{ src: string; alt: string; top: number; left: number } | null>(null);
+
+    const [isItemPanelOpen, setIsItemPanelOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState<MenuRecord | null>(null);
+    const [itemBaseline, setItemBaseline] = useState<{
+        id: string | null;
+        name: string;
+        desc: string;
+        categoryId: string;
+        price: string;
+        available: boolean;
+        imagePreview: string | null;
+    }>({
+        id: null,
+        name: '',
+        desc: '',
+        categoryId: '',
+        price: '',
+        available: true,
+        imagePreview: null,
+    });
 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
@@ -211,7 +226,17 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     const openCreate = () => {
         resetForm();
-        setIsCreateOpen(true);
+        setEditingItem(null);
+        setItemBaseline({
+            id: null,
+            name: '',
+            desc: '',
+            categoryId: '',
+            price: '',
+            available: true,
+            imagePreview: null,
+        });
+        setIsItemPanelOpen(true);
     };
 
     const openEdit = async (item: MenuRecord) => {
@@ -223,33 +248,72 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setFormImage(null);
         setFormImagePreview(item.imageUrl ? resolveImageUrl(item.imageUrl) : null);
         setEditingItem(item);
+        setIsItemPanelOpen(true);
+        setItemBaseline({
+            id: String(item.id),
+            name: item.name || '',
+            desc: '',
+            categoryId: item.categoryId || '',
+            price: String(item.price ?? ''),
+            available: !!item.isAvailable,
+            imagePreview: item.imageUrl ? resolveImageUrl(item.imageUrl) : null,
+        });
 
         // Menu list fetch intentionally omits description; load it on-demand for editing
         try {
             const full = await getMenuById(item.id);
             setFormDesc(full.description || '');
+            setItemBaseline((prev) =>
+                prev.id === String(item.id)
+                    ? { ...prev, desc: full.description || '' }
+                    : prev
+            );
         } catch {
             // Leave description empty if it fails to load
         }
     };
 
-    const closeModal = () => {
+    const closeItemPanel = () => {
         if (submitting) return;
-        setIsCreateOpen(false);
+        setIsItemPanelOpen(false);
         setEditingItem(null);
         resetForm();
     };
+
+    const canSubmitItem = useMemo(() => {
+        const valid = !!formName.trim() && !!formPrice && Number(formPrice) > 0;
+        if (!valid) return false;
+        const baselineMatch =
+            formName === itemBaseline.name &&
+            formDesc === itemBaseline.desc &&
+            (formCategory || '') === (itemBaseline.categoryId || '') &&
+            formPrice === itemBaseline.price &&
+            formAvailable === itemBaseline.available &&
+            formImagePreview === itemBaseline.imagePreview &&
+            formImage == null;
+        return !baselineMatch;
+    }, [
+        formName,
+        formDesc,
+        formCategory,
+        formPrice,
+        formAvailable,
+        formImage,
+        formImagePreview,
+        itemBaseline,
+    ]);
 
     const openCategoryModal = () => {
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
-        setIsCategoryModalOpen(true);
+        setCategoryBaseline({ id: null, name: '', desc: '' });
+        setIsCategoryPanelOpen(true);
     };
 
     const closeCategoryModal = () => {
         if (categorySubmitting) return;
-        setIsCategoryModalOpen(false);
+        setIsCategoryPanelOpen(false);
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
@@ -260,100 +324,63 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setEditingCategory(category);
         setCategoryName(category.name || '');
         setCategoryDesc('');
-        setIsCategoryModalOpen(true);
+        setCategoryBaseline({ id: String(category.id), name: category.name || '', desc: '' });
+        setIsCategoryPanelOpen(true);
     };
 
     const handleDeleteCategory = (e: React.MouseEvent, category: MenuCategory) => {
         e.stopPropagation();
-        setSwal({
-            type: 'question',
-            title: t('menu_page.messages.delete_title'),
-            text: `Delete category "${category.name}"?`,
-            showCancel: true,
-            confirmText: t('menu_page.messages.delete_confirm_btn'),
-            onConfirm: async () => {
-                setSwal(null);
-                setCategorySubmitting(true);
-                try {
-                    await deleteMenuCategory(category.id);
-                    await refreshData();
-                    setSwal({
-                        type: 'success',
-                        title: t('menu_page.messages.deleted_title'),
-                        text: `Category "${category.name}" deleted.`,
-                        onConfirm: () => setSwal(null),
-                    });
-                } catch (err) {
-                    setSwal({
-                        type: 'error',
-                        title: t('menu_page.messages.error_title'),
-                        text: err instanceof Error ? err.message : 'Failed to delete category',
-                        onConfirm: () => setSwal(null),
-                    });
-                } finally {
-                    setCategorySubmitting(false);
-                }
-            },
-            onCancel: () => setSwal(null),
-        });
+        setCategoryToDelete(category);
     };
 
     const handleSaveCategory = async () => {
         const name = categoryName.trim();
         if (!name) {
-            setSwal({ type: 'warning', title: t('category.manage_category'), text: t('categories.messages.name_required'), onConfirm: () => setSwal(null) });
+            toast.error(t('categories.messages.name_required'));
             return;
         }
         if (branchId === 'all') {
-            setSwal({ type: 'warning', title: t('category.manage_category'), text: t('categories.messages.select_branch'), onConfirm: () => setSwal(null) });
+            toast.error(t('categories.messages.select_branch'));
             return;
         }
         setCategorySubmitting(true);
         try {
             if (editingCategory) {
                 await updateMenuCategory(editingCategory.id, { name, description: categoryDesc.trim() || null });
-                setSwal({
-                    type: 'success',
-                    title: 'Category updated successfully',
-                    text: '',
-                    onConfirm: () => {
-                        setSwal(null);
-                        closeCategoryModal();
-                        refreshData();
-                    },
-                });
+                toast.success('Category updated successfully');
+                closeCategoryModal();
+                refreshData();
             } else {
                 await createMenuCategory(branchId, { name, description: categoryDesc.trim() || null });
-                setSwal({
-                    type: 'success',
-                    title: t('category.category_created_successfully'),
-                    text: '',
-                    onConfirm: () => {
-                        setSwal(null);
-                        closeCategoryModal();
-                        refreshData();
-                    },
-                });
+                toast.success(t('category.category_created_successfully'));
+                closeCategoryModal();
+                refreshData();
             }
         } catch (e) {
-            setSwal({
-                type: 'error',
-                title: editingCategory ? 'Failed to update category' : t('category.failed_to_create_category'),
-                text: e instanceof Error ? e.message : editingCategory ? 'Failed to update category' : 'Failed to create category',
-                onConfirm: () => setSwal(null),
-            });
+            toast.error(e instanceof Error ? e.message : (editingCategory ? 'Failed to update category' : 'Failed to create category'));
         } finally {
             setCategorySubmitting(false);
         }
     };
 
+    const canSubmitCategory = useMemo(() => {
+        const valid = !!categoryName.trim() && branchId !== 'all';
+        if (!valid) return false;
+        const baselineMatch =
+            categoryName === categoryBaseline.name &&
+            categoryDesc === categoryBaseline.desc;
+        return !baselineMatch;
+    }, [categoryName, categoryDesc, categoryBaseline, branchId]);
+
     // ==================== Ingredients modal ====================
     const openIngredientsModal = async (item: MenuRecord) => {
         setIngredientsForMenu(item);
         setMenuIngredients([]);
+        setMenuIngredientsBaseline([]);
         setAddIngredientId('');
         setAddQty('');
         setEditingIngredientId(null);
+        setPendingIngredientEdits({});
         setIngredientsLoading(true);
         try {
             const [ingredients, list] = await Promise.all([
@@ -361,9 +388,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 getIngredients(item.branchId, undefined),
             ]);
             setMenuIngredients(ingredients);
+            setMenuIngredientsBaseline(ingredients);
             setAllIngredients(list.map((i) => ({ id: i.id, name: i.name, unit: i.unit || 'pcs' })));
         } catch (e) {
-            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to load ingredients', onConfirm: () => setSwal(null) });
+            toast.error(e instanceof Error ? e.message : 'Failed to load ingredients');
         } finally {
             setIngredientsLoading(false);
         }
@@ -373,86 +401,139 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         if (!ingredientsSubmitting) {
             setIngredientsForMenu(null);
             setMenuIngredients([]);
+            setMenuIngredientsBaseline([]);
             setAddIngredientId('');
             setAddQty('');
             setEditingIngredientId(null);
+            setPendingIngredientEdits({});
         }
     };
 
-    const handleAddIngredient = async () => {
+    const handleAddIngredient = () => {
         if (!ingredientsForMenu || !addIngredientId.trim()) return;
         const qty = Number(addQty);
         if (!Number.isFinite(qty) || qty <= 0) {
-            setSwal({ type: 'warning', title: t('menu_page.ingredients.invalid_qty'), text: t('menu_page.ingredients.invalid_qty_msg'), onConfirm: () => setSwal(null) });
+            toast.error(t('menu_page.ingredients.invalid_qty_msg'));
             return;
         }
         if (menuIngredients.some((mi) => mi.ingredientId === addIngredientId)) {
-            setSwal({ type: 'warning', title: t('menu_page.ingredients.already_added'), text: t('menu_page.ingredients.already_added_msg'), onConfirm: () => setSwal(null) });
+            toast.error(t('menu_page.ingredients.already_added_msg'));
             return;
         }
         const selectedIng = allIngredients.find((i) => i.id === addIngredientId);
         const unit = selectedIng?.unit || 'pcs';
-        setIngredientsSubmitting(true);
-        try {
-            await createMenuIngredient({
+        // Add locally; persisted on final Update
+        setMenuIngredients((prev) => [
+            ...prev,
+            {
+                id: `new:${addIngredientId}`,
                 menuId: ingredientsForMenu.id,
                 ingredientId: addIngredientId,
+                ingredientName: selectedIng?.name || '',
                 qtyPerServe: qty,
                 unit,
-            });
-            const refreshed = await getMenuIngredients(ingredientsForMenu.id);
-            setMenuIngredients(refreshed);
-            setAddIngredientId('');
-            setAddQty('');
-        } catch (e) {
-            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to add', onConfirm: () => setSwal(null) });
-        } finally {
-            setIngredientsSubmitting(false);
-        }
+            } as unknown as MenuIngredientRecord,
+        ]);
+        setAddIngredientId('');
+        setAddQty('');
     };
 
-    const handleUpdateIngredient = async (id: string) => {
+    const handleStartEditIngredient = (rec: MenuIngredientRecord) => {
+        setEditingIngredientId(rec.id);
+        const current = pendingIngredientEdits[rec.id] ?? { qtyPerServe: rec.qtyPerServe, unit: rec.unit || 'pcs' };
+        setEditingQty(String(current.qtyPerServe));
+        setEditingUnit(current.unit);
+    };
+
+    const handleCommitIngredientDraftEdit = (id: string) => {
         const qty = Number(editingQty);
-        if (!Number.isFinite(qty) || qty <= 0) return;
+        if (!Number.isFinite(qty) || qty <= 0) {
+            toast.error(t('menu_page.ingredients.invalid_qty_msg'));
+            return;
+        }
+        setPendingIngredientEdits((prev) => ({ ...prev, [id]: { qtyPerServe: qty, unit: editingUnit || 'pcs' } }));
+        setEditingIngredientId(null);
+    };
+
+    const handleRemoveIngredient = (rec: MenuIngredientRecord) => {
+        // Remove locally; persisted on final Update
+        setMenuIngredients((prev) => prev.filter((x) => x.id !== rec.id));
+        if (editingIngredientId === rec.id) {
+            setEditingIngredientId(null);
+        }
+        setPendingIngredientEdits((prev) => {
+            const next = { ...prev };
+            delete next[rec.id];
+            return next;
+        });
+    };
+
+    const canSubmitIngredientsUpdate = useMemo(() => {
+        // changed if added/removed or any pending edit differs from baseline
+        if (menuIngredients.length !== menuIngredientsBaseline.length) return true;
+        const baselineById = new Map(menuIngredientsBaseline.map((r) => [String(r.id), r]));
+        for (const rec of menuIngredients) {
+            const base = baselineById.get(String(rec.id));
+            if (!base) return true;
+            const draft = pendingIngredientEdits[String(rec.id)];
+            if (draft) {
+                if (Number(draft.qtyPerServe) !== Number(base.qtyPerServe) || String(draft.unit || '') !== String(base.unit || '')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }, [menuIngredients, menuIngredientsBaseline, pendingIngredientEdits]);
+
+    const handleSubmitIngredientsUpdate = async () => {
+        if (!ingredientsForMenu) return;
         setIngredientsSubmitting(true);
         try {
-            await updateMenuIngredient(id, { qtyPerServe: qty, unit: editingUnit });
-            if (ingredientsForMenu) {
-                const refreshed = await getMenuIngredients(ingredientsForMenu.id);
-                setMenuIngredients(refreshed);
+            const baselineById = new Map(menuIngredientsBaseline.map((r) => [String(r.id), r]));
+            const currentById = new Map(menuIngredients.map((r) => [String(r.id), r]));
+
+            // Deletes: present in baseline, missing in current, and not "new:*"
+            const deletes = menuIngredientsBaseline.filter((b) => !currentById.has(String(b.id)) && !String(b.id).startsWith('new:'));
+
+            // Adds: id starts with new:
+            const adds = menuIngredients.filter((c) => String(c.id).startsWith('new:'));
+
+            // Updates: pending edits for existing ids
+            const updates = Object.entries(pendingIngredientEdits)
+                .filter(([id]) => baselineById.has(String(id)) && !String(id).startsWith('new:'))
+                .filter(([id, draft]) => {
+                    const base = baselineById.get(String(id))!;
+                    return Number(draft.qtyPerServe) !== Number(base.qtyPerServe) || String(draft.unit || '') !== String(base.unit || '');
+                });
+
+            for (const d of deletes) {
+                await deleteMenuIngredient(String(d.id));
             }
+            for (const [id, draft] of updates) {
+                await updateMenuIngredient(String(id), { qtyPerServe: draft.qtyPerServe, unit: draft.unit });
+            }
+            for (const a of adds) {
+                await createMenuIngredient({
+                    menuId: ingredientsForMenu.id,
+                    ingredientId: a.ingredientId,
+                    qtyPerServe: pendingIngredientEdits[String(a.id)]?.qtyPerServe ?? a.qtyPerServe,
+                    unit: pendingIngredientEdits[String(a.id)]?.unit ?? a.unit,
+                });
+            }
+
+            // Refresh from server and reset baselines
+            const refreshed = await getMenuIngredients(ingredientsForMenu.id);
+            setMenuIngredients(refreshed);
+            setMenuIngredientsBaseline(refreshed);
+            setPendingIngredientEdits({});
             setEditingIngredientId(null);
+            closeIngredientsModal();
+            toast.success(t('menu_page.messages.updated_title'));
         } catch (e) {
-            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to update', onConfirm: () => setSwal(null) });
+            toast.error(e instanceof Error ? e.message : t('menu_page.messages.operation_failed'));
         } finally {
             setIngredientsSubmitting(false);
         }
-    };
-
-    const handleRemoveIngredient = async (rec: MenuIngredientRecord) => {
-        setSwal({
-            type: 'question',
-            title: t('menu_page.ingredients.remove_title'),
-            text: t('menu_page.ingredients.remove_confirm', { name: rec.ingredientName }),
-            showCancel: true,
-            confirmText: t('menu_page.messages.delete_confirm_btn'),
-            onConfirm: async () => {
-                setSwal(null);
-                setIngredientsSubmitting(true);
-                try {
-                    await deleteMenuIngredient(rec.id);
-                    if (ingredientsForMenu) {
-                        const refreshed = await getMenuIngredients(ingredientsForMenu.id);
-                        setMenuIngredients(refreshed);
-                    }
-                } catch (e) {
-                    setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : 'Failed to remove', onConfirm: () => setSwal(null) });
-                } finally {
-                    setIngredientsSubmitting(false);
-                }
-            },
-            onCancel: () => setSwal(null),
-        });
     };
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -468,11 +549,11 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     // ==================== Submit create/edit ====================
     const handleSubmit = async () => {
         if (!formName.trim()) {
-            setSwal({ type: 'warning', title: t('menu_page.messages.name_required'), text: t('menu_page.messages.name_required_msg'), onConfirm: () => setSwal(null) });
+            toast.error(t('menu_page.messages.name_required_msg'));
             return;
         }
         if (!formPrice || Number(formPrice) <= 0) {
-            setSwal({ type: 'warning', title: t('menu_page.messages.price_required'), text: t('menu_page.messages.price_required_msg'), onConfirm: () => setSwal(null) });
+            toast.error(t('menu_page.messages.price_required_msg'));
             return;
         }
 
@@ -489,7 +570,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     imageFile: formImage,
                 };
                 await updateMenu(editingItem.id, payload);
-                setSwal({ type: 'success', title: t('menu_page.messages.updated_title'), text: t('menu_page.messages.updated_msg', { name: formName.trim() }), onConfirm: () => setSwal(null) });
+                toast.success(t('menu_page.messages.updated_msg', { name: formName.trim() }));
             } else {
                 const payload: CreateMenuPayload = {
                     branchId,
@@ -501,12 +582,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     imageFile: formImage,
                 };
                 await createMenu(payload);
-                setSwal({ type: 'success', title: t('menu_page.messages.created_title'), text: t('menu_page.messages.created_msg', { name: formName.trim() }), onConfirm: () => setSwal(null) });
+                toast.success(t('menu_page.messages.created_msg', { name: formName.trim() }));
             }
-            closeModal();
+            closeItemPanel();
             await refreshData();
         } catch (e) {
-            setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : t('menu_page.messages.operation_failed'), onConfirm: () => setSwal(null) });
+            toast.error(e instanceof Error ? e.message : t('menu_page.messages.operation_failed'));
         } finally {
             setSubmitting(false);
         }
@@ -514,24 +595,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     // ==================== Delete ====================
     const confirmDelete = (item: MenuRecord) => {
-        setSwal({
-            type: 'question',
-            title: t('menu_page.messages.delete_title'),
-            text: t('menu_page.messages.delete_confirm', { name: item.name }),
-            showCancel: true,
-            confirmText: t('menu_page.messages.delete_confirm_btn'),
-            onConfirm: async () => {
-                setSwal(null);
-                try {
-                    await deleteMenu(item.id);
-                    await refreshData();
-                    setSwal({ type: 'success', title: t('menu_page.messages.deleted_title'), text: t('menu_page.messages.deleted_msg', { name: item.name }), onConfirm: () => setSwal(null) });
-                } catch (e) {
-                    setSwal({ type: 'error', title: t('menu_page.messages.error_title'), text: e instanceof Error ? e.message : t('menu_page.messages.delete_failed'), onConfirm: () => setSwal(null) });
-                }
-            },
-            onCancel: () => setSwal(null),
-        });
+        setItemToDelete(item);
     };
 
     const handleImageHoverEnter = useCallback((e: React.MouseEvent<HTMLDivElement>, item: MenuRecord) => {
@@ -642,53 +706,51 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     // ==================== Modal form content ====================
     const modalContent = (
         <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-5">
-                <div>
-                    <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.item_name')}</label>
-                    <input
-                        type="text"
-                        value={formName}
-                        onChange={(e) => setFormName(e.target.value)}
-                        placeholder={t('menu_page.modal.item_name_placeholder')}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.price')}</label>
-                    <input
-                        type="number"
-                        value={formPrice}
-                        onChange={(e) => setFormPrice(e.target.value)}
-                        placeholder={t('menu_page.modal.price_placeholder')}
-                        min="0"
-                        step="0.01"
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
-                    />
-                </div>
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.item_name')}</label>
+                <input
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    placeholder={t('menu_page.modal.item_name_placeholder')}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                />
             </div>
 
-            <div className="grid grid-cols-2 gap-5">
-                <div>
-                    <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.category')}</label>
-                    <Select2
-                        options={[{ value: '', label: t('menu_page.modal.uncategorized') }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
-                        value={formCategory || ''}
-                        onChange={(v) => setFormCategory(v ? String(v) : '')}
-                        placeholder={t('menu_page.modal.select_category')}
-                    />
-                </div>
-                <div>
-                    <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.availability')}</label>
-                    <div className="flex gap-4 mt-1">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="avail" checked={formAvailable} onChange={() => setFormAvailable(true)} className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer" />
-                            <span className="text-sm font-bold text-brand-text">{t('menu_page.status.available')}</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="avail" checked={!formAvailable} onChange={() => setFormAvailable(false)} className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer" />
-                            <span className="text-sm font-bold text-brand-text">{t('menu_page.status.unavailable')}</span>
-                        </label>
-                    </div>
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.price')}</label>
+                <input
+                    type="number"
+                    value={formPrice}
+                    onChange={(e) => setFormPrice(e.target.value)}
+                    placeholder={t('menu_page.modal.price_placeholder')}
+                    min="0"
+                    step="0.01"
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
+                />
+            </div>
+
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.category')}</label>
+                <Select2
+                    options={[{ value: '', label: t('menu_page.modal.uncategorized') }, ...categories.map((c) => ({ value: c.id, label: c.name }))]}
+                    value={formCategory || ''}
+                    onChange={(v) => setFormCategory(v ? String(v) : '')}
+                    placeholder={t('menu_page.modal.select_category')}
+                />
+            </div>
+
+            <div>
+                <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.availability')}</label>
+                <div className="flex flex-wrap gap-4 mt-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="avail" checked={formAvailable} onChange={() => setFormAvailable(true)} className="w-4 h-4 text-green-500 focus:ring-green-500/20 cursor-pointer" />
+                        <span className="text-sm font-bold text-brand-text">{t('menu_page.status.available')}</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="avail" checked={!formAvailable} onChange={() => setFormAvailable(false)} className="w-4 h-4 text-red-500 focus:ring-red-500/20 cursor-pointer" />
+                        <span className="text-sm font-bold text-brand-text">{t('menu_page.status.unavailable')}</span>
+                    </label>
                 </div>
             </div>
 
@@ -1133,16 +1195,16 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 </div>
             )}
 
-            {/* Create / Edit Modal */}
-            <Modal
-                isOpen={isCreateOpen || !!editingItem}
-                onClose={closeModal}
+            {/* Add / Edit Side Panel */}
+            <SidePanel
+                isOpen={isItemPanelOpen}
+                onClose={closeItemPanel}
                 title={editingItem ? t('menu_page.modal.edit_title') : t('menu_page.modal.add_title')}
-                maxWidth="lg"
+                width="lg"
                 footer={
                     <div className="flex items-center justify-end gap-3">
                         <button
-                            onClick={closeModal}
+                            onClick={closeItemPanel}
                             disabled={submitting}
                             className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
                         >
@@ -1150,7 +1212,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         </button>
                         <button
                             onClick={handleSubmit}
-                            disabled={submitting}
+                            disabled={submitting || !canSubmitItem}
                             className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                         >
                             {submitting && <Loader2 size={16} className="animate-spin" />}
@@ -1160,14 +1222,67 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 }
             >
                 {modalContent}
+            </SidePanel>
+
+            {/* Delete confirmation modal (confirmation-only) */}
+            <Modal
+                isOpen={!!itemToDelete}
+                onClose={() => {
+                    if (!submitting) setItemToDelete(null);
+                }}
+                title={t('menu_page.messages.delete_title')}
+                maxWidth="md"
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setItemToDelete(null)}
+                            disabled={submitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('menu_page.modal.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                if (!itemToDelete) return;
+                                setSubmitting(true);
+                                try {
+                                    await deleteMenu(itemToDelete.id);
+                                    await refreshData();
+                                    setItemToDelete(null);
+                                    toast.success(t('menu_page.messages.deleted_msg', { name: itemToDelete.name }));
+                                } catch (e) {
+                                    toast.error(e instanceof Error ? e.message : t('menu_page.messages.delete_failed'));
+                                } finally {
+                                    setSubmitting(false);
+                                }
+                            }}
+                            disabled={submitting}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {submitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('menu_page.messages.delete_confirm_btn')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-3">
+                    <p className="text-sm text-brand-text font-bold">
+                        {itemToDelete?.name}
+                    </p>
+                    <p className="text-sm text-brand-muted">
+                        {itemToDelete ? t('menu_page.messages.delete_confirm', { name: itemToDelete.name }) : ''}
+                    </p>
+                </div>
             </Modal>
 
-            {/* Add/Edit Category Modal */}
-            <Modal
-                isOpen={isCategoryModalOpen}
+            {/* Add/Edit Category Side Panel */}
+            <SidePanel
+                isOpen={isCategoryPanelOpen}
                 onClose={closeCategoryModal}
                 title={editingCategory ? 'Edit Category' : t('categories.add_new_category')}
-                maxWidth="md"
+                width="md"
                 footer={
                     <div className="flex items-center justify-end gap-3">
                         <button
@@ -1181,7 +1296,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         <button
                             type="button"
                             onClick={handleSaveCategory}
-                            disabled={categorySubmitting}
+                            disabled={categorySubmitting || !canSubmitCategory}
                             className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
                         >
                             {categorySubmitting && <Loader2 size={16} className="animate-spin" />}
@@ -1212,22 +1327,85 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         />
                     </div>
                 </div>
+            </SidePanel>
+
+            {/* Delete category confirmation modal (confirmation-only) */}
+            <Modal
+                isOpen={!!categoryToDelete}
+                onClose={() => {
+                    if (!categorySubmitting) setCategoryToDelete(null);
+                }}
+                title={t('menu_page.messages.delete_title')}
+                maxWidth="md"
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setCategoryToDelete(null)}
+                            disabled={categorySubmitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('menu_page.modal.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                if (!categoryToDelete) return;
+                                setCategorySubmitting(true);
+                                try {
+                                    await deleteMenuCategory(categoryToDelete.id);
+                                    await refreshData();
+                                    setCategoryToDelete(null);
+                                    toast.success(`Category "${categoryToDelete.name}" deleted.`);
+                                } catch (err) {
+                                    toast.error(err instanceof Error ? err.message : 'Failed to delete category');
+                                } finally {
+                                    setCategorySubmitting(false);
+                                }
+                            }}
+                            disabled={categorySubmitting}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {categorySubmitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('menu_page.messages.delete_confirm_btn')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-3">
+                    <p className="text-sm text-brand-text font-bold">
+                        {categoryToDelete?.name}
+                    </p>
+                    <p className="text-sm text-brand-muted">
+                        {categoryToDelete ? `Delete category "${categoryToDelete.name}"?` : ''}
+                    </p>
+                </div>
             </Modal>
 
-            {/* Ingredients Modal */}
-            <Modal
+            {/* Ingredients Side Panel */}
+            <SidePanel
                 isOpen={!!ingredientsForMenu}
                 onClose={closeIngredientsModal}
                 title={ingredientsForMenu ? t('menu_page.ingredients.modal_title', { name: ingredientsForMenu.name }) : t('menu_page.ingredients.title')}
-                maxWidth="lg"
+                width="lg"
                 footer={
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-end gap-3">
                         <button
+                            type="button"
                             onClick={closeIngredientsModal}
                             disabled={ingredientsSubmitting}
                             className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
                         >
-                            {t('common.close')}
+                            {t('menu_page.modal.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleSubmitIngredientsUpdate}
+                            disabled={ingredientsSubmitting || !canSubmitIngredientsUpdate}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {ingredientsSubmitting && <Loader2 size={16} className="animate-spin" />}
+                            Update
                         </button>
                     </div>
                 }
@@ -1239,103 +1417,113 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         </div>
                     ) : (
                         <>
-                            <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.ingredient')}</th>
-                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.qty_per_serve')}</th>
-                                            <th className="text-left px-4 py-3 font-bold text-brand-text">{t('menu_page.ingredients.unit')}</th>
-                                            <th className="text-right px-4 py-3 font-bold text-brand-text w-24">{t('menu_page.table.actions')}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {menuIngredients.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={4} className="px-4 py-8 text-center text-brand-muted">
-                                                    {t('menu_page.ingredients.no_ingredients')}
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            menuIngredients.map((rec) => (
-                                                <tr key={rec.id} className="border-t border-gray-100 hover:bg-gray-50/50">
-                                                    <td className="px-4 py-3 font-medium text-brand-text">{rec.ingredientName}</td>
-                                                    <td className="px-4 py-3">
-                                                        {editingIngredientId === rec.id ? (
-                                                            <input
-                                                                type="number"
-                                                                value={editingQty}
-                                                                onChange={(e) => setEditingQty(e.target.value)}
-                                                                min={getQtyInputStep(rec.unit) || 0.01}
-                                                                step={getQtyInputStep(rec.unit) || 0.01}
-                                                                className="w-24 px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
-                                                            />
-                                                        ) : (
-                                                            <span className="text-brand-text">{formatQty(rec.qtyPerServe, rec.unit)}</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        {editingIngredientId === rec.id ? (
-                                                            <select
-                                                                value={editingUnit}
-                                                                onChange={(e) => setEditingUnit(e.target.value)}
-                                                                className="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary"
-                                                            >
-                                                                {UOM_OPTIONS.map((o) => (
-                                                                    <option key={o} value={o}>{getUnitLabel(o)}</option>
-                                                                ))}
-                                                            </select>
-                                                        ) : (
-                                                            <span className="text-brand-muted">{getUnitLabel(rec.unit)}</span>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-4 py-3 text-right">
-                                                        {editingIngredientId === rec.id ? (
-                                                            <div className="flex justify-end gap-1">
+                            <div className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+                                {menuIngredients.length === 0 ? (
+                                    <div className="px-4 py-10 text-center text-sm text-brand-muted">
+                                        {t('menu_page.ingredients.no_ingredients')}
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-gray-100">
+                                        {menuIngredients.map((rec) => {
+                                            const isEditing = editingIngredientId === rec.id;
+                                            const draft = pendingIngredientEdits[rec.id];
+                                            const displayQty = draft ? draft.qtyPerServe : rec.qtyPerServe;
+                                            const displayUnit = draft ? draft.unit : (rec.unit || 'pcs');
+                                            return (
+                                                <div
+                                                    key={rec.id}
+                                                    className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-gray-50/60"
+                                                >
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm font-bold text-brand-text truncate">
+                                                            {rec.ingredientName}
+                                                        </div>
+                                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-brand-muted">
+                                                            <span className="font-semibold text-brand-text">
+                                                                {t('menu_page.ingredients.qty_per_serve')}:
+                                                            </span>
+                                                            {isEditing ? (
+                                                                <input
+                                                                    type="number"
+                                                                    value={editingQty}
+                                                                    onChange={(e) => setEditingQty(e.target.value)}
+                                                                    min={getQtyInputStep(rec.unit) || 0.01}
+                                                                    step={getQtyInputStep(rec.unit) || 0.01}
+                                                                    className="w-28 px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary bg-white"
+                                                                />
+                                                            ) : (
+                                                                <span className="tabular-nums text-brand-text">
+                                                                    {formatQty(displayQty, displayUnit)}
+                                                                </span>
+                                                            )}
+                                                            <span className="font-semibold text-brand-text">
+                                                                {t('menu_page.ingredients.unit')}:
+                                                            </span>
+                                                            {isEditing ? (
+                                                                <div className="w-28">
+                                                                    <Select2
+                                                                        options={UOM_OPTIONS.map((o) => ({ value: o, label: getUnitLabel(o) }))}
+                                                                        value={editingUnit}
+                                                                        onChange={(v) => setEditingUnit(v ? String(v) : '')}
+                                                                        placeholder={t('menu_page.ingredients.unit')}
+                                                                        clearable={false}
+                                                                        variant="compact"
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <span>{getUnitLabel(displayUnit)}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="shrink-0 flex items-center gap-1.5">
+                                                        {isEditing ? (
+                                                            <>
                                                                 <button
-                                                                    onClick={() => handleUpdateIngredient(rec.id)}
+                                                                    onClick={() => handleCommitIngredientDraftEdit(rec.id)}
                                                                     disabled={ingredientsSubmitting}
-                                                                    className="px-2 py-1 text-xs font-bold text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50"
+                                                                    className="px-2 py-1.5 text-xs font-bold text-green-600 hover:bg-green-50 rounded-lg disabled:opacity-50"
                                                                 >
-                                                                    {ingredientsSubmitting ? <Loader2 size={14} className="animate-spin inline" /> : t('menu_page.ingredients.save')}
+                                                                    {t('menu_page.ingredients.save')}
                                                                 </button>
                                                                 <button
                                                                     onClick={() => setEditingIngredientId(null)}
                                                                     disabled={ingredientsSubmitting}
-                                                                    className="px-2 py-1 text-xs font-bold text-brand-muted hover:bg-gray-100 rounded-lg"
+                                                                    className="px-2 py-1.5 text-xs font-bold text-brand-muted hover:bg-gray-100 rounded-lg"
                                                                 >
                                                                     {t('menu_page.modal.cancel')}
                                                                 </button>
-                                                            </div>
+                                                            </>
                                                         ) : (
-                                                            <div className="flex justify-end gap-1">
+                                                            <>
                                                                 <button
-                                                                    onClick={() => { setEditingIngredientId(rec.id); setEditingQty(String(rec.qtyPerServe)); setEditingUnit(rec.unit || 'pcs'); }}
+                                                                    onClick={() => handleStartEditIngredient(rec)}
                                                                     disabled={ingredientsSubmitting}
-                                                                    className="p-1.5 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-lg transition-colors"
+                                                                    className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 rounded-lg transition-colors"
                                                                     title={t('menu_page.modal.edit_title')}
                                                                 >
-                                                                    <Edit2 size={14} />
+                                                                    <Edit2 size={16} />
                                                                 </button>
                                                                 <button
                                                                     onClick={() => handleRemoveIngredient(rec)}
                                                                     disabled={ingredientsSubmitting}
-                                                                    className="p-1.5 text-brand-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                                    className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                                                     title={t('menu_page.ingredients.remove')}
                                                                 >
-                                                                    <Trash2 size={14} />
+                                                                    <Trash2 size={16} />
                                                                 </button>
-                                                            </div>
+                                                            </>
                                                         )}
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                            <div className="sticky bottom-0 -mx-6 px-6 pt-4 pb-6 bg-white border-t border-gray-100">
+                                <div className="flex flex-wrap items-end gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
                                 <div className="flex-1 min-w-[140px]">
                                     <label className="block text-xs font-bold text-brand-text mb-1">{t('menu_page.ingredients.ingredient')}</label>
                                     <Select2
@@ -1372,58 +1560,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     {t('menu_page.ingredients.add')}
                                 </button>
                             </div>
+                            </div>
                         </>
                     )}
                 </div>
-            </Modal>
+            </SidePanel>
 
-            {/* SweetAlert-style popup */}
-            <AnimatePresence>
-                {swal && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center z-[100] p-4"
-                    >
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
-                        >
-                            <div className="flex justify-center mb-4">
-                                {swal.type === 'question' && <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center"><AlertCircle size={40} className="text-blue-500" /></div>}
-                                {swal.type === 'success' && <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center"><CheckCircle2 size={40} className="text-green-500" /></div>}
-                                {swal.type === 'error' && <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center"><X size={40} className="text-red-500" /></div>}
-                                {swal.type === 'warning' && <div className="w-16 h-16 rounded-full bg-yellow-100 flex items-center justify-center"><AlertTriangle size={40} className="text-yellow-500" /></div>}
-                            </div>
-                            <h3 className="text-2xl font-bold text-brand-text text-center mb-2">{swal.title}</h3>
-                            <p className="text-brand-muted text-center mb-6">{swal.text}</p>
-                            <div className="flex justify-center gap-3">
-                                {swal.showCancel && (
-                                    <button onClick={() => { swal.onCancel?.(); setSwal(null); }} className="px-6 py-2.5 bg-gray-100 text-brand-muted rounded-xl font-bold hover:bg-gray-200 transition-all">
-                                        {t('menu_page.modal.cancel')}
-                                    </button>
-                                )}
-                                <button
-                                    onClick={async () => { if (swal.onConfirm) await swal.onConfirm(); }}
-                                    className={cn(
-                                        'px-6 py-2.5 text-white rounded-xl font-bold transition-all',
-                                        swal.type === 'error' ? 'bg-red-500 hover:bg-red-600'
-                                            : swal.type === 'success' ? 'bg-green-500 hover:bg-green-600'
-                                                : swal.type === 'question' ? 'bg-red-500 hover:bg-red-600'
-                                                    : 'bg-brand-orange hover:opacity-90'
-                                    )}
-                                >
-                                    {swal.confirmText || t('common.ok')}
-                                </button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
         </SkeletonTransition>
     );
 };
