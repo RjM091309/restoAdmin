@@ -16,7 +16,15 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
   body {
+    margin: 0;
     @apply bg-brand-bg text-brand-text font-sans;
   }
 }

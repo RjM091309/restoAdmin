@@ -475,6 +475,15 @@ export default function App() {
 
   const isLoginPage = location.pathname === '/' || location.pathname === '/login';
 
+  useEffect(() => {
+    const appScroller = document.querySelector('[data-app-scroll-container]') as HTMLElement | null;
+    // Use the existing app scroll container only to avoid scroll flicker.
+    if (!appScroller) return;
+    requestAnimationFrame(() => {
+      appScroller.scrollTop = 0;
+    });
+  }, [location.pathname, location.search]);
+
   if (isLoginPage) {
     if (isLoggedIn && location.pathname === '/') {
       return <Navigate to="/dashboard" replace />;
@@ -514,7 +523,7 @@ export default function App() {
             onBranchChange={setSelectedBranch}
           />
 
-          <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar" data-app-scroll-container>
             <AnimatePresence mode="wait">
               <Routes location={location} key={location.pathname}>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -56,6 +56,24 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
     const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
+    const categoryListRef = useRef<HTMLDivElement | null>(null);
+    const menuItemsScrollRef = useRef<HTMLDivElement | null>(null);
+
+    const scrollMenuItemsToTop = useCallback(() => {
+        requestAnimationFrame(() => {
+            menuItemsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    }, []);
+
+    const scrollPageToTop = useCallback(() => {
+        const appScroller = document.querySelector('[data-app-scroll-container]') as HTMLElement | null;
+        if (appScroller) {
+            appScroller.scrollTop = 0;
+            return;
+        }
+        // Fallback only if app scroller is not found.
+        window.scrollTo(0, 0);
+    }, []);
 
     const formatPriceNoDecimals = useCallback((value: unknown) => {
         const n = typeof value === 'number' ? value : Number(value);
@@ -240,6 +258,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     };
 
     const openEdit = async (item: MenuRecord) => {
+        scrollMenuItemsToTop();
         setFormName(item.name);
         setFormDesc('');
         setFormCategory(item.categoryId || '');
@@ -298,6 +317,13 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             return A.rest.localeCompare(B.rest, undefined, { sensitivity: 'base', numeric: true });
         });
     }, [categories]);
+
+    const handleSelectCategory = useCallback((e: React.MouseEvent<HTMLButtonElement>, categoryId: string) => {
+        e.currentTarget.blur();
+        setSelectedCategory(categoryId);
+        // Use existing app main scroller only (prevents multi-container flicker).
+        scrollPageToTop();
+    }, [scrollPageToTop]);
 
     const canSubmitItem = useMemo(() => {
         const baselinePrice = Number(itemBaseline.price || 0);
@@ -398,6 +424,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     // ==================== Ingredients modal ====================
     const openIngredientsModal = async (item: MenuRecord) => {
+        scrollMenuItemsToTop();
         setIngredientsForMenu(item);
         setMenuIngredients([]);
         setMenuIngredientsBaseline([]);
@@ -621,6 +648,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     // ==================== Delete ====================
     const confirmDelete = (item: MenuRecord) => {
+        scrollMenuItemsToTop();
         setItemToDelete(item);
     };
 
@@ -952,7 +980,11 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     </div>
                                 </div>
 
-                                <div className="p-2 flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                <div
+                                    ref={categoryListRef}
+                                    data-category-scroller
+                                    className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar"
+                                >
                                     {sortedCategories.map((cat) => {
                                         const active = cat.id === selectedCategory;
                                         const count = menus.filter((m) => m.categoryId === cat.id).length;
@@ -966,7 +998,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                             >
                                                 <button
                                                     type="button"
-                                                    onClick={() => setSelectedCategory(cat.id)}
+                                                    onClick={(e) => handleSelectCategory(e, cat.id)}
                                                     className={cn(
                                                         'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
                                                         active ? 'text-brand-primary' : 'text-brand-text',
@@ -1085,7 +1117,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     </div>
 
                                     <div className="flex-1 min-h-0 overflow-hidden">
-                                        <div className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
+                                        <div ref={menuItemsScrollRef} className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
                                             <AnimatePresence mode="wait">
                                                 <motion.div
                                                     key={`table-${selectedCategory ?? 'none'}-${availFilter}`}
