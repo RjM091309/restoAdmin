@@ -152,6 +152,7 @@ export type UpdateExpensePayload = {
   expAmount: number;
   expQty?: number | null;
   expSource: string | null;
+  encodedDt?: string | null;
 };
 
 export async function updateExpense(id: string, payload: UpdateExpensePayload): Promise<void> {
@@ -165,6 +166,7 @@ export async function updateExpense(id: string, payload: UpdateExpensePayload): 
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
+      ...(payload.encodedDt !== undefined ? { ENCODED_DT: payload.encodedDt } : {}),
     }),
   });
   const json = (await response.json()) as ApiResponse<null>;

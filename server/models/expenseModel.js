@@ -287,9 +287,13 @@ class ExpenseModel {
 	static async update(id, data) {
 		await ExpenseModel.ensureSchema();
 		const expQty = data.EXP_QTY != null && Number.isFinite(Number(data.EXP_QTY)) ? Number(data.EXP_QTY) : null;
+		const encRaw = data.ENCODED_DT ?? data.encoded_dt ?? data.encodedDt;
+		const shouldUpdateEncoded = encRaw !== undefined;
+		const encodedDt =
+			shouldUpdateEncoded && encRaw != null && String(encRaw).trim() !== '' ? String(encRaw).trim() : shouldUpdateEncoded ? null : undefined;
+
 		try {
-			const [result] = await pool.execute(
-				`
+			let sql = `
 				UPDATE expenses
 				SET
 					MASTER_CAT_ID = ?,
@@ -298,26 +302,43 @@ class ExpenseModel {
 					EXP_QTY = ?,
 					EXP_SOURCE = ?,
 					EDITED_BY = ?,
-					EDITED_DT = CURRENT_TIMESTAMP
+					EDITED_DT = CURRENT_TIMESTAMP`;
+			const params = [
+				Number(data.MASTER_CAT_ID),
+				data.EXP_DESC || null,
+				Number(data.EXP_AMOUNT),
+				expQty,
+				data.EXP_SOURCE || null,
+				String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
+			];
+			if (shouldUpdateEncoded) {
+				sql += ', ENCODED_DT = ?';
+				params.push(encodedDt);
+			}
+			sql += `
 				WHERE IDNo = ? AND ACTIVE = 1
-				`,
-				[
-					Number(data.MASTER_CAT_ID),
-					data.EXP_DESC || null,
-					Number(data.EXP_AMOUNT),
-					expQty,
-					data.EXP_SOURCE || null,
-					String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
-					Number(id),
-				]
-			);
+			`;
+			params.push(Number(id));
+
+			const [result] = await pool.execute(sql, params);
 			return result.affectedRows > 0;
 		} catch (err) {
 			if (err.message && (err.message.includes('EXP_QTY') || err.message.includes('Unknown column'))) {
-				const [result] = await pool.execute(
-					`UPDATE expenses SET MASTER_CAT_ID = ?, EXP_DESC = ?, EXP_AMOUNT = ?, EXP_SOURCE = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP WHERE IDNo = ? AND ACTIVE = 1`,
-					[Number(data.MASTER_CAT_ID), data.EXP_DESC || null, Number(data.EXP_AMOUNT), data.EXP_SOURCE || null, String(data.user_id ?? data.EDITED_BY ?? '').trim() || null, Number(id)]
-				);
+				let sql = `UPDATE expenses SET MASTER_CAT_ID = ?, EXP_DESC = ?, EXP_AMOUNT = ?, EXP_SOURCE = ?, EDITED_BY = ?, EDITED_DT = CURRENT_TIMESTAMP`;
+				const params = [
+					Number(data.MASTER_CAT_ID),
+					data.EXP_DESC || null,
+					Number(data.EXP_AMOUNT),
+					data.EXP_SOURCE || null,
+					String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
+				];
+				if (shouldUpdateEncoded) {
+					sql += ', ENCODED_DT = ?';
+					params.push(encodedDt);
+				}
+				sql += ` WHERE IDNo = ? AND ACTIVE = 1`;
+				params.push(Number(id));
+				const [result] = await pool.execute(sql, params);
 				return result.affectedRows > 0;
 			}
 			throw err;

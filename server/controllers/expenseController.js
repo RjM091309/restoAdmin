@@ -34,6 +34,7 @@ class ExpenseController {
 			EXP_AMOUNT: req.body.EXP_AMOUNT ?? req.body.expAmount ?? req.body.amount ?? null,
 			EXP_QTY: req.body.EXP_QTY ?? req.body.expQty ?? req.body.exp_qty ?? null,
 			EXP_SOURCE: req.body.EXP_SOURCE || req.body.expSource || req.body.source || null,
+			ENCODED_DT: req.body.ENCODED_DT ?? req.body.encoded_dt ?? req.body.encodedDt ?? undefined,
 		};
 	}
 
@@ -160,6 +161,14 @@ class ExpenseController {
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
+			const encodedDtRaw = payload.ENCODED_DT;
+			const encodedDt =
+				encodedDtRaw !== undefined && encodedDtRaw !== null && String(encodedDtRaw).trim() !== ''
+					? String(encodedDtRaw).trim()
+					: encodedDtRaw !== undefined
+						? null
+						: undefined;
+
 			const ok = await ExpenseModel.update(id, {
 				MASTER_CAT_ID: masterCategory.IDNo,
 				EXP_DESC: payload.EXP_DESC,
@@ -167,6 +176,7 @@ class ExpenseController {
 				EXP_QTY: payload.EXP_QTY,
 				EXP_SOURCE: payload.EXP_SOURCE,
 				user_id: userId,
+				...(encodedDt !== undefined ? { ENCODED_DT: encodedDt } : {}),
 			});
 
 			if (!ok) return ApiResponse.notFound(res, 'Expense');

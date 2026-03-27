@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { type ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
@@ -107,6 +107,23 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   });
 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
+
+  const tableItemsScrollRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollTableItemsToTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      tableItemsScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }, []);
+
+  const scrollPageToTop = useCallback(() => {
+    const appScroller = document.querySelector('[data-app-scroll-container]') as HTMLElement | null;
+    if (appScroller) {
+      appScroller.scrollTop = 0;
+      return;
+    }
+    window.scrollTo(0, 0);
+  }, []);
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
@@ -607,10 +624,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
   const handleSelectOperation = (opId: string) => {
     setSelectedOperationId(opId);
     setSelectedCategoryId(null);
+    scrollTableItemsToTop();
+    scrollPageToTop();
   };
 
   const handleSelectCategory = (catId: string) => {
     setSelectedCategoryId(catId);
+    scrollTableItemsToTop();
+    scrollPageToTop();
   };
 
   const handleOpenAddOperation = () => {
@@ -720,6 +741,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           expAmount: amount,
           expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
+          encodedDt,
         });
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0) {
           try {
@@ -1532,7 +1554,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           </div>
 
           <div className="flex-1 min-h-0 overflow-hidden">
-            <div className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
+            <div
+              ref={tableItemsScrollRef}
+              className="h-full overflow-auto overflow-x-hidden custom-scrollbar"
+            >
               <AnimatePresence mode="wait">
                 {!selectedCategoryId ? (
                   <motion.div
@@ -1912,8 +1937,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
               type="date"
               value={expenseForm.encodedDate}
               onChange={(e) => setExpenseForm((prev) => ({ ...prev, encodedDate: e.target.value }))}
-              disabled={!!editingExpense}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
             />
           </div>
           {isInventoryCategory && (
