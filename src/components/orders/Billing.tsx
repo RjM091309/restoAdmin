@@ -64,6 +64,8 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
   const { t } = useTranslation();
   const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
 
+  const EPS = 1e-6;
+
   const formatMoneyNoDecimals = useCallback((value: unknown) => {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) return '0';
@@ -195,7 +197,10 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
   const openPaymentModal = (record: BillingRecord) => {
     setActiveRecord(record);
     setPaymentMethod(record.PAYMENT_METHOD || 'CASH');
-    setPaymentAmount('');
+    // Pre-fill with the remaining balance to pay.
+    const remaining =
+      Math.max(0, Number(record.AMOUNT_DUE || 0) - Number(record.AMOUNT_PAID || 0));
+    setPaymentAmount(remaining > 0 ? String(remaining) : '');
     setPaymentRef('');
     setPaymentModalOpen(true);
   };
@@ -247,11 +252,28 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
     setActiveRecord(null);
   };
 
+  const paymentRemaining = useMemo(() => {
+    if (!activeRecord) return 0;
+    return Math.max(
+      0,
+      Number(activeRecord.AMOUNT_DUE || 0) - Number(activeRecord.AMOUNT_PAID || 0),
+    );
+  }, [activeRecord]);
+
   const handleProcessPayment = async () => {
     if (!activeRecord) return;
     const amount = Number(paymentAmount);
+    const remaining = paymentRemaining;
+
     if (!Number.isFinite(amount) || amount <= 0) {
       toast.error(t('billing.failed_to_process_payment'));
+      return;
+    }
+    // Prevent overpayment beyond remaining balance.
+    if (amount - remaining > EPS) {
+      toast.error(
+        t('billing.overpayment_not_allowed', { remaining: formatMoneyNoDecimals(remaining) }),
+      );
       return;
     }
     setSubmittingPayment(true);
@@ -286,8 +308,14 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
   const canSubmitPayment = useMemo(() => {
     if (!activeRecord) return false;
     const amount = Number(paymentAmount);
-    return Number.isFinite(amount) && amount > 0;
-  }, [activeRecord, paymentAmount]);
+    return Number.isFinite(amount) && amount > 0 && amount - paymentRemaining <= EPS;
+  }, [activeRecord, paymentAmount, paymentRemaining]);
+
+  const paymentAmountNumber = Number(paymentAmount);
+  const paymentOver =
+    Number.isFinite(paymentAmountNumber) &&
+    paymentAmountNumber > 0 &&
+    paymentAmountNumber - paymentRemaining > EPS;
 
   const columns: ColumnDef<BillingRecord>[] = useMemo(
     () => [
@@ -583,6 +611,13 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
                 placeholder={t('billing.input_amount_placeholder')}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
               />
+              {paymentOver && (
+                <p className="text-[11px] font-bold text-red-600 mt-1">
+                  {t('billing.overpayment_not_allowed', {
+                    remaining: formatMoneyNoDecimals(paymentRemaining),
+                  })}
+                </p>
+              )}
             </div>
 
             <div className="space-y-3">

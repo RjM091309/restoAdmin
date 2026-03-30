@@ -1269,6 +1269,8 @@
 		"payment_processed_successfully": "Payment processed successfully",
 		"error": "Error",
 		"failed_to_process_payment": "Failed to process payment",
+		"overpayment_not_allowed": "Payment cannot exceed the remaining balance (₱{{remaining}}).",
+		"underpayment_not_allowed": "Payment cannot be less than the remaining balance (₱{{remaining}}).",
 		"unable_to_load_billing_records": "Unable to load billing records. Please refresh.",
 		"unknown": "Unknown",
 		"n_a": "N/A",

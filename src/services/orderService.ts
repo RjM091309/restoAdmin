@@ -66,6 +66,9 @@ export type CreateOrderPayload = {
 export type CreateManualSettledOrderPayload = CreateOrderPayload & {
     payment_method?: string;
     payment_ref?: string | null;
+    // Some backends expect uppercase payment fields.
+    PAYMENT_METHOD?: string;
+    PAYMENT_REF?: string | null;
 };
 
 // ---- API internals ----

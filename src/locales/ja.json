@@ -1214,6 +1214,8 @@
 		"payment_processed_successfully": "支払が正常に処理されました",
 		"error": "エラー",
 		"failed_to_process_payment": "支払処理に失敗しました",
+		"overpayment_not_allowed": "支払金額は残高（₱{{remaining}}）を超えることはできません。",
+		"underpayment_not_allowed": "支払金額は残高（₱{{remaining}}）を下回ることはできません。",
 		"unable_to_load_billing_records": "請求記録を読み込めません。ページを更新してください。",
 		"unknown": "不明",
 		"n_a": "該当なし",

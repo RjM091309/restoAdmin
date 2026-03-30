@@ -1215,6 +1215,8 @@
 		"payment_processed_successfully": "付款处理成功",
 		"error": "错误",
 		"failed_to_process_payment": "付款处理失败",
+		"overpayment_not_allowed": "付款金额不能超过剩余余额（₱{{remaining}}）。",
+		"underpayment_not_allowed": "付款金额不能小于剩余余额（₱{{remaining}}）。",
 		"unable_to_load_billing_records": "无法加载账单记录。请刷新页面。",
 		"unknown": "未知",
 		"n_a": "不适用",

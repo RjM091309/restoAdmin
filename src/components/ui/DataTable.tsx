@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -24,6 +24,12 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [perPageOpen, setPerPageOpen] = useState(false);
+
+  // When the table data changes (filter/search/refresh), always show the first page.
+  // This prevents "new row not visible" issues when the user is currently on page 2+.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [data.length, itemsPerPage]);
 
   // Pagination logic
   const totalPages = Math.ceil(data.length / itemsPerPage);

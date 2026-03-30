@@ -1252,6 +1252,8 @@
 		"payment_processed_successfully": "결제가 성공적으로 처리되었습니다",
 		"error": "오류",
 		"failed_to_process_payment": "결제 처리에 실패했습니다",
+		"overpayment_not_allowed": "결제 금액은 잔액(₱{{remaining}})을 초과할 수 없습니다.",
+		"underpayment_not_allowed": "결제 금액은 잔액(₱{{remaining}})보다 작을 수 없습니다.",
 		"unable_to_load_billing_records": "청구 기록을 불러올 수 없습니다. 페이지를 새로고침해주세요.",
 		"unknown": "알 수 없음",
 		"n_a": "해당 없음",

@@ -228,24 +228,165 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [branchId]);
 
     // ==================== Filtering ====================
+    const MANILA_TIMEZONE = 'Asia/Manila';
+    const MANILA_UTC_OFFSET_HOURS = 8; // Asia/Manila is UTC+8 (no DST)
+
+    const parseManilaLocalDateTimeToUtcMs = (value: string): number | null => {
+        // Supports:
+        // - 'YYYY-MM-DD HH:mm:ss'
+        // - 'YYYY-MM-DD HH:mm:ss.SSS' (fractional seconds)
+        const m = value.match(
+            /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d+)?$/,
+        );
+        if (!m) return null;
+
+        const year = Number(m[1]);
+        const monthIndex = Number(m[2]) - 1;
+        const day = Number(m[3]);
+        const hour = Number(m[4]);
+        const minute = Number(m[5]);
+        const second = Number(m[6]);
+        const ms = m[7] ? Number(m[7].slice(1).padEnd(3, '0').slice(0, 3)) : 0;
+
+        // Convert Manila local -> UTC instant (UTC = local - offset)
+        return Date.UTC(
+            year,
+            monthIndex,
+            day,
+            hour - MANILA_UTC_OFFSET_HOURS,
+            minute,
+            second,
+            ms,
+        );
+    };
+
+    const parseEncodedDtToUtcMs = (encoded: string): number | null => {
+        if (!encoded) return null;
+
+        // If timezone info is present, rely on JS Date parsing.
+        // Examples:
+        // - '...Z'
+        // - '...+08:00'
+        // - '...-05:30'
+        if (/[zZ]$/.test(encoded) || /[+-]\d{2}:?\d{2}$/.test(encoded)) {
+            const d = new Date(encoded);
+            return Number.isNaN(d.getTime()) ? null : d.getTime();
+        }
+
+        // If backend returns MySQL-style without timezone (space) or ISO without timezone (T):
+        // - 'YYYY-MM-DD HH:mm:ss'
+        // - 'YYYY-MM-DDTHH:mm:ss'
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(encoded)) {
+            const manilaMs = parseManilaLocalDateTimeToUtcMs(encoded);
+            if (manilaMs != null) return manilaMs;
+        }
+
+        // Fallback: try to parse as ISO by replacing the space with 'T'
+        const d = new Date(encoded.replace(' ', 'T'));
+        return Number.isNaN(d.getTime()) ? null : d.getTime();
+    };
+
+    const formatEncodedDt = (encoded: string | null | undefined) => {
+        if (!encoded) return '—';
+        const utcMs = parseEncodedDtToUtcMs(encoded);
+        if (utcMs == null) return '—';
+
+        return new Intl.DateTimeFormat(undefined, {
+            timeZone: MANILA_TIMEZONE,
+            dateStyle: 'short',
+            timeStyle: 'short',
+        }).format(new Date(utcMs));
+    };
+
     const isWithinDateRange = (encoded: string | null | undefined) => {
         if (!encoded) return true;
         if (!dateRange.start || !dateRange.end) return true;
-        const encodedDate = new Date(encoded);
-        if (Number.isNaN(encodedDate.getTime())) return true;
-        const start = new Date(`${dateRange.start}T00:00:00`);
-        const end = new Date(`${dateRange.end}T23:59:59.999`);
-        return encodedDate >= start && encodedDate <= end;
+
+        const startMatch = dateRange.start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        const endMatch = dateRange.end.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!startMatch || !endMatch) return true;
+
+        // Robust fallback: compare by the date portion only (YYYY-MM-DD).
+        // This avoids edge-case exclusions when ENCODED_DT timezone interpretation differs.
+        const encodedDateMatch = String(encoded).match(/^(\d{4}-\d{2}-\d{2})[ T]?/);
+        if (encodedDateMatch?.[1]) {
+            const encodedYmd = encodedDateMatch[1];
+            if (encodedYmd >= dateRange.start && encodedYmd <= dateRange.end) return true;
+        }
+
+        const encodedMs = parseEncodedDtToUtcMs(encoded);
+        if (encodedMs == null) return true;
+
+        const sy = Number(startMatch[1]);
+        const sm = Number(startMatch[2]) - 1;
+        const sd = Number(startMatch[3]);
+
+        const ey = Number(endMatch[1]);
+        const em = Number(endMatch[2]) - 1;
+        const ed = Number(endMatch[3]);
+
+        // Manila local -> UTC instants
+        const startUtcMs = Date.UTC(sy, sm, sd, 0 - MANILA_UTC_OFFSET_HOURS, 0, 0, 0);
+        const endUtcMs = Date.UTC(ey, em, ed, 23 - MANILA_UTC_OFFSET_HOURS, 59, 59, 999);
+
+        return encodedMs >= startUtcMs && encodedMs <= endUtcMs;
     };
 
     const filteredOrders = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        return orders.filter((order) => {
+
+        const parseOrderNoToMs = (orderNo: string | null | undefined): number | null => {
+            // Expected: ORD-YYYYMMDD-HHMMSS (example: ORD-20260330-155527)
+            const m = String(orderNo ?? '').match(/^ORD-(\d{8})-(\d{6})/);
+            if (!m) return null;
+
+            const ymd = m[1];
+            const hhmmss = m[2];
+            const year = Number(ymd.slice(0, 4));
+            const month = Number(ymd.slice(4, 6)) - 1;
+            const day = Number(ymd.slice(6, 8));
+
+            const hour = Number(hhmmss.slice(0, 2));
+            const minute = Number(hhmmss.slice(2, 4));
+            const second = Number(hhmmss.slice(4, 6));
+
+            // Use Date.UTC so any timezone assumption becomes a constant offset for ordering.
+            return Date.UTC(year, month, day, hour, minute, second);
+        };
+
+        const filtered = orders.filter((order) => {
             const matchStatus = statusFilter === 'all' || String(order.STATUS) === statusFilter;
             const matchSearch = !term || order.ORDER_NO.toLowerCase().includes(term) || (order.TABLE_NUMBER && order.TABLE_NUMBER.toString().includes(term));
-            const matchDate = isWithinDateRange(order.ENCODED_DT as unknown as string | null | undefined);
+            const matchDate = isWithinDateRange(order.ENCODED_DT);
             return matchStatus && matchSearch && matchDate;
         });
+
+        // Precompute sort keys once (avoids recomputation inside sort comparator).
+        const keyed = filtered.map((order) => {
+            const orderNoMs = parseOrderNoToMs(order.ORDER_NO);
+            const encodedMs = order.ENCODED_DT ? parseEncodedDtToUtcMs(order.ENCODED_DT) : null;
+            return {
+                order,
+                primaryMs: orderNoMs ?? encodedMs,
+                encodedMs,
+                dbId: Number(order.IDNo),
+            };
+        });
+
+        keyed.sort((a, b) => {
+            const aPrimary = a.primaryMs ?? Number.NEGATIVE_INFINITY;
+            const bPrimary = b.primaryMs ?? Number.NEGATIVE_INFINITY;
+            if (bPrimary !== aPrimary) return bPrimary - aPrimary;
+
+            // Tie-break by encoded timestamp only when both parse successfully.
+            if (a.encodedMs != null && b.encodedMs != null && b.encodedMs !== a.encodedMs) {
+                return b.encodedMs - a.encodedMs;
+            }
+
+            return b.dbId - a.dbId;
+        });
+
+        return keyed.map((k) => k.order);
     }, [orders, searchTerm, statusFilter, dateRange.start, dateRange.end]);
 
     // ==================== Stats ====================
@@ -479,9 +620,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         // Default: present date only (YYYY-MM-DD), time will be current timestamp.
         // Preserve user's previously selected date across multiple manual orders.
         if (!manualOrderDate) {
+            // Use Asia/Manila for consistency with ENCODED_DT generation and filtering.
             const now = new Date();
-            const pad2 = (n: number) => String(n).padStart(2, '0');
-            setManualOrderDate(`${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`);
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Manila',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+            }).formatToParts(now);
+            const get = (type: string) => String(parts.find((p) => p.type === type)?.value ?? '0');
+            const y = get('year');
+            const m = get('month');
+            const d = get('day');
+            setManualOrderDate(`${y}-${m}-${d}`);
         }
         setManualDiscountAmount('0');
         setManualOrderBranchId('');
@@ -879,7 +1030,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             const roomChargeAdditionalService =
                 hasManualRoomChargeRow ? (manualRoomChargeQty - 1) * manualRoomCharge : 0;
             const manualGrandTotal = Math.max(0, manualGrandTotalPreview);
-            await createManualSettledOrder({
+            const created = await createManualSettledOrder({
                 ORDER_NO: manualOrderNo.trim(), order_no: manualOrderNo.trim(),
                 BRANCH_ID: effectiveManualBranchId, branch_id: effectiveManualBranchId,
                 TABLE_ID: manualOrderTableId ? Number(manualOrderTableId) : null,
@@ -892,12 +1043,38 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 DISCOUNT_AMOUNT: manualDiscountApplied,
                 GRAND_TOTAL: manualGrandTotal,
                 ORDER_ITEMS: items, items,
+                // Keep both lower/upper-case keys for compatibility with backend.
                 payment_method: manualPaymentMethod,
                 payment_ref: manualPaymentRef?.trim() ? manualPaymentRef.trim() : null,
+                PAYMENT_METHOD: manualPaymentMethod,
+                PAYMENT_REF: manualPaymentRef?.trim() ? manualPaymentRef.trim() : null,
             });
             setManualOrderOpen(false);
             setManualOrderTableId('');
+
+            // After creating/settling, clear local filters so the new record is visible.
+            // (If user is filtering by PENDING, a SETTLED manual order would be hidden.)
+            setSearchTerm('');
+            setStatusFilter('all');
+
             await loadOrders();
+
+            // Workaround: if the list endpoint (`getOrders`) doesn't include
+            // newly-created manual-settled orders yet, ensure the specific order
+            // is inserted into the current table state.
+            if (created?.id != null) {
+                try {
+                    const createdOrder = await getOrderById(String(created.id));
+                    if (createdOrder) {
+                        setOrders((prev) => {
+                            if (prev.some((o) => Number(o.IDNo) === Number(createdOrder.IDNo))) return prev;
+                            return [createdOrder, ...prev];
+                        });
+                    }
+                } catch {
+                    // Ignore; table will still update after `loadOrders()` in the common case.
+                }
+            }
             toast.success(t('orders.swal.manual_created_text', { orderNo: manualOrderNo.trim() }));
         } catch (e) {
             if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
@@ -1055,7 +1232,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     <div className="min-w-0">
                         <p className="text-sm font-bold">{order.ORDER_NO}</p>
                         <p className="text-[10px] text-brand-muted">
-                            {order.ENCODED_DT ? new Date(order.ENCODED_DT).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                            {formatEncodedDt(order.ENCODED_DT)}
                         </p>
                     </div>
                 </div>
