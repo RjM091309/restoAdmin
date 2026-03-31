@@ -59,7 +59,14 @@ const formatCurrency = (value: number) => {
   }).format(safe);
 };
 
-export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) => {
+const formatYmdForLabel = (ymd: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  const d = new Date(`${ymd}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -127,11 +134,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
-  const grandTotalExpenses = useMemo(
-    () => expenses.reduce((sum, row) => sum + row.expAmount, 0),
-    [expenses],
-  );
-
   // Keep ENCODED_DT consistent with Orders UI using Asia/Manila.
   const pad2 = (n: number) => String(n).padStart(2, '0');
   const getManilaParts = (d: Date) => {
@@ -164,6 +166,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     const p = getManilaParts(new Date());
     const timePart = `${pad2(p.hour)}:${pad2(p.minute)}:${pad2(p.second)}`;
     return `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
+  };
+  const getCurrentManilaRange = () => {
+    const now = new Date();
+    const p = getManilaParts(now);
+    return {
+      start: `${p.year}-${pad2(p.month)}-01`,
+      end: `${p.year}-${pad2(p.month)}-${pad2(p.day)}`,
+    };
   };
 
   // Load operations from operation_category table and categories from master_categories (by BRANCH_ID)
@@ -306,6 +316,31 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     return fromDerived;
   }, [categoriesForOperation, selectedCategoryId, selectedOperationId]);
 
+  const effectiveDateRange = useMemo(() => {
+    const fallback = getCurrentManilaRange();
+    return {
+      start: dateRange.start || fallback.start,
+      end: dateRange.end || fallback.end,
+    };
+  }, [dateRange.end, dateRange.start]);
+  const dateRangeLabel = useMemo(
+    () => `${formatYmdForLabel(effectiveDateRange.start)} - ${formatYmdForLabel(effectiveDateRange.end)}`,
+    [effectiveDateRange.end, effectiveDateRange.start],
+  );
+
+  const expensesInRange = useMemo(() => {
+    const { start, end } = effectiveDateRange;
+    return expenses.filter((row) => {
+      const encodedYmd = (row.encodedDt || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
+      return encodedYmd >= start && encodedYmd <= end;
+    });
+  }, [effectiveDateRange, expenses]);
+  const grandTotalExpenses = useMemo(
+    () => expensesInRange.reduce((sum, row) => sum + row.expAmount, 0),
+    [expensesInRange],
+  );
+
   const itemsForCategory = useMemo(() => {
     if (!selectedCategory) return [];
 
@@ -333,6 +368,39 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       });
   }, [expenses, masterCategories, selectedCategory, selectedOperationId]);
 
+  const rangeEntriesForCategory = useMemo(() => {
+    const { start, end } = effectiveDateRange;
+    return itemsForCategory.filter((row) => {
+      const encodedYmd = (row.encodedDt || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
+      return encodedYmd >= start && encodedYmd <= end;
+    });
+  }, [effectiveDateRange, itemsForCategory]);
+
+  const tableRowsForCategory = useMemo(() => {
+    const rangedNameSet = new Set(
+      rangeEntriesForCategory.map((row) => String(row.expDesc || row.expName || '').trim()).filter(Boolean),
+    );
+    const templateByName = new Map<string, ExpenseRecord>();
+
+    for (const row of itemsForCategory) {
+      const name = String(row.expDesc || row.expName || '').trim();
+      if (!name || rangedNameSet.has(name)) continue;
+      if (!templateByName.has(name)) {
+        templateByName.set(name, {
+          ...row,
+          id: `template-${name.toLowerCase().replace(/\s+/g, '-')}`,
+          expAmount: 0,
+          expQty: 0,
+          stockQty: 0,
+          encodedDt: '',
+        });
+      }
+    }
+
+    return [...rangeEntriesForCategory, ...Array.from(templateByName.values())];
+  }, [itemsForCategory, rangeEntriesForCategory]);
+
   const expenseBreakdown = useMemo(() => {
     // Build a simple breakdown based on current selection.
     // - If a main category is selected (no sub category): group by CATEGORY_TYPE (sub-category).
@@ -349,7 +417,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
     if (selectedCategory) {
       // Sub category selected → strictly mirror the table items list
-      for (const exp of itemsForCategory) {
+      for (const exp of rangeEntriesForCategory) {
         const amount = Number(exp.expAmount) || 0;
         if (amount <= 0) continue;
         const rawLabel = (exp.expDesc || exp.expName || exp.expSource || 'Unknown') as string;
@@ -372,7 +440,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
         opById.set(String(op.id), op);
       }
 
-      for (const exp of expenses) {
+      for (const exp of expensesInRange) {
         const amount = Number(exp.expAmount) || 0;
         if (amount <= 0) continue;
 
@@ -413,14 +481,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       othersKeys,
       hasOthers: restSum > 0,
     };
-  }, [expenses, itemsForCategory, masterCategories, operations, selectedCategory, selectedOperationId]);
+  }, [expensesInRange, masterCategories, operations, rangeEntriesForCategory, selectedCategory, selectedOperationId]);
 
   // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
   const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
 
   const totalForView = useMemo(() => {
     if (selectedCategoryId && selectedCategory) {
-      return itemsForCategory.reduce((sum, row) => sum + row.expAmount, 0);
+      return rangeEntriesForCategory.reduce((sum, row) => sum + row.expAmount, 0);
     }
     if (selectedOperationId) {
       // Sum all expenses whose master category belongs to this operation (any type)
@@ -429,14 +497,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
           .filter((cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId)
           .map((cat) => cat.id),
       );
-      return expenses.reduce(
+      return expensesInRange.reduce(
         (sum, row) => (row.masterCatId != null && opMasterIds.has(row.masterCatId) ? sum + row.expAmount : sum),
         0,
       );
     }
     // Nothing selected → selected total is 0
     return 0;
-  }, [expenses, itemsForCategory, masterCategories, selectedCategory, selectedCategoryId, selectedOperationId]);
+  }, [expensesInRange, masterCategories, rangeEntriesForCategory, selectedCategory, selectedCategoryId, selectedOperationId]);
 
   const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
 
@@ -835,7 +903,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
     const qtyRaw = addingQtyValue.trim();
     const hasQty = qtyRaw !== '';
     const qty = hasQty ? Number(qtyRaw) : NaN;
-    const isQtyOnlyRestock = isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && (addingAmountValue.trim() === '' || amount === 0);
+    const isTemplateRow = String(row.id || '').startsWith('template-');
+    const isQtyOnlyRestock =
+      isInventoryCategory &&
+      !isTemplateRow &&
+      hasQty &&
+      Number.isFinite(qty) &&
+      qty >= 0 &&
+      (addingAmountValue.trim() === '' || amount === 0);
 
     if (isQtyOnlyRestock) {
       // Add qty to existing row only — no new expense, no duplicate
@@ -1045,7 +1120,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
 
   const filteredItemsForCategory = useMemo(() => {
     const term = tableSearch.trim().toLowerCase();
-    const base = itemsForCategory;
+    const base = tableRowsForCategory;
     const byNameSet =
       tableItemsNameFilter && tableItemsNameFilter.size > 0
         ? base.filter((row) => tableItemsNameFilter.has(String(row.expDesc || row.expName || '').trim()))
@@ -1056,7 +1131,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
       const name = (row.expDesc || row.expName || '').toLowerCase();
       return name.includes(term);
     });
-  }, [itemsForCategory, tableItemsNameFilter, tableSearch]);
+  }, [tableItemsNameFilter, tableRowsForCategory, tableSearch]);
 
   const shouldPaginate = filteredItemsForCategory.length > ITEMS_PER_PAGE;
   const [currentPage, setCurrentPage] = useState(1);
@@ -1154,6 +1229,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 </div>
                 <div className="text-xs text-brand-muted mt-1">
                   All Main Categories
+                </div>
+                <div className="text-[11px] text-brand-muted mt-1">
+                  {dateRangeLabel}
                 </div>
               </div>
               <div className="h-11 w-11 rounded-2xl bg-brand-primary/10 border border-brand-primary/10 flex items-center justify-center">
@@ -1439,7 +1517,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                         )
                         .map((m) => m.id),
                     );
-                    const expenseCount = expenses.filter(
+                    const expenseCount = expensesInRange.filter(
                       (exp) => exp.masterCatId != null && relatedMasterIds.has(exp.masterCatId),
                     ).length;
                     return (
@@ -1516,11 +1594,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                 <div className="text-xs text-brand-muted mt-1">
                   {selectedCategory ? (
                     <>
-                      Showing items for <span className="font-bold text-brand-text">{selectedCategory.name}</span>.
+                      Showing selected date range items for <span className="font-bold text-brand-text">{selectedCategory.name}</span> plus reusable item templates.
                     </>
                   ) : (
                     'Select a Sub Category to display items.'
                   )}
+                </div>
+                <div className="text-[11px] text-brand-muted mt-1">
+                  Range: {dateRangeLabel}
                 </div>
               </div>
               {selectedCategoryId && (
@@ -1642,7 +1723,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch }) =>
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white">
                           <div className="text-sm text-brand-muted">
                             Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{' '}
-                            {Math.min(currentPage * ITEMS_PER_PAGE, itemsForCategory.length)} of {itemsForCategory.length}{' '}
+                            {Math.min(currentPage * ITEMS_PER_PAGE, filteredItemsForCategory.length)} of {filteredItemsForCategory.length}{' '}
                             entries
                           </div>
                           <div className="flex items-center gap-2">

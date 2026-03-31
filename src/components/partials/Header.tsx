@@ -239,6 +239,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleClose = () => setDropdownOpen(false);
   const showDateRangePicker =
     activeTab === 'Dashboard' ||
+    activeTab === 'Expenses' ||
     activeTab === 'Sales Analytics' ||
     activeTab === 'Menu' ||
     activeTab === 'Category' ||
