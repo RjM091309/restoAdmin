@@ -50,7 +50,7 @@ class ApiController {
 
 				if (isArgonHash(storedPassword)) {
 					isValid = await argon2.verify(storedPassword, password);
-				} else {
+				} else { 
 					const hashedMD5 = generateMD5(salt + password);
 					isValid = (hashedMD5 === storedPassword);
 					isLegacy = true;

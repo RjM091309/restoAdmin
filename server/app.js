@@ -213,30 +213,51 @@ const server = app.listen(app.get('port'), function () {
   console.log('API Server running at http://localhost:' + app.get('port'));
   console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
 
-  // Try to log response from Python analytics sample endpoint on startup
-  const options = {
-    hostname: 'localhost',
-    port: 2100,
-    path: '/api/analytics/sample',
-    method: 'GET',
+  // Try to log response from Python analytics sample endpoint on startup.
+  // Prefer IPv4 loopback first to avoid Windows localhost -> ::1 resolution issues.
+  const pyServerPort = Number(process.env.PYSERVER_PORT || 2100);
+  const samplePath = '/api/analytics/sample';
+  const pyServerHosts = ['127.0.0.1', 'localhost'];
+
+  const pingPyServer = (hostIndex = 0) => {
+    const host = pyServerHosts[hostIndex];
+    if (!host) return;
+
+    const options = {
+      hostname: host,
+      port: pyServerPort,
+      path: samplePath,
+      method: 'GET',
+      timeout: 3000,
+    };
+
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      res.on('end', () => {
+        console.log('[PyServer] status:', res.statusCode);
+        console.log('[PyServer] response:', data);
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Request timed out'));
+    });
+
+    req.on('error', (err) => {
+      if (hostIndex < pyServerHosts.length - 1) {
+        pingPyServer(hostIndex + 1);
+        return;
+      }
+      console.error(`[PyServer] Could not reach http://${host}:${pyServerPort}${samplePath}:`, err.message);
+    });
+
+    req.end();
   };
 
-  const req = http.request(options, (res) => {
-    let data = '';
-    res.on('data', (chunk) => {
-      data += chunk;
-    });
-    res.on('end', () => {
-      console.log('[PyServer] status:', res.statusCode);
-      console.log('[PyServer] response:', data);
-    });
-  });
-
-  req.on('error', (err) => {
-    console.error('[PyServer] Could not reach http://localhost:2100/api/analytics/sample:', err.message);
-  });
-
-  req.end();
+  pingPyServer();
 
   // Optional: auto-start Loyverse polling sync on boot
   const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';

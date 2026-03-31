@@ -37,6 +37,7 @@ class OrderModel {
 			LEFT JOIN user_info ui ON ui.IDNo = o.ENCODED_BY
 			LEFT JOIN billing bill ON bill.ORDER_ID = o.IDNo
 			WHERE 1=1
+			  AND o.STATUS != -2
 		`;
 
 		const params = [];
