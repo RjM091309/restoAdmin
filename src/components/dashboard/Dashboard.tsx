@@ -33,6 +33,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { Modal } from '../ui/Modal';
 import { getOrders, getOrderItems, ORDER_STATUS, type OrderItemRecord, type OrderRecord } from '../../services/orderService';
 import { getMenus, resolveImageUrl, type MenuRecord } from '../../services/menuService';
 import {
@@ -382,6 +383,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const [trendingMenusData, setTrendingMenusData] = React.useState<TrendingMenuRow[]>([]);
   const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(false);
   const [menuImageByName, setMenuImageByName] = React.useState<Record<string, string>>({});
+  const [isIncomeTopModalOpen, setIsIncomeTopModalOpen] = React.useState(false);
+  const [incomeTopDate, setIncomeTopDate] = React.useState<string>('');
+  const [incomeTopLoading, setIncomeTopLoading] = React.useState(false);
+  const [incomeTopRows, setIncomeTopRows] = React.useState<ApiTopSellingItem[]>([]);
+  const incomeTopGrandTotal = React.useMemo(
+    () => incomeTopRows.reduce((sum, row) => sum + Number(row.total_revenue || 0), 0),
+    [incomeTopRows],
+  );
 
   const navigateToBreakdown = React.useCallback(
     (metric: 'income' | 'expense', pointDate?: string) => {
@@ -392,6 +401,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       navigate(`/expenses?${nextParams.toString()}`);
     },
     [location.search, navigate],
+  );
+
+  const handleRevenuePointAction = React.useCallback(
+    async (metric: 'income' | 'expense', pointDate?: string) => {
+      if (metric === 'expense') {
+        navigateToBreakdown('expense', pointDate);
+        return;
+      }
+
+      const fallback = getCurrentMonthRange();
+      const pickedDate = pointDate || dateRange.end || fallback.end;
+      const params = new URLSearchParams();
+      params.set('start_date', pickedDate);
+      params.set('end_date', pickedDate);
+      params.set('limit', '10');
+      if (selectedBranch && String(selectedBranch.id) !== 'all') {
+        params.set('branch_id', String(selectedBranch.id));
+      }
+
+      setIncomeTopDate(pickedDate);
+      setIsIncomeTopModalOpen(true);
+      setIncomeTopLoading(true);
+      try {
+        const rows = await fetchTopSellingApi(params);
+        setIncomeTopRows(Array.isArray(rows) ? rows.slice(0, 10) : []);
+      } catch (error) {
+        console.error('Failed to load income top menus:', error);
+        setIncomeTopRows([]);
+      } finally {
+        setIncomeTopLoading(false);
+      }
+    },
+    [dateRange.end, navigateToBreakdown, selectedBranch],
   );
 
   const RevenueXAxisTick = React.useMemo(() => {
@@ -1031,7 +1073,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                             {...props}
                             color="#4f46e5"
                             metric="income"
-                            onNavigate={navigateToBreakdown}
+                            onNavigate={handleRevenuePointAction}
                           />
                         )}
                         activeDot={(props) => (
@@ -1039,7 +1081,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                             {...props}
                             color="#4f46e5"
                             metric="income"
-                            onNavigate={navigateToBreakdown}
+                            onNavigate={handleRevenuePointAction}
                           />
                         )}
                       />
@@ -1055,7 +1097,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                             {...props}
                             color="#0f172a"
                             metric="expense"
-                            onNavigate={navigateToBreakdown}
+                            onNavigate={handleRevenuePointAction}
                           />
                         )}
                         activeDot={(props) => (
@@ -1063,7 +1105,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                             {...props}
                             color="#0f172a"
                             metric="expense"
-                            onNavigate={navigateToBreakdown}
+                            onNavigate={handleRevenuePointAction}
                           />
                         )}
                       />
@@ -1341,6 +1383,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           </div>
         </motion.div>
       )}
+      <Modal
+        isOpen={isIncomeTopModalOpen}
+        onClose={() => setIsIncomeTopModalOpen(false)}
+        title={`Top 10 Best Order Menu${incomeTopDate ? ` • ${formatDateLabel(incomeTopDate)}` : ''}`}
+        maxWidth="3xl"
+      >
+        {incomeTopLoading ? (
+          <div className="py-10 text-center text-sm text-brand-muted">Loading...</div>
+        ) : incomeTopRows.length === 0 ? (
+          <div className="py-10 text-center text-sm text-brand-muted">No data</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">#</th>
+                    <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">Menu</th>
+                    <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase text-right">Qty</th>
+                    <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incomeTopRows.map((row, idx) => (
+                    <tr key={`${row.IDNo}-${idx}`} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-3 py-2 text-sm font-semibold text-slate-700">{idx + 1}</td>
+                      <td className="px-3 py-2 text-sm text-slate-800">{row.MENU_NAME || 'Unknown'}</td>
+                      <td className="px-3 py-2 text-sm text-slate-700 text-right tabular-nums">
+                        {Number(row.total_quantity || 0).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-bold text-slate-900 text-right tabular-nums">
+                        {formatCurrency(Number(row.total_revenue || 0))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <span className="text-sm font-bold text-slate-600">
+                {`Total Income${incomeTopDate ? ` • ${formatDateLabel(incomeTopDate)}` : ''}`}
+              </span>
+              <span className="text-lg font-black text-slate-900 tabular-nums">
+                {formatCurrency(incomeTopGrandTotal)}
+              </span>
+            </div>
+          </div>
+        )}
+      </Modal>
     </AnimatePresence>
   );
 };
