@@ -50,6 +50,10 @@ type PaymentHistoryRow = {
 
 interface BillingProps {
   selectedBranch: Branch | null;
+  dateRange: {
+    start: string;
+    end: string;
+  };
 }
 
 const authHeaders = (): HeadersInit => {
@@ -60,7 +64,7 @@ const authHeaders = (): HeadersInit => {
   };
 };
 
-export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
+export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
 
@@ -169,9 +173,31 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
     );
   };
 
+  const isWithinDateRange = useCallback(
+    (encoded: string | null | undefined) => {
+      if (!encoded) return true;
+      if (!dateRange.start || !dateRange.end) return true;
+      const startOk = /^\d{4}-\d{2}-\d{2}$/.test(dateRange.start);
+      const endOk = /^\d{4}-\d{2}-\d{2}$/.test(dateRange.end);
+      if (!startOk || !endOk) return true;
+      const encodedDateMatch = String(encoded).match(/^(\d{4}-\d{2}-\d{2})[ T]?/);
+      if (encodedDateMatch?.[1]) {
+        const encodedYmd = encodedDateMatch[1];
+        return encodedYmd >= dateRange.start && encodedYmd <= dateRange.end;
+      }
+      return true;
+    },
+    [dateRange.start, dateRange.end],
+  );
+
+  const recordsInDateRange = useMemo(
+    () => records.filter((r) => isWithinDateRange(r.ENCODED_DT)),
+    [records, isWithinDateRange],
+  );
+
   const filteredRecords = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return records.filter((r) => {
+    return recordsInDateRange.filter((r) => {
       const matchSearch =
         !term ||
         r.ORDER_NO.toLowerCase().includes(term) ||
@@ -180,19 +206,19 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch }) => {
         statusFilter === 'all' || String(r.STATUS) === statusFilter;
       return matchSearch && matchStatus;
     });
-  }, [records, searchTerm, statusFilter]);
+  }, [recordsInDateRange, searchTerm, statusFilter]);
 
   const stats = useMemo(() => {
-    const totalDue = records.reduce((s, r) => {
+    const totalDue = recordsInDateRange.reduce((s, r) => {
       const remaining = Number(r.AMOUNT_DUE || 0) - Number(r.AMOUNT_PAID || 0);
       return s + Math.max(0, remaining);
     }, 0);
-    const totalPaid = records.reduce((s, r) => s + Number(r.AMOUNT_PAID || 0), 0);
-    const paidCount = records.filter((r) => r.STATUS === 1).length;
-    const partialCount = records.filter((r) => r.STATUS === 2).length;
-    const unpaidCount = records.filter((r) => r.STATUS === 3).length;
+    const totalPaid = recordsInDateRange.reduce((s, r) => s + Number(r.AMOUNT_PAID || 0), 0);
+    const paidCount = recordsInDateRange.filter((r) => r.STATUS === 1).length;
+    const partialCount = recordsInDateRange.filter((r) => r.STATUS === 2).length;
+    const unpaidCount = recordsInDateRange.filter((r) => r.STATUS === 3).length;
     return { totalDue, totalPaid, paidCount, partialCount, unpaidCount };
-  }, [records]);
+  }, [recordsInDateRange]);
 
   const openPaymentModal = (record: BillingRecord) => {
     setActiveRecord(record);

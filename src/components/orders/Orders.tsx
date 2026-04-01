@@ -298,7 +298,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }).format(new Date(utcMs));
     };
 
-    const isWithinDateRange = (encoded: string | null | undefined) => {
+    const isWithinDateRange = useCallback((encoded: string | null | undefined) => {
         if (!encoded) return true;
         if (!dateRange.start || !dateRange.end) return true;
 
@@ -330,7 +330,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         const endUtcMs = Date.UTC(ey, em, ed, 23 - MANILA_UTC_OFFSET_HOURS, 59, 59, 999);
 
         return encodedMs >= startUtcMs && encodedMs <= endUtcMs;
-    };
+    }, [dateRange.start, dateRange.end]);
 
     const filteredOrders = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
@@ -387,19 +387,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         });
 
         return keyed.map((k) => k.order);
-    }, [orders, searchTerm, statusFilter, dateRange.start, dateRange.end]);
+    }, [orders, searchTerm, statusFilter, isWithinDateRange]);
 
     // ==================== Stats ====================
     const stats = useMemo(() => {
-        const pending = orders.filter((o) => o.STATUS === ORDER_STATUS.PENDING).length;
-        const confirmed = orders.filter((o) => o.STATUS === ORDER_STATUS.CONFIRMED).length;
-        const settled = orders.filter((o) => o.STATUS === ORDER_STATUS.SETTLED).length;
-        const cancelled = orders.filter((o) => o.STATUS === ORDER_STATUS.CANCELLED).length;
-        const totalRevenue = orders
+        const scoped = orders.filter((o) => isWithinDateRange(o.ENCODED_DT));
+        const pending = scoped.filter((o) => o.STATUS === ORDER_STATUS.PENDING).length;
+        const confirmed = scoped.filter((o) => o.STATUS === ORDER_STATUS.CONFIRMED).length;
+        const settled = scoped.filter((o) => o.STATUS === ORDER_STATUS.SETTLED).length;
+        const cancelled = scoped.filter((o) => o.STATUS === ORDER_STATUS.CANCELLED).length;
+        const totalRevenue = scoped
             .filter((o) => o.STATUS === ORDER_STATUS.SETTLED)
             .reduce((s, o) => s + Number(o.GRAND_TOTAL || 0), 0);
-        return { total: orders.length, pending, confirmed, settled, cancelled, totalRevenue };
-    }, [orders]);
+        return { total: scoped.length, pending, confirmed, settled, cancelled, totalRevenue };
+    }, [orders, isWithinDateRange]);
 
     // ==================== Detail ====================
     const openDetail = async (order: OrderRecord) => {

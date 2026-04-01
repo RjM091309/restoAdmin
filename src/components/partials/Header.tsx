@@ -240,6 +240,8 @@ export const Header: React.FC<HeaderProps> = ({
   const showDateRangePicker =
     activeTab === 'Dashboard' ||
     activeTab === 'Expenses' ||
+    activeTab === 'Orders' ||
+    activeTab === 'Billing' ||
     activeTab === 'Sales Analytics' ||
     activeTab === 'Menu' ||
     activeTab === 'Category' ||

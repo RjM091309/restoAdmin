@@ -567,6 +567,7 @@ export default function App() {
                     <Billing
                       key={selectedBranch.id}
                       selectedBranch={selectedBranch}
+                      dateRange={dateRange}
                     />
                   ) : (
                     <Navigate to="/dashboard" replace />
