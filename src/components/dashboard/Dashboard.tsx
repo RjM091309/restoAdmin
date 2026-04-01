@@ -285,6 +285,31 @@ const TrendingMenuItem = ({
   </div>
 );
 
+const RevenueClickableDot = ({
+  cx,
+  cy,
+  payload,
+  color,
+  metric,
+  onNavigate,
+}: any) => {
+  if (typeof cx !== 'number' || typeof cy !== 'number') return null;
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={4}
+      fill={color}
+      stroke="none"
+      style={{ cursor: 'pointer' }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onNavigate(metric, payload?.date);
+      }}
+    />
+  );
+};
+
 const VerticalCarousel = ({
   items,
   netSalesLabel = 'Net sales',
@@ -358,6 +383,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(false);
   const [menuImageByName, setMenuImageByName] = React.useState<Record<string, string>>({});
 
+  const navigateToBreakdown = React.useCallback(
+    (metric: 'income' | 'expense', pointDate?: string) => {
+      const nextParams = new URLSearchParams(location.search);
+      nextParams.set('breakdown', '1');
+      nextParams.set('metric', metric);
+      if (pointDate) nextParams.set('focus_date', pointDate);
+      navigate(`/expenses?${nextParams.toString()}`);
+    },
+    [location.search, navigate],
+  );
+
   const RevenueXAxisTick = React.useMemo(() => {
     const Tick = (props: any) => {
       const { x, y, payload } = props ?? {};
@@ -424,7 +460,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           <div style={{ marginBottom: 8, fontSize: 12, ...labelStyle }}>{labelText}</div>
           <div style={{ display: 'grid', gap: 6 }}>
             {sorted.map((it: any, idx: number) => (
-              <div key={`${it?.dataKey}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                key={`${it?.dataKey}-${idx}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  width: '100%',
+                  textAlign: 'left',
+                }}
+              >
                 <span style={{ width: 8, height: 8, borderRadius: 9999, background: it?.color || '#64748b', display: 'inline-block' }} />
                 <span style={{ fontSize: 12, color: '#475569', minWidth: 70 }}>{rowLabel(String(it?.dataKey))}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{formatCurrency(Number(it?.value ?? 0))}</span>
@@ -435,7 +483,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       );
     };
     return Content;
-  }, [t]);
+  }, [navigateToBreakdown, t]);
 
   const OrdersTooltipContent = React.useMemo(() => {
     const Content = (props: any) => {
@@ -965,7 +1013,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         tickLine={false}
                         width={0}
                       />
-                      <Tooltip content={RevenueTooltipContent} />
+                      <Tooltip
+                        content={RevenueTooltipContent}
+                        offset={20}
+                        position={{ y: 24 }}
+                        wrapperStyle={{ zIndex: 20, pointerEvents: 'none' }}
+                      />
                       <Area
                         type="monotone"
                         dataKey="income"
@@ -973,7 +1026,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         fill="url(#incomeGradient)"
                         stroke="#4f46e5"
                         strokeWidth={2}
-                        dot={{ r: 4, fill: '#4f46e5', strokeWidth: 0 }}
+                        dot={(props) => (
+                          <RevenueClickableDot
+                            {...props}
+                            color="#4f46e5"
+                            metric="income"
+                            onNavigate={navigateToBreakdown}
+                          />
+                        )}
+                        activeDot={(props) => (
+                          <RevenueClickableDot
+                            {...props}
+                            color="#4f46e5"
+                            metric="income"
+                            onNavigate={navigateToBreakdown}
+                          />
+                        )}
                       />
                       <Area
                         type="monotone"
@@ -982,7 +1050,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         fill="url(#expenseGradient)"
                         stroke="#0f172a"
                         strokeWidth={2}
-                        dot={{ r: 4, fill: '#0f172a', strokeWidth: 0 }}
+                        dot={(props) => (
+                          <RevenueClickableDot
+                            {...props}
+                            color="#0f172a"
+                            metric="expense"
+                            onNavigate={navigateToBreakdown}
+                          />
+                        )}
+                        activeDot={(props) => (
+                          <RevenueClickableDot
+                            {...props}
+                            color="#0f172a"
+                            metric="expense"
+                            onNavigate={navigateToBreakdown}
+                          />
+                        )}
                       />
                     </ComposedChart>
                   </ResponsiveContainer>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import { type ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
 import { type Branch } from '../partials/Header';
@@ -67,6 +68,7 @@ const formatYmdForLabel = (ymd: string) => {
 };
 
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
+  const location = useLocation();
   const [operations, setOperations] = useState<Operation[]>([]);
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -116,6 +118,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
   const tableItemsScrollRef = useRef<HTMLDivElement | null>(null);
+  const expenseBreakdownRef = useRef<HTMLDivElement | null>(null);
 
   const scrollTableItemsToTop = useCallback(() => {
     requestAnimationFrame(() => {
@@ -131,6 +134,22 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     }
     window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldJumpToBreakdown = params.get('breakdown') === '1';
+    if (!shouldJumpToBreakdown) return;
+
+    // When entering from dashboard breakdown links, default to "all categories"
+    // so users immediately see the full breakdown, not a stale previous selection.
+    setSelectedOperationId(null);
+    setSelectedCategoryId(null);
+    setTableItemsNameFilter(null);
+
+    requestAnimationFrame(() => {
+      expenseBreakdownRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [location.search]);
 
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
 
@@ -405,7 +424,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     // Build a simple breakdown based on current selection.
     // - If a main category is selected (no sub category): group by CATEGORY_TYPE (sub-category).
     // - If a sub category is selected: group by "table items" (expense item names) under that sub category.
-    // - Else: group by main category (operation).
+    // - Else: group by sub category (CATEGORY_TYPE) across all main categories.
     type Row = { name: string; value: number };
 
     const add = (map: Map<string, number>, key: string, amount: number) => {
@@ -453,7 +472,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           continue;
         }
 
-        // Nothing selected: group by main category (operation name)
+        // Nothing selected: group by main category (operation)
         const opId = mc?.opCategoryId != null ? String(mc.opCategoryId) : '';
         const opName = opById.get(opId)?.name || 'Uncategorized';
         add(map, opName, amount);
@@ -465,7 +484,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       .filter((r) => r.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    // Keep the chart readable: top 6 + Others
+    // Only collapse into "Others" when viewing table items of a specific sub category.
+    // For main/sub-category summaries, show all rows so nothing appears "missing".
+    if (!selectedCategory) {
+      const allKeys = new Set(rows.map((r) => r.name));
+      return {
+        rows,
+        topKeys: allKeys,
+        othersKeys: new Set<string>(),
+        hasOthers: false,
+      };
+    }
+
     const top = rows.slice(0, 6);
     const rest = rows.slice(6);
     const restSum = rest.reduce((s, r) => s + r.value, 0);
@@ -1268,7 +1298,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           </div>
         </div>
 
-        <div className="md:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 h-full flex flex-col">
+        <div
+          id="expense-breakdown"
+          ref={expenseBreakdownRef}
+          className="md:col-span-8 bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 h-full flex flex-col"
+        >
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Expense Breakdown</div>
@@ -1280,6 +1314,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     : 'By main category'}
               </div>
             </div>
+            {(selectedOperationId || selectedCategoryId) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedOperationId(null);
+                  setSelectedCategoryId(null);
+                  setTableItemsNameFilter(null);
+                  setTableSearch('');
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-brand-primary border border-brand-primary/30 hover:bg-brand-primary/5 transition-colors cursor-pointer"
+              >
+                Back
+              </button>
+            )}
           </div>
 
           <div className="mt-3 flex-1 w-full min-w-0 min-h-[210px] flex flex-col">
@@ -1299,6 +1348,39 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                           const color = PIE_COLORS[idx % PIE_COLORS.length];
                           const isOthers = row.name === 'Others';
                           const canClickOthers = Boolean(selectedCategory) && isOthers && expenseBreakdown.othersKeys.size > 0;
+                          const canClickMainCategory =
+                            !selectedOperation &&
+                            !selectedCategory &&
+                            !isOthers &&
+                            operations.some((op) => op.name === row.name);
+                          const isRowClickable = canClickOthers || canClickMainCategory;
+                          const handleBreakdownRowClick = () => {
+                            if (canClickOthers) {
+                              setCurrentPage(1);
+                              setTableSearch('');
+                              setTableItemsNameFilter((prev) => {
+                                // toggle: click again to clear
+                                if (prev && prev.size === expenseBreakdown.othersKeys.size) {
+                                  let same = true;
+                                  for (const k of expenseBreakdown.othersKeys) {
+                                    if (!prev.has(k)) { same = false; break; }
+                                  }
+                                  if (same) return null;
+                                }
+                                return new Set(expenseBreakdown.othersKeys);
+                              });
+                              return;
+                            }
+                            if (canClickMainCategory) {
+                              const op = operations.find((item) => item.name === row.name);
+                              if (!op) return;
+                              setSelectedOperationId(op.id);
+                              setSelectedCategoryId(null);
+                              setCurrentPage(1);
+                              setTableSearch('');
+                              setTableItemsNameFilter(null);
+                            }
+                          };
                           return (
                             <li
                               key={`${row.name}-${idx}`}
@@ -1307,28 +1389,19 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                             >
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (!canClickOthers) return;
-                                  setCurrentPage(1);
-                                  setTableSearch('');
-                                  setTableItemsNameFilter((prev) => {
-                                    // toggle: click again to clear
-                                    if (prev && prev.size === expenseBreakdown.othersKeys.size) {
-                                      let same = true;
-                                      for (const k of expenseBreakdown.othersKeys) {
-                                        if (!prev.has(k)) { same = false; break; }
-                                      }
-                                      if (same) return null;
-                                    }
-                                    return new Set(expenseBreakdown.othersKeys);
-                                  });
-                                }}
-                                disabled={!canClickOthers}
+                                onClick={handleBreakdownRowClick}
+                                disabled={!isRowClickable}
                                 className={cn(
                                   'flex items-center gap-2 min-w-0 text-left',
-                                  canClickOthers ? 'cursor-pointer hover:opacity-90' : 'cursor-default',
+                                  isRowClickable ? 'cursor-pointer hover:opacity-90' : 'cursor-default',
                                 )}
-                                aria-label={canClickOthers ? 'Filter table items by Others group' : undefined}
+                                aria-label={
+                                  canClickOthers
+                                    ? 'Filter table items by Others group'
+                                    : canClickMainCategory
+                                      ? 'Open sub category breakdown for selected main category'
+                                      : undefined
+                                }
                               >
                                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                                 <span className="text-xs font-semibold text-slate-700 truncate">{row.name}</span>
@@ -1336,30 +1409,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (!canClickOthers) return;
-                                  setCurrentPage(1);
-                                  setTableSearch('');
-                                  setTableItemsNameFilter((prev) => {
-                                    // toggle: click again to clear
-                                    if (prev && prev.size === expenseBreakdown.othersKeys.size) {
-                                      let same = true;
-                                      for (const k of expenseBreakdown.othersKeys) {
-                                        if (!prev.has(k)) { same = false; break; }
-                                      }
-                                      if (same) return null;
-                                    }
-                                    return new Set(expenseBreakdown.othersKeys);
-                                  });
-                                }}
-                                disabled={!canClickOthers}
+                                onClick={handleBreakdownRowClick}
+                                disabled={!isRowClickable}
                                 className={cn(
                                   'w-full',
-                                  canClickOthers ? 'cursor-pointer' : 'cursor-default',
+                                  isRowClickable ? 'cursor-pointer' : 'cursor-default',
                                 )}
-                                aria-label={canClickOthers ? 'Filter table items by Others group' : undefined}
+                                aria-label={
+                                  canClickOthers
+                                    ? 'Filter table items by Others group'
+                                    : canClickMainCategory
+                                      ? 'Open sub category breakdown for selected main category'
+                                      : undefined
+                                }
                               >
-                                <div className={cn('h-2.5 rounded-full bg-slate-100 overflow-hidden', canClickOthers ? 'hover:bg-slate-200/60 transition-colors' : '')}>
+                                <div className={cn('h-2.5 rounded-full bg-slate-100 overflow-hidden', isRowClickable ? 'hover:bg-slate-200/60 transition-colors' : '')}>
                                   <motion.div
                                     className="h-full rounded-full"
                                     initial={{ width: 0 }}

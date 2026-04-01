@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -429,6 +429,33 @@ export default function App() {
   const displayActiveTab = activeTab;
 
   const [dateRange, setDateRange] = useState(getDefaultDateRange);
+  const previousDateRangeBeforeFocusRef = useRef<{ start: string; end: string } | null>(null);
+  const focusDateOverrideActiveRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const focusDate = (params.get('focus_date') || '').trim();
+    const isFocusDate = /^\d{4}-\d{2}-\d{2}$/.test(focusDate);
+
+    if (location.pathname === '/expenses' && isFocusDate) {
+      setDateRange((prev) => {
+        if (!focusDateOverrideActiveRef.current) {
+          previousDateRangeBeforeFocusRef.current = prev;
+          focusDateOverrideActiveRef.current = true;
+        }
+        if (prev.start === focusDate && prev.end === focusDate) return prev;
+        return { start: focusDate, end: focusDate };
+      });
+      return;
+    }
+
+    if (location.pathname !== '/expenses' && focusDateOverrideActiveRef.current) {
+      const previous = previousDateRangeBeforeFocusRef.current;
+      focusDateOverrideActiveRef.current = false;
+      previousDateRangeBeforeFocusRef.current = null;
+      if (previous) setDateRange(previous);
+    }
+  }, [location.pathname, location.search]);
 
   // Dynamic data generation based on date range (simulated)
   // const getDynamicRevenueData = () => {
@@ -453,7 +480,11 @@ export default function App() {
   // const dynamicRevenueData = getDynamicRevenueData();
 
   const handleTabChange = (tab: string) => {
-    const suffix = location.search || '';
+    const params = new URLSearchParams(location.search);
+    params.delete('breakdown');
+    params.delete('metric');
+    params.delete('focus_date');
+    const suffix = params.toString() ? `?${params.toString()}` : '';
     switch (tab) {
       case 'User Info': navigate(`/users/info${suffix}`); break;
       case 'User Role': navigate(`/users/role${suffix}`); break;
