@@ -591,6 +591,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         cellClassName: 'text-right',
         render: (row) => {
           const isAdding = addingAmountForId === row.id;
+          const isTemplateRow = String(row.id || '').startsWith('template-');
           return (
             <div className="flex items-center justify-end gap-3">
               {isAdding ? (
@@ -674,7 +675,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                   {canDelete('expenses') && (
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); setExpenseToDelete(row); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isTemplateRow) {
+                          toast.error('Template row cannot be deleted. Delete an existing dated entry instead.');
+                          return;
+                        }
+                        setExpenseToDelete(row);
+                      }}
                       className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
                       aria-label="Delete expense"
                     >
@@ -794,6 +802,33 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   };
 
   const handleOpenEditExpense = (row: ExpenseRecord) => {
+    if (String(row.id || '').startsWith('template-')) {
+      // Template rows are placeholders (no real DB ID). Try to open the latest
+      // real record with the same item name so users can still edit unit/amount.
+      const templateName = String(row.expDesc || row.expName || '').trim();
+      const latestReal = itemsForCategory.find((it) => {
+        const realName = String(it.expDesc || it.expName || '').trim();
+        return realName && realName === templateName && !String(it.id || '').startsWith('template-');
+      });
+      if (latestReal) {
+        setEditingExpense(latestReal);
+        setExpenseForm({
+          expDesc: latestReal.expDesc ?? '',
+          expAmount: latestReal.expAmount ? String(latestReal.expAmount) : '',
+          expSource: latestReal.expSource ?? '',
+          stockQty: latestReal.stockQty != null ? String(latestReal.stockQty) : '',
+          unit: latestReal.unit ?? 'pcs',
+          encodedDate: latestReal.encodedDt ? getManilaDateStr(new Date(latestReal.encodedDt)) : getManilaDateStr(new Date()),
+        });
+        setIsExpensePanelOpen(true);
+        toast.success('Opened latest existing entry for this item.');
+        return;
+      }
+      // No historical real row found; fallback to add flow.
+      handleStartAddSameItemAmount(row);
+      toast.error('No existing entry found to edit. Added as new item instead.');
+      return;
+    }
     setEditingExpense(row);
     setExpenseForm({
       expDesc: row.expDesc ?? '',
@@ -839,6 +874,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           expAmount: amount,
           expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
+          unit: expenseForm.unit || editingExpense.unit || 'pcs',
           encodedDt,
         });
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0) {
@@ -868,6 +904,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           expAmount: amount,
           expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
+          unit: expenseForm.unit || 'pcs',
           encodedDt,
         });
         const list = await getExpenses(branchId);
@@ -990,6 +1027,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         expAmount: amount,
         expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
         expSource: row.expSource ?? null,
+        unit: row.unit || 'pcs',
         encodedDt,
       });
       if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {

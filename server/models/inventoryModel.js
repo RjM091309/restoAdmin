@@ -194,7 +194,7 @@ class InventoryModel {
 		const qty = Number(stockQty);
 		if (!Number.isFinite(qty)) return false;
 		if (!addToExisting && qty < 0) return false;
-		const validUnits = ['pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
+		const validUnits = ['pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
 		const unitVal = unit && String(unit).trim() ? String(unit).trim().toLowerCase() : 'pcs';
 		const safeUnit = validUnits.includes(unitVal) ? unitVal : 'pcs';
 		try {

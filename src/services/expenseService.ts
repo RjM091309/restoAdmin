@@ -120,6 +120,7 @@ export type CreateExpensePayload = {
   expAmount: number;
   expQty?: number | null;
   expSource: string | null;
+  unit?: string | null;
   // MySQL DATETIME/TIMESTAMP format: "YYYY-MM-DD HH:mm:ss"
   encodedDt?: string | null;
 };
@@ -136,6 +137,7 @@ export async function createExpense(payload: CreateExpensePayload): Promise<numb
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
+      UNIT: payload.unit ?? 'pcs',
       ENCODED_DT: payload.encodedDt ?? null,
     }),
   });
@@ -152,6 +154,7 @@ export type UpdateExpensePayload = {
   expAmount: number;
   expQty?: number | null;
   expSource: string | null;
+  unit?: string | null;
   encodedDt?: string | null;
 };
 
@@ -166,6 +169,7 @@ export async function updateExpense(id: string, payload: UpdateExpensePayload): 
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
+      UNIT: payload.unit ?? 'pcs',
       ...(payload.encodedDt !== undefined ? { ENCODED_DT: payload.encodedDt } : {}),
     }),
   });

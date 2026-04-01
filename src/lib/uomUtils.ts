@@ -9,12 +9,12 @@ const DECIMAL_UNITS = new Set(['kg', 'g', 'l', 'ml']);
 
 /** Whole/count units — no decimals */
 const WHOLE_NUMBER_UNITS = new Set([
-  'pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
+  'pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
 ]);
 
 /** All UOM options for selection, grouped: whole first, then decimal */
 export const UOM_OPTIONS = [
-  'pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
+  'pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
   'kg', 'g', 'L', 'mL',
 ] as const;
 

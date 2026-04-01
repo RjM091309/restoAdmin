@@ -9,7 +9,7 @@ const pool = require('../config/db');
 const IngredientModel = require('./ingredientModel');
 
 // Same valid units as inventory (lowercase)
-const VALID_UNITS = ['pcs', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
+const VALID_UNITS = ['pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup', 'kg', 'g', 'l', 'ml'];
 
 function sanitizeUnit(unit) {
 	const u = unit && String(unit).trim() ? String(unit).trim().toLowerCase() : 'pcs';
