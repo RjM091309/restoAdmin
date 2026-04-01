@@ -57,7 +57,17 @@ class InventoryDeductionModel {
 			try {
 				await pool.execute(`ALTER TABLE inventory_deductions MODIFY COLUMN DEDUCTED_QTY DECIMAL(12,3) NOT NULL DEFAULT 0`);
 			} catch (alterErr) {
-				console.warn('[InventoryDeductionModel] DEDUCTED_QTY type normalization skipped:', alterErr.message);
+				const code = String(alterErr?.code || '').toUpperCase();
+				const message = String(alterErr?.message || '');
+				const isLockIssue =
+					code === 'ER_LOCK_DEADLOCK' ||
+					code === 'ER_LOCK_WAIT_TIMEOUT' ||
+					/Deadlock found when trying to get lock/i.test(message) ||
+					/Lock wait timeout exceeded/i.test(message);
+
+				if (!isLockIssue) {
+					console.warn('[InventoryDeductionModel] DEDUCTED_QTY type normalization skipped:', message);
+				}
 			}
 
 			InventoryDeductionModel._schemaReady = true;

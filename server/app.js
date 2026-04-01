@@ -24,6 +24,8 @@ const loyverseService = require('./utils/loyverseService');
 const app = express();
 app.use(compression());
 
+const API_INFO_FILE = path.join(__dirname, 'public', 'api-info.html');
+
 // CORS configuration - must be at the top to handle preflight requests
 // TEMPORARY: Allow all origins for development - RESTRICT IN PRODUCTION!
 app.use(cors({
@@ -137,7 +139,17 @@ app.get('/', (req, res) => {
 	
 	// If browser requests HTML, serve info page
 	if (accepts.includes('text/html')) {
-		return res.sendFile(path.join(__dirname, 'public', 'api-info.html'));
+		return res.sendFile(API_INFO_FILE, (err) => {
+			if (err) {
+				// Fallback to JSON when the static info page is unavailable.
+				return res.json({
+					success: true,
+					message: 'Restaurant Management System API',
+					version: '2.0.0',
+					documentation: '/api',
+				});
+			}
+		});
 	}
 	
 	// Otherwise return JSON (API clients, Postman, etc.)
@@ -213,51 +225,53 @@ const server = app.listen(app.get('port'), function () {
   console.log('API Server running at http://localhost:' + app.get('port'));
   console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
 
-  // Try to log response from Python analytics sample endpoint on startup.
-  // Prefer IPv4 loopback first to avoid Windows localhost -> ::1 resolution issues.
-  const pyServerPort = Number(process.env.PYSERVER_PORT || 2100);
-  const samplePath = '/api/analytics/sample';
-  const pyServerHosts = ['127.0.0.1', 'localhost'];
+  // Optional startup health check for Python analytics service.
+  // Disabled by default to avoid noisy logs when PyServer is not running.
+  const pyServerPingEnabled = String(process.env.PYSERVER_STARTUP_PING || '').toLowerCase() === 'true';
+  if (pyServerPingEnabled) {
+    // Prefer IPv4 loopback first to avoid localhost -> ::1 resolution issues.
+    const pyServerPort = Number(process.env.PYSERVER_PORT || 2100);
+    const samplePath = '/api/analytics/sample';
+    const pyServerHosts = ['127.0.0.1', 'localhost'];
 
-  const pingPyServer = (hostIndex = 0) => {
-    const host = pyServerHosts[hostIndex];
-    if (!host) return;
+    const pingPyServer = (hostIndex = 0) => {
+      const host = pyServerHosts[hostIndex];
+      if (!host) return;
 
-    const options = {
-      hostname: host,
-      port: pyServerPort,
-      path: samplePath,
-      method: 'GET',
-      timeout: 3000,
+      const options = {
+        hostname: host,
+        port: pyServerPort,
+        path: samplePath,
+        method: 'GET',
+        timeout: 3000,
+      };
+
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          console.log('[PyServer] status:', res.statusCode);
+          console.log('[PyServer] response:', data);
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error('Request timed out'));
+      });
+
+      req.on('error', () => {
+        if (hostIndex < pyServerHosts.length - 1) {
+          pingPyServer(hostIndex + 1);
+        }
+      });
+
+      req.end();
     };
 
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      res.on('end', () => {
-        console.log('[PyServer] status:', res.statusCode);
-        console.log('[PyServer] response:', data);
-      });
-    });
-
-    req.on('timeout', () => {
-      req.destroy(new Error('Request timed out'));
-    });
-
-    req.on('error', (err) => {
-      if (hostIndex < pyServerHosts.length - 1) {
-        pingPyServer(hostIndex + 1);
-        return;
-      }
-      console.error(`[PyServer] Could not reach http://${host}:${pyServerPort}${samplePath}:`, err.message);
-    });
-
-    req.end();
-  };
-
-  pingPyServer();
+    pingPyServer();
+  }
 
   // Optional: auto-start Loyverse polling sync on boot
   const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';

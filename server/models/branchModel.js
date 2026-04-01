@@ -30,8 +30,18 @@ class BranchModel {
 					MODIFY COLUMN IDNo INT NOT NULL AUTO_INCREMENT
 				`);
 			} catch (alterErr) {
-				// Ignore if already correct or other benign failure
-				console.warn('[BranchModel] ensureSchema ALTER IDNo:', alterErr.message);
+				const code = String(alterErr?.code || '').toUpperCase();
+				const message = String(alterErr?.message || '');
+				const isLockIssue =
+					code === 'ER_LOCK_DEADLOCK' ||
+					code === 'ER_LOCK_WAIT_TIMEOUT' ||
+					/Deadlock found when trying to get lock/i.test(message) ||
+					/Lock wait timeout exceeded/i.test(message);
+
+				// Deadlock/lock-timeout can happen under concurrent startup; ignore to avoid noisy logs.
+				if (!isLockIssue) {
+					console.warn('[BranchModel] ensureSchema ALTER IDNo:', message);
+				}
 			}
 
 			BranchModel._schemaReady = true;

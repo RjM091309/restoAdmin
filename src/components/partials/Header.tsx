@@ -59,6 +59,9 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
+const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   breadcrumbs = [],
@@ -227,13 +230,17 @@ export const Header: React.FC<HeaderProps> = ({
   const endDate = toDate(dateRange.end);
   const pickerValue: [Date | null, Date | null] = [startDate, endDate];
 
-  const handleDateRangeChange = (update: [Date | null, Date | null] | null) => {
+  const handleDateRangeChange = (
+    update: [Date | null, Date | null] | null,
+    options?: { closeOnComplete?: boolean }
+  ) => {
     const [s, e] = update ?? [null, null];
     onDateRangeChange({
       start: s ? toYYYYMMDD(s) : '',
       end: e ? toYYYYMMDD(e) : '',
     });
-    if (s && e) setDropdownOpen(false);
+    const closeOnComplete = options?.closeOnComplete ?? true;
+    if (closeOnComplete && s && e) setDropdownOpen(false);
   };
 
   const handleClose = () => setDropdownOpen(false);
@@ -316,10 +323,67 @@ export const Header: React.FC<HeaderProps> = ({
                       selectsRange
                       startDate={pickerValue[0]}
                       endDate={pickerValue[1]}
-                      onChange={handleDateRangeChange}
+                      openToDate={pickerValue[0] ?? undefined}
+                      onChange={(update) => handleDateRangeChange(update, { closeOnComplete: true })}
                       dateFormat="MMM d, yyyy"
                       calendarClassName="react-datepicker-material"
                       isClearable
+                      renderCustomHeader={({
+                        monthDate,
+                        decreaseMonth,
+                        increaseMonth,
+                        prevMonthButtonDisabled,
+                        nextMonthButtonDisabled,
+                      }) => {
+                        const monthLabel = monthDate.toLocaleDateString(localeForLanguage(i18n.language), {
+                          month: 'long',
+                          year: 'numeric',
+                        });
+
+                        return (
+                          <div className="flex items-center justify-between px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const prevMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
+                                const s = startOfMonth(prevMonth);
+                                const e = endOfMonth(prevMonth);
+                                handleDateRangeChange([s, e], { closeOnComplete: false });
+                                decreaseMonth();
+                              }}
+                              disabled={prevMonthButtonDisabled}
+                              className={cn(
+                                'p-2 rounded-lg transition-colors',
+                                prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                              )}
+                              aria-label="Previous month (auto-select last month range)"
+                            >
+                              <ArrowLeft size={18} className="text-brand-muted" />
+                            </button>
+
+                            <div className="text-sm font-bold text-brand-text">{monthLabel}</div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
+                                const s = startOfMonth(nextMonth);
+                                const e = endOfMonth(nextMonth);
+                                handleDateRangeChange([s, e], { closeOnComplete: false });
+                                increaseMonth();
+                              }}
+                              disabled={nextMonthButtonDisabled}
+                              className={cn(
+                                'p-2 rounded-lg transition-colors',
+                                nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                              )}
+                              aria-label="Next month"
+                            >
+                              <ArrowLeft size={18} className="text-brand-muted rotate-180" />
+                            </button>
+                          </div>
+                        );
+                      }}
                     />
                   </div>
                 </>
