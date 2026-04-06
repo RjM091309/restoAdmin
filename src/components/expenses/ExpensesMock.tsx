@@ -67,6 +67,34 @@ const formatYmdForLabel = (ymd: string) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+const pad2Ymd = (n: number) => String(n).padStart(2, '0');
+
+/** YYYY-MM-DD in Asia/Manila for an instant (aligns with dashboard daily-expenses / MySQL DATE in PH). */
+const getManilaYmdFromDate = (d: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return `${get('year')}-${pad2Ymd(get('month'))}-${pad2Ymd(get('day'))}`;
+};
+
+/**
+ * Expense ENCODED_DT → calendar YYYY-MM-DD for range filters.
+ * API often returns ISO UTC strings; `.slice(0, 10)` is the wrong calendar day vs Python daily-expenses.
+ */
+function expenseEncodedYmd(encodedDt: string | null | undefined): string | null {
+  const raw = (encodedDt || '').trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}\s/.test(raw) && !raw.includes('T')) return raw.slice(0, 10);
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) return null;
+  return getManilaYmdFromDate(new Date(ms));
+}
+
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
   const location = useLocation();
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -350,8 +378,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const expensesInRange = useMemo(() => {
     const { start, end } = effectiveDateRange;
     return expenses.filter((row) => {
-      const encodedYmd = (row.encodedDt || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
+      const encodedYmd = expenseEncodedYmd(row.encodedDt);
+      if (!encodedYmd || !/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
       return encodedYmd >= start && encodedYmd <= end;
     });
   }, [effectiveDateRange, expenses]);
@@ -390,8 +418,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const rangeEntriesForCategory = useMemo(() => {
     const { start, end } = effectiveDateRange;
     return itemsForCategory.filter((row) => {
-      const encodedYmd = (row.encodedDt || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
+      const encodedYmd = expenseEncodedYmd(row.encodedDt);
+      if (!encodedYmd || !/^\d{4}-\d{2}-\d{2}$/.test(encodedYmd)) return false;
       return encodedYmd >= start && encodedYmd <= end;
     });
   }, [effectiveDateRange, itemsForCategory]);
@@ -542,7 +570,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     () => [
       {
         header: 'Date',
-        render: (row) => <span>{row.encodedDt ? new Date(row.encodedDt).toISOString().slice(0, 10) : ''}</span>,
+        render: (row) => (
+          <span>{row.encodedDt ? expenseEncodedYmd(row.encodedDt) ?? '' : ''}</span>
+        ),
       },
       {
         header: 'Item',

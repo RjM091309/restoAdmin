@@ -322,16 +322,21 @@ def least_selling(
         # Legacy table product_sales_summary has been removed; rely only on actual orders.
         summary_rows: List[dict] = []
 
-        # Source 2: actual orders (paid orders from billing)
+        # Source 2: actual orders (paid billings) — same sale-day + status rules as daily-sales
+        # so dashboard "income" drill-down matches the chart (PH local billing date, STATUS 1/2).
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
         order_date_filter = ""
         order_branch_filter = ""
         order_params: List[object] = []
 
         if start_date and end_date:
-            order_date_filter = "AND DATE(o.ENCODED_DT) BETWEEN %s AND %s"
+            order_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
             order_params.extend([start_date, end_date])
         if branch_id:
-            order_branch_filter = "AND o.BRANCH_ID = %s"
+            order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
 
         orders_query = f"""
@@ -346,7 +351,7 @@ def least_selling(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
-            WHERE b.STATUS = 1
+            WHERE b.STATUS IN (1, 2)
             {order_date_filter}
             {order_branch_filter}
             GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
@@ -451,16 +456,20 @@ def top_selling(
         # Legacy table product_sales_summary has been removed; rely only on actual orders.
         summary_rows: List[dict] = []
 
-        # Source 2: actual orders (paid orders from billing)
+        # Same sale-day + paid rules as daily-sales (chart income) — see least_selling / daily_sales.
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
         order_date_filter = ""
         order_branch_filter = ""
         order_params: List[object] = []
 
         if start_date and end_date:
-            order_date_filter = "AND DATE(o.ENCODED_DT) BETWEEN %s AND %s"
+            order_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
             order_params.extend([start_date, end_date])
         if branch_id:
-            order_branch_filter = "AND o.BRANCH_ID = %s"
+            order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
 
         orders_query = f"""
@@ -475,7 +484,7 @@ def top_selling(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
-            WHERE b.STATUS = 1
+            WHERE b.STATUS IN (1, 2)
             {order_date_filter}
             {order_branch_filter}
             GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
