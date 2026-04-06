@@ -22,6 +22,11 @@ import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS } from '../../lib/uomUtils';
 import { Select2 } from '../ui/Select2';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
+import {
+  fetchExpenseSummaryApi,
+  fetchExpenseCategoryBreakdownApi,
+  type ApiExpenseCategoryRow,
+} from '../../services/analyticsService';
 
 type ExpensesMockProps = {
   selectedBranch: Branch | null;
@@ -36,6 +41,7 @@ type Operation = {
   name: string;
   description?: string | null;
   state: number; // 1=inventory, 0=expense
+  active: boolean;
 };
 
 type Category = {
@@ -95,6 +101,26 @@ function expenseEncodedYmd(encodedDt: string | null | undefined): string | null 
   return getManilaYmdFromDate(new Date(ms));
 }
 
+/**
+ * Same inclusion rules as Python `/api/analytics/daily-expenses` and `expense-summary`:
+ * active expense row, active master_categories row, active operation_category (INNER JOIN).
+ * Rows outside this scope still appear in the table but are excluded from Grand Total / breakdown
+ * so totals match the branch dashboard chart.
+ */
+function expenseCountsTowardDashboardAnalytics(
+  row: ExpenseRecord,
+  masterById: Map<string, InventoryCategory>,
+  opById: Map<string, Operation>,
+): boolean {
+  if (!row.active) return false;
+  if (row.masterCatId == null || String(row.masterCatId).trim() === '') return false;
+  const mc = masterById.get(String(row.masterCatId));
+  if (!mc?.active) return false;
+  if (mc.opCategoryId == null || String(mc.opCategoryId).trim() === '') return false;
+  const oc = opById.get(String(mc.opCategoryId));
+  return Boolean(oc?.active);
+}
+
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
   const location = useLocation();
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -103,6 +129,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [masterCategories, setMasterCategories] = useState<InventoryCategory[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
+  /** Same Python analytics as branch dashboard (expense-summary / expense-breakdown). */
+  const [analyticsFinanceLoading, setAnalyticsFinanceLoading] = useState(false);
+  const [analyticsGrandOk, setAnalyticsGrandOk] = useState(false);
+  const [analyticsGrandTotal, setAnalyticsGrandTotal] = useState(0);
+  const [analyticsExpenseBreakdownRows, setAnalyticsExpenseBreakdownRows] = useState<ApiExpenseCategoryRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [tableItemsNameFilter, setTableItemsNameFilter] = useState<Set<string> | null>(null);
 
@@ -270,6 +301,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           name: row.name,
           description: row.description ?? null,
           state: row.state === 1 ? 1 : 0,
+          active: row.active,
         }));
         mapped.sort((a, b) => {
           const numA = /^(\d+)\.?\s/.exec(a.name);
@@ -375,6 +407,65 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     [effectiveDateRange.end, effectiveDateRange.start],
   );
 
+  useEffect(() => {
+    if (!isSpecificBranch || !branchId) {
+      setAnalyticsGrandOk(false);
+      setAnalyticsExpenseBreakdownRows(null);
+      setAnalyticsFinanceLoading(false);
+      return;
+    }
+    const { start, end } = effectiveDateRange;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      setAnalyticsGrandOk(false);
+      setAnalyticsExpenseBreakdownRows(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAnalyticsFinanceLoading(true);
+    setAnalyticsGrandOk(false);
+    setAnalyticsExpenseBreakdownRows(null);
+
+    const params = new URLSearchParams();
+    params.set('start_date', start);
+    params.set('end_date', end);
+    params.set('branch_id', branchId);
+
+    void (async () => {
+      try {
+        const [sumRes, brRes] = await Promise.allSettled([
+          fetchExpenseSummaryApi(new URLSearchParams(params)),
+          fetchExpenseCategoryBreakdownApi(new URLSearchParams(params)),
+        ]);
+        if (cancelled) return;
+
+        if (sumRes.status === 'fulfilled') {
+          setAnalyticsGrandTotal(Number(sumRes.value.total_expense ?? 0));
+          setAnalyticsGrandOk(true);
+          if (brRes.status === 'fulfilled') {
+            setAnalyticsExpenseBreakdownRows(brRes.value);
+          } else {
+            setAnalyticsExpenseBreakdownRows(null);
+          }
+        } else {
+          setAnalyticsGrandOk(false);
+          setAnalyticsExpenseBreakdownRows(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setAnalyticsGrandOk(false);
+          setAnalyticsExpenseBreakdownRows(null);
+        }
+      } finally {
+        if (!cancelled) setAnalyticsFinanceLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSpecificBranch, branchId, effectiveDateRange.start, effectiveDateRange.end]);
+
   const expensesInRange = useMemo(() => {
     const { start, end } = effectiveDateRange;
     return expenses.filter((row) => {
@@ -383,10 +474,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       return encodedYmd >= start && encodedYmd <= end;
     });
   }, [effectiveDateRange, expenses]);
+
+  const expensesInAnalyticsRange = useMemo(() => {
+    const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
+    const opById = new Map(operations.map((o) => [String(o.id), o]));
+    return expensesInRange.filter((row) =>
+      expenseCountsTowardDashboardAnalytics(row, masterById, opById),
+    );
+  }, [expensesInRange, masterCategories, operations]);
+
   const grandTotalExpenses = useMemo(
-    () => expensesInRange.reduce((sum, row) => sum + row.expAmount, 0),
-    [expensesInRange],
+    () => expensesInAnalyticsRange.reduce((sum, row) => sum + row.expAmount, 0),
+    [expensesInAnalyticsRange],
   );
+
+  const grandTotalDisplayed = analyticsGrandOk ? analyticsGrandTotal : grandTotalExpenses;
 
   const itemsForCategory = useMemo(() => {
     if (!selectedCategory) return [];
@@ -423,6 +525,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       return encodedYmd >= start && encodedYmd <= end;
     });
   }, [effectiveDateRange, itemsForCategory]);
+
+  const rangeEntriesForCategoryAnalytics = useMemo(() => {
+    const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
+    const opById = new Map(operations.map((o) => [String(o.id), o]));
+    return rangeEntriesForCategory.filter((row) =>
+      expenseCountsTowardDashboardAnalytics(row, masterById, opById),
+    );
+  }, [rangeEntriesForCategory, masterCategories, operations]);
 
   const tableRowsForCategory = useMemo(() => {
     const rangedNameSet = new Set(
@@ -463,8 +573,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     const map = new Map<string, number>();
 
     if (selectedCategory) {
-      // Sub category selected → strictly mirror the table items list
-      for (const exp of rangeEntriesForCategory) {
+      // Sub category selected → mirror analytics scope (dashboard chart / Python totals)
+      for (const exp of rangeEntriesForCategoryAnalytics) {
         const amount = Number(exp.expAmount) || 0;
         if (amount <= 0) continue;
         const rawLabel = (exp.expDesc || exp.expName || exp.expSource || 'Unknown') as string;
@@ -475,6 +585,25 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             ? ((exp.expDesc || exp.expSource || exp.expName || 'Unknown') as string).trim() || 'Unknown'
             : label;
         add(map, finalLabel, amount);
+      }
+    } else if (
+      analyticsGrandOk &&
+      analyticsExpenseBreakdownRows !== null &&
+      branchId &&
+      !selectedCategory
+    ) {
+      const filtered = analyticsExpenseBreakdownRows.filter((r) => String(r.branch_id) === String(branchId));
+      if (selectedOperationId) {
+        const op = operations.find((o) => o.id === selectedOperationId);
+        const opName = (op?.name || '').trim();
+        for (const r of filtered) {
+          if (String(r.exp_cat || '').trim() !== opName) continue;
+          add(map, (r.exp_name || 'Unknown') as string, Number(r.total_amount || 0));
+        }
+      } else {
+        for (const r of filtered) {
+          add(map, (r.exp_cat || 'Uncategorized') as string, Number(r.total_amount || 0));
+        }
       }
     } else {
       const masterById = new Map<string, InventoryCategory>();
@@ -487,7 +616,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         opById.set(String(op.id), op);
       }
 
-      for (const exp of expensesInRange) {
+      for (const exp of expensesInAnalyticsRange) {
         const amount = Number(exp.expAmount) || 0;
         if (amount <= 0) continue;
 
@@ -539,14 +668,24 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       othersKeys,
       hasOthers: restSum > 0,
     };
-  }, [expensesInRange, masterCategories, operations, rangeEntriesForCategory, selectedCategory, selectedOperationId]);
+  }, [
+    analyticsExpenseBreakdownRows,
+    analyticsGrandOk,
+    branchId,
+    expensesInAnalyticsRange,
+    masterCategories,
+    operations,
+    rangeEntriesForCategoryAnalytics,
+    selectedCategory,
+    selectedOperationId,
+  ]);
 
   // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
   const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
 
   const totalForView = useMemo(() => {
     if (selectedCategoryId && selectedCategory) {
-      return rangeEntriesForCategory.reduce((sum, row) => sum + row.expAmount, 0);
+      return rangeEntriesForCategoryAnalytics.reduce((sum, row) => sum + row.expAmount, 0);
     }
     if (selectedOperationId) {
       // Sum all expenses whose master category belongs to this operation (any type)
@@ -555,14 +694,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           .filter((cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId)
           .map((cat) => cat.id),
       );
-      return expensesInRange.reduce(
+      return expensesInAnalyticsRange.reduce(
         (sum, row) => (row.masterCatId != null && opMasterIds.has(row.masterCatId) ? sum + row.expAmount : sum),
         0,
       );
     }
     // Nothing selected → selected total is 0
     return 0;
-  }, [expensesInRange, masterCategories, rangeEntriesForCategory, selectedCategory, selectedCategoryId, selectedOperationId]);
+  }, [
+    expensesInAnalyticsRange,
+    masterCategories,
+    rangeEntriesForCategoryAnalytics,
+    selectedCategory,
+    selectedCategoryId,
+    selectedOperationId,
+  ]);
 
   const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
 
@@ -1117,6 +1263,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             name: operationForm.name.trim(),
             description: operationForm.description.trim() || null,
             state: operationForm.state,
+            active: true,
           },
         ]);
         handleCloseOperationPanel();
@@ -1322,11 +1469,15 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Grand Total Expenses</div>
-                <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
-                  {formatCurrency(grandTotalExpenses)}
-                </div>
+                {isSpecificBranch && analyticsFinanceLoading ? (
+                  <Skeleton className="h-9 w-40 mt-1 rounded-lg" />
+                ) : (
+                  <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
+                    {formatCurrency(grandTotalDisplayed)}
+                  </div>
+                )}
                 <div className="text-xs text-brand-muted mt-1">
-                  All Main Categories
+                  {analyticsGrandOk ? 'Matches dashboard (analytics API)' : 'All main categories (local sum)'}
                 </div>
                 <div className="text-[11px] text-brand-muted mt-1">
                   {dateRangeLabel}
@@ -1649,7 +1800,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                         )
                         .map((m) => m.id),
                     );
-                    const expenseCount = expensesInRange.filter(
+                    const expenseCount = expensesInAnalyticsRange.filter(
                       (exp) => exp.masterCatId != null && relatedMasterIds.has(exp.masterCatId),
                     ).length;
                     return (

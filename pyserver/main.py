@@ -18,6 +18,12 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env.local")
 load_dotenv(BASE_DIR / ".env", override=False)
 
+# PH-local instant for expenses.ENCODED_DT — matches daily-sales billing bucketing (+08:00).
+_EXPENSE_LOCAL_DT_SQL = """COALESCE(
+    CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+    DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+)"""
+
 
 def _get_db_config() -> dict:
     return {
@@ -165,9 +171,6 @@ class DailyExpenseItem(BaseModel):
     expense_date: str
     total_expense: float
 
-class DailyExpenseItem(BaseModel):
-    expense_date: str
-    total_expense: float
 
 class ExpenseSummary(BaseModel):
     total_expense: float
@@ -263,7 +266,7 @@ def branch_sales(
             ORDER BY total_sales DESC
         """
 
-        cur.execute(billing_query, billing_params)
+        cur.execute(billing_query, billing_params)  # pyright: ignore[reportArgumentType]
         billing_rows = cur.fetchall()
 
         cur.close()
@@ -832,6 +835,7 @@ def expense_summary(
     - Reads from expenses + master_categories
     - Respects ACTIVE flag
     - Optional branch/date filters
+    - Date filters use Asia/Manila (+08:00) calendar day, same as daily-sales.
     """
     try:
         conn = get_connection()
@@ -845,10 +849,10 @@ def expense_summary(
             params.append(branch_id)
 
         if start_date:
-            where.append("DATE(e.ENCODED_DT) >= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
         if end_date:
-            where.append("DATE(e.ENCODED_DT) <= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
         where_sql = " AND ".join(where)
@@ -886,7 +890,7 @@ def daily_expenses(
 ) -> dict:
     """
     Daily expenses time series based on expenses table.
-    Mirrors expense-summary filters but groups by DATE(e.ENCODED_DT).
+    Mirrors expense-summary filters; groups by PH (+08:00) calendar day (aligned with daily-sales).
     """
     try:
         conn = get_connection()
@@ -900,24 +904,24 @@ def daily_expenses(
             params.append(branch_id)
 
         if start_date:
-            where.append("DATE(e.ENCODED_DT) >= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
         if end_date:
-            where.append("DATE(e.ENCODED_DT) <= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
         where_sql = " AND ".join(where)
 
         query = f"""
             SELECT
-                DATE(e.ENCODED_DT) AS expense_date,
+                DATE_FORMAT({_EXPENSE_LOCAL_DT_SQL}, '%Y-%m-%d') AS expense_date,
                 COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
             FROM expenses e
             LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
             INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
             WHERE {where_sql}
-            GROUP BY DATE(e.ENCODED_DT)
-            ORDER BY DATE(e.ENCODED_DT)
+            GROUP BY DATE({_EXPENSE_LOCAL_DT_SQL})
+            ORDER BY DATE({_EXPENSE_LOCAL_DT_SQL})
         """
 
         cur.execute(query, params)
@@ -972,10 +976,10 @@ def expense_breakdown(
             params.append(branch_id)
 
         if start_date:
-            where.append("DATE(e.ENCODED_DT) >= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
         if end_date:
-            where.append("DATE(e.ENCODED_DT) <= %s")
+            where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
         where_sql = " AND ".join(where)
@@ -1071,15 +1075,15 @@ def performance_trend(
         if period == "weekly":
             sales_bucket = f"WEEKDAY({billing_local_dt})"  # 0=Mon .. 6=Sun
             discount_bucket = f"WEEKDAY({orders_local_dt})"
-            expense_bucket = "WEEKDAY(DATE(e.ENCODED_DT))"
+            expense_bucket = f"WEEKDAY(DATE({_EXPENSE_LOCAL_DT_SQL}))"
         elif period == "monthly":
             sales_bucket = f"DAY({billing_local_dt})"  # 1..31
             discount_bucket = f"DAY({orders_local_dt})"
-            expense_bucket = "DAY(DATE(e.ENCODED_DT))"
+            expense_bucket = f"DAY(DATE({_EXPENSE_LOCAL_DT_SQL}))"
         else:
             sales_bucket = f"MONTH({billing_local_dt})"  # 1..12
             discount_bucket = f"MONTH({orders_local_dt})"
-            expense_bucket = "MONTH(DATE(e.ENCODED_DT))"
+            expense_bucket = f"MONTH(DATE({_EXPENSE_LOCAL_DT_SQL}))"
 
         # Sales (paid) by bucket
         sales_where = ["b.STATUS IN (1, 2)"]
@@ -1131,10 +1135,10 @@ def performance_trend(
             exp_where.append("e.BRANCH_ID = %s")
             exp_params.append(branch_id)
         if effective_start:
-            exp_where.append("DATE(e.ENCODED_DT) >= %s")
+            exp_where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             exp_params.append(effective_start.strftime("%Y-%m-%d"))
         if effective_end:
-            exp_where.append("DATE(e.ENCODED_DT) <= %s")
+            exp_where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             exp_params.append(effective_end.strftime("%Y-%m-%d"))
 
         exp_query = f"""
