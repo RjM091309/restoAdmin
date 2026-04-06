@@ -1,5 +1,12 @@
-const express = require('express');
 const path = require('path');
+// Load env before any route/model requires (otherwise Loyverse and others read stale process.env).
+require('dotenv').config({
+	path: path.resolve(__dirname, '..', '.env.local'),
+	override: true,
+});
+require('dotenv').config({ override: true });
+
+const express = require('express');
 const http = require('http');
 const routes = require('./routes');
 const bodyParser = require('body-parser');
@@ -8,11 +15,6 @@ const passport = require('passport');
 const session = require('express-session');
 const flash = require('connect-flash');
 const i18n = require('i18n');
-require('dotenv').config({
-	path: path.resolve(__dirname, '..', '.env.local'),
-	override: true,
-});
-require('dotenv').config({ override: true });
 
 // Telegram bot removed - not needed for template
 // const { startTelegramBot } = require('./utils/telegram');
@@ -277,12 +279,31 @@ const server = app.listen(app.get('port'), function () {
   const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';
   if (autoSyncEnabled) {
     try {
-      const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
-      const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
       const intervalRaw = process.env.LOYVERSE_SYNC_INTERVAL;
       const interval = intervalRaw ? parseInt(intervalRaw, 10) : null;
-      loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, Number.isFinite(interval) ? interval : null);
-      console.log('[Loyverse Sync] Auto-sync enabled on boot');
+      const intervalArg = Number.isFinite(interval) ? interval : null;
+      const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
+      if (multiRaw) {
+        const multiIds = multiRaw
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => Number.isFinite(n));
+        if (multiIds.length) {
+          loyverseService.startAutoSyncMulti(multiIds, intervalArg);
+          console.log('[Loyverse Sync] Auto-sync enabled on boot (branches: %s)', multiIds.join(', '));
+        } else {
+          console.warn('[Loyverse Sync] LOYVERSE_AUTO_SYNC_BRANCH_IDS set but no valid ids; using default branch only.');
+          const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+          const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
+          loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
+          console.log('[Loyverse Sync] Auto-sync enabled on boot');
+        }
+      } else {
+        const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+        const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
+        loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
+        console.log('[Loyverse Sync] Auto-sync enabled on boot');
+      }
     } catch (e) {
       console.error('[Loyverse Sync] Failed to start auto-sync on boot:', e?.message || e);
     }

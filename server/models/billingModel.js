@@ -237,15 +237,24 @@ class BillingModel {
 		}
 	}
 
+	/**
+	 * Apply refund to billing. Idempotent per refund receipt number.
+	 * @returns {{ changed: true }} when DB was updated
+	 * @returns {{ changed: false }} when this refund receipt was already applied (no DB write)
+	 * @returns false when order missing and cannot insert billing
+	 */
 	static async updateRefundForOrder(orderId, refundAmount, refundDt, refundReason, refundReceiptNumber = null) {
-		// Debug: log intent before applying refund
-		console.log('[BillingModel.updateRefundForOrder] Incoming refund payload:', {
-			orderId,
-			refundAmount,
-			refundDt,
-			refundReason,
-			refundReceiptNumber
-		});
+		const debug = String(process.env.LOYVERSE_DEBUG_SYNC || '').toLowerCase() === '1' || String(process.env.LOYVERSE_DEBUG_SYNC || '').toLowerCase() === 'true';
+
+		if (debug) {
+			console.log('[BillingModel.updateRefundForOrder] Incoming refund payload:', {
+				orderId,
+				refundAmount,
+				refundDt,
+				refundReason,
+				refundReceiptNumber
+			});
+		}
 
 		// Idempotency guard: record this refund receipt number once.
 		// If we've already applied it, do nothing.
@@ -271,8 +280,10 @@ class BillingModel {
 
 			// If insert didn't happen, we've already processed this refund receipt.
 			if (!ins?.affectedRows) {
-				console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
-				return true;
+				if (debug) {
+					console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
+				}
+				return { changed: false };
 			}
 		}
 
@@ -286,9 +297,11 @@ class BillingModel {
 		`;
 
 		const [updateResult] = await pool.execute(updateQuery, [refundAmount, refundDt, refundReason, orderId]);
-		console.log('[BillingModel.updateRefundForOrder] UPDATE result.affectedRows =', updateResult.affectedRows);
+		if (debug) {
+			console.log('[BillingModel.updateRefundForOrder] UPDATE result.affectedRows =', updateResult.affectedRows);
+		}
 		if (updateResult.affectedRows > 0) {
-			return true;
+			return { changed: true };
 		}
 
 		// If no billing row exists for this order yet, create one so refunds are not lost
@@ -332,9 +345,11 @@ class BillingModel {
 			order.ENCODED_DT || new Date()
 		]);
 
-		console.log('[BillingModel.updateRefundForOrder] INSERTED billing row with refund for orderId=', orderId);
+		if (debug) {
+			console.log('[BillingModel.updateRefundForOrder] INSERTED billing row with refund for orderId=', orderId);
+		}
 
-		return true;
+		return { changed: true };
 	}
 }
 

@@ -236,12 +236,18 @@ def branch_sales(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
+        # Same PH (+08:00) calendar day as daily-sales / least-selling so charts and branch table agree.
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+
         date_filter_billing = ""
         branch_filter_billing = ""
         billing_params: List[object] = []
 
         if start_date and end_date:
-            date_filter_billing = "AND DATE(b.ENCODED_DT) >= %s AND DATE(b.ENCODED_DT) <= %s"
+            date_filter_billing = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
             billing_params.extend([start_date, end_date])
 
         if branch_id:
@@ -596,10 +602,8 @@ def daily_sales(
             CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
             DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
         )"""
-        orders_local_dt = """COALESCE(
-            CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
-            DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
-        )"""
+        # Discount must bucket by the same PH calendar day as billing (paid_total), not order.ENCODED_DT,
+        # or the same receipt can split across days and KPI totals diverge from Loyverse.
         refund_local_dt = """COALESCE(
             CONVERT_TZ(b.REFUND_DT, @@session.time_zone, '+08:00'),
             DATE_ADD(b.REFUND_DT, INTERVAL 8 HOUR)
@@ -637,7 +641,7 @@ def daily_sales(
         discount_params: List[object] = []
 
         if start_date and end_date:
-            discount_date_filter = f"AND DATE({orders_local_dt}) BETWEEN %s AND %s"
+            discount_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
             discount_params.extend([start_date, end_date])
         if branch_id:
             discount_branch_filter = "AND o.BRANCH_ID = %s"
@@ -645,14 +649,14 @@ def daily_sales(
 
         discount_query = f"""
             SELECT 
-                DATE_FORMAT({orders_local_dt}, '%Y-%m-%d') AS sale_date,
+                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount
             FROM orders o
             INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             WHERE 1=1
             {discount_date_filter}
             {discount_branch_filter}
-            GROUP BY DATE({orders_local_dt})
+            GROUP BY DATE({billing_local_dt})
         """
 
         cur.execute(discount_query, discount_params)

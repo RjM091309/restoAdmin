@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     X,
     Settings,
     Globe,
-    Database,
     Shield,
     Info,
     ChevronRight,
@@ -19,23 +18,18 @@ import {
     Check,
     AlertCircle,
     Loader2,
-    Square,
     MapPin,
     Phone,
     Hash,
     Eye,
     EyeOff,
     RefreshCw,
-    Clock,
     User as UserIcon,
     FileText,
     QrCode,
-    Wifi,
-    WifiOff
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
@@ -153,7 +147,7 @@ const ToastMessage: React.FC<{ toast: Toast }> = ({ toast }) => (
 // SUB-VIEW: Branch Management
 // ═══════════════════════════════════════════════════════
 
-type Branch = {
+type BranchRecord = {
     IDNo: number;
     BRANCH_CODE: string;
     BRANCH_NAME: string;
@@ -162,10 +156,10 @@ type Branch = {
 };
 
 const BranchManagementView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
-    const [branches, setBranches] = useState<Branch[]>([]);
+    const [branches, setBranches] = useState<BranchRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [toast, setToast] = useState<Toast>(null);
-    const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+    const [editingBranch, setEditingBranch] = useState<BranchRecord | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -196,7 +190,7 @@ const BranchManagementView: React.FC<{ onBack: () => void; t: (key: string) => s
         setEditingBranch(null); setIsCreating(false);
     };
 
-    const startEdit = (b: Branch) => {
+    const startEdit = (b: BranchRecord) => {
         setEditingBranch(b); setIsCreating(false);
         setFormCode(b.BRANCH_CODE); setFormName(b.BRANCH_NAME);
         setFormAddress(b.ADDRESS || ''); setFormPhone(b.PHONE || '');
@@ -507,288 +501,6 @@ const DashboardLayoutView: React.FC<{ onBack: () => void; t: (key: string) => st
 };
 
 // ═══════════════════════════════════════════════════════
-// SUB-VIEW: Data Sync (Loyverse)
-// ═══════════════════════════════════════════════════════
-
-const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
-    const [status, setStatus] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
-    const [syncing, setSyncing] = useState(false);
-    const [fullSyncLoading, setFullSyncLoading] = useState(false);
-    const [rangeSyncLoading, setRangeSyncLoading] = useState(false);
-    const [toast, setToast] = useState<Toast>(null);
-    const rangeSyncAbortRef = useRef<AbortController | null>(null);
-
-    useEffect(() => {
-        if (toast) { const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t); }
-    }, [toast]);
-
-    const fetchStatus = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await fetch('/api/loyverse/status', { headers: authHeaders() });
-            const data = await res.json();
-            if (data.success) setStatus(data.data);
-            else setStatus(null);
-        } catch { setStatus(null); }
-        finally { setLoading(false); }
-    }, []);
-
-    useEffect(() => { fetchStatus(); }, [fetchStatus]);
-
-    const handleSync = async () => {
-        setSyncing(true);
-        try {
-            const res = await fetch('/api/loyverse/sync', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ incremental: true }) });
-            const data = await res.json();
-            if (data.success) {
-                if (data.data?.alreadyRunning) {
-                    if (data.data?.status) setStatus(data.data.status);
-                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
-                    return;
-                }
-                const s = data.data?.stats;
-                const msg = s
-                    ? `${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
-                    : (data.data?.message || 'Sync complete!');
-                setToast({ type: 'success', message: msg });
-                fetchStatus();
-            } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
-            }
-        } catch { setToast({ type: 'error', message: 'Network error during sync' }); }
-        finally { setSyncing(false); }
-    };
-
-    const handleFullSync = async () => {
-        setFullSyncLoading(true);
-        try {
-            const res = await fetch('/api/loyverse/full-sync', {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({ limit: 250 }),
-            });
-            const data = await res.json();
-            if (data.success) {
-                if (data.data?.alreadyRunning) {
-                    if (data.data?.status) setStatus(data.data.status);
-                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
-                    return;
-                }
-                const s = data.data?.stats;
-                const msg = s
-                    ? `Full sync: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
-                    : (data.data?.message || 'Full sync completed.');
-                setToast({ type: 'success', message: msg });
-                fetchStatus();
-            } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Full sync failed' });
-            }
-        } catch {
-            setToast({ type: 'error', message: 'Network error during full sync' });
-        } finally {
-            setFullSyncLoading(false);
-        }
-    };
-
-    /** Sync only from March 1 (current year) through today — no checkpoint reset. Supports abort via Stop. */
-    const handleSyncMarch1ToToday = async () => {
-        if (rangeSyncLoading) return;
-        const ac = new AbortController();
-        rangeSyncAbortRef.current = ac;
-        setRangeSyncLoading(true);
-        try {
-            const now = new Date();
-            const year = now.getFullYear();
-            let march1 = new Date(year, 2, 1, 0, 0, 0, 0); // March 1 this year
-            if (now < march1) {
-                march1 = new Date(year - 1, 2, 1, 0, 0, 0, 0); // before Mar 1: use previous year's Mar 1
-            }
-            const res = await fetch('/api/loyverse/sync-range', {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({
-                    created_at_min: march1.toISOString(),
-                    created_at_max: now.toISOString(),
-                    limit: 250,
-                }),
-                signal: ac.signal,
-            });
-            const data = await res.json();
-            if (data.success) {
-                if (data.data?.alreadyRunning) {
-                    if (data.data?.status) setStatus(data.data.status);
-                    setToast({ type: 'success', message: data.data?.message || 'Sync already in progress. Please wait.' });
-                    return;
-                }
-                const s = data.data?.stats;
-                const msg = s
-                    ? `Sync Mar 1–today: ${s.totalInserted ?? 0} inserted, ${s.totalUpdated ?? 0} updated, ${s.totalErrors ?? 0} errors`
-                    : (data.data?.message || 'Sync completed.');
-                setToast({ type: 'success', message: msg });
-                fetchStatus();
-            } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Sync failed' });
-            }
-        } catch (err: any) {
-            if (err?.name === 'AbortError') {
-                setToast({ type: 'success', message: 'Sync cancelled.' });
-            } else {
-                setToast({ type: 'error', message: 'Network error during sync' });
-            }
-        } finally {
-            rangeSyncAbortRef.current = null;
-            setRangeSyncLoading(false);
-        }
-    };
-
-    const handleStopRangeSync = () => {
-        if (rangeSyncAbortRef.current) {
-            rangeSyncAbortRef.current.abort();
-        }
-    };
-
-    const handleToggleAutoSync = async (start: boolean) => {
-        try {
-            const url = start ? '/api/loyverse/auto-sync/start' : '/api/loyverse/auto-sync/stop';
-            const res = await fetch(url, { method: 'POST', headers: authHeaders() });
-            const data = await res.json();
-            if (data.success) {
-                setToast({ type: 'success', message: start ? 'Auto-sync started!' : 'Auto-sync stopped.' });
-                // Optimistic update so UI shows Active/Stop immediately (in case refetch hits another server instance)
-                setStatus((prev: any) => ({
-                    ...prev,
-                    autoSyncActive: start,
-                    autoSync: {
-                        ...prev?.autoSync,
-                        running: start,
-                        intervalMs: start ? (data.data?.interval ?? prev?.autoSync?.intervalMs ?? 10000) : (prev?.autoSync?.intervalMs ?? 10000),
-                    },
-                    lastSync: start ? new Date().toISOString() : prev?.lastSync,
-                }));
-                fetchStatus(); // still refetch to get latest from server
-            } else {
-                setToast({ type: 'error', message: data.message || data.error || 'Action failed' });
-            }
-        } catch { setToast({ type: 'error', message: 'Network error' }); }
-    };
-
-    return (
-        <div className="flex flex-col h-full">
-            <SubViewHeader title={t('system_settings.data_sync')} onBack={onBack} disabled={rangeSyncLoading} />
-            <ToastMessage toast={toast} />
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
-                {loading ? (
-                    <div className="flex items-center justify-center py-12">
-                        <Loader2 size={24} className="animate-spin text-brand-orange" />
-                    </div>
-                ) : (
-                    <>
-                        {/* Status Card — support both status.autoSync.running and status.autoSyncActive (backend) */}
-                        {(() => {
-                            const isActive = status?.autoSync?.running ?? status?.autoSyncActive === true;
-                            const lastSync = status?.lastSync ?? status?.lastSyncTime;
-                            return (
-                                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            {isActive ? (
-                                                <Wifi size={16} className="text-green-500" />
-                                            ) : (
-                                                <WifiOff size={16} className="text-gray-400" />
-                                            )}
-                                            <span className="text-sm font-bold text-brand-text">
-                                                {t('system_settings.auto_sync')}: {isActive ? t('system_settings.active') : t('system_settings.inactive')}
-                                            </span>
-                                        </div>
-                                        <button
-                                            onClick={() => handleToggleAutoSync(!isActive)}
-                                            className={cn(
-                                                "px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer",
-                                                isActive
-                                                    ? "bg-red-100 text-red-600 hover:bg-red-200"
-                                                    : "bg-green-100 text-green-600 hover:bg-green-200"
-                                            )}
-                                        >
-                                            {isActive ? t('system_settings.stop') : t('system_settings.start')}
-                                        </button>
-                                    </div>
-                                    {status?.autoSync?.intervalMs != null && (
-                                        <p className="text-xs text-brand-muted"><Clock size={12} className="inline mr-1" />
-                                            Interval: {status.autoSync.intervalMs >= 60000 ? `${Math.round(status.autoSync.intervalMs / 60000)} min` : `${Math.round(status.autoSync.intervalMs / 1000)} sec`}
-                                        </p>
-                                    )}
-                                    {lastSync != null && (
-                                        <p className="text-xs text-brand-muted"><RefreshCw size={12} className="inline mr-1" />
-                                            Last sync: {new Date(lastSync).toLocaleString()}
-                                        </p>
-                                    )}
-                                </div>
-                            );
-                        })()}
-
-                        {/* Manual Sync Button */}
-                        <button
-                            onClick={handleSync}
-                            disabled={syncing}
-                            className="w-full py-3.5 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-brand-primary/20 hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {syncing ? <><Loader2 size={16} className="animate-spin" /> {t('system_settings.syncing')}...</> : <><RefreshCw size={16} /> {t('system_settings.sync_now')}</>}
-                        </button>
-
-                        {/* Sync March 1 – today (no full reset); show Stop when syncing */}
-                        {rangeSyncLoading ? (
-                            <div className="flex gap-2">
-                                <button
-                                    disabled
-                                    className="flex-1 py-3 bg-emerald-500/80 text-white rounded-xl font-bold text-sm cursor-wait flex items-center justify-center gap-2"
-                                >
-                                    <Loader2 size={16} className="animate-spin" /> Syncing...
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleStopRangeSync}
-                                    className="px-5 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-colors cursor-pointer flex items-center justify-center gap-2"
-                                >
-                                    <Square size={16} /> Stop
-                                </button>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={handleSyncMarch1ToToday}
-                                disabled={syncing || fullSyncLoading}
-                                className="w-full py-3 bg-emerald-500 text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                            >
-                                <RefreshCw size={16} /> Sync (Mar 1 – today)
-                            </button>
-                        )}
-                        <p className="text-xs text-emerald-800/80 text-center font-medium">
-                            Syncs only receipts from March 1 (this year) to now. Does not reset checkpoint.
-                        </p>
-
-                        {/* Full re-sync (after DB wipe) */}
-                        <button
-                            onClick={handleFullSync}
-                            disabled={fullSyncLoading || syncing}
-                            className="w-full py-3 bg-amber-500 text-white rounded-xl font-bold text-sm hover:bg-amber-600 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {fullSyncLoading ? <><Loader2 size={16} className="animate-spin" /> Full re-sync...</> : <>Full re-sync (reset & sync all)</>}
-                        </button>
-                        <p className="text-xs text-amber-700/80 text-center font-medium">
-                            Use after DB wipe: resets checkpoint and pulls all receipts from Loyverse.
-                        </p>
-
-                        <p className="text-xs text-brand-muted text-center font-medium">
-                            {t('system_settings.sync_description')}
-                        </p>
-                    </>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ═══════════════════════════════════════════════════════
 // SUB-VIEW: Mobile App
 // ═══════════════════════════════════════════════════════
 
@@ -1002,7 +714,7 @@ const VersionInfoView: React.FC<{ onBack: () => void; t: (key: string) => string
 // MAIN PANEL
 // ═══════════════════════════════════════════════════════
 
-type ViewState = 'main' | 'branch' | 'localization' | 'dashboard-layout' | 'data-sync' | 'mobile-app' | 'security-audit' | 'version-info';
+type ViewState = 'main' | 'branch' | 'localization' | 'dashboard-layout' | 'mobile-app' | 'security-audit' | 'version-info';
 
 type SystemSettingsPanelProps = {
     isOpen: boolean;
@@ -1100,12 +812,6 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                             <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.connect_sync')}</h5>
                                         </div>
                                         <SettingsItem
-                                            icon={Database}
-                                            label={t('system_settings.data_sync')}
-                                            description={t('system_settings.data_sync_desc')}
-                                            onClick={() => setView('data-sync')}
-                                        />
-                                        <SettingsItem
                                             icon={Smartphone}
                                             label={t('system_settings.mobile_app')}
                                             description={t('system_settings.mobile_app_desc')}
@@ -1159,7 +865,6 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                     {view === 'branch' && <BranchManagementView onBack={goBack} t={t} />}
                                     {view === 'localization' && <LocalizationView onBack={goBack} t={t} />}
                                     {view === 'dashboard-layout' && <DashboardLayoutView onBack={goBack} t={t} />}
-                                    {view === 'data-sync' && <DataSyncView onBack={goBack} t={t} />}
                                     {view === 'mobile-app' && <MobileAppView onBack={goBack} t={t} />}
                                     {view === 'security-audit' && <SecurityAuditView onBack={goBack} t={t} />}
                                     {view === 'version-info' && <VersionInfoView onBack={goBack} t={t} />}
