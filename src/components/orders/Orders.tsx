@@ -977,8 +977,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             return;
         }
         // Allow creating the order when room charge exists (room charge is injected separately)
-        // so the user can proceed even if the manual items list is empty.
-        if (manualOrderItems.length === 0 && !hasManualRoomChargeRow) {
+        // so the user can proceed even if the manual items list is empty — unless qty is 0 (waived).
+        if (manualOrderItems.length === 0 && (!hasManualRoomChargeRow || manualRoomChargeQty <= 0)) {
             setSwal({
                 type: 'warning',
                 title: t('orders.swal.add_items_title'),
@@ -1842,10 +1842,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                     <button
                                                                         type="button"
                                                                             onClick={() => {
-                                                                                setManualRoomChargeQty((prev) => roundToHalf(Math.max(0.5, prev - 0.5)));
+                                                                                setManualRoomChargeQty((prev) => roundToHalf(Math.max(0, prev - 0.5)));
                                                                                 setManualRowFlash({ menuId: MANUAL_ROOM_CHARGE_ITEM_ID, nonce: Date.now() });
                                                                             }}
-                                                                            disabled={it.qty <= 0.5}
+                                                                            disabled={it.qty <= 0}
                                                                         className="w-8 h-8 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-brand-muted font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                                                         title="Decrease"
                                                                     >
