@@ -28,6 +28,10 @@ router.post("/login", ApiController.login);
 // Response: { success: true, tokens: { accessToken, refreshToken, expiresIn } }
 router.post("/refresh", ApiController.refreshToken);
 
+// GET - Receipt scanner Gemini API key from DB
+// URL: /api/receiptscanner/gemini-key
+router.get("/receiptscanner/gemini-key", optionalJWT, ApiController.getReceiptScannerApiKey);
+
 // ============================================
 // PROTECTED ROUTES (JWT authentication required)
 // ============================================

@@ -21,6 +21,7 @@ const { generateTokenPair, verifyRefreshToken } = require('../utils/jwt');
 const socketService = require('../utils/socketService');
 const TranslationService = require('../utils/translationService');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils');
+const pool = require('../config/db');
 
 class ApiController {
 	// Login endpoint for mobile app
@@ -141,6 +142,43 @@ class ApiController {
 			return res.status(500).json({
 				success: false,
 				error: 'Internal server error'
+			});
+		}
+	}
+
+	static async getReceiptScannerApiKey(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const [cols] = await pool.execute(`SHOW COLUMNS FROM receiptscanner_api`);
+			const colNames = new Set((cols || []).map((c) => String(c.Field || '').toUpperCase()));
+			const keyCol = colNames.has('GEMINI_API') ? 'GEMINI_API' : (colNames.has('GEMENI_API') ? 'GEMENI_API' : null);
+			if (!keyCol) {
+				return res.status(500).json({
+					success: false,
+					error: 'No Gemini API column found in receiptscanner_api'
+				});
+			}
+			const whereActive = colNames.has('ACTIVE') ? ' WHERE ACTIVE = 1' : '';
+			const [rows] = await pool.execute(
+				`SELECT ${keyCol} FROM receiptscanner_api${whereActive} ORDER BY IDNo DESC LIMIT 1`
+			);
+			const rawKey = rows?.[0]?.GEMINI_API ?? rows?.[0]?.GEMENI_API ?? '';
+			const apiKey = String(rawKey).trim();
+			if (!apiKey) {
+				return res.status(404).json({
+					success: false,
+					error: 'Receipt scanner API key not configured'
+				});
+			}
+			return res.json({
+				success: true,
+				data: { apiKey }
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] GET /api/receiptscanner/gemini-key - Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch receipt scanner API key'
 			});
 		}
 	}
