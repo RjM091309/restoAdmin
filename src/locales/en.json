@@ -419,6 +419,7 @@
 		"no_data_available": "No data available",
 		"revenue": "revenue",
 		"least_selling_hint": "Products with the fewest orders. Consider reviewing pricing or promotions.",
+		"insight": "Insight",
 		"top_5_products": "Top 5 Products",
 		"sales_trend": "sales trend",
 		"sales_graph_by_product": "Sales graph by product",

@@ -711,10 +711,340 @@ const VersionInfoView: React.FC<{ onBack: () => void; t: (key: string) => string
 };
 
 // ═══════════════════════════════════════════════════════
+// SUB-VIEW: Data Sync (Loyverse)
+// ═══════════════════════════════════════════════════════
+
+const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
+    const [toast, setToast] = useState<Toast>(null);
+    const [running, setRunning] = useState(false);
+    const [statusLoading, setStatusLoading] = useState(false);
+    const [syncStatus, setSyncStatus] = useState<any>(null);
+    const [branchIds, setBranchIds] = useState<string>('2,9');
+    const [startDate, setStartDate] = useState<string>('2026-04-01');
+    const [endDate, setEndDate] = useState<string>('2026-04-06');
+    const [lastResult, setLastResult] = useState<any>(null);
+
+    useEffect(() => {
+        if (toast) { const tt = setTimeout(() => setToast(null), 3000); return () => clearTimeout(tt); }
+    }, [toast]);
+
+    const toIsoMin = (d: string) => `${d}T00:00:00.000Z`;
+    const toIsoMax = (d: string) => `${d}T23:59:59.999Z`;
+
+    const parseBranchIds = (raw: string) => {
+        const ids = String(raw || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((s) => Number(s))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        return Array.from(new Set(ids));
+    };
+
+    const readBranchIdFromUrl = () => {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const bid = params.get('branchId');
+            if (!bid || bid === 'all') return null;
+            const n = Number(bid);
+            return Number.isFinite(n) && n > 0 ? n : null;
+        } catch {
+            return null;
+        }
+    };
+
+    // Default branch behavior:
+    // - If URL has ?branchId=9, then Data Sync uses ONLY that branch by default.
+    // - If no URL branch, try /api/me branch_id (branch user login).
+    // - Otherwise fall back to multi-branch (2,9) for admins.
+    useEffect(() => {
+        const urlBid = readBranchIdFromUrl();
+        if (urlBid) {
+            setBranchIds(String(urlBid));
+            return;
+        }
+        const token = getToken();
+        if (!token) return;
+        fetch('/api/me', { headers: { Authorization: `Bearer ${token}` } })
+            .then((res) => res.json())
+            .then((json) => {
+                const bid = json?.data?.branch_id ?? json?.data?.BRANCH_ID ?? null;
+                const n = Number(bid);
+                if (Number.isFinite(n) && n > 0) {
+                    setBranchIds(String(n));
+                }
+            })
+            .catch(() => {});
+    }, []);
+
+    const refreshStatus = useCallback(async () => {
+        setStatusLoading(true);
+        try {
+            const res = await fetch('/api/loyverse/status', { headers: authHeaders() });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.success) {
+                setToast({ type: 'error', message: json?.message || 'Failed to load sync status' });
+                return;
+            }
+            setSyncStatus(json?.data || null);
+        } catch {
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            setStatusLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { refreshStatus(); }, [refreshStatus]);
+
+    // Auto-refresh status while a sync is running, so users don't have to spam refresh.
+    useEffect(() => {
+        if (!syncStatus?.isSyncing) return;
+        const id = window.setInterval(() => {
+            refreshStatus();
+        }, 2000);
+        return () => window.clearInterval(id);
+    }, [syncStatus?.isSyncing, refreshStatus]);
+
+    const stopAutoSync = async () => {
+        setRunning(true);
+        try {
+            const res = await fetch('/api/loyverse/auto-sync/stop', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({}),
+            });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.success) {
+                setToast({ type: 'error', message: json?.message || 'Failed to stop auto-sync' });
+                return;
+            }
+            setToast({ type: 'success', message: t('system_settings.stop') + ' ✓' });
+            await refreshStatus();
+        } catch {
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    const startAutoSync = async () => {
+        setRunning(true);
+        try {
+            // Start auto-sync using server defaults (env-configured branches/interval).
+            const res = await fetch('/api/loyverse/auto-sync/start', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({}),
+            });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.success) {
+                setToast({ type: 'error', message: json?.message || 'Failed to start auto-sync' });
+                return;
+            }
+            setToast({ type: 'success', message: t('system_settings.start') + ' ✓' });
+            await refreshStatus();
+        } catch {
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    const runSyncRange = async () => {
+        const bids = parseBranchIds(branchIds);
+        if (bids.length === 0) {
+            setToast({ type: 'error', message: 'Branch IDs are required (e.g. 2,9).' });
+            return;
+        }
+        if (!startDate || !endDate) {
+            setToast({ type: 'error', message: 'Start date and end date are required.' });
+            return;
+        }
+        setRunning(true);
+        setLastResult(null);
+        try {
+            const results: any[] = [];
+            for (const bid of bids) {
+                const res = await fetch('/api/loyverse/sync-range', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({
+                        branch_id: bid,
+                        created_at_min: toIsoMin(startDate),
+                        created_at_max: toIsoMax(endDate),
+                        limit: 250,
+                    }),
+                });
+                const json = await res.json().catch(() => null);
+                if (json?.alreadyRunning) {
+                    setSyncStatus(json?.status || null);
+                    setLastResult({ alreadyRunning: true, branch_id: bid, response: json });
+                    setToast({ type: 'error', message: json?.message || 'Sync already running. Please wait.' });
+                    return;
+                }
+                if (!res.ok || !json?.success) {
+                    const msg = json?.message || 'Sync failed';
+                    setLastResult({ branch_id: bid, response: json });
+                    setToast({ type: 'error', message: `Branch ${bid}: ${msg}` });
+                    return;
+                }
+                results.push({ branch_id: bid, ...json?.data });
+            }
+            setLastResult(results);
+            setToast({ type: 'success', message: t('system_settings.sync_now') + ' ✓' });
+            await refreshStatus();
+        } catch {
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    return (
+        <div className="flex flex-col h-full">
+            <SubViewHeader
+                title={t('system_settings.data_sync')}
+                onBack={onBack}
+                disabled={running}
+            />
+
+            <ToastMessage toast={toast} />
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5">
+                <div className="p-4 rounded-2xl border border-gray-100 bg-brand-bg">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-brand-orange/10 text-brand-orange flex items-center justify-center shrink-0">
+                            <RefreshCw size={18} />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-sm font-bold text-brand-text">{t('system_settings.sync_description')}</p>
+                            <p className="text-xs text-brand-muted font-medium mt-1">
+                                Resync a date range to backfill Loyverse values (e.g. Product unit price).
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">Sync status</p>
+                            <p className="text-sm font-bold text-brand-text mt-1">
+                                {syncStatus?.isSyncing ? 'Running' : 'Idle'}
+                                {syncStatus?.autoSyncActive ? ' · Auto-sync ON' : ' · Auto-sync OFF'}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={refreshStatus}
+                            disabled={running || statusLoading}
+                            className="px-3 py-2 rounded-xl text-xs font-bold bg-gray-50 border border-gray-200 text-brand-text hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {statusLoading ? '...' : 'Refresh'}
+                        </button>
+                    </div>
+
+                    {syncStatus?.isSyncing && (
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
+                            <p className="text-xs text-amber-800 font-semibold">
+                                Sync is running.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={stopAutoSync}
+                                disabled={running}
+                                className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+                            >
+                                Stop
+                            </button>
+                        </div>
+                    )}
+
+                    {!syncStatus?.isSyncing && !syncStatus?.autoSyncActive && (
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                            <p className="text-xs text-emerald-800 font-semibold">
+                                Auto-sync is OFF.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={startAutoSync}
+                                disabled={running}
+                                className="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                            >
+                                Start auto-sync
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Branch IDs</label>
+                        <input
+                            value={branchIds}
+                            onChange={(e) => setBranchIds(e.target.value)}
+                            disabled={running}
+                            inputMode="numeric"
+                            className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
+                            placeholder="e.g. 2,9"
+                        />
+                        <p className="mt-2 text-[11px] text-brand-muted font-medium">
+                            Tip: separate multiple branches with commas (e.g. <span className="font-mono">2,9</span>). This runs sequentially.
+                        </p>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Start date</label>
+                        <input
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => setStartDate(e.target.value)}
+                            disabled={running}
+                            className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">End date</label>
+                        <input
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            disabled={running}
+                            className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
+                        />
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={runSyncRange}
+                    disabled={running || !!syncStatus?.isSyncing}
+                    className={cn(
+                        "w-full h-11 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2",
+                        (running || !!syncStatus?.isSyncing) ? "bg-gray-100 text-brand-muted cursor-not-allowed" : "bg-brand-orange text-white hover:bg-brand-orange/90 cursor-pointer"
+                    )}
+                >
+                    {running ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                    {(running || !!syncStatus?.isSyncing) ? t('system_settings.syncing') : t('system_settings.sync_now')}
+                </button>
+
+                {lastResult && (
+                    <div className="p-4 rounded-2xl border border-gray-100 bg-white">
+                        <p className="text-xs font-bold text-brand-muted uppercase tracking-widest mb-2">Result</p>
+                        <pre className="text-[11px] leading-relaxed text-slate-700 whitespace-pre-wrap break-words">
+                            {JSON.stringify(lastResult, null, 2)}
+                        </pre>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// ═══════════════════════════════════════════════════════
 // MAIN PANEL
 // ═══════════════════════════════════════════════════════
 
-type ViewState = 'main' | 'branch' | 'localization' | 'dashboard-layout' | 'mobile-app' | 'security-audit' | 'version-info';
+type ViewState = 'main' | 'branch' | 'localization' | 'dashboard-layout' | 'data-sync' | 'mobile-app' | 'security-audit' | 'version-info';
 
 type SystemSettingsPanelProps = {
     isOpen: boolean;
@@ -817,6 +1147,12 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                             description={t('system_settings.mobile_app_desc')}
                                             onClick={() => setView('mobile-app')}
                                         />
+                                        <SettingsItem
+                                            icon={RefreshCw}
+                                            label={t('system_settings.data_sync')}
+                                            description={t('system_settings.data_sync_desc')}
+                                            onClick={() => setView('data-sync')}
+                                        />
 
                                         <div className="px-4 py-2 mt-4">
                                             <h5 className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">{t('system_settings.system_info')}</h5>
@@ -865,6 +1201,7 @@ export const SystemSettingsPanel: React.FC<SystemSettingsPanelProps> = ({
                                     {view === 'branch' && <BranchManagementView onBack={goBack} t={t} />}
                                     {view === 'localization' && <LocalizationView onBack={goBack} t={t} />}
                                     {view === 'dashboard-layout' && <DashboardLayoutView onBack={goBack} t={t} />}
+                                    {view === 'data-sync' && <DataSyncView onBack={goBack} t={t} />}
                                     {view === 'mobile-app' && <MobileAppView onBack={goBack} t={t} />}
                                     {view === 'security-audit' && <SecurityAuditView onBack={goBack} t={t} />}
                                     {view === 'version-info' && <VersionInfoView onBack={goBack} t={t} />}

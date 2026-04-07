@@ -23,6 +23,7 @@ const i18n = require('i18n');
 const compression = require('compression');
 const cors = require('cors');
 const loyverseService = require('./utils/loyverseService');
+const { ensureOrderItemsLineCostColumn } = require('./utils/ensureSchema');
 const app = express();
 app.use(compression());
 
@@ -221,95 +222,103 @@ app.use((err, req, res, next) => {
 	});
 });
 
-// Start the server
-const server = app.listen(app.get('port'), function () {
-  console.log('Server started on port ' + app.get('port'));
-  console.log('API Server running at http://localhost:' + app.get('port'));
-  console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
+// Start the server (LINE_COST column must exist before Loyverse sync writes it)
+(async () => {
+	try {
+		await ensureOrderItemsLineCostColumn();
+	} catch (e) {
+		console.error('[Schema] ensureOrderItemsLineCostColumn:', e?.message || e);
+	}
 
-  // Optional startup health check for Python analytics service.
-  // Disabled by default to avoid noisy logs when PyServer is not running.
-  const pyServerPingEnabled = String(process.env.PYSERVER_STARTUP_PING || '').toLowerCase() === 'true';
-  if (pyServerPingEnabled) {
-    // Prefer IPv4 loopback first to avoid localhost -> ::1 resolution issues.
-    const pyServerPort = Number(process.env.PYSERVER_PORT || 2100);
-    const samplePath = '/api/analytics/sample';
-    const pyServerHosts = ['127.0.0.1', 'localhost'];
+	const server = app.listen(app.get('port'), function () {
+		console.log('Server started on port ' + app.get('port'));
+		console.log('API Server running at http://localhost:' + app.get('port'));
+		console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
 
-    const pingPyServer = (hostIndex = 0) => {
-      const host = pyServerHosts[hostIndex];
-      if (!host) return;
+		// Optional startup health check for Python analytics service.
+		// Disabled by default to avoid noisy logs when PyServer is not running.
+		const pyServerPingEnabled = String(process.env.PYSERVER_STARTUP_PING || '').toLowerCase() === 'true';
+		if (pyServerPingEnabled) {
+			// Prefer IPv4 loopback first to avoid localhost -> ::1 resolution issues.
+			const pyServerPort = Number(process.env.PYSERVER_PORT || 2100);
+			const samplePath = '/api/analytics/sample';
+			const pyServerHosts = ['127.0.0.1', 'localhost'];
 
-      const options = {
-        hostname: host,
-        port: pyServerPort,
-        path: samplePath,
-        method: 'GET',
-        timeout: 3000,
-      };
+			const pingPyServer = (hostIndex = 0) => {
+				const host = pyServerHosts[hostIndex];
+				if (!host) return;
 
-      const req = http.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-        res.on('end', () => {
-          console.log('[PyServer] status:', res.statusCode);
-          console.log('[PyServer] response:', data);
-        });
-      });
+				const options = {
+					hostname: host,
+					port: pyServerPort,
+					path: samplePath,
+					method: 'GET',
+					timeout: 3000,
+				};
 
-      req.on('timeout', () => {
-        req.destroy(new Error('Request timed out'));
-      });
+				const req = http.request(options, (res) => {
+					let data = '';
+					res.on('data', (chunk) => {
+						data += chunk;
+					});
+					res.on('end', () => {
+						console.log('[PyServer] status:', res.statusCode);
+						console.log('[PyServer] response:', data);
+					});
+				});
 
-      req.on('error', () => {
-        if (hostIndex < pyServerHosts.length - 1) {
-          pingPyServer(hostIndex + 1);
-        }
-      });
+				req.on('timeout', () => {
+					req.destroy(new Error('Request timed out'));
+				});
 
-      req.end();
-    };
+				req.on('error', () => {
+					if (hostIndex < pyServerHosts.length - 1) {
+						pingPyServer(hostIndex + 1);
+					}
+				});
 
-    pingPyServer();
-  }
+				req.end();
+			};
 
-  // Optional: auto-start Loyverse polling sync on boot
-  const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';
-  if (autoSyncEnabled) {
-    try {
-      const intervalRaw = process.env.LOYVERSE_SYNC_INTERVAL;
-      const interval = intervalRaw ? parseInt(intervalRaw, 10) : null;
-      const intervalArg = Number.isFinite(interval) ? interval : null;
-      const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
-      if (multiRaw) {
-        const multiIds = multiRaw
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => Number.isFinite(n));
-        if (multiIds.length) {
-          loyverseService.startAutoSyncMulti(multiIds, intervalArg);
-          console.log('[Loyverse Sync] Auto-sync enabled on boot (branches: %s)', multiIds.join(', '));
-        } else {
-          console.warn('[Loyverse Sync] LOYVERSE_AUTO_SYNC_BRANCH_IDS set but no valid ids; using default branch only.');
-          const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
-          const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
-          loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
-          console.log('[Loyverse Sync] Auto-sync enabled on boot');
-        }
-      } else {
-        const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
-        const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
-        loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
-        console.log('[Loyverse Sync] Auto-sync enabled on boot');
-      }
-    } catch (e) {
-      console.error('[Loyverse Sync] Failed to start auto-sync on boot:', e?.message || e);
-    }
-  }
-});
+			pingPyServer();
+		}
 
-// Initialize Socket.io
-const socketService = require('./utils/socketService');
-socketService.initializeSocket(server);
+		// Optional: auto-start Loyverse polling sync on boot
+		const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';
+		if (autoSyncEnabled) {
+			try {
+				const intervalRaw = process.env.LOYVERSE_SYNC_INTERVAL;
+				const interval = intervalRaw ? parseInt(intervalRaw, 10) : null;
+				const intervalArg = Number.isFinite(interval) ? interval : null;
+				const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
+				if (multiRaw) {
+					const multiIds = multiRaw
+						.split(',')
+						.map((s) => parseInt(s.trim(), 10))
+						.filter((n) => Number.isFinite(n));
+					if (multiIds.length) {
+						loyverseService.startAutoSyncMulti(multiIds, intervalArg);
+						console.log('[Loyverse Sync] Auto-sync enabled on boot (branches: %s)', multiIds.join(', '));
+					} else {
+						console.warn('[Loyverse Sync] LOYVERSE_AUTO_SYNC_BRANCH_IDS set but no valid ids; using default branch only.');
+						const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+						const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
+						loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
+						console.log('[Loyverse Sync] Auto-sync enabled on boot');
+					}
+				} else {
+					const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+					const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
+					loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
+					console.log('[Loyverse Sync] Auto-sync enabled on boot');
+				}
+			} catch (e) {
+				console.error('[Loyverse Sync] Failed to start auto-sync on boot:', e?.message || e);
+			}
+		}
+	});
+
+	// Initialize Socket.io
+	const socketService = require('./utils/socketService');
+	socketService.initializeSocket(server);
+})();

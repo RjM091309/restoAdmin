@@ -37,6 +37,8 @@ export type ApiDailySalesItem = {
   refund: number;
   discount: number;
   net_sales: number;
+  /** Loyverse: daily SUM(LINE_COST) for "Product unit price" / gross profit (no recipe). */
+  product_cost?: number;
   gross_profit: number;
 };
 

@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal, Dict
+from typing import Any, List, Optional, Literal, Dict, cast
 import os
 from pathlib import Path
 import time
@@ -79,6 +79,35 @@ app.add_middleware(
 )
 
 
+def _ensure_order_items_line_cost(conn) -> None:
+    """Idempotent: add order_items.LINE_COST if missing (same as Node ensureSchema)."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_items' AND COLUMN_NAME = 'LINE_COST'
+            LIMIT 1
+            """
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            """
+            ALTER TABLE order_items
+            ADD COLUMN LINE_COST DECIMAL(12,2) NULL DEFAULT NULL
+            COMMENT 'Loyverse line amount (report Product unit price column); optional recipe fallback in analytics'
+            AFTER LINE_TOTAL
+            """
+        )
+        conn.commit()
+        print("[PyServer] order_items.LINE_COST created")
+    except Exception as exc:
+        print("[PyServer] ensure LINE_COST failed:", getattr(exc, "message", str(exc)))
+    finally:
+        cur.close()
+
+
 @app.on_event("startup")
 def init_db_pool():
     """
@@ -98,6 +127,7 @@ def init_db_pool():
         cur.execute("SELECT DATABASE()")
         row = cur.fetchone()
         cur.close()
+        _ensure_order_items_line_cost(conn)
         conn.close()
         print(
             f"[PyServer] Connected to MySQL at {db_config['host']}:{db_config['port']} - DB: {row[0] if row and row[0] else db_config['database']}"
@@ -116,6 +146,21 @@ def health_check():
         "service": "pyserver",
         "db_configured": bool(db_config.get("database")),
     }
+
+
+def _mysql_column_exists(cur, table: str, column: str) -> bool:
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+            LIMIT 1
+            """,
+            (table, column),
+        )
+        return cur.fetchone() is not None
+    except Exception:
+        return False
 
 
 @app.get("/api/analytics/sample")
@@ -159,6 +204,8 @@ class DailySalesItem(BaseModel):
     refund: float
     discount: float
     net_sales: float
+    # Loyverse only: SUM(order_items.LINE_COST) synced from receipts/Items API — no recipe/ingredients
+    product_cost: float
     gross_profit: float
 
 
@@ -590,7 +637,8 @@ def daily_sales(
     - refund: SUM of billing.REFUND (synced from Loyverse refunds)
     - discount: SUM of orders.DISCOUNT_AMOUNT for paid orders
     - net_sales: total_sales - refund - discount
-    - gross_profit: same as net_sales (simplified)
+    - product_cost: SUM(order_items.LINE_COST) from Loyverse sync only (no ingredient/recipe)
+    - gross_profit: net_sales - product_cost
     """
     try:
         conn = get_connection()
@@ -634,6 +682,9 @@ def daily_sales(
 
         cur.execute(billing_query, billing_params)
         billing_rows = cur.fetchall()
+
+        has_line_cost = _mysql_column_exists(cur, "order_items", "LINE_COST")
+        line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
 
         # 2) Discount per day from orders (only paid orders)
         discount_date_filter = ""
@@ -690,6 +741,37 @@ def daily_sales(
         cur.execute(refund_query, refund_params)
         refund_rows = cur.fetchall()
 
+        # 4) Loyverse "Product unit price" daily total = SUM(LINE_COST) — same PH sale-day as billing
+        cogs_date_filter = ""
+        cogs_branch_filter = ""
+        cogs_params: List[object] = []
+        if start_date and end_date:
+            cogs_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
+            cogs_params.extend([start_date, end_date])
+        if branch_id:
+            cogs_branch_filter = "AND b.BRANCH_ID = %s"
+            cogs_params.append(branch_id)
+
+        cogs_query = f"""
+            SELECT
+                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+                COALESCE(SUM({line_cogs_expr}), 0) AS product_cost
+            FROM billing b
+            INNER JOIN orders o ON o.IDNo = b.ORDER_ID
+            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+            WHERE b.STATUS IN (1, 2)
+            {cogs_date_filter}
+            {cogs_branch_filter}
+            GROUP BY DATE({billing_local_dt})
+        """
+        cogs_rows: List[Dict[str, Any]] = []
+        try:
+            cur.execute(cogs_query, cogs_params)
+            cogs_rows = cast(List[Dict[str, Any]], cur.fetchall() or [])
+        except Exception as cogs_exc:
+            print("[PyServer] daily-sales COGS query skipped:", getattr(cogs_exc, "message", str(cogs_exc)))
+            cogs_rows = []
+
         cur.close()
         conn.close()
     except Exception as exc:
@@ -715,6 +797,14 @@ def daily_sales(
             continue
         refund_map[str(sale_date)] = float(row.get("refund") or 0.0)
 
+    cogs_map: Dict[str, float] = {}
+    for row in cogs_rows:
+        sale_date = row.get("sale_date")
+        if sale_date is None:
+            continue
+        key = str(sale_date)
+        cogs_map[key] = float(row.get("product_cost") or 0.0)
+
     # Merge into final daily series
     items: List[DailySalesItem] = []
     billing_map = {}
@@ -724,18 +814,24 @@ def daily_sales(
             continue
         billing_map[str(sale_date)] = float(row.get("total_sales") or 0.0)
 
-    all_dates = set(billing_map.keys()) | set(discount_map.keys()) | set(refund_map.keys())
+    all_dates = (
+        set(billing_map.keys())
+        | set(discount_map.keys())
+        | set(refund_map.keys())
+        | set(cogs_map.keys())
+    )
     for key in sorted(all_dates):
         discount = float(discount_map.get(key, 0.0) or 0.0)
         refund = float(refund_map.get(key, 0.0) or 0.0)
         paid_total = float(billing_map.get(key, 0.0) or 0.0)
+        product_cost = float(cogs_map.get(key, 0.0) or 0.0)
 
         # Loyverse daily export uses:
         # total_sales (gross) = paid_total + discount
         # net_sales = total_sales - discount - refund
         total_sales = paid_total + discount
         net_sales = total_sales - discount - refund
-        gross_profit = net_sales
+        gross_profit = max(0.0, net_sales - product_cost)
 
         items.append(
             DailySalesItem(
@@ -744,6 +840,7 @@ def daily_sales(
                 refund=refund,
                 discount=discount,
                 net_sales=net_sales,
+                product_cost=product_cost,
                 gross_profit=gross_profit,
             )
         )

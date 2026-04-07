@@ -409,6 +409,7 @@
 		"no_data_available": "データがありません",
 		"revenue": "収益",
 		"least_selling_hint": "注文数が最も少ない商品です。価格やプロモーションの見直しを検討してください。",
+		"insight": "インサイト",
 		"top_5_products": "上位5商品",
 		"sales_trend": "売上傾向",
 		"sales_graph_by_product": "商品別の売上グラフ",

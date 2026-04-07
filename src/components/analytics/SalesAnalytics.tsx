@@ -158,13 +158,22 @@ const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
   const derivedRefund = hasApiNetSales ? totalSales - discount - apiNetSales : NaN;
   const refund = Number.isFinite(derivedRefund) ? Math.max(0, derivedRefund) : Math.max(0, apiRefund);
   const netSales = hasApiNetSales ? Math.max(0, apiNetSales) : Math.max(0, totalSales - refund - discount);
-  const grossProfit = netSales;
+  // Loyverse only: daily sum of LINE_COST (same as product_cost used for gross profit)
+  const rawCost = (item as any).product_cost ?? (item as any).productCost;
+  const productCost = Math.max(0, Number(rawCost ?? 0));
+  const productUnitPrice = productCost;
+  const apiGross = Number((item as any).gross_profit);
+  const hasApiGross = Number.isFinite(apiGross) && (item as any).gross_profit != null;
+  // Gross margin = (total_sales - refund - discount) - product_cost = net_sales - product_cost
+  const grossProfit = hasApiGross ? Math.max(0, apiGross) : Math.max(0, netSales - productCost);
 
   return {
     totalSales,
     refund,
     discount: Math.max(0, discount),
     netSales,
+    productCost,
+    productUnitPrice,
     grossProfit,
   };
 };
@@ -224,6 +233,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
               refund: normalized.refund,
               discount: normalized.discount,
               netSales: normalized.netSales,
+              productCost: normalized.productCost,
+              productUnitPrice: normalized.productUnitPrice,
               grossProfit: normalized.grossProfit,
             };
           })
@@ -384,7 +395,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           refund: row.refund,
           discount: row.discount,
           netSales: row.netSales,
-          productUnitPrice: 0,
+          productUnitPrice: row.productUnitPrice,
           grossProfit: row.grossProfit,
         })),
     [trendData]

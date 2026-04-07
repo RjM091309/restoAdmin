@@ -58,6 +58,10 @@ class LoyverseService {
 		/** @type {Map<number, string>} */
 		this.branchAccessTokens = new Map();
 		this._loadBranchAccessTokens();
+		/** @type {Map<string, number|null>} variant unit cost cache (Items API) */
+		this._variantUnitCostCache = new Map();
+		/** @type {boolean|null} */
+		this._orderItemsLineCostColumnCache = null;
 		/** When auto-sync runs for multiple branches, listed here (for status). */
 		this.autoSyncMultiBranchIds = null;
 		const envRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
@@ -66,7 +70,9 @@ class LoyverseService {
 			this.defaultBranchId,
 			envRaw != null && String(envRaw).trim() !== '' ? `"${String(envRaw).trim()}"` : 'unset'
 		);
+		// LINE_COST: receipt fields + Items API (default on). Set LOYVERSE_FETCH_VARIANT_COST=0 to skip HTTP. Token may need ITEMS_READ.
 	}
+
 
 	/** Re-read from process.env before each sync so server config matches .env after deploy. */
 	_refreshDefaultBranchIdFromEnv() {
@@ -848,6 +854,157 @@ class LoyverseService {
 		}
 	}
 
+	/** Loyverse receipt line: COGS line total from receipt (API uses cost_total / cost). Zero means "not set" — skip so recipe fallback can apply. */
+	_extractLoyverseLineAmountFromReceipt(lineItem, quantity) {
+		const q = Number(quantity) || 1;
+		const positive = (v) => {
+			const n = Number(v);
+			return Number.isFinite(n) && n > 0 ? n : null;
+		};
+		const totalCandidates = [
+			lineItem.cost_total,
+			lineItem.total_cost,
+			lineItem.total_cost_money,
+			lineItem.line_cost,
+			lineItem.line_total_cost,
+			lineItem.net_cost,
+			lineItem.gross_cost,
+			lineItem.money_cost,
+		];
+		for (const c of totalCandidates) {
+			const t = positive(c);
+			if (t != null) return t;
+		}
+		const unitCandidates = [
+			lineItem.cost,
+			lineItem.cost_money,
+			lineItem.cost_price,
+			lineItem.item_cost,
+			lineItem.variant_cost,
+			lineItem.default_cost,
+			lineItem.average_cost,
+			lineItem.unit_cost,
+			lineItem.purchase_price,
+		];
+		for (const u of unitCandidates) {
+			const uc = positive(u);
+			if (uc != null) return uc * q;
+		}
+		const v = lineItem.variant;
+		if (v && typeof v === 'object') {
+			const uc = positive(v.cost ?? v.cost_money ?? v.default_cost ?? v.average_cost);
+			if (uc != null) return uc * q;
+		}
+		return null;
+	}
+
+	_pickVariantUnitCostFromItemPayload(item, variantId) {
+		const variants = item?.variants || [];
+		for (const v of variants) {
+			const vid = v.variant_id ?? v.id;
+			if (variantId && String(vid) !== String(variantId)) continue;
+			const c = Number(v.cost ?? v.default_cost ?? v.average_cost);
+			if (Number.isFinite(c) && c > 0) return c;
+		}
+		return null;
+	}
+
+	/**
+	 * Items API fallback so LINE_COST matches Loyverse when receipt omits amounts. Default ON; set LOYVERSE_FETCH_VARIANT_COST=0 to disable.
+	 * Token needs ITEMS_READ (and RECEIPTS_READ) where applicable.
+	 */
+	async _fetchVariantUnitCostFromItemsApi(lineItem, branchId) {
+		const fetchOff =
+			process.env.LOYVERSE_FETCH_VARIANT_COST === '0' ||
+			String(process.env.LOYVERSE_FETCH_VARIANT_COST || '').toLowerCase() === 'false';
+		if (fetchOff) return null;
+
+		const variantId = lineItem.variant_id || lineItem.item_variant_id;
+		const itemId = lineItem.item_id;
+		const vCacheKey = variantId ? `v:${branchId}:${variantId}` : null;
+
+		if (vCacheKey && this._variantUnitCostCache.has(vCacheKey)) {
+			return this._variantUnitCostCache.get(vCacheKey);
+		}
+
+		const headers = this.getAuthHeaders(branchId);
+		const timeout = 15000;
+		const dbg = String(process.env.LOYVERSE_DEBUG_SYNC || '').toLowerCase() === '1';
+
+		if (itemId) {
+			try {
+				const res = await axios.get(`${this.baseURL}/items/${itemId}`, { headers, timeout });
+				const item = res.data?.item || res.data;
+				const unit = this._pickVariantUnitCostFromItemPayload(item, variantId);
+				if (unit != null) {
+					if (vCacheKey) this._variantUnitCostCache.set(vCacheKey, unit);
+					return unit;
+				}
+			} catch (e) {
+				if (dbg) console.warn('[Loyverse] items GET by item_id failed:', itemId, e?.message || e);
+			}
+		}
+
+		if (variantId) {
+			try {
+				const res = await axios.get(`${this.baseURL}/items`, {
+					headers,
+					timeout,
+					params: { variant_ids: variantId },
+				});
+				const items = res.data?.items || [];
+				for (const it of items) {
+					const unit = this._pickVariantUnitCostFromItemPayload(it, variantId);
+					if (unit != null) {
+						this._variantUnitCostCache.set(`v:${branchId}:${variantId}`, unit);
+						return unit;
+					}
+				}
+			} catch (e) {
+				if (dbg) console.warn('[Loyverse] items GET by variant_ids failed:', variantId, e?.message || e);
+			}
+		}
+
+		return null;
+	}
+
+	async _resolveLoyverseLineCostTotal(lineItem, quantity, branchId) {
+		const q = Number(quantity) || 1;
+		const fromReceipt = this._extractLoyverseLineAmountFromReceipt(lineItem, q);
+		if (fromReceipt != null) return fromReceipt;
+		const unit = await this._fetchVariantUnitCostFromItemsApi(lineItem, branchId);
+		if (unit != null) return unit * q;
+		return null;
+	}
+
+	/**
+	 * Only cache positive detection. Never cache "no column" — so after ALTER TABLE, next sync picks up LINE_COST.
+	 */
+	async _orderItemsHasLineCostColumn(connection) {
+		if (this._orderItemsLineCostColumnCache === true) {
+			return true;
+		}
+		try {
+			const [rows] = await connection.execute(
+				`SELECT 1 FROM information_schema.COLUMNS
+				 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_items' AND COLUMN_NAME = 'LINE_COST'
+				 LIMIT 1`
+			);
+			if (rows.length > 0) {
+				this._orderItemsLineCostColumnCache = true;
+				return true;
+			}
+			return false;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	/** Call after migrations add LINE_COST so inserts use the column without full process restart. */
+	invalidateLineCostColumnCache() {
+		this._orderItemsLineCostColumnCache = null;
+	}
+
 	/**
 	 * Insert order items from Loyverse line items
 	 */
@@ -856,6 +1013,7 @@ class LoyverseService {
 			return;
 		}
 
+		const hasLineCostCol = await this._orderItemsHasLineCostColumn(connection);
 		const itemsToInsert = [];
 
 		for (const lineItem of lineItems) {
@@ -864,116 +1022,63 @@ class LoyverseService {
 			const quantity = lineItem.quantity || 1;
 			const price = lineItem.price || 0;
 			const totalMoney = lineItem.total_money || (quantity * price);
+			const rawLineCost = await this._resolveLoyverseLineCostTotal(lineItem, quantity, branchId);
+			const lineCostTotal =
+				rawLineCost != null && Number(rawLineCost) > 0 ? Number(rawLineCost) : null;
 
-			// Find or auto-create matching menu item scoped to this branch
+			// Find matching menu item scoped to this branch
 			let menuItem = await this.findMenuItemByNameOrSku(itemName, sku, branchId);
 
-			if (!menuItem) {
-				try {
-					// Auto-create a menu entry for this branch so we don't need manual DB edits
-					const unitPrice = price || (quantity ? (totalMoney / quantity) : 0);
-					const encodedDt = new Date();
-
-					// Base params shared by both insert variants (with/without SKU column).
-					// Use 0 as fallback CATEGORY_ID to satisfy NOT NULL constraints on some servers.
-					const baseParams = [
-						branchId,      // BRANCH_ID
-						0,             // CATEGORY_ID (unknown, can be reassigned later; 0 = "Uncategorized")
-						itemName,      // MENU_NAME
-						null,          // MENU_DESCRIPTION
-						null,          // MENU_IMG
-						unitPrice,     // MENU_PRICE
-						1,             // IS_AVAILABLE
-						1,             // ACTIVE
-						0,             // ENCODED_BY (system)
-						encodedDt,     // ENCODED_DT
-					];
-
-					try {
-						// Prefer insert that includes SKU column when it exists
-						const [result] = await connection.execute(
-							`INSERT INTO menu (
-								BRANCH_ID,
-								CATEGORY_ID,
-								MENU_NAME,
-								MENU_DESCRIPTION,
-								MENU_IMG,
-								MENU_PRICE,
-								IS_AVAILABLE,
-								ACTIVE,
-								ENCODED_BY,
-								ENCODED_DT,
-								SKU
-							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-							[...baseParams, sku || null]
-						);
-						const insertedId = result.insertId;
-						menuItem = {
-							IDNo: insertedId,
-							MENU_NAME: itemName,
-							MENU_PRICE: unitPrice,
-							BRANCH_ID: branchId,
-						};
-						console.log(`[Loyverse Sync] Auto-created menu item "${itemName}" for branch ${branchId} with SKU ${sku || 'NULL'}`);
-					} catch (err) {
-						// If SKU column does not exist yet, retry without it to keep backward compatibility
-						if (String(err.message || '').includes('Unknown column') && String(err.message || '').includes('SKU')) {
-							const [resultFallback] = await connection.execute(
-								`INSERT INTO menu (
-									BRANCH_ID,
-									CATEGORY_ID,
-									MENU_NAME,
-									MENU_DESCRIPTION,
-									MENU_IMG,
-									MENU_PRICE,
-									IS_AVAILABLE,
-									ACTIVE,
-									ENCODED_BY,
-									ENCODED_DT
-								) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-								baseParams
-							);
-							const insertedId = resultFallback.insertId;
-							menuItem = {
-								IDNo: insertedId,
-								MENU_NAME: itemName,
-								MENU_PRICE: unitPrice,
-								BRANCH_ID: branchId,
-							};
-							console.log(`[Loyverse Sync] Auto-created menu item "${itemName}" for branch ${branchId} (no SKU column)`);
-						} else {
-							throw err;
-						}
-					}
-				} catch (createErr) {
-					console.error(`[Loyverse Sync] Failed to auto-create menu item "${itemName}" (SKU: ${sku}):`, createErr.message);
-				}
-			}
+			// IMPORTANT: Do not auto-create menu items from Loyverse.
+			// Menu master data is managed by admins; Loyverse sync will skip unmapped items.
 
 			if (menuItem) {
-				itemsToInsert.push([
-					orderId,
-					menuItem.IDNo,
-					quantity,
-					price,
-					totalMoney,
-					1, // STATUS: 1=READY (already completed in Loyverse)
-					0, // ENCODED_BY: System user
-					new Date()
-				]);
+				if (hasLineCostCol) {
+					itemsToInsert.push([
+						orderId,
+						menuItem.IDNo,
+						quantity,
+						price,
+						totalMoney,
+						lineCostTotal,
+						1,
+						0,
+						new Date()
+					]);
+				} else {
+					itemsToInsert.push([
+						orderId,
+						menuItem.IDNo,
+						quantity,
+						price,
+						totalMoney,
+						1,
+						0,
+						new Date()
+					]);
+				}
 			} else {
 				// Log unmapped items for manual review
 				console.warn(`[Loyverse Sync] Menu item not found: "${itemName}" (SKU: ${sku})`);
 				
-				// Optionally create a placeholder or skip
-				// For now, we'll skip unmapped items
+				// Skip unmapped items
 			}
 		}
 
 		if (itemsToInsert.length > 0) {
-			try {
-				await connection.query(
-					`INSERT INTO order_items (
+			const insertCols = hasLineCostCol
+				? `INSERT INTO order_items (
+						ORDER_ID,
+						MENU_ID,
+						QTY,
+						UNIT_PRICE,
+						LINE_TOTAL,
+						LINE_COST,
+						STATUS,
+						ENCODED_BY,
+						ENCODED_DT
+					) VALUES ?`
+				: `INSERT INTO order_items (
 						ORDER_ID,
 						MENU_ID,
 						QTY,
@@ -982,9 +1087,9 @@ class LoyverseService {
 						STATUS,
 						ENCODED_BY,
 						ENCODED_DT
-					) VALUES ?`,
-					[itemsToInsert]
-				);
+					) VALUES ?`;
+			try {
+				await connection.query(insertCols, [itemsToInsert]);
 			} catch (orderItemsErr) {
 				const msg = String(orderItemsErr.message || '');
 				if (msg.includes("IDNo") && msg.includes("default")) {
@@ -993,8 +1098,20 @@ class LoyverseService {
 					);
 					let nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
 					const rowsWithId = itemsToInsert.map((row) => [nextId++, ...row]);
-					await connection.query(
-						`INSERT INTO order_items (
+					const insertColsWithId = hasLineCostCol
+						? `INSERT INTO order_items (
+							IDNo,
+							ORDER_ID,
+							MENU_ID,
+							QTY,
+							UNIT_PRICE,
+							LINE_TOTAL,
+							LINE_COST,
+							STATUS,
+							ENCODED_BY,
+							ENCODED_DT
+						) VALUES ?`
+						: `INSERT INTO order_items (
 							IDNo,
 							ORDER_ID,
 							MENU_ID,
@@ -1004,9 +1121,8 @@ class LoyverseService {
 							STATUS,
 							ENCODED_BY,
 							ENCODED_DT
-						) VALUES ?`,
-						[rowsWithId]
-					);
+						) VALUES ?`;
+					await connection.query(insertColsWithId, [rowsWithId]);
 				} else {
 					throw orderItemsErr;
 				}
