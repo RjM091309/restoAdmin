@@ -157,9 +157,22 @@ class LoyverseController {
 	static async startAutoSync(req, res) {
 		try {
 			const branchId = req.body.branch_id || req.query.branch_id || null;
+			const branchIdsRaw = req.body.branch_ids ?? req.body.branchIds ?? req.query.branch_ids ?? req.query.branchIds ?? null;
 			const interval = parseInt(req.body.interval) || null;
+			console.log('[LoyverseController] startAutoSync request', { branchId, branchIdsRaw, interval });
 
-			loyverseService.startAutoSync(branchId, interval);
+			const branchIds = Array.isArray(branchIdsRaw)
+				? branchIdsRaw
+				: (typeof branchIdsRaw === 'string'
+					? branchIdsRaw.split(',').map((s) => parseInt(String(s).trim(), 10))
+					: []);
+
+			const cleanIds = (branchIds || []).filter((n) => Number.isFinite(n));
+			if (cleanIds.length > 1) {
+				loyverseService.startAutoSyncMulti(cleanIds, interval);
+			} else {
+				loyverseService.startAutoSync(branchId ?? (cleanIds.length === 1 ? cleanIds[0] : null), interval);
+			}
 			
 			return ApiResponse.success(res, {
 				message: 'Auto-sync started successfully',
@@ -176,7 +189,23 @@ class LoyverseController {
 	 */
 	static async stopAutoSync(req, res) {
 		try {
-			loyverseService.stopAutoSync();
+			const branchId = req.body.branch_id || req.query.branch_id || null;
+			const branchIdsRaw = req.body.branch_ids ?? req.body.branchIds ?? req.query.branch_ids ?? req.query.branchIds ?? null;
+			const branchIds = Array.isArray(branchIdsRaw)
+				? branchIdsRaw
+				: (typeof branchIdsRaw === 'string'
+					? branchIdsRaw.split(',').map((s) => parseInt(String(s).trim(), 10))
+					: []);
+			const cleanIds = (branchIds || []).filter((n) => Number.isFinite(n));
+			console.log('[LoyverseController] stopAutoSync request', { branchId, cleanIds });
+
+			if (cleanIds.length > 0) {
+				for (const bid of cleanIds) {
+					loyverseService.stopAutoSync(bid);
+				}
+			} else {
+				loyverseService.stopAutoSync(branchId);
+			}
 			return ApiResponse.success(res, { message: 'Auto-sync stopped successfully' }, 'Auto-sync stopped');
 		} catch (error) {
 			return ApiResponse.error(res, error.message, 500);

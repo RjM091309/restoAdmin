@@ -24,15 +24,43 @@ import {
     Eye,
     EyeOff,
     RefreshCw,
+    Calendar,
     User as UserIcon,
     FileText,
     QrCode,
 } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
+
+const toDate = (s: string): Date | null => (s ? new Date(s) : null);
+const toYYYYMMDD = (d: Date): string =>
+    d.getFullYear() +
+    '-' +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    '-' +
+    String(d.getDate()).padStart(2, '0');
+const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+const localeForLanguage = (lng: string) => {
+    const base = String(lng || 'en').split('-')[0];
+    if (base === 'ja') return 'ja-JP';
+    if (base === 'ko') return 'ko-KR';
+    if (base === 'zh') return 'zh-CN';
+    return 'en-US';
+};
+const getDefaultSyncDateRange = () => {
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    return {
+        start: toYYYYMMDD(monthStart),
+        end: toYYYYMMDD(today),
+    };
+};
 
 // ─── Shared Types & Helpers ────────────────────────────
 
@@ -715,14 +743,16 @@ const VersionInfoView: React.FC<{ onBack: () => void; t: (key: string) => string
 // ═══════════════════════════════════════════════════════
 
 const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
+    const { i18n } = useTranslation();
+    const defaultRange = getDefaultSyncDateRange();
     const [toast, setToast] = useState<Toast>(null);
     const [running, setRunning] = useState(false);
-    const [statusLoading, setStatusLoading] = useState(false);
     const [syncStatus, setSyncStatus] = useState<any>(null);
     const [branchIds, setBranchIds] = useState<string>('2,9');
-    const [startDate, setStartDate] = useState<string>('2026-04-01');
-    const [endDate, setEndDate] = useState<string>('2026-04-06');
+    const [startDate, setStartDate] = useState<string>(defaultRange.start);
+    const [endDate, setEndDate] = useState<string>(defaultRange.end);
     const [lastResult, setLastResult] = useState<any>(null);
+    const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
 
     useEffect(() => {
         if (toast) { const tt = setTimeout(() => setToast(null), 3000); return () => clearTimeout(tt); }
@@ -753,6 +783,13 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         }
     };
 
+    const getEffectiveBranchIdsForActions = () => {
+        const bids = parseBranchIds(branchIds);
+        if (bids.length > 0) return bids;
+        const urlBid = readBranchIdFromUrl();
+        return urlBid ? [urlBid] : [];
+    };
+
     // Default branch behavior:
     // - If URL has ?branchId=9, then Data Sync uses ONLY that branch by default.
     // - If no URL branch, try /api/me branch_id (branch user login).
@@ -778,7 +815,6 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     }, []);
 
     const refreshStatus = useCallback(async () => {
-        setStatusLoading(true);
         try {
             const res = await fetch('/api/loyverse/status', { headers: authHeaders() });
             const json = await res.json().catch(() => null);
@@ -789,8 +825,6 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             setSyncStatus(json?.data || null);
         } catch {
             setToast({ type: 'error', message: t('sales_analytics.network_error') });
-        } finally {
-            setStatusLoading(false);
         }
     }, []);
 
@@ -808,17 +842,22 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     const stopAutoSync = async () => {
         setRunning(true);
         try {
+            const bids = getEffectiveBranchIdsForActions();
             const res = await fetch('/api/loyverse/auto-sync/stop', {
                 method: 'POST',
                 headers: authHeaders(),
-                body: JSON.stringify({}),
+                body: JSON.stringify(
+                    bids.length > 1
+                        ? { branch_ids: bids }
+                        : { branch_id: bids[0] || null }
+                ),
             });
             const json = await res.json().catch(() => null);
             if (!res.ok || !json?.success) {
                 setToast({ type: 'error', message: json?.message || 'Failed to stop auto-sync' });
                 return;
             }
-            setToast({ type: 'success', message: t('system_settings.stop') + ' ✓' });
+            setToast({ type: 'success', message: t('system_settings.stop') });
             await refreshStatus();
         } catch {
             setToast({ type: 'error', message: t('sales_analytics.network_error') });
@@ -830,18 +869,23 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     const startAutoSync = async () => {
         setRunning(true);
         try {
-            // Start auto-sync using server defaults (env-configured branches/interval).
+            // Start auto-sync for the currently selected branch/branches.
+            const bids = getEffectiveBranchIdsForActions();
             const res = await fetch('/api/loyverse/auto-sync/start', {
                 method: 'POST',
                 headers: authHeaders(),
-                body: JSON.stringify({}),
+                body: JSON.stringify(
+                    bids.length > 1
+                        ? { branch_ids: bids }
+                        : { branch_id: bids[0] || null }
+                ),
             });
             const json = await res.json().catch(() => null);
             if (!res.ok || !json?.success) {
                 setToast({ type: 'error', message: json?.message || 'Failed to start auto-sync' });
                 return;
             }
-            setToast({ type: 'success', message: t('system_settings.start') + ' ✓' });
+            setToast({ type: 'success', message: t('system_settings.start') });
             await refreshStatus();
         } catch {
             setToast({ type: 'error', message: t('sales_analytics.network_error') });
@@ -891,13 +935,25 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                 results.push({ branch_id: bid, ...json?.data });
             }
             setLastResult(results);
-            setToast({ type: 'success', message: t('system_settings.sync_now') + ' ✓' });
+            setToast({ type: 'success', message: t('system_settings.sync_now') });
             await refreshStatus();
         } catch {
             setToast({ type: 'error', message: t('sales_analytics.network_error') });
         } finally {
             setRunning(false);
         }
+    };
+
+    const pickerValue: [Date | null, Date | null] = [toDate(startDate), toDate(endDate)];
+    const handleDateRangeChange = (
+        update: [Date | null, Date | null] | null,
+        options?: { closeOnComplete?: boolean }
+    ) => {
+        const [s, e] = update ?? [null, null];
+        setStartDate(s ? toYYYYMMDD(s) : '');
+        setEndDate(e ? toYYYYMMDD(e) : '');
+        const closeOnComplete = options?.closeOnComplete ?? true;
+        if (closeOnComplete && s && e) setDateDropdownOpen(false);
     };
 
     return (
@@ -933,15 +989,9 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                                 {syncStatus?.isSyncing ? 'Running' : 'Idle'}
                                 {syncStatus?.autoSyncActive ? ' · Auto-sync ON' : ' · Auto-sync OFF'}
                             </p>
+                        
                         </div>
-                        <button
-                            type="button"
-                            onClick={refreshStatus}
-                            disabled={running || statusLoading}
-                            className="px-3 py-2 rounded-xl text-xs font-bold bg-gray-50 border border-gray-200 text-brand-text hover:bg-gray-100 transition-colors disabled:opacity-50"
-                        >
-                            {statusLoading ? '...' : 'Refresh'}
-                        </button>
+                        
                     </div>
 
                     {syncStatus?.isSyncing && (
@@ -975,6 +1025,7 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             </button>
                         </div>
                     )}
+
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -988,29 +1039,95 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
                             placeholder="e.g. 2,9"
                         />
-                        <p className="mt-2 text-[11px] text-brand-muted font-medium">
-                            Tip: separate multiple branches with commas (e.g. <span className="font-mono">2,9</span>). This runs sequentially.
-                        </p>
+                       
                     </div>
-                    <div>
-                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Start date</label>
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            disabled={running}
-                            className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
-                        />
-                    </div>
-                    <div>
-                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">End date</label>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            disabled={running}
-                            className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
-                        />
+                    <div className="col-span-2">
+                        <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Date range</label>
+                        <div className="relative mt-2">
+                            <button
+                                type="button"
+                                onClick={() => setDateDropdownOpen((o) => !o)}
+                                disabled={running}
+                                className={cn(
+                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-colors",
+                                    running
+                                        ? "bg-gray-50 border-gray-200 text-brand-muted cursor-not-allowed"
+                                        : "bg-white border-gray-200 text-brand-text hover:bg-gray-50 cursor-pointer"
+                                )}
+                            >
+                                <span className="truncate">
+                                    {startDate && endDate ? `${startDate} - ${endDate}` : 'Select date range'}
+                                </span>
+                                <Calendar size={18} className="text-brand-muted shrink-0" />
+                            </button>
+
+                            {dateDropdownOpen && (
+                                <>
+                                    <div
+                                        className="fixed inset-0 z-[80]"
+                                        onClick={() => setDateDropdownOpen(false)}
+                                        aria-hidden
+                                    />
+                                    <div className="absolute top-full left-0 mt-2 z-[90] bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+                                        <DatePicker
+                                            inline
+                                            selectsRange
+                                            startDate={pickerValue[0]}
+                                            endDate={pickerValue[1]}
+                                            openToDate={pickerValue[0] ?? undefined}
+                                            onChange={(update) => handleDateRangeChange(update, { closeOnComplete: true })}
+                                            dateFormat="MMM d, yyyy"
+                                            calendarClassName="react-datepicker-material"
+                                            isClearable
+                                            renderCustomHeader={({
+                                                monthDate,
+                                                decreaseMonth,
+                                                increaseMonth,
+                                                prevMonthButtonDisabled,
+                                                nextMonthButtonDisabled,
+                                            }) => {
+                                                const monthLabel = monthDate.toLocaleDateString(localeForLanguage(i18n.language), {
+                                                    month: 'long',
+                                                    year: 'numeric',
+                                                });
+
+                                                return (
+                                                    <div className="flex items-center justify-between px-3 py-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={decreaseMonth}
+                                                            disabled={prevMonthButtonDisabled}
+                                                            className={cn(
+                                                                'p-2 rounded-lg transition-colors',
+                                                                prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                                            )}
+                                                            aria-label="Previous month"
+                                                        >
+                                                            <ArrowLeft size={18} className="text-brand-muted" />
+                                                        </button>
+
+                                                        <div className="text-sm font-bold text-brand-text">{monthLabel}</div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={increaseMonth}
+                                                            disabled={nextMonthButtonDisabled}
+                                                            className={cn(
+                                                                'p-2 rounded-lg transition-colors',
+                                                                nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                                            )}
+                                                            aria-label="Next month"
+                                                        >
+                                                            <ArrowLeft size={18} className="text-brand-muted rotate-180" />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            }}
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
 
