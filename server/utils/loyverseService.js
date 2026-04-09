@@ -437,16 +437,20 @@ class LoyverseService {
 
 	/**
 	 * Loyverse receipt totals for billing (analytics uses billing.AMOUNT_PAID with orders.DISCOUNT_AMOUNT).
-	 * Uses total_money as source of truth when payment split sums disagree or payments are missing.
+	 * Prefer actual payment sums; when missing, fall back to net collectible (total_money - total_discount).
 	 */
 	_resolveLoyversePaymentTotals(receipt) {
 		const totalMoney = Number(receipt.total_money) || 0;
+		const totalDiscount = Number(receipt.total_discount) || 0;
+		const netPaidExpected = Math.max(0, totalMoney - totalDiscount);
 		let totalPaid = 0;
 		if (receipt.payments && receipt.payments.length > 0) {
 			totalPaid = receipt.payments.reduce((sum, p) => sum + (Number(p.money_amount) || 0), 0);
 		}
-		if (Math.abs(totalPaid - totalMoney) > 0.02) {
-			totalPaid = totalMoney;
+		// When Loyverse omits/underreports split payments in payload, avoid inflating paid totals:
+		// use net paid expectation instead of gross total.
+		if (!(Number.isFinite(totalPaid) && totalPaid > 0)) {
+			totalPaid = netPaidExpected > 0 ? netPaidExpected : totalMoney;
 		}
 		const paymentMethod =
 			receipt.payments && receipt.payments.length > 0

@@ -1021,8 +1021,35 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                 }
                 results.push({ branch_id: bid, ...json?.data });
             }
-            setLastResult(results);
-            setToast({ type: 'success', message: t('system_settings.sync_now') });
+            setLastResult({
+                success: true,
+                message: 'Sync range completed successfully',
+                data: results,
+            });
+
+            // Auto-enable incremental auto-sync right after a successful date-range resync.
+            try {
+                const startRes = await fetch('/api/loyverse/auto-sync/start', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify(
+                        bids.length > 1
+                            ? { branch_ids: bids }
+                            : { branch_id: bids[0] || null }
+                    ),
+                });
+                const startJson = await startRes.json().catch(() => null);
+                if (!startRes.ok || !startJson?.success) {
+                    setToast({ type: 'error', message: startJson?.message || 'Resync completed, but failed to start auto-sync.' });
+                    await refreshStatus();
+                    return;
+                }
+                setToast({ type: 'success', message: 'Sync completed. Auto-sync started.' });
+            } catch {
+                setToast({ type: 'error', message: 'Sync completed, but auto-sync could not be started.' });
+                await refreshStatus();
+                return;
+            }
             await refreshStatus();
         } catch (error: any) {
             if (error?.name === 'AbortError') {
