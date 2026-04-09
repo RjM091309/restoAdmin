@@ -112,6 +112,13 @@ class LoyverseController {
 				return ApiResponse.error(res, 'created_at_min and created_at_max are required', 400);
 			}
 
+			console.log('[Loyverse Sync] sync-range HTTP accepted', {
+				branchId: branchId ?? '(default from env)',
+				limit,
+				created_at_min,
+				created_at_max,
+			});
+
 			let cancelled = false;
 			const onAborted = () => { cancelled = true; };
 			req.on('aborted', onAborted);
@@ -139,6 +146,9 @@ class LoyverseController {
 			}, 'Sync range completed successfully');
 		} catch (error) {
 			if (LoyverseController.isSyncInProgressError(error)) {
+				console.log('[Loyverse Sync] sync-range skipped: sync already in progress for this branch', {
+					branchId: req.body.branch_id || req.query.branch_id || null,
+				});
 				const status = loyverseService.getSyncStatus();
 				return ApiResponse.success(res, {
 					alreadyRunning: true,

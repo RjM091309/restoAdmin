@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -753,10 +753,17 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
     const [endDate, setEndDate] = useState<string>(defaultRange.end);
     const [lastResult, setLastResult] = useState<any>(null);
     const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
+    const [rangeRunning, setRangeRunning] = useState(false);
+    const syncRangeAbortRef = useRef<AbortController | null>(null);
 
     useEffect(() => {
         if (toast) { const tt = setTimeout(() => setToast(null), 3000); return () => clearTimeout(tt); }
     }, [toast]);
+    useEffect(() => {
+        return () => {
+            syncRangeAbortRef.current?.abort();
+        };
+    }, []);
 
     const toIsoMin = (d: string) => `${d}T00:00:00.000Z`;
     const toIsoMax = (d: string) => `${d}T23:59:59.999Z`;
@@ -788,6 +795,81 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         if (bids.length > 0) return bids;
         const urlBid = readBranchIdFromUrl();
         return urlBid ? [urlBid] : [];
+    };
+    const selectedBranchIds = getEffectiveBranchIdsForActions();
+    const syncingBranchIds = Array.isArray(syncStatus?.syncingBranches)
+        ? syncStatus.syncingBranches
+            .map((n: any) => Number(n))
+            .filter((n: number) => Number.isFinite(n))
+        : [];
+    const autoSyncBranchIds = Array.isArray(syncStatus?.autoSync?.branchIds)
+        ? syncStatus.autoSync.branchIds
+            .map((n: any) => Number(n))
+            .filter((n: number) => Number.isFinite(n))
+        : [];
+    const isSelectedBranchSyncing = selectedBranchIds.length > 0
+        ? selectedBranchIds.some((id) => syncingBranchIds.includes(id))
+        : !!syncStatus?.isSyncing;
+    const isSelectedBranchAutoSyncActive = selectedBranchIds.length > 0
+        ? selectedBranchIds.some((id) => autoSyncBranchIds.includes(id))
+        : !!syncStatus?.autoSyncActive;
+    const activeDateRangeByBranch = (syncStatus?.activeDateRangeByBranch && typeof syncStatus.activeDateRangeByBranch === 'object')
+        ? syncStatus.activeDateRangeByBranch
+        : {};
+    const activeSyncMetaByBranch = (syncStatus?.activeSyncMetaByBranch && typeof syncStatus.activeSyncMetaByBranch === 'object')
+        ? syncStatus.activeSyncMetaByBranch
+        : {};
+    const activeRangeBranchId = selectedBranchIds.find((id) => !!activeDateRangeByBranch[String(id)]);
+    const activeSelectedSyncRange = activeRangeBranchId != null ? activeDateRangeByBranch[String(activeRangeBranchId)] : null;
+    const activeMetaBranchId = selectedBranchIds.find((id) => !!activeSyncMetaByBranch[String(id)]);
+    const activeSelectedSyncMeta = activeMetaBranchId != null ? activeSyncMetaByBranch[String(activeMetaBranchId)] : null;
+    const isSelectedBranchDateRangeSyncing = !!(
+        isSelectedBranchSyncing &&
+        (
+            activeSelectedSyncMeta?.source === 'date_range' ||
+            activeSelectedSyncRange ||
+            rangeRunning
+        )
+    );
+    const isoToYYYYMMDD = (v: any) => {
+        if (!v) return '';
+        const d = new Date(v);
+        return Number.isNaN(d.getTime()) ? '' : toYYYYMMDD(d);
+    };
+    const displayStartDate = (isSelectedBranchSyncing && (activeSelectedSyncMeta?.created_at_min || activeSelectedSyncRange?.created_at_min))
+        ? isoToYYYYMMDD(activeSelectedSyncMeta?.created_at_min || activeSelectedSyncRange?.created_at_min)
+        : startDate;
+    const displayEndDate = (isSelectedBranchSyncing && (activeSelectedSyncMeta?.created_at_max || activeSelectedSyncRange?.created_at_max))
+        ? isoToYYYYMMDD(activeSelectedSyncMeta?.created_at_max || activeSelectedSyncRange?.created_at_max)
+        : endDate;
+
+    const progressBranchId =
+        selectedBranchIds.find((id) => syncingBranchIds.includes(id)) ?? selectedBranchIds[0];
+    const syncProgress =
+        progressBranchId != null && syncStatus?.syncProgressByBranch && typeof syncStatus.syncProgressByBranch === 'object'
+            ? (syncStatus.syncProgressByBranch as Record<string, any>)[String(progressBranchId)]
+            : null;
+    const progressPhase = syncProgress?.phase as string | undefined;
+    const receiptsThisPage = Number(syncProgress?.receiptsThisPage) || 0;
+    const processedInPage = Number(syncProgress?.processedInPage) || 0;
+    const totalFetchedProg = Number(syncProgress?.totalFetched) || 0;
+    const progressHasMore = syncProgress?.hasMore === true;
+    const progressPage = Number(syncProgress?.page) || 0;
+    const progressElapsedMs = Number(syncProgress?.elapsedMs) || 0;
+    const progressIndeterminate =
+        progressPhase === 'starting' ||
+        progressPhase === 'fetching_api' ||
+        (progressPhase === 'processing_receipts' && receiptsThisPage === 0);
+    const pageProgressPct =
+        !progressIndeterminate && receiptsThisPage > 0
+            ? Math.min(100, Math.round((processedInPage / receiptsThisPage) * 1000) / 10)
+            : 0;
+    const formatElapsed = (ms: number) => {
+        if (!Number.isFinite(ms) || ms < 0) return '0:00';
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return `${m}:${String(r).padStart(2, '0')}`;
     };
 
     // Default branch behavior:
@@ -830,14 +912,15 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
 
     useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
-    // Auto-refresh status while a sync is running, so users don't have to spam refresh.
+    // Auto-refresh status while a sync is running (1s while syncing for progress bar smoothness).
     useEffect(() => {
-        if (!syncStatus?.isSyncing) return;
+        if (!syncStatus?.isSyncing && !syncStatus?.autoSyncActive) return;
+        const ms = syncStatus?.isSyncing ? 1000 : 2500;
         const id = window.setInterval(() => {
             refreshStatus();
-        }, 2000);
+        }, ms);
         return () => window.clearInterval(id);
-    }, [syncStatus?.isSyncing, refreshStatus]);
+    }, [syncStatus?.isSyncing, syncStatus?.autoSyncActive, refreshStatus]);
 
     const stopAutoSync = async () => {
         setRunning(true);
@@ -905,13 +988,17 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             return;
         }
         setRunning(true);
+        setRangeRunning(true);
         setLastResult(null);
         try {
             const results: any[] = [];
             for (const bid of bids) {
+                const controller = new AbortController();
+                syncRangeAbortRef.current = controller;
                 const res = await fetch('/api/loyverse/sync-range', {
                     method: 'POST',
                     headers: authHeaders(),
+                    signal: controller.signal,
                     body: JSON.stringify({
                         branch_id: bid,
                         created_at_min: toIsoMin(startDate),
@@ -937,9 +1024,47 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
             setLastResult(results);
             setToast({ type: 'success', message: t('system_settings.sync_now') });
             await refreshStatus();
+        } catch (error: any) {
+            if (error?.name === 'AbortError') {
+                setToast({ type: 'success', message: 'Sync stopped by user.' });
+                await refreshStatus();
+                return;
+            }
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            syncRangeAbortRef.current = null;
+            setRangeRunning(false);
+            setRunning(false);
+        }
+    };
+
+    const stopSelectedBranchSync = async () => {
+        setRunning(true);
+        try {
+            // Cancel local request immediately (same tab), then request server-side stop (all tabs/browsers).
+            syncRangeAbortRef.current?.abort();
+            const bids = getEffectiveBranchIdsForActions();
+            const res = await fetch('/api/loyverse/auto-sync/stop', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(
+                    bids.length > 1
+                        ? { branch_ids: bids }
+                        : { branch_id: bids[0] || null }
+                ),
+            });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.success) {
+                setToast({ type: 'error', message: json?.message || 'Failed to stop sync' });
+                return;
+            }
+            setToast({ type: 'success', message: 'Stop requested. Sync will halt shortly.' });
+            await refreshStatus();
         } catch {
             setToast({ type: 'error', message: t('sales_analytics.network_error') });
         } finally {
+            syncRangeAbortRef.current = null;
+            setRangeRunning(false);
             setRunning(false);
         }
     };
@@ -986,18 +1111,18 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                         <div className="min-w-0">
                             <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">Sync status</p>
                             <p className="text-sm font-bold text-brand-text mt-1">
-                                {syncStatus?.isSyncing ? 'Running' : 'Idle'}
-                                {syncStatus?.autoSyncActive ? ' · Auto-sync ON' : ' · Auto-sync OFF'}
+                                {isSelectedBranchSyncing ? 'Running' : 'Idle'}
+                                {(isSelectedBranchAutoSyncActive && !isSelectedBranchDateRangeSyncing) ? ' · Auto-sync ON' : ' · Auto-sync OFF'}
                             </p>
                         
                         </div>
                         
                     </div>
 
-                    {syncStatus?.isSyncing && (
+                    {isSelectedBranchAutoSyncActive && !isSelectedBranchDateRangeSyncing && (
                         <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
                             <p className="text-xs text-amber-800 font-semibold">
-                                Sync is running.
+                                {isSelectedBranchSyncing ? 'Sync is running.' : 'Auto-sync is ON.'}
                             </p>
                             <button
                                 type="button"
@@ -1005,12 +1130,12 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                                 disabled={running}
                                 className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
                             >
-                                Stop
+                                Stop auto-sync
                             </button>
                         </div>
                     )}
 
-                    {!syncStatus?.isSyncing && !syncStatus?.autoSyncActive && (
+                    {!isSelectedBranchSyncing && !isSelectedBranchAutoSyncActive && (
                         <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
                             <p className="text-xs text-emerald-800 font-semibold">
                                 Auto-sync is OFF.
@@ -1028,35 +1153,78 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
 
                 </div>
 
+                {/* Page-level progress: date range resync only (not incremental / auto-sync). */}
+                {isSelectedBranchDateRangeSyncing && syncProgress && (
+                    <div className="p-4 rounded-2xl border border-gray-100 bg-white space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">Date range resync</p>
+                            <span className="text-[10px] font-mono text-slate-600 tabular-nums">
+                                {formatElapsed(progressElapsedMs)}
+                            </span>
+                        </div>
+                        <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                            {progressIndeterminate ? (
+                                <div className="h-full w-[38%] rounded-full bg-brand-orange/90 animate-pulse" />
+                            ) : (
+                                <div
+                                    className="h-full rounded-full bg-brand-orange transition-[width] duration-300 ease-out"
+                                    style={{ width: `${pageProgressPct}%` }}
+                                />
+                            )}
+                        </div>
+                        {progressIndeterminate ? (
+                            <p className="text-[11px] text-slate-600 font-medium">
+                                {progressPhase === 'fetching_api'
+                                    ? `Fetching page ${progressPage || 1} from Loyverse…`
+                                    : 'Preparing sync…'}
+                            </p>
+                        ) : (
+                            <p className="text-[11px] text-slate-600 font-medium leading-snug">
+                                Branch {progressBranchId} · Page {progressPage} ·{' '}
+                                <span className="font-bold text-brand-text">
+                                    {processedInPage}/{receiptsThisPage}
+                                </span>{' '}
+                                receipts on this page ·{' '}
+                                <span className="font-bold text-brand-text">{totalFetchedProg}</span> fetched total
+                                {progressHasMore ? ' · more pages after this' : receiptsThisPage > 0 && processedInPage >= receiptsThisPage ? ' · finishing…' : ''}
+                            </p>
+                        )}
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Overall completion % is not available (Loyverse does not return total count). The bar shows this page only; it resets each new page.
+                        </p>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                         <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Branch IDs</label>
                         <input
                             value={branchIds}
                             onChange={(e) => setBranchIds(e.target.value)}
-                            disabled={running}
+                            disabled={running || isSelectedBranchSyncing}
                             inputMode="numeric"
                             className="mt-2 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-sm font-medium text-brand-text outline-none focus:ring-2 focus:ring-brand-orange/20"
                             placeholder="e.g. 2,9"
                         />
                        
                     </div>
+                    {!isSelectedBranchAutoSyncActive && (
                     <div className="col-span-2">
                         <label className="text-xs font-bold text-brand-muted uppercase tracking-widest">Date range</label>
                         <div className="relative mt-2">
                             <button
                                 type="button"
                                 onClick={() => setDateDropdownOpen((o) => !o)}
-                                disabled={running}
+                                disabled={running || isSelectedBranchSyncing}
                                 className={cn(
                                     "w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-medium transition-colors",
-                                    running
+                                    (running || isSelectedBranchSyncing)
                                         ? "bg-gray-50 border-gray-200 text-brand-muted cursor-not-allowed"
                                         : "bg-white border-gray-200 text-brand-text hover:bg-gray-50 cursor-pointer"
                                 )}
                             >
                                 <span className="truncate">
-                                    {startDate && endDate ? `${startDate} - ${endDate}` : 'Select date range'}
+                                    {displayStartDate && displayEndDate ? `${displayStartDate} - ${displayEndDate}` : 'Select date range'}
                                 </span>
                                 <Calendar size={18} className="text-brand-muted shrink-0" />
                             </button>
@@ -1129,22 +1297,40 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                             )}
                         </div>
                     </div>
+                    )}
                 </div>
 
-                <button
-                    type="button"
-                    onClick={runSyncRange}
-                    disabled={running || !!syncStatus?.isSyncing}
-                    className={cn(
-                        "w-full h-11 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2",
-                        (running || !!syncStatus?.isSyncing) ? "bg-gray-100 text-brand-muted cursor-not-allowed" : "bg-brand-orange text-white hover:bg-brand-orange/90 cursor-pointer"
+                {!isSelectedBranchAutoSyncActive && (
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onClick={runSyncRange}
+                        disabled={running || isSelectedBranchSyncing}
+                        className={cn(
+                            "h-11 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2",
+                            isSelectedBranchSyncing ? "col-span-1" : "col-span-2",
+                            (running || isSelectedBranchSyncing) ? "bg-gray-100 text-brand-muted cursor-not-allowed" : "bg-brand-orange text-white hover:bg-brand-orange/90 cursor-pointer"
+                        )}
+                    >
+                        {(running || isSelectedBranchSyncing)
+                            ? <Loader2 size={16} className="animate-spin" />
+                            : <RefreshCw size={16} />}
+                        {(running || isSelectedBranchSyncing) ? t('system_settings.syncing') : t('system_settings.sync_now')}
+                    </button>
+                    {isSelectedBranchSyncing && (
+                        <button
+                            type="button"
+                            onClick={stopSelectedBranchSync}
+                            disabled={running && !rangeRunning}
+                            className="col-span-1 h-11 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2 bg-amber-600 text-white hover:bg-amber-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Stop sync
+                        </button>
                     )}
-                >
-                    {running ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                    {(running || !!syncStatus?.isSyncing) ? t('system_settings.syncing') : t('system_settings.sync_now')}
-                </button>
+                </div>
+                )}
 
-                {lastResult && (
+                {!isSelectedBranchAutoSyncActive && lastResult && (
                     <div className="p-4 rounded-2xl border border-gray-100 bg-white">
                         <p className="text-xs font-bold text-brand-muted uppercase tracking-widest mb-2">Result</p>
                         <pre className="text-[11px] leading-relaxed text-slate-700 whitespace-pre-wrap break-words">

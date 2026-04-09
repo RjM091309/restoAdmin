@@ -26,7 +26,7 @@ class LoyverseService {
 		this.accessToken = process.env.LOYVERSE_ACCESS_TOKEN || '';
 		this.defaultBranchId = 1;
 		this._refreshDefaultBranchIdFromEnv();
-		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // 30 seconds default
+		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // ms; default 10s if env unset
 		this.autoSyncLimit = parseInt(process.env.LOYVERSE_AUTO_SYNC_LIMIT) || 500;
 		this.syncSince = process.env.LOYVERSE_SYNC_SINCE || '';
 		// When true, syncing is append-only: existing imported orders are never updated/overwritten.
@@ -42,6 +42,10 @@ class LoyverseService {
 		// Safety limits (0 = no limit). Useful when you have very large datasets.
 		this.maxSyncReceipts = parseInt(process.env.LOYVERSE_SYNC_MAX_RECEIPTS) || 0;
 		this.maxSyncPages = parseInt(process.env.LOYVERSE_SYNC_MAX_PAGES) || 0;
+		/** Optional ms pause before each receipts page after the first (reduces Loyverse 429 bursts). */
+		this.syncPageDelayMs = Math.max(0, parseInt(process.env.LOYVERSE_SYNC_PAGE_DELAY_MS, 10) || 0);
+		/** Stagger start of each branch in multi auto-sync so two merchants do not hammer API together. */
+		this.autoSyncBranchStaggerMs = Math.max(0, parseInt(process.env.LOYVERSE_AUTO_SYNC_BRANCH_STAGGER_MS, 10) || 0);
 		/** Branch IDs with an active syncAllReceipts run (different branches may sync in parallel). */
 		this.syncingBranches = new Set();
 		// Cancel signals for in-flight sync loops (per-branch).
@@ -70,26 +74,64 @@ class LoyverseService {
 		this.autoSyncIntervalsByBranch = new Map();
 		/** @type {Map<number, number>} per-branch cooldown until epoch ms (for 429 backoff) */
 		this.rateLimitCooldownUntilMs = new Map();
+		/** @type {Map<number, { created_at_min: string|null, created_at_max: string|null }>} active date-range sync context */
+		this.activeDateRangeByBranch = new Map();
+		/** @type {Map<number, { source: string, created_at_min: string|null, created_at_max: string|null, startedAt: string }>} */
+		this.activeSyncMetaByBranch = new Map();
+		/** @type {Map<number, Record<string, unknown>>} Per-branch live progress for /api/loyverse/status + UI bar */
+		this.activeSyncProgressByBranch = new Map();
 		const envRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+		const hasExplicitDefault = envRaw != null && String(envRaw).trim() !== '';
+		const autoList = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
 		console.log(
-			'[Loyverse] defaultBranchId=%s (LOYVERSE_DEFAULT_BRANCH_ID=%s)',
+			'[Loyverse] defaultBranchId=%s (LOYVERSE_DEFAULT_BRANCH_ID=%s%s)',
 			this.defaultBranchId,
-			envRaw != null && String(envRaw).trim() !== '' ? `"${String(envRaw).trim()}"` : 'unset'
+			hasExplicitDefault ? `"${String(envRaw).trim()}"` : 'unset',
+			!hasExplicitDefault && autoList ? `; inferred first from LOYVERSE_AUTO_SYNC_BRANCH_IDS="${autoList}"` : ''
 		);
 		// LINE_COST: receipt fields + Items API (default on). Set LOYVERSE_FETCH_VARIANT_COST=0 to skip HTTP. Token may need ITEMS_READ.
 	}
 
 
+	/**
+	 * First branch in LOYVERSE_AUTO_SYNC_BRANCH_IDS (e.g. "2,9") when DEFAULT is unset — avoids silent fallback to 1.
+	 */
+	_defaultBranchIdFromAutoSyncList() {
+		const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
+		if (!multiRaw) return null;
+		const ids = multiRaw
+			.split(',')
+			.map((s) => parseInt(String(s).trim(), 10))
+			.filter((n) => Number.isFinite(n) && n > 0);
+		return ids.length ? ids[0] : null;
+	}
+
 	/** Re-read from process.env before each sync so server config matches .env after deploy. */
 	_refreshDefaultBranchIdFromEnv() {
 		const raw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
 		const trimmed = raw != null ? String(raw).trim() : '';
-		if (!trimmed) {
-			this.defaultBranchId = 1;
+		if (trimmed) {
+			const parsed = parseInt(trimmed, 10);
+			this.defaultBranchId = Number.isFinite(parsed) ? parsed : (this._defaultBranchIdFromAutoSyncList() || 1);
 			return;
 		}
-		const parsed = parseInt(trimmed, 10);
-		this.defaultBranchId = Number.isFinite(parsed) ? parsed : 1;
+		const fromList = this._defaultBranchIdFromAutoSyncList();
+		if (fromList != null) {
+			this.defaultBranchId = fromList;
+			return;
+		}
+		this.defaultBranchId = 1;
+	}
+
+	_touchSyncProgress(branchId, patch) {
+		const bid = parseInt(branchId, 10);
+		if (!Number.isFinite(bid)) return;
+		const prev = this.activeSyncProgressByBranch.get(bid) || {};
+		this.activeSyncProgressByBranch.set(bid, {
+			...prev,
+			...patch,
+			updatedAt: new Date().toISOString(),
+		});
 	}
 
 	/**
@@ -744,6 +786,7 @@ class LoyverseService {
 			// Debug: log raw receipt only when it's new to our DB (prevents spam on periodic sync)
 			if (!existingOrderId && this._shouldLogRawReceipt(receipt)) {
 				console.log('[Loyverse Sync][RAW RECEIPT]', JSON.stringify({
+					branch_id: targetBranchId,
 					receipt_number: receipt.receipt_number,
 					receipt_type: receipt.receipt_type,
 					transaction_type: receipt.transaction_type,
@@ -1234,6 +1277,19 @@ class LoyverseService {
 		this._refreshDefaultBranchIdFromEnv();
 		const rawBid = branchId != null ? parseInt(branchId, 10) : this.defaultBranchId;
 		const resolvedBranchId = Number.isFinite(rawBid) ? rawBid : this.defaultBranchId;
+		const toIsoOrNull = (v) => {
+			if (v == null || v === '') return null;
+			const d = v instanceof Date ? v : new Date(v);
+			return Number.isNaN(d.getTime()) ? null : d.toISOString();
+		};
+		const hasDateRange = options.created_at_min != null || options.created_at_max != null;
+		const isIncrementalMode =
+			options.incremental === true ||
+			options.incremental === 'true' ||
+			options.realtime === true ||
+			options.realtime === 'true';
+		const inferredSource = hasDateRange ? 'date_range' : (isIncrementalMode ? 'auto_sync' : 'manual_sync');
+		const syncSource = String(options.sync_source || inferredSource);
 
 		if (this.syncingBranches.has(resolvedBranchId)) {
 			console.log('[Loyverse Sync] Rejecting new sync request: sync already in progress for this branch.', {
@@ -1247,6 +1303,12 @@ class LoyverseService {
 		}
 
 		this.syncingBranches.add(resolvedBranchId);
+		this.activeSyncMetaByBranch.set(resolvedBranchId, {
+			source: syncSource,
+			created_at_min: toIsoOrNull(options.created_at_min),
+			created_at_max: toIsoOrNull(options.created_at_max),
+			startedAt: new Date().toISOString(),
+		});
 		// Reset cancel state at the start of a new run for this branch.
 		this.cancelSyncRequestedBranches.delete(resolvedBranchId);
 		this.cancelSyncReasonByBranch.delete(resolvedBranchId);
@@ -1270,6 +1332,23 @@ class LoyverseService {
 			lastError: null,
 			cancelled: false
 		};
+
+		this._touchSyncProgress(resolvedBranchId, {
+			syncRunId,
+			branchId: resolvedBranchId,
+			source: syncSource,
+			incremental: isIncrementalMode,
+			phase: 'starting',
+			page: 0,
+			receiptsThisPage: 0,
+			processedInPage: 0,
+			totalFetched: 0,
+			totalInserted: 0,
+			totalUpdated: 0,
+			hasMore: null,
+			startedAt: new Date().toISOString(),
+			elapsedMs: 0,
+		});
 
 		const abortedCheck = options.abortedCheck || (() => false);
 		const shouldCancel = () =>
@@ -1318,6 +1397,18 @@ class LoyverseService {
 				: null;
 			let maxUpdatedAtSeen = lastUpdatedAt;
 
+			const pageLogEnv = String(process.env.LOYVERSE_SYNC_PAGE_LOG || '').toLowerCase();
+			const logEveryPage =
+				!incremental ||
+				pageLogEnv === '1' ||
+				pageLogEnv === 'true' ||
+				pageLogEnv === 'yes';
+			const receiptProgressEveryRaw = parseInt(String(process.env.LOYVERSE_SYNC_RECEIPT_PROGRESS_EVERY || ''), 10);
+			// Date-range resync: log every N receipts while processing a page (default 25). Set env to 0 to disable.
+			const receiptProgressEvery = Number.isFinite(receiptProgressEveryRaw) && receiptProgressEveryRaw >= 0
+				? receiptProgressEveryRaw
+				: (!incremental ? 25 : 0);
+
 			while (hasMore) {
 				if (shouldCancel()) {
 					this.syncStats.cancelled = true;
@@ -1329,16 +1420,58 @@ class LoyverseService {
 					break;
 				}
 				pageCount += 1;
+				if (pageCount > 1 && this.syncPageDelayMs > 0) {
+					if (shouldCancel()) {
+						this.syncStats.cancelled = true;
+						hasMore = false;
+						break;
+					}
+					await new Promise((r) => setTimeout(r, this.syncPageDelayMs));
+				}
+				this._touchSyncProgress(resolvedBranchId, {
+					phase: 'fetching_api',
+					page: pageCount,
+					receiptsThisPage: 0,
+					processedInPage: 0,
+					elapsedMs: Date.now() - startTs,
+				});
+				const fetchStarted = Date.now();
 				const result = await this.fetchReceipts(limit, cursor, dateFilter, resolvedBranchId);
 				const receipts = result.receipts || [];
 				this.syncStats.totalFetched += receipts.length;
+
+				this._touchSyncProgress(resolvedBranchId, {
+					phase: 'processing_receipts',
+					page: pageCount,
+					receiptsThisPage: receipts.length,
+					processedInPage: 0,
+					hasMore: !!result.hasMore,
+					totalFetched: this.syncStats.totalFetched,
+					totalInserted: this.syncStats.totalInserted,
+					totalUpdated: this.syncStats.totalUpdated,
+					apiFetchMs: Date.now() - fetchStarted,
+					elapsedMs: Date.now() - startTs,
+				});
+
+				if (logEveryPage) {
+					console.log('[Loyverse Sync] page fetched (processing next)', {
+						branchId: resolvedBranchId,
+						syncRunId,
+						page: pageCount,
+						receiptsThisPage: receipts.length,
+						apiFetchMs: Date.now() - fetchStarted,
+						hasMoreAfterPage: !!result.hasMore,
+					});
+				}
 
 				let skippedOldInPage = 0;
 				let pageInserted = 0;
 				let pageUpdated = 0;
 				let pageRefundApplied = 0;
 
+				let receiptIndex = 0;
 				for (const receipt of receipts) {
+					receiptIndex += 1;
 					if (shouldCancel()) {
 						this.syncStats.cancelled = true;
 						console.log('[Loyverse Sync] Sync cancelled.', {
@@ -1414,6 +1547,46 @@ class LoyverseService {
 						this.syncStats.lastError = error.message;
 						console.error(`[Loyverse Sync] Error syncing receipt ${receipt.receipt_number}:`, error.message);
 					}
+
+					this._touchSyncProgress(resolvedBranchId, {
+						processedInPage: receiptIndex,
+						totalFetched: this.syncStats.totalFetched,
+						totalInserted: this.syncStats.totalInserted,
+						totalUpdated: this.syncStats.totalUpdated,
+						totalErrors: this.syncStats.totalErrors,
+						lastReceiptNumber: receipt.receipt_number,
+						elapsedMs: Date.now() - startTs,
+					});
+
+					if (receiptProgressEvery > 0 && receiptIndex % receiptProgressEvery === 0) {
+						console.log('[Loyverse Sync] receipt progress', {
+							branchId: resolvedBranchId,
+							syncRunId,
+							page: pageCount,
+							processedInPage: receiptIndex,
+							ofInPage: receipts.length,
+							receipt_number: receipt.receipt_number,
+							elapsedMs: Date.now() - startTs,
+						});
+					}
+				}
+
+				// Heartbeat: date-range / full syncs are non-incremental — log every API page so operators see work (not only on inserts).
+				// For incremental (auto-sync), set LOYVERSE_SYNC_PAGE_LOG=1 to log each page too.
+				if (logEveryPage) {
+					const elapsedMs = Date.now() - startTs;
+					console.log('[Loyverse Sync] page progress', {
+						branchId: resolvedBranchId,
+						syncRunId,
+						page: pageCount,
+						receiptsThisPage: receipts.length,
+						totalFetched: this.syncStats.totalFetched,
+						insertedThisPage: pageInserted,
+						updatedThisPage: pageUpdated,
+						errors: this.syncStats.totalErrors,
+						hasMore: !!result.hasMore,
+						elapsedMs,
+					});
 				}
 
 				const verbosePage =
@@ -1473,6 +1646,9 @@ class LoyverseService {
 			throw error;
 		} finally {
 			this.syncingBranches.delete(resolvedBranchId);
+			this.activeDateRangeByBranch.delete(resolvedBranchId);
+			this.activeSyncMetaByBranch.delete(resolvedBranchId);
+			this.activeSyncProgressByBranch.delete(resolvedBranchId);
 			// Clear cancel request for this branch after completing this run.
 			this.cancelSyncRequestedBranches.delete(resolvedBranchId);
 			this.cancelSyncReasonByBranch.delete(resolvedBranchId);
@@ -1564,33 +1740,43 @@ class LoyverseService {
 		const syncInterval = interval || this.syncInterval;
 		this.autoSyncMultiBranchIds = [...ids];
 
-		console.log(`[Loyverse Sync] Auto-sync (multi-branch): ${ids.join(', ')}`);
+		console.log(`[Loyverse Sync] Auto-sync (multi-branch): ${ids.join(', ')}`, {
+			branchStaggerMs: this.autoSyncBranchStaggerMs,
+		});
 
-		// Start/replace timers per branch.
-		for (const bid of ids) {
-			const existing = this.autoSyncIntervalsByBranch.get(bid);
-			if (existing) clearInterval(existing);
-			const timer = setInterval(async () => {
-				try {
-					const now = Date.now();
-					const cooldownUntil = this.rateLimitCooldownUntilMs.get(bid) || 0;
-					if (cooldownUntil > now) return;
-					if (this.syncingBranches.has(bid)) return;
-					await this.syncAllReceipts(bid, this.autoSyncLimit, { incremental: true });
-				} catch (error) {
-					console.error(`[Loyverse Sync] Auto-sync error (branch ${bid}):`, error.message);
-					if (String(error?.message || '').includes('Unauthorized (401)')) {
-						console.error(
-							`[Loyverse Sync] Branch ${bid}: check LOYVERSE_BRANCH_${bid}_ACCESS_TOKEN or LOYVERSE_BRANCH_ACCOUNTS.`
-						);
+		// Start/replace timers per branch; optional stagger so branches do not sync at the same instant (429).
+		for (let idx = 0; idx < ids.length; idx++) {
+			const bid = ids[idx];
+			const startBranch = () => {
+				const existing = this.autoSyncIntervalsByBranch.get(bid);
+				if (existing) clearInterval(existing);
+				const timer = setInterval(async () => {
+					try {
+						const now = Date.now();
+						const cooldownUntil = this.rateLimitCooldownUntilMs.get(bid) || 0;
+						if (cooldownUntil > now) return;
+						if (this.syncingBranches.has(bid)) return;
+						await this.syncAllReceipts(bid, this.autoSyncLimit, { incremental: true });
+					} catch (error) {
+						console.error(`[Loyverse Sync] Auto-sync error (branch ${bid}):`, error.message);
+						if (String(error?.message || '').includes('Unauthorized (401)')) {
+							console.error(
+								`[Loyverse Sync] Branch ${bid}: check LOYVERSE_BRANCH_${bid}_ACCESS_TOKEN or LOYVERSE_BRANCH_ACCOUNTS.`
+							);
+						}
 					}
-				}
-			}, syncInterval);
-			this.autoSyncIntervalsByBranch.set(bid, timer);
-			// initial kick
-			this.syncAllReceipts(bid, this.autoSyncLimit, { incremental: true }).catch((err) => {
-				console.error(`[Loyverse Sync] Initial sync error (branch ${bid}):`, err.message);
-			});
+				}, syncInterval);
+				this.autoSyncIntervalsByBranch.set(bid, timer);
+				this.syncAllReceipts(bid, this.autoSyncLimit, { incremental: true }).catch((err) => {
+					console.error(`[Loyverse Sync] Initial sync error (branch ${bid}):`, err.message);
+				});
+			};
+			const delayMs = idx * this.autoSyncBranchStaggerMs;
+			if (delayMs > 0) {
+				setTimeout(startBranch, delayMs);
+			} else {
+				startBranch();
+			}
 		}
 	}
 
@@ -1634,9 +1820,21 @@ class LoyverseService {
 		const autoBranches = this.autoSyncIntervalsByBranch.size
 			? Array.from(this.autoSyncIntervalsByBranch.keys())
 			: (this.autoSyncMultiBranchIds || null);
+		const activeDateRangeByBranch = Object.fromEntries(
+			Array.from(this.activeDateRangeByBranch.entries()).map(([bid, range]) => [String(bid), range])
+		);
+		const activeSyncMetaByBranch = Object.fromEntries(
+			Array.from(this.activeSyncMetaByBranch.entries()).map(([bid, meta]) => [String(bid), meta])
+		);
+		const syncProgressByBranch = Object.fromEntries(
+			Array.from(this.activeSyncProgressByBranch.entries()).map(([bid, prog]) => [String(bid), prog])
+		);
 		return {
 			isSyncing: this.syncingBranches.size > 0,
 			syncingBranches: Array.from(this.syncingBranches),
+			activeDateRangeByBranch,
+			activeSyncMetaByBranch,
+			syncProgressByBranch,
 			lastSyncTime: this.lastSyncTime,
 			stats: this.syncStats,
 			autoSyncActive: this.autoSyncIntervalsByBranch.size > 0,
@@ -1667,12 +1865,34 @@ class LoyverseService {
 		const targetBranchId = branchId || this.defaultBranchId;
 		const createdMin = options.created_at_min;
 		const createdMax = options.created_at_max;
+		const toIsoOrNull = (v) => {
+			if (v == null || v === '') return null;
+			const d = v instanceof Date ? v : new Date(v);
+			return Number.isNaN(d.getTime()) ? null : d.toISOString();
+		};
+		this.activeDateRangeByBranch.set(targetBranchId, {
+			created_at_min: toIsoOrNull(createdMin),
+			created_at_max: toIsoOrNull(createdMax),
+		});
+
+		console.log('[Loyverse Sync] Date-range resync: preparing branch', {
+			branchId: targetBranchId,
+			limit,
+			created_at_min: createdMin,
+			created_at_max: createdMax,
+		});
 
 		// When recomputing a range, clear existing refunds in that date window first
 		// so that multiple runs stay idempotent even though we accumulate per order.
 		if (createdMin && createdMax) {
+			const t0 = Date.now();
 			try {
+				console.log('[Loyverse Sync] Date-range resync: resetting refunds in range (DB)…');
 				await BillingModel.resetRefundsInRange(createdMin, createdMax, targetBranchId);
+				console.log('[Loyverse Sync] Date-range resync: refund reset done', {
+					branchId: targetBranchId,
+					ms: Date.now() - t0,
+				});
 			} catch (err) {
 				console.error('[Loyverse Sync] Failed to reset refunds in range:', err.message);
 			}
