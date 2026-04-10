@@ -278,12 +278,25 @@ class BillingModel {
 				[refundReceiptNumber, orderId, branchId, refundAmount, refundDt, refundReason]
 			);
 
-			// If insert didn't happen, we've already processed this refund receipt.
+			// If insert didn't happen, the receipt key already exists.
+			// Treat as unchanged only when it points to the same order.
+			// If it points to a different historical order mapping, re-apply to the current target order.
 			if (!ins?.affectedRows) {
-				if (debug) {
-					console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
+				const [existingRows] = await pool.execute(
+					`SELECT order_id FROM loyverse_refund_receipts WHERE refund_receipt_number = ? LIMIT 1`,
+					[refundReceiptNumber]
+				);
+				const existingOrderId = Number(existingRows[0]?.order_id || 0);
+				if (existingOrderId === Number(orderId || 0)) {
+					if (debug) {
+						console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
+					}
+					return { changed: false };
 				}
-				return { changed: false };
+				console.warn(
+					'[BillingModel.updateRefundForOrder] Re-mapping refund receipt to different order.',
+					{ refundReceiptNumber, previousOrderId: existingOrderId || null, newOrderId: orderId }
+				);
 			}
 		}
 
@@ -301,6 +314,26 @@ class BillingModel {
 			console.log('[BillingModel.updateRefundForOrder] UPDATE result.affectedRows =', updateResult.affectedRows);
 		}
 		if (updateResult.affectedRows > 0) {
+			if (refundReceiptNumber) {
+				try {
+					let branchId = null;
+					try {
+						const [orows] = await pool.execute(
+							`SELECT BRANCH_ID FROM orders WHERE IDNo = ? LIMIT 1`,
+							[orderId]
+						);
+						branchId = orows[0]?.BRANCH_ID ?? null;
+					} catch (_) {}
+					await pool.execute(
+						`UPDATE loyverse_refund_receipts
+						 SET order_id = ?, branch_id = ?, refund_amount = ?, refund_dt = ?, refund_reason = ?
+						 WHERE refund_receipt_number = ?`,
+						[orderId, branchId, refundAmount, refundDt, refundReason, refundReceiptNumber]
+					);
+				} catch (e) {
+					console.warn('[BillingModel.updateRefundForOrder] Failed to refresh refund tracker row:', e?.message || e);
+				}
+			}
 			return { changed: true };
 		}
 
@@ -347,6 +380,20 @@ class BillingModel {
 
 		if (debug) {
 			console.log('[BillingModel.updateRefundForOrder] INSERTED billing row with refund for orderId=', orderId);
+		}
+
+		if (refundReceiptNumber) {
+			try {
+				// Ensure tracker points to the actual order we updated/inserted.
+				await pool.execute(
+					`UPDATE loyverse_refund_receipts
+					 SET order_id = ?, branch_id = ?, refund_amount = ?, refund_dt = ?, refund_reason = ?
+					 WHERE refund_receipt_number = ?`,
+					[orderId, order.BRANCH_ID || null, refundAmount, refundDt, refundReason, refundReceiptNumber]
+				);
+			} catch (e) {
+				console.warn('[BillingModel.updateRefundForOrder] Failed to refresh refund tracker row:', e?.message || e);
+			}
 		}
 
 		return { changed: true };

@@ -652,9 +652,10 @@ def daily_sales(
         )"""
         # Discount must bucket by the same PH calendar day as billing (paid_total), not order.ENCODED_DT,
         # or the same receipt can split across days and KPI totals diverge from Loyverse.
-        refund_local_dt = """COALESCE(
-            CONVERT_TZ(b.REFUND_DT, @@session.time_zone, '+08:00'),
-            DATE_ADD(b.REFUND_DT, INTERVAL 8 HOUR)
+        refund_source_dt = "COALESCE(b.REFUND_DT, b.ENCODED_DT)"
+        refund_local_dt = f"""COALESCE(
+            CONVERT_TZ({refund_source_dt}, @@session.time_zone, '+08:00'),
+            DATE_ADD({refund_source_dt}, INTERVAL 8 HOUR)
         )"""
 
         # 1) Billing-based daily totals
@@ -722,8 +723,8 @@ def daily_sales(
             refund_date_filter = f"AND DATE({refund_local_dt}) BETWEEN %s AND %s"
             refund_params.extend([start_date, end_date])
         if branch_id:
-            # Use order's branch to filter refunds
-            refund_branch_filter = "AND o.BRANCH_ID = %s"
+            # Keep branch source consistent with total_sales/discount filters.
+            refund_branch_filter = "AND b.BRANCH_ID = %s"
             refund_params.append(branch_id)
 
         refund_query = f"""

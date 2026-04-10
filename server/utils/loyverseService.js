@@ -1283,6 +1283,77 @@ class LoyverseService {
 	}
 
 	/**
+	 * Reconcile orphan Loyverse refund stubs (LOY-R-*) that were created when original sale
+	 * was not matched during an earlier sync run. This applies missed refunds to billing.
+	 */
+	async reconcileOrphanRefundStubs(branchId, limit = 50) {
+		const bid = this._resolveDefaultBranchId(branchId, 'reconcileOrphanRefundStubs');
+		const cap = Math.max(1, Math.min(parseInt(limit, 10) || 50, 300));
+		const [rows] = await pool.execute(
+			`
+			SELECT o.IDNo, o.ORDER_NO
+			FROM orders o
+			LEFT JOIN billing b ON b.ORDER_ID = o.IDNo
+			WHERE o.BRANCH_ID = ?
+			  AND o.ORDER_NO LIKE 'LOY-R-%'
+			  AND b.IDNo IS NULL
+			ORDER BY o.ENCODED_DT DESC
+			LIMIT ${cap}
+			`,
+			[bid]
+		);
+		if (!rows || rows.length === 0) {
+			return { scanned: 0, applied: 0, skipped: 0, errors: 0 };
+		}
+
+		let applied = 0;
+		let skipped = 0;
+		let errors = 0;
+		for (const row of rows) {
+			try {
+				const orderNo = String(row.ORDER_NO || '');
+				const receiptNumber = orderNo.startsWith('LOY-R-') ? orderNo.slice(6) : '';
+				if (!receiptNumber) {
+					skipped++;
+					continue;
+				}
+
+				const receipt = await this.fetchReceipt(receiptNumber, bid);
+				if (!receipt) {
+					skipped++;
+					continue;
+				}
+
+				const refundFor = String(receipt.refund_for || '').trim();
+				const refundAmount = Math.abs(Number(receipt.total_money || 0));
+				if (!refundFor || !(refundAmount > 0)) {
+					skipped++;
+					continue;
+				}
+
+				const originalOrderNo = `LOY-${refundFor}`;
+				const originalOrderId = await this.orderExists(originalOrderNo);
+				if (!originalOrderId) {
+					skipped++;
+					continue;
+				}
+
+				const result = await this.syncRefundReceipt(receipt, originalOrderId, bid);
+				if (result?.action === 'refund_updated') {
+					applied++;
+				} else {
+					skipped++;
+				}
+			} catch (e) {
+				errors++;
+				console.warn('[Loyverse Sync] reconcileOrphanRefundStubs item failed:', e?.message || e);
+			}
+		}
+
+		return { scanned: rows.length, applied, skipped, errors };
+	}
+
+	/**
 	 * Sync all new receipts from Loyverse
 	 */
 	async syncAllReceipts(branchId = null, limit = 50, options = {}) {
@@ -1662,6 +1733,21 @@ class LoyverseService {
 			// Clear cancel request for this branch after completing this run.
 			this.cancelSyncRequestedBranches.delete(resolvedBranchId);
 			this.cancelSyncReasonByBranch.delete(resolvedBranchId);
+			// Best-effort refund repair for historical orphan stubs.
+			// This keeps analytics refund totals accurate even if a past run created LOY-R-* stubs.
+			try {
+				const repaired = await this.reconcileOrphanRefundStubs(resolvedBranchId, 80);
+				if ((repaired?.applied || 0) > 0) {
+					this.syncStats.refundNewlyApplied = (this.syncStats.refundNewlyApplied || 0) + repaired.applied;
+					console.log('[Loyverse Sync] Reconciled orphan refund stubs.', {
+						branchId: resolvedBranchId,
+						...repaired,
+					});
+				}
+			} catch (repairErr) {
+				console.warn('[Loyverse Sync] reconcileOrphanRefundStubs skipped:', repairErr?.message || repairErr);
+			}
+
 			const elapsedMs = Date.now() - startTs;
 			const ins = this.syncStats.totalInserted || 0;
 			const upd = this.syncStats.totalUpdated || 0;
