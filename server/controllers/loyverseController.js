@@ -221,6 +221,27 @@ class LoyverseController {
 			return ApiResponse.error(res, error.message, 500);
 		}
 	}
+
+	/**
+	 * Delete all Loyverse-imported orders for a branch (LOY-*, LOY-R-*), related rows, refund trackers, reset checkpoint.
+	 * POST /api/loyverse/purge-imported  body: { branch_id }
+	 */
+	static async purgeImported(req, res) {
+		try {
+			const branchId = req.body.branch_id ?? req.query.branch_id ?? null;
+			if (branchId == null || branchId === '') {
+				return ApiResponse.error(res, 'branch_id is required', 400);
+			}
+			const result = await loyverseService.purgeLoyverseImportedOrdersForBranch(branchId);
+			return ApiResponse.success(
+				res,
+				result,
+				`Removed ${result.deletedOrders} Loyverse-imported order(s); checkpoint reset. Run date-range or full sync next.`
+			);
+		} catch (error) {
+			return ApiResponse.error(res, error.message, 500);
+		}
+	}
 }
 
 module.exports = LoyverseController;

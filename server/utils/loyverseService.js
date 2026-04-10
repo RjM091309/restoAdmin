@@ -24,7 +24,7 @@ class LoyverseService {
 	constructor() {
 		this.baseURL = 'https://api.loyverse.com/v1.0';
 		this.accessToken = process.env.LOYVERSE_ACCESS_TOKEN || '';
-		this.defaultBranchId = 1;
+		this.defaultBranchId = null;
 		this._refreshDefaultBranchIdFromEnv();
 		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // ms; default 10s if env unset
 		this.autoSyncLimit = parseInt(process.env.LOYVERSE_AUTO_SYNC_LIMIT) || 500;
@@ -82,45 +82,54 @@ class LoyverseService {
 		this.activeSyncProgressByBranch = new Map();
 		const envRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
 		const hasExplicitDefault = envRaw != null && String(envRaw).trim() !== '';
-		const autoList = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
 		console.log(
-			'[Loyverse] defaultBranchId=%s (LOYVERSE_DEFAULT_BRANCH_ID=%s%s)',
-			this.defaultBranchId,
-			hasExplicitDefault ? `"${String(envRaw).trim()}"` : 'unset',
-			!hasExplicitDefault && autoList ? `; inferred first from LOYVERSE_AUTO_SYNC_BRANCH_IDS="${autoList}"` : ''
+			'[Loyverse] defaultBranchId=%s (LOYVERSE_DEFAULT_BRANCH_ID=%s). No silent fallback: sync without explicit branch id fails until this is a positive integer.',
+			this.defaultBranchId === null ? 'unset' : this.defaultBranchId,
+			hasExplicitDefault ? `"${String(envRaw).trim()}"` : 'unset'
 		);
 		// LINE_COST: receipt fields + Items API (default on). Set LOYVERSE_FETCH_VARIANT_COST=0 to skip HTTP. Token may need ITEMS_READ.
 	}
 
 
-	/**
-	 * First branch in LOYVERSE_AUTO_SYNC_BRANCH_IDS (e.g. "2,9") when DEFAULT is unset — avoids silent fallback to 1.
-	 */
-	_defaultBranchIdFromAutoSyncList() {
-		const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
-		if (!multiRaw) return null;
-		const ids = multiRaw
-			.split(',')
-			.map((s) => parseInt(String(s).trim(), 10))
-			.filter((n) => Number.isFinite(n) && n > 0);
-		return ids.length ? ids[0] : null;
-	}
-
 	/** Re-read from process.env before each sync so server config matches .env after deploy. */
 	_refreshDefaultBranchIdFromEnv() {
 		const raw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
 		const trimmed = raw != null ? String(raw).trim() : '';
-		if (trimmed) {
-			const parsed = parseInt(trimmed, 10);
-			this.defaultBranchId = Number.isFinite(parsed) ? parsed : (this._defaultBranchIdFromAutoSyncList() || 1);
+		if (!trimmed) {
+			this.defaultBranchId = null;
 			return;
 		}
-		const fromList = this._defaultBranchIdFromAutoSyncList();
-		if (fromList != null) {
-			this.defaultBranchId = fromList;
+		const parsed = parseInt(trimmed, 10);
+		if (Number.isFinite(parsed) && parsed > 0) {
+			this.defaultBranchId = parsed;
 			return;
 		}
-		this.defaultBranchId = 1;
+		this.defaultBranchId = null;
+		console.error(
+			'[Loyverse] LOYVERSE_DEFAULT_BRANCH_ID must be a positive integer; got %s — default branch unresolved.',
+			JSON.stringify(trimmed)
+		);
+	}
+
+	/**
+	 * Use explicit branch id when provided; otherwise LOYVERSE_DEFAULT_BRANCH_ID (required).
+	 * No silent fallback to branch 1 or to LOYVERSE_AUTO_SYNC_BRANCH_IDS.
+	 */
+	_resolveDefaultBranchId(explicitBranchId, context) {
+		this._refreshDefaultBranchIdFromEnv();
+		if (explicitBranchId != null && String(explicitBranchId).trim() !== '') {
+			const p = parseInt(String(explicitBranchId).trim(), 10);
+			if (Number.isFinite(p) && p > 0) return p;
+			throw new Error(
+				`[Loyverse] ${context}: invalid branch id ${JSON.stringify(explicitBranchId)}. Use a positive integer, or set LOYVERSE_DEFAULT_BRANCH_ID.`
+			);
+		}
+		if (this.defaultBranchId != null && Number.isFinite(this.defaultBranchId) && this.defaultBranchId > 0) {
+			return this.defaultBranchId;
+		}
+		throw new Error(
+			`[Loyverse] ${context}: branch id is required. Set LOYVERSE_DEFAULT_BRANCH_ID in .env.local to a positive integer (no silent default).`
+		);
 	}
 
 	_touchSyncProgress(branchId, patch) {
@@ -241,7 +250,7 @@ class LoyverseService {
 	async fetchReceipt(receiptNumber, authBranchId = null) {
 		try {
 			const url = `${this.baseURL}/receipts/${receiptNumber}`;
-			const bid = authBranchId != null ? authBranchId : this.defaultBranchId;
+			const bid = this._resolveDefaultBranchId(authBranchId, 'fetchReceipt');
 			const response = await axios.get(url, {
 				headers: this.getAuthHeaders(bid)
 			});
@@ -261,7 +270,7 @@ class LoyverseService {
 	 * @param {{ created_at_min?: string|Date, created_at_max?: string|Date }} dateFilter - optional; ISO or Date for filtering by receipt creation
 	 */
 	async fetchReceipts(limit = 50, cursor = null, dateFilter = {}, authBranchId = null) {
-		const bid = authBranchId != null ? authBranchId : this.defaultBranchId;
+		const bid = this._resolveDefaultBranchId(authBranchId, 'fetchReceipts');
 		const now = Date.now();
 		const cooldownUntil = this.rateLimitCooldownUntilMs.get(bid) || 0;
 		if (cooldownUntil > now) {
@@ -536,12 +545,11 @@ class LoyverseService {
 	 * Adds lightweight logging of raw payload for debugging.
 	 */
 	async syncReceipt(receipt, branchId = null) {
+		const targetBranchId = this._resolveDefaultBranchId(branchId, 'syncReceipt');
 		const connection = await pool.getConnection();
 		
 		try {
 			await connection.beginTransaction();
-
-			const targetBranchId = branchId || this.defaultBranchId;
 			const receiptNumber = receipt.receipt_number;
 			let orderNo;
 			let existingOrderId;
@@ -1227,7 +1235,7 @@ class LoyverseService {
 	 * Sync a refund receipt from Loyverse to local database
 	 */
 	async syncRefundReceipt(receipt, existingOrderId, branchId = null) {
-		const targetBranchId = branchId || this.defaultBranchId;
+		const targetBranchId = this._resolveDefaultBranchId(branchId, 'syncRefundReceipt');
 		// Use Math.abs to ensure refund amount is always a positive number in our DB
 		const refundAmount = Math.abs(receipt.total_money || 0); 
 		const refundDt = new Date(receipt.receipt_date || receipt.created_at);
@@ -1278,9 +1286,7 @@ class LoyverseService {
 	 * Sync all new receipts from Loyverse
 	 */
 	async syncAllReceipts(branchId = null, limit = 50, options = {}) {
-		this._refreshDefaultBranchIdFromEnv();
-		const rawBid = branchId != null ? parseInt(branchId, 10) : this.defaultBranchId;
-		const resolvedBranchId = Number.isFinite(rawBid) ? rawBid : this.defaultBranchId;
+		const resolvedBranchId = this._resolveDefaultBranchId(branchId, 'syncAllReceipts');
 		const toIsoOrNull = (v) => {
 			if (v == null || v === '') return null;
 			const d = v instanceof Date ? v : new Date(v);
@@ -1688,11 +1694,17 @@ class LoyverseService {
 	 * Start automatic sync (polling)
 	 */
 	startAutoSync(branchId = null, interval = null) {
+		let bid;
+		try {
+			bid = this._resolveDefaultBranchId(branchId, 'startAutoSync');
+		} catch (e) {
+			console.error(e.message || e);
+			return;
+		}
+
 		const syncInterval = interval || this.syncInterval;
 
 		// Track which branch auto-sync is targeting (even single-branch), so UI/status can show it.
-		const rawBid = branchId != null ? parseInt(branchId, 10) : this.defaultBranchId;
-		const bid = Number.isFinite(rawBid) ? rawBid : this.defaultBranchId;
 		this.autoSyncMultiBranchIds = [bid];
 
 		console.log(`[Loyverse Sync] Connected successfully sa loyverse`);
@@ -1852,13 +1864,95 @@ class LoyverseService {
 	}
 
 	/**
+	 * Delete all locally imported Loyverse POS orders for one branch (ORDER_NO like LOY-%, LOY-R-%),
+	 * related rows, refund idempotency keys, and reset incremental checkpoint. Use before a clean full sync.
+	 * Does not delete manual/non-Loyverse orders.
+	 *
+	 * Includes LOY orders whose `orders.BRANCH_ID` differs from the target but still appear under this
+	 * branch in `billing` (historical mismatch) — otherwise purge deletes 0 rows while analytics still
+	 * sums `billing.BRANCH_ID`.
+	 */
+	async purgeLoyverseImportedOrdersForBranch(branchId) {
+		const bid = parseInt(branchId, 10);
+		if (!Number.isFinite(bid) || bid < 1) {
+			throw new Error('Invalid branch_id');
+		}
+		if (this.syncingBranches.has(bid)) {
+			throw new Error('Cannot purge while a sync is running for this branch. Stop sync first.');
+		}
+
+		const deleteByIds = async (connection, table, column, ids) => {
+			const chunkSize = 400;
+			for (let i = 0; i < ids.length; i += chunkSize) {
+				const slice = ids.slice(i, i + chunkSize);
+				const ph = slice.map(() => '?').join(',');
+				await connection.execute(`DELETE FROM ${table} WHERE ${column} IN (${ph})`, slice);
+			}
+		};
+
+		let deletedCount = 0;
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+
+			const [orderRows] = await connection.execute(
+				`
+				SELECT DISTINCT o.IDNo
+				FROM orders o
+				WHERE (o.ORDER_NO LIKE 'LOY-%' OR o.ORDER_NO LIKE 'LOY-R-%')
+				AND (
+					o.BRANCH_ID = ?
+					OR EXISTS (
+						SELECT 1 FROM billing b WHERE b.ORDER_ID = o.IDNo AND b.BRANCH_ID = ?
+					)
+				)
+				`,
+				[bid, bid]
+			);
+			const ids = orderRows.map((r) => r.IDNo);
+			deletedCount = ids.length;
+
+			if (ids.length > 0) {
+				await deleteByIds(connection, 'inventory_deductions', 'ORDER_ID', ids);
+				await deleteByIds(connection, 'order_items', 'ORDER_ID', ids);
+				try {
+					await deleteByIds(connection, 'payment_transactions', 'ORDER_ID', ids);
+				} catch (e) {
+					const msg = String(e?.message || '');
+					if (!/Unknown table|doesn't exist/i.test(msg)) throw e;
+				}
+				await deleteByIds(connection, 'billing', 'ORDER_ID', ids);
+				await deleteByIds(connection, 'orders', 'IDNo', ids);
+			}
+
+			try {
+				await BillingModel.ensureLoyverseRefundsTable();
+				await connection.execute(`DELETE FROM loyverse_refund_receipts WHERE branch_id = ?`, [bid]);
+			} catch (e) {
+				console.warn('[Loyverse purge] loyverse_refund_receipts:', e?.message || e);
+			}
+
+			await connection.commit();
+		} catch (e) {
+			await connection.rollback();
+			throw e;
+		} finally {
+			connection.release();
+		}
+
+		await LoyverseSyncStateModel.resetLastUpdatedAt(bid);
+		return { branchId: bid, deletedOrders: deletedCount };
+	}
+
+	/**
 	 * Full re-sync from Loyverse (e.g. after DB wipe).
 	 * Resets checkpoint then syncs all receipts without incremental skip.
 	 */
 	async fullResync(branchId = null, limit = 50, options = {}) {
-		await LoyverseSyncStateModel.resetLastUpdatedAt(branchId || this.defaultBranchId);
+		const bid = this._resolveDefaultBranchId(branchId, 'fullResync');
+		await LoyverseSyncStateModel.resetLastUpdatedAt(bid);
 		const opts = { ...options, incremental: false };
-		return this.syncAllReceipts(branchId, limit, opts);
+		return this.syncAllReceipts(bid, limit, opts);
 	}
 
 	/**
@@ -1866,7 +1960,7 @@ class LoyverseService {
 	 * Use e.g. created_at_min = Jan 1, created_at_max = now to sync "this year – today".
 	 */
 	async syncDateRange(branchId = null, limit = 50, options = {}) {
-		const targetBranchId = branchId || this.defaultBranchId;
+		const targetBranchId = this._resolveDefaultBranchId(branchId, 'syncDateRange');
 		const createdMin = options.created_at_min;
 		const createdMax = options.created_at_max;
 		const toIsoOrNull = (v) => {

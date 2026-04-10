@@ -765,8 +765,16 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         };
     }, []);
 
-    const toIsoMin = (d: string) => `${d}T00:00:00.000Z`;
-    const toIsoMax = (d: string) => `${d}T23:59:59.999Z`;
+    const toIsoMin = (d: string) => {
+        const [y, m, day] = String(d).split('-').map((n) => Number(n));
+        const dt = new Date(y, (m || 1) - 1, day || 1, 0, 0, 0, 0);
+        return dt.toISOString();
+    };
+    const toIsoMax = (d: string) => {
+        const [y, m, day] = String(d).split('-').map((n) => Number(n));
+        const dt = new Date(y, (m || 1) - 1, day || 1, 23, 59, 59, 999);
+        return dt.toISOString();
+    };
 
     const parseBranchIds = (raw: string) => {
         const ids = String(raw || '')
@@ -1096,6 +1104,55 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
         }
     };
 
+    /** Remove all LOY-* / LOY-R-* orders for one branch, then user runs date-range (or full) sync to match Loyverse. */
+    const purgeLoyverseImported = async () => {
+        if (isSelectedBranchSyncing) {
+            setToast({ type: 'error', message: 'Wait until sync finishes, or stop it first.' });
+            return;
+        }
+        if (isSelectedBranchAutoSyncActive) {
+            setToast({ type: 'error', message: 'Turn off auto-sync first.' });
+            return;
+        }
+        const bids = parseBranchIds(branchIds);
+        if (bids.length !== 1) {
+            setToast({ type: 'error', message: 'Enter exactly one branch ID (e.g. 2) to delete Loyverse imports.' });
+            return;
+        }
+        const br = bids[0];
+        if (
+            !window.confirm(
+                `Delete ALL Loyverse-imported orders for branch ${br} (ORDER_NO starting with LOY-)? Manual orders are kept. Then run Sync for your date range. This cannot be undone.`
+            )
+        ) {
+            return;
+        }
+        setRunning(true);
+        try {
+            const res = await fetch('/api/loyverse/purge-imported', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ branch_id: br }),
+            });
+            const json = await res.json().catch(() => null);
+            if (!res.ok || !json?.success) {
+                setToast({ type: 'error', message: json?.message || json?.error || 'Purge failed' });
+                return;
+            }
+            const n = json?.data?.deletedOrders ?? 0;
+            setToast({
+                type: 'success',
+                message: `Removed ${n} Loyverse order(s). Run Sync now for your date range to match Loyverse.`,
+            });
+            setLastResult({ purge: true, branch_id: br, ...json?.data });
+            await refreshStatus();
+        } catch {
+            setToast({ type: 'error', message: t('sales_analytics.network_error') });
+        } finally {
+            setRunning(false);
+        }
+    };
+
     const pickerValue: [Date | null, Date | null] = [toDate(startDate), toDate(endDate)];
     const handleDateRangeChange = (
         update: [Date | null, Date | null] | null,
@@ -1355,6 +1412,25 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                         </button>
                     )}
                 </div>
+                )}
+
+                {!isSelectedBranchAutoSyncActive && (
+                    <div className="p-4 rounded-2xl border border-red-200 bg-red-50/90 space-y-2">
+                        <p className="text-[10px] font-bold text-red-800 uppercase tracking-widest">Clean resync (match Loyverse)</p>
+                        <p className="text-[11px] text-red-900/90 leading-relaxed">
+                            Deletes Loyverse imports (<span className="font-mono text-[10px]">LOY-*</span> /{' '}
+                            <span className="font-mono text-[10px]">LOY-R-*</span>) tied to this branch — including rows where billing is branch{' '}
+                            <strong>X</strong> but the order row was saved under another branch id (fixes “empty orders but sales still show”).
+                        </p>
+                        <button
+                            type="button"
+                            onClick={purgeLoyverseImported}
+                            disabled={running || isSelectedBranchSyncing || isSelectedBranchAutoSyncActive}
+                            className="w-full py-2.5 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Delete Loyverse imports for this branch
+                        </button>
+                    </div>
                 )}
 
                 {!isSelectedBranchAutoSyncActive && lastResult && (

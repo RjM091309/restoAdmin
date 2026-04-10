@@ -28,6 +28,9 @@ router.post('/api/loyverse/sync', authenticate, requireAdmin, LoyverseController
 // POST /api/loyverse/full-sync — reset checkpoint then sync all from Loyverse (use after DB wipe)
 router.post('/api/loyverse/full-sync', authenticate, requireAdmin, LoyverseController.fullSync);
 
+// POST /api/loyverse/purge-imported — delete LOY-* / LOY-R-* orders for branch + reset checkpoint (before clean resync)
+router.post('/api/loyverse/purge-imported', authenticate, requireAdmin, LoyverseController.purgeImported);
+
 // POST /api/loyverse/sync-range — sync only receipts in date range (e.g. Feb 1 – today), no checkpoint reset
 router.post('/api/loyverse/sync-range', authenticate, requireAdmin, LoyverseController.syncRange);
 
