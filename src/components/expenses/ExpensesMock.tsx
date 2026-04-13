@@ -94,8 +94,9 @@ const getManilaYmdFromDate = (d: Date) => {
 function expenseEncodedYmd(encodedDt: string | null | undefined): string | null {
   const raw = (encodedDt || '').trim();
   if (!raw) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  if (/^\d{4}-\d{2}-\d{2}\s/.test(raw) && !raw.includes('T')) return raw.slice(0, 10);
+  const leadingYmd = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  // Keep table date aligned with DB ENCODED_DT calendar date (no timezone shift).
+  if (leadingYmd) return leadingYmd[1];
   const ms = Date.parse(raw);
   if (Number.isNaN(ms)) return null;
   return getManilaYmdFromDate(new Date(ms));
