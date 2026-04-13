@@ -75,6 +75,20 @@ const formatYmdForLabel = (ymd: string) => {
 
 const pad2Ymd = (n: number) => String(n).padStart(2, '0');
 
+const formatExpenseAmountInput = (raw: string): string => {
+  const cleaned = String(raw || '').replace(/,/g, '').replace(/[^\d.]/g, '');
+  if (!cleaned) return '';
+  const firstDot = cleaned.indexOf('.');
+  const normalized = firstDot === -1 ? cleaned : `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, '')}`;
+  const [intPartRaw, decPart] = normalized.split('.');
+  const intPart = intPartRaw.replace(/^0+(?=\d)/, '');
+  const grouped = (intPart || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (normalized.endsWith('.') && decPart === undefined) return `${grouped}.`;
+  return decPart !== undefined ? `${grouped}.${decPart}` : grouped;
+};
+
+const parseExpenseAmount = (value: string): number => Number(String(value || '').replace(/,/g, '').trim());
+
 /** YYYY-MM-DD in Asia/Manila for an instant (aligns with dashboard daily-expenses / MySQL DATE in PH). */
 const getManilaYmdFromDate = (d: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -790,11 +804,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     />
                   )}
                   <input
-                    type="number"
-                    min={0}
-                    step="1"
+                    type="text"
+                    inputMode="decimal"
                     value={addingAmountValue}
-                    onChange={(e) => setAddingAmountValue(e.target.value)}
+                    onChange={(e) => setAddingAmountValue(formatExpenseAmountInput(e.target.value))}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveSameItemAmount(row);
                       if (e.key === 'Escape') handleCancelAddSameItemAmount();
@@ -809,8 +822,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                       isSubmitting ||
                       (isInventoryCategory
                         ? addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue)) ||
-                          (addingAmountValue.trim() !== '' && (!Number.isFinite(Number(addingAmountValue)) || Number(addingAmountValue) < 0))
-                        : addingAmountValue.trim() === '' || !Number.isFinite(Number(addingAmountValue)))
+                          (addingAmountValue.trim() !== '' && (!Number.isFinite(parseExpenseAmount(addingAmountValue)) || parseExpenseAmount(addingAmountValue) < 0))
+                        : addingAmountValue.trim() === '' || !Number.isFinite(parseExpenseAmount(addingAmountValue)))
                     }
                     className="p-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                     aria-label="Save"
@@ -991,11 +1004,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         setEditingExpense(latestReal);
         setExpenseForm({
           expDesc: latestReal.expDesc ?? '',
-          expAmount: latestReal.expAmount ? String(latestReal.expAmount) : '',
+          expAmount: latestReal.expAmount ? formatExpenseAmountInput(String(latestReal.expAmount)) : '',
           expSource: latestReal.expSource ?? '',
           stockQty: latestReal.stockQty != null ? String(latestReal.stockQty) : '',
           unit: latestReal.unit ?? 'pcs',
-          encodedDate: latestReal.encodedDt ? getManilaDateStr(new Date(latestReal.encodedDt)) : getManilaDateStr(new Date()),
+          encodedDate: expenseEncodedYmd(latestReal.encodedDt) ?? getManilaDateStr(new Date()),
         });
         setIsExpensePanelOpen(true);
         toast.success('Opened latest existing entry for this item.');
@@ -1009,11 +1022,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setEditingExpense(row);
     setExpenseForm({
       expDesc: row.expDesc ?? '',
-      expAmount: row.expAmount ? String(row.expAmount) : '',
+      expAmount: row.expAmount ? formatExpenseAmountInput(String(row.expAmount)) : '',
       expSource: row.expSource ?? '',
       stockQty: row.stockQty != null ? String(row.stockQty) : '',
       unit: row.unit ?? 'pcs',
-      encodedDate: row.encodedDt ? getManilaDateStr(new Date(row.encodedDt)) : getManilaDateStr(new Date()),
+      encodedDate: expenseEncodedYmd(row.encodedDt) ?? getManilaDateStr(new Date()),
     });
     setIsExpensePanelOpen(true);
   };
@@ -1028,7 +1041,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const handleSubmitExpense = async () => {
     if (!branchId || !selectedCategory?.masterCategoryId) return;
-    const amount = Number(expenseForm.expAmount);
+    const amount = parseExpenseAmount(expenseForm.expAmount);
     if (!Number.isFinite(amount) || amount < 0) {
       toast.error('Enter a valid amount');
       return;
@@ -1128,7 +1141,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const handleStartAddSameItemAmount = (row: ExpenseRecord) => {
     setAddingAmountForId(row.id);
-    setAddingAmountValue(String(row.expAmount ?? ''));
+    setAddingAmountValue(formatExpenseAmountInput(String(row.expAmount ?? '')));
     if (isInventoryCategory) {
       setAddingQtyValue(''); // Empty so user types qty for the new purchase
     } else {
@@ -1143,7 +1156,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   };
 
   const handleSaveSameItemAmount = async (row: ExpenseRecord) => {
-    const amount = Number(addingAmountValue);
+    const amount = parseExpenseAmount(addingAmountValue);
     const qtyRaw = addingQtyValue.trim();
     const hasQty = qtyRaw !== '';
     const qty = hasQty ? Number(qtyRaw) : NaN;
@@ -2260,7 +2273,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
               disabled={
                 isSubmitting ||
                 expenseForm.expAmount.trim() === '' ||
-                !Number.isFinite(Number(expenseForm.expAmount)) ||
+                !Number.isFinite(parseExpenseAmount(expenseForm.expAmount)) ||
                 (isInventoryCategory && !editingExpense && !expenseForm.unit.trim())
               }
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
@@ -2285,11 +2298,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Amount *</label>
             <input
-              type="number"
-              min={0}
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={expenseForm.expAmount}
-              onChange={(e) => setExpenseForm((prev) => ({ ...prev, expAmount: e.target.value }))}
+              onChange={(e) => setExpenseForm((prev) => ({ ...prev, expAmount: formatExpenseAmountInput(e.target.value) }))}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
               placeholder="0.00"
             />
