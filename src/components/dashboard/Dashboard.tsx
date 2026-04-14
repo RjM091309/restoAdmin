@@ -143,6 +143,52 @@ type RevenuePoint = {
   expense: number;
 };
 
+/** Every calendar day in [startYmd, endYmd] inclusive (local noon dates). */
+const eachDateKeyInclusive = (startYmd: string, endYmd: string): string[] => {
+  const start = parseIsoDate(startYmd.slice(0, 10));
+  const end = parseIsoDate(endYmd.slice(0, 10));
+  if (!start || !end || start.getTime() > end.getTime()) return [];
+  const keys: string[] = [];
+  const cur = new Date(start.getTime());
+  const endMs = end.getTime();
+  while (cur.getTime() <= endMs) {
+    keys.push(toYYYYMMDD(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return keys;
+};
+
+/**
+ * One chart point per day in the selected range so weekends are visible even when
+ * daily-sales omits days with no billing row (intermittent empty days).
+ */
+const fillRevenueDataGaps = (
+  points: RevenuePoint[],
+  startYmd: string,
+  endYmd: string,
+  expenseByDate: Map<string, number>,
+  reconByDate: Record<string, number>,
+): RevenuePoint[] => {
+  const rangeKeys = eachDateKeyInclusive(startYmd, endYmd);
+  if (rangeKeys.length === 0) return points;
+  const byDate = new Map<string, RevenuePoint>();
+  for (const p of points) {
+    const k = p.date?.slice(0, 10);
+    if (k) byDate.set(k, p);
+  }
+  return rangeKeys.map((key) => {
+    const existing = byDate.get(key);
+    if (existing) return existing;
+    const d = parseIsoDate(key);
+    return {
+      name: d ? String(d.getDate()) : key,
+      date: key,
+      income: Number(reconByDate[key] ?? 0),
+      expense: expenseByDate.get(key) ?? 0,
+    };
+  });
+};
+
 type DashboardProps = {
   selectedBranch: Branch | null;
   dateRange: {
@@ -720,6 +766,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
               },
             ];
           }
+        }
+
+        const aggregateExpenseOnlyFallback =
+          dailySales.length === 0 &&
+          revenueData.length === 1 &&
+          (revenueData[0]?.income ?? 0) === 0 &&
+          Math.abs((revenueData[0]?.expense ?? 0) - totalExpenses) < 1e-6;
+        if (revenueData.length > 0 && !aggregateExpenseOnlyFallback) {
+          revenueData = fillRevenueDataGaps(revenueData, start, end, expenseByDate, reconByDate);
         }
 
         const last7Days = dailyOrders.slice(-7);
