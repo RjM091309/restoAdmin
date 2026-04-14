@@ -52,6 +52,7 @@ import {
   type ApiCategoryReportRow,
   type ApiTopSellingItem,
 } from '../../services/analyticsService';
+import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -387,9 +388,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const [incomeTopDate, setIncomeTopDate] = React.useState<string>('');
   const [incomeTopLoading, setIncomeTopLoading] = React.useState(false);
   const [incomeTopRows, setIncomeTopRows] = React.useState<ApiTopSellingItem[]>([]);
+  /** Cash reconciliation amount for the opened calendar day (same scope as chart / Sales Analytics) */
+  const [incomeTopReconDay, setIncomeTopReconDay] = React.useState(0);
   const incomeTopGrandTotal = React.useMemo(
     () => incomeTopRows.reduce((sum, row) => sum + Number(row.total_revenue || 0), 0),
     [incomeTopRows],
+  );
+  const incomeTopModalTotal = React.useMemo(
+    () => incomeTopGrandTotal + incomeTopReconDay,
+    [incomeTopGrandTotal, incomeTopReconDay],
   );
 
   const navigateToBreakdown = React.useCallback(
@@ -423,12 +430,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       setIncomeTopDate(pickedDate);
       setIsIncomeTopModalOpen(true);
       setIncomeTopLoading(true);
+      setIncomeTopReconDay(0);
+      const ymd = pickedDate.slice(0, 10);
       try {
-        const rows = await fetchTopSellingApi(params);
+        const [rows, recon] = await Promise.all([
+          fetchTopSellingApi(params),
+          selectedBranch && String(selectedBranch.id) !== 'all'
+            ? fetchCashReconciliationAggregates({
+                start: ymd,
+                end: ymd,
+                branchId: String(selectedBranch.id),
+              }).catch(() => ({ total: 0, byDate: {} as Record<string, number> }))
+            : Promise.resolve({ total: 0, byDate: {} as Record<string, number> }),
+        ]);
         setIncomeTopRows(Array.isArray(rows) ? rows.slice(0, 10) : []);
+        const fromMap = Number(recon.byDate?.[ymd] ?? 0);
+        const dayAmt = fromMap || Number(recon.total ?? 0);
+        setIncomeTopReconDay(Number.isFinite(dayAmt) ? Math.max(0, dayAmt) : 0);
       } catch (error) {
         console.error('Failed to load income top menus:', error);
         setIncomeTopRows([]);
+        setIncomeTopReconDay(0);
       } finally {
         setIncomeTopLoading(false);
       }
@@ -577,19 +599,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         baseParams.set('start_date', start);
         baseParams.set('end_date', end);
 
-        const [dailySales, dailyOrders, dailyExpenses, expenseSummary, branchSales]: [
+        const [dailySales, dailyOrders, dailyExpenses, expenseSummary, branchSales, reconAgg]: [
           ApiDailySalesItem[],
           ApiDailyOrdersItem[],
           ApiDailyExpenseItem[],
           ApiExpenseSummary,
           ApiBranchSalesItem[],
+          Awaited<ReturnType<typeof fetchCashReconciliationAggregates>>,
         ] = await Promise.all([
           fetchDailySalesApi(new URLSearchParams(baseParams)),
           fetchDailyOrdersApi(new URLSearchParams(baseParams)),
           fetchDailyExpensesApi(new URLSearchParams(baseParams)),
           fetchExpenseSummaryApi(new URLSearchParams(baseParams)),
           fetchBranchSalesApi(new URLSearchParams(baseParams)),
+          fetchCashReconciliationAggregates({
+            start,
+            end,
+            branchId: String(selectedBranch.id),
+          }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
         ]);
+
+        const reconByDate = reconAgg?.byDate && typeof reconAgg.byDate === 'object' ? reconAgg.byDate : {};
+        const reconPeriodTotal = Number(reconAgg?.total) || 0;
 
         const branchItem = branchSales.find(
           (b) => String(b.branch_id) === String(selectedBranch.id),
@@ -602,7 +633,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           0,
         );
         const totalSalesFromBranch = branchItem ? Number(branchItem.total_sales || 0) : 0;
-        const totalSales = totalSalesFromDaily || totalSalesFromBranch;
+        const totalSales = (totalSalesFromDaily || totalSalesFromBranch) + reconPeriodTotal;
 
         // Primary source for expenses is the summary endpoint, but the Python
         // service can occasionally return 0 during warm-up or transient DB issues.
@@ -630,32 +661,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           expenseByDate.set(e.expense_date, Number(e.total_expense || 0));
         });
 
+        const saleDatesWithPosRow = new Set(
+          dailySales.map((item) => String(item.sale_date).slice(0, 10)),
+        );
+
         let revenueData: RevenuePoint[] = [];
         if (dailySales.length > 0) {
           revenueData = dailySales.map((item) => {
-            const key = item.sale_date;
-            const dailyExpense = expenseByDate.get(key) ?? 0;
+            const key = String(item.sale_date).slice(0, 10);
+            const dailyExpense = expenseByDate.get(key) ?? expenseByDate.get(item.sale_date) ?? 0;
+            const reconDay = Number(reconByDate[key] ?? 0);
             const d = new Date(item.sale_date);
             return {
               // X-axis: show day-of-month only so all labels fit (e.g. "1", "2", ...).
               // Tooltip uses the attached ISO date.
               name: Number.isNaN(d.getTime()) ? item.sale_date : String(d.getDate()),
-              date: item.sale_date,
-              income: item.total_sales,
+              date: key,
+              income: Number(item.total_sales || 0) + reconDay,
               expense: dailyExpense,
             };
           });
-        } else if (totalExpenses > 0) {
-          // No sales data but we have expenses: show a single point using the start date as label
-          const d = new Date(start);
-          revenueData = [
-            {
-              name: Number.isNaN(d.getTime()) ? formatDateLabel(start) : String(d.getDate()),
-              date: start,
-              income: 0,
-              expense: totalExpenses,
-            },
-          ];
+          for (const [dateKey, raw] of Object.entries(reconByDate)) {
+            const recon = Number(raw) || 0;
+            if (recon <= 0 || saleDatesWithPosRow.has(dateKey)) continue;
+            const d = new Date(`${dateKey}T12:00:00`);
+            revenueData.push({
+              name: Number.isNaN(d.getTime()) ? dateKey : String(d.getDate()),
+              date: dateKey,
+              income: recon,
+              expense: expenseByDate.get(dateKey) ?? 0,
+            });
+          }
+          revenueData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        } else if (totalExpenses > 0 || reconPeriodTotal > 0) {
+          if (reconPeriodTotal > 0) {
+            for (const [dateKey, raw] of Object.entries(reconByDate)) {
+              const recon = Number(raw) || 0;
+              if (recon <= 0) continue;
+              const d = new Date(`${dateKey}T12:00:00`);
+              revenueData.push({
+                name: Number.isNaN(d.getTime()) ? dateKey : String(d.getDate()),
+                date: dateKey,
+                income: recon,
+                expense: expenseByDate.get(dateKey) ?? 0,
+              });
+            }
+            revenueData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+          }
+          if (revenueData.length === 0) {
+            // No POS daily rows and no per-day recon: single point (e.g. expenses only)
+            const d = new Date(start);
+            revenueData = [
+              {
+                name: Number.isNaN(d.getTime()) ? formatDateLabel(start) : String(d.getDate()),
+                date: start,
+                income: 0,
+                expense: totalExpenses,
+              },
+            ];
+          }
         }
 
         const last7Days = dailyOrders.slice(-7);
@@ -1385,13 +1449,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       )}
       <Modal
         isOpen={isIncomeTopModalOpen}
-        onClose={() => setIsIncomeTopModalOpen(false)}
+        onClose={() => {
+          setIsIncomeTopModalOpen(false);
+          setIncomeTopReconDay(0);
+        }}
         title={`Top 10 Best Order Menu${incomeTopDate ? ` • ${formatDateLabel(incomeTopDate)}` : ''}`}
         maxWidth="3xl"
       >
         {incomeTopLoading ? (
           <div className="py-10 text-center text-sm text-brand-muted">Loading...</div>
-        ) : incomeTopRows.length === 0 ? (
+        ) : incomeTopRows.length === 0 && incomeTopReconDay <= 0 ? (
           <div className="py-10 text-center text-sm text-brand-muted">No data</div>
         ) : (
           <div className="space-y-4">
@@ -1418,6 +1485,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       </td>
                     </tr>
                   ))}
+                  {incomeTopReconDay > 0 ? (
+                    <tr className="border-b border-teal-100 bg-teal-50/50">
+                      <td className="px-3 py-2 text-sm text-teal-800">—</td>
+                      <td className="px-3 py-2 text-sm font-semibold text-teal-900">
+                        {t('cash_reconciliation.card_cash_reconciliation')}
+                      </td>
+                      <td className="px-3 py-2 text-sm text-teal-700 text-right tabular-nums">—</td>
+                      <td className="px-3 py-2 text-sm font-bold text-teal-900 text-right tabular-nums">
+                        {formatCurrency(incomeTopReconDay)}
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
@@ -1426,7 +1505,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 {`Total Income${incomeTopDate ? ` • ${formatDateLabel(incomeTopDate)}` : ''}`}
               </span>
               <span className="text-lg font-black text-slate-900 tabular-nums">
-                {formatCurrency(incomeTopGrandTotal)}
+                {formatCurrency(incomeTopModalTotal)}
               </span>
             </div>
           </div>

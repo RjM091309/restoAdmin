@@ -21,6 +21,8 @@ import {
   fetchPerformanceTrendApi,
   type ApiPerformanceTrendRow,
 } from '../../services/analyticsService';
+import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
+import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
 import { useUser } from '../../context/UserContext';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -163,6 +165,16 @@ const getCurrentMonthRange = (): DateRange => {
   };
 };
 
+/** Gross POS total per day — same basis as Sales Analytics “Total sales” KPI (sum of `total_sales`). */
+const sumDailyTotalSales = (items: ApiDailySalesItem[]): number =>
+  items.reduce((sum, item) => sum + Number(item.total_sales || 0), 0);
+
+const formatModalMoney = (n: number) =>
+  `₱${Math.trunc(Number.isFinite(n) ? n : 0).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange, onDateRangeChange }) => {
   const { t } = useTranslation();
   const { user } = useUser();
@@ -189,6 +201,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<Record<number, Record<string, number>>>({});
+
+  const [cashReconModalOpen, setCashReconModalOpen] = useState(false);
+  const [cashReconModalBranch, setCashReconModalBranch] = useState<BranchPerformanceData | null>(null);
+  const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
+  /** Recon sum for all branches in compare range (used when daily-sales is unscoped) */
+  const [comparePeriodReconAll, setComparePeriodReconAll] = useState(0);
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
@@ -387,29 +405,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               const expenseParams = new URLSearchParams(baseParams);
               const dailyParams = new URLSearchParams(baseParams);
               try {
-                const [expenseSummary, branchDailySales] = await Promise.all([
+                const [expenseSummary, branchDailySales, reconAgg] = await Promise.all([
                   fetchExpenseSummaryApi(expenseParams),
                   fetchDailySalesApi(dailyParams),
+                  fetchCashReconciliationAggregates({
+                    start,
+                    end,
+                    branchId: String(b.branch_id),
+                  }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
                 ]);
 
-                const totalSalesFromDaily = branchDailySales.reduce(
-                  (sum, item) => sum + Number(item.total_sales || 0),
-                  0,
-                );
+                const reportGross = sumDailyTotalSales(branchDailySales);
+                const reconTotal = Number(reconAgg.total) || 0;
+                const posBase = reportGross > 0 ? reportGross : Number(b.total_sales || 0);
+                const totalSales = posBase + reconTotal;
 
                 return {
                   id: b.branch_id,
                   name: b.branch_name,
-                  // Align totalSales with SalesAnalytics (daily-sales based)
-                  totalSales: totalSalesFromDaily || b.total_sales,
+                  totalSales,
+                  reportSalesPos: posBase,
+                  reconTotal,
                   totalExpenses: expenseSummary.total_expense,
                   totalOrders: b.order_count,
                 } as BranchPerformanceData;
               } catch (err: any) {
+                let reconFallback = 0;
+                try {
+                  const r = await fetchCashReconciliationAggregates({
+                    start,
+                    end,
+                    branchId: String(b.branch_id),
+                  }).catch(() => ({ total: 0 }));
+                  reconFallback = Number(r.total) || 0;
+                } catch {
+                  reconFallback = 0;
+                }
+                const ts = Number(b.total_sales || 0) + reconFallback;
                 return {
                   id: b.branch_id,
                   name: b.branch_name,
-                  totalSales: b.total_sales,
+                  totalSales: ts,
+                  reportSalesPos: Number(b.total_sales || 0),
+                  reconTotal: reconFallback,
                   totalExpenses: 0,
                   totalOrders: b.order_count,
                 } as BranchPerformanceData;
@@ -449,18 +487,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         );
 
         setDailySalesForCards(dailySales);
+
+        try {
+          const allRecon = await fetchCashReconciliationAggregates({ start, end });
+          setComparePeriodReconAll(Number(allRecon.total) || 0);
+        } catch {
+          setComparePeriodReconAll(0);
+        }
       } catch (error) {
         console.error('Failed to load dashboard analytics data:', error);
         setBranchRevenueDistribution([]);
         setTopProductsData([]);
         setDailySalesForCards([]);
+        setComparePeriodReconAll(0);
       } finally {
         setAnalyticsLoading(false);
       }
     };
 
     void loadAnalytics();
-  }, [activeBranchId, compareDateRange.start, compareDateRange.end]);
+  }, [activeBranchId, compareDateRange.start, compareDateRange.end, analyticsReloadKey]);
 
   // Load expense summary from Python analytics (expense-summary)
   useEffect(() => {
@@ -546,19 +592,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       return;
     }
 
-    // Otherwise, show aggregated view using daily sales + expense summary (all branches or header filter).
+    // Aggregated (no focused branch): match branch cards when available (net + recon per branch).
+    if (!activeBranchId && branchCardsData.length > 0) {
+      const totalSales = branchCardsData.reduce((s, b) => s + b.totalSales, 0);
+      const totalExpenses = expenseSummaryTotal ?? 0;
+      setSummaryData({
+        totalRevenue: totalSales - totalExpenses,
+        totalSales,
+        totalExpenses,
+      });
+      return;
+    }
+
+    // Fallback: daily net + period recon (all branches)
     if ((!dailySalesForCards || dailySalesForCards.length === 0) && expenseSummaryTotal == null) {
       setSummaryData(null);
       return;
     }
 
-    let totalSales = 0;
-
-    for (const item of dailySalesForCards) {
-      const totalSalesDay = Number(item.total_sales || 0);
-      totalSales += totalSalesDay;
-    }
-
+    const grossFromDaily = sumDailyTotalSales(dailySalesForCards || []);
+    const totalSales = grossFromDaily + (comparePeriodReconAll || 0);
     const totalExpenses = expenseSummaryTotal ?? 0;
     const totalRevenue = totalSales - totalExpenses;
 
@@ -567,7 +620,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       totalSales,
       totalExpenses,
     });
-  }, [activeBranchId, branchCardsData, performanceData, dailySalesForCards, expenseSummaryTotal]);
+  }, [
+    activeBranchId,
+    branchCardsData,
+    performanceData,
+    dailySalesForCards,
+    expenseSummaryTotal,
+    comparePeriodReconAll,
+  ]);
 
   const formatCurrency = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -1403,6 +1463,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       branch={branchForCard}
                       onClick={() => handleBranchFocus(branchForCard)}
                       onCompareToggle={() => handleBranchCompareToggle(branch.id)}
+                      onTotalSalesClick={() => {
+                        setCashReconModalBranch(branchForCard);
+                        setCashReconModalOpen(true);
+                      }}
                       isSelected={compareBranchIds.includes(branch.id)}
                       isActive={activeBranchId === branch.id}
                     />
@@ -1506,6 +1570,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           </>
         )}
       </AnimatePresence>
+
+      <CashReconciliationModal
+        open={cashReconModalOpen}
+        onClose={() => {
+          setCashReconModalOpen(false);
+          setCashReconModalBranch(null);
+          setAnalyticsReloadKey((k) => k + 1);
+        }}
+        onDataChanged={() => setAnalyticsReloadKey((k) => k + 1)}
+        branchId={cashReconModalBranch != null ? Number(cashReconModalBranch.id) : null}
+        branchName={cashReconModalBranch?.name ?? '—'}
+        dateRange={{
+          start: compareDateRange.start || getCurrentMonthRange().start,
+          end: compareDateRange.end || getCurrentMonthRange().end,
+        }}
+        reportBasis="total"
+        reportNetSalesDisplay={formatModalMoney(
+          cashReconModalBranch?.reportSalesPos ??
+            Math.max(
+              0,
+              (cashReconModalBranch?.totalSales ?? 0) - (cashReconModalBranch?.reconTotal ?? 0),
+            ),
+        )}
+        cashReconPeriodDisplay={formatModalMoney(cashReconModalBranch?.reconTotal ?? 0)}
+        totalNetSalesDisplay={formatModalMoney(cashReconModalBranch?.totalSales ?? 0)}
+      />
     </>
   );
 };

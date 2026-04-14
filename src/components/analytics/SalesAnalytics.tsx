@@ -25,6 +25,8 @@ import {
   CartesianGrid,
   Cell,
 } from 'recharts';
+import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
+import { CashReconciliationModal } from './CashReconciliationModal';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
 function ChartContainer({
@@ -216,31 +218,80 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [dailySalesLoading, setDailySalesLoading] = useState(false);
   const [dailySalesError, setDailySalesError] = useState<string | null>(null);
 
+  const [cashReconciliationOpen, setCashReconciliationOpen] = useState(false);
+  const [reconAdjustCurrent, setReconAdjustCurrent] = useState<{
+    byDate: Record<string, number>;
+    total: number;
+  }>({ byDate: {}, total: 0 });
+  const [reconAdjustPreviousTotal, setReconAdjustPreviousTotal] = useState(0);
+
   const trendData = useMemo(() => {
-    const baseData =
-      dailySalesCurrent.length > 0
-        ? dailySalesCurrent.map((item) => {
-            const parsed = parseDateSafe(item.sale_date);
-            const label = parsed ? formatDateLabel(parsed) : item.sale_date;
-            const tableDate = parsed
-              ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
-              : item.sale_date;
-            const normalized = normalizeDailySalesItem(item);
-            return {
-              label,
-              tableDate,
-              totalSales: normalized.totalSales,
-              refund: normalized.refund,
-              discount: normalized.discount,
-              netSales: normalized.netSales,
-              productCost: normalized.productCost,
-              productUnitPrice: normalized.productUnitPrice,
-              grossProfit: normalized.grossProfit,
-            };
-          })
-        : [];
-    return baseData;
-  }, [dailySalesCurrent]);
+    const byDate = reconAdjustCurrent.byDate;
+    const saleDatesWithPosRow = new Set<string>();
+
+    const rows: Array<{
+      label: string;
+      tableDate: string;
+      saleDate: string;
+      totalSales: number;
+      refund: number;
+      discount: number;
+      netSales: number;
+      productCost: number;
+      productUnitPrice: number;
+      grossProfit: number;
+    }> = [];
+
+    for (const item of dailySalesCurrent) {
+      const saleDate = String(item.sale_date).slice(0, 10);
+      saleDatesWithPosRow.add(saleDate);
+      const parsed = parseDateSafe(item.sale_date);
+      const label = parsed ? formatDateLabel(parsed) : item.sale_date;
+      const tableDate = parsed
+        ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+        : item.sale_date;
+      const recon = Number(byDate[saleDate] ?? 0);
+      const normalized = normalizeDailySalesItem(item);
+      rows.push({
+        label,
+        tableDate,
+        saleDate,
+        totalSales: normalized.totalSales + recon,
+        refund: normalized.refund,
+        discount: normalized.discount,
+        netSales: normalized.netSales + recon,
+        productCost: normalized.productCost,
+        productUnitPrice: normalized.productUnitPrice,
+        grossProfit: normalized.grossProfit + recon,
+      });
+    }
+
+    // Cash recon on dates with no POS daily row — still part of period net / gross (was missing before).
+    for (const [dateKey, raw] of Object.entries(byDate)) {
+      const recon = Number(raw) || 0;
+      if (recon <= 0 || saleDatesWithPosRow.has(dateKey)) continue;
+      const parsed = parseDateSafe(dateKey);
+      const label = parsed ? formatDateLabel(parsed) : dateKey;
+      const tableDate = parsed
+        ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+        : dateKey;
+      rows.push({
+        label,
+        tableDate,
+        saleDate: dateKey,
+        totalSales: recon,
+        refund: 0,
+        discount: 0,
+        netSales: recon,
+        productCost: 0,
+        productUnitPrice: 0,
+        grossProfit: recon,
+      });
+    }
+
+    rows.sort((a, b) => a.saleDate.localeCompare(b.saleDate));
+    return rows;
+  }, [dailySalesCurrent, reconAdjustCurrent.byDate]);
 
   const previousTrendData = useMemo(() => {
     if (dailySalesPrevious.length === 0) return [];
@@ -355,6 +406,56 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   useEffect(() => { fetchLeastSelling(); }, [fetchLeastSelling]);
   useEffect(() => { fetchDailySales(); }, [fetchDailySales]);
 
+  const loadReconAggregates = useCallback(async () => {
+    const hasRange = dateRange.start && dateRange.end;
+    if (!hasRange) {
+      setReconAdjustCurrent({ byDate: {}, total: 0 });
+      setReconAdjustPreviousTotal(0);
+      return;
+    }
+    const branchOpt =
+      !isAllBranch && selectedBranch?.id && String(selectedBranch.id) !== 'all'
+        ? String(selectedBranch.id)
+        : undefined;
+    try {
+      const { previousStart, previousEnd } = previousRange;
+      const [cur, prev] = await Promise.all([
+        fetchCashReconciliationAggregates({
+          start: dateRange.start,
+          end: dateRange.end,
+          branchId: branchOpt,
+        }),
+        previousStart && previousEnd
+          ? fetchCashReconciliationAggregates({
+              start: previousStart,
+              end: previousEnd,
+              branchId: branchOpt,
+            })
+          : Promise.resolve({ total: 0, byDate: {} as Record<string, number> }),
+      ]);
+      setReconAdjustCurrent({
+        byDate: cur.byDate || {},
+        total: Number(cur.total) || 0,
+      });
+      setReconAdjustPreviousTotal(Number(prev.total) || 0);
+    } catch (e) {
+      console.error('[SalesAnalytics] cash reconciliation aggregates', e);
+      setReconAdjustCurrent({ byDate: {}, total: 0 });
+      setReconAdjustPreviousTotal(0);
+    }
+  }, [
+    dateRange.start,
+    dateRange.end,
+    isAllBranch,
+    selectedBranch?.id,
+    previousRange.previousStart,
+    previousRange.previousEnd,
+  ]);
+
+  useEffect(() => {
+    void loadReconAggregates();
+  }, [loadReconAggregates]);
+
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
     if (chartPointCount <= 2) return 180;
@@ -455,7 +556,10 @@ const metricConfig = {
       };
 
       const current = aggregateMetric(trendData, key);
-      const previous = aggregateMetric(previousTrendData, key);
+      let previous = aggregateMetric(previousTrendData, key);
+      if (key === 'totalSales' || key === 'netSales' || key === 'grossProfit') {
+        previous += reconAdjustPreviousTotal;
+      }
       const diff = current - previous;
       const hasPrev = previous > 0;
       const percent = hasPrev ? (diff / previous) * 100 : 0;
@@ -482,7 +586,22 @@ const metricConfig = {
       makeItem('netSales', t('sales_analytics.net_sales')),
       makeItem('grossProfit', t('sales_analytics.gross_profit')),
     ];
-  }, [trendData, previousTrendData, metricConfig, t]);
+  }, [trendData, previousTrendData, metricConfig, t, reconAdjustPreviousTotal]);
+  /** POS / daily-sales net only (no cash reconciliation) — for modal breakdown */
+  const reportNetSalesTotal = useMemo(
+    () =>
+      dailySalesCurrent.reduce((sum, item) => sum + normalizeDailySalesItem(item).netSales, 0),
+    [dailySalesCurrent]
+  );
+  const reportNetSalesDisplay = money(reportNetSalesTotal);
+  const cashReconPeriodDisplay = money(reconAdjustCurrent.total);
+  const totalNetSalesModalDisplay = money(reportNetSalesTotal + reconAdjustCurrent.total);
+
+  const cashReconciliationBranchId = useMemo(() => {
+    if (!selectedBranch || String(selectedBranch.id) === 'all') return null;
+    const n = Number(selectedBranch.id);
+    return Number.isFinite(n) ? n : null;
+  }, [selectedBranch]);
   const activeMetricLabel = topStatItems.find((item) => item.key === activeMetric)?.label || t('sales_analytics.total_sales');
   const LoyverseTooltip: React.FC<{
     active?: boolean;
@@ -684,7 +803,10 @@ const metricConfig = {
             <button
               type="button"
               key={item.label}
-              onClick={() => setActiveMetric(item.key)}
+              onClick={() => {
+                setActiveMetric(item.key);
+                if (item.key === 'netSales') setCashReconciliationOpen(true);
+              }}
               className="p-5 text-left transition-colors hover:bg-gray-50 border-b-2 border-b-transparent"
               style={activeMetric === item.key ? { borderBottomColor: CHART_THEME_COLOR } : undefined}
             >
@@ -960,6 +1082,21 @@ const metricConfig = {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <CashReconciliationModal
+        open={cashReconciliationOpen}
+        onClose={() => {
+          setCashReconciliationOpen(false);
+          void loadReconAggregates();
+        }}
+        onDataChanged={() => void loadReconAggregates()}
+        branchId={cashReconciliationBranchId}
+        branchName={selectedBranch?.name ?? '—'}
+        dateRange={dateRange}
+        reportNetSalesDisplay={reportNetSalesDisplay}
+        cashReconPeriodDisplay={cashReconPeriodDisplay}
+        totalNetSalesDisplay={totalNetSalesModalDisplay}
+      />
     </div>
   );
 };
