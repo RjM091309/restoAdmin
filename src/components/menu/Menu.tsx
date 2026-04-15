@@ -47,6 +47,25 @@ import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 import { toast } from 'sonner';
 
+function sortMenuCategoriesByName(categories: MenuCategory[]): MenuCategory[] {
+    const splitLeadingNumber = (name: string) => {
+        const s = String(name || '').trim();
+        const m = s.match(/^(\d+)\s*[\.\)\-]?\s*(.*)$/);
+        if (!m) return { hasNum: false, num: Number.POSITIVE_INFINITY, rest: s };
+        return { hasNum: true, num: Number(m[1]), rest: (m[2] || '').trim() };
+    };
+
+    return [...categories].sort((a, b) => {
+        const A = splitLeadingNumber(String(a.name || ''));
+        const B = splitLeadingNumber(String(b.name || ''));
+
+        if (A.hasNum && B.hasNum && A.num !== B.num) return A.num - B.num;
+        if (A.hasNum !== B.hasNum) return A.hasNum ? -1 : 1;
+
+        return A.rest.localeCompare(B.rest, undefined, { sensitivity: 'base', numeric: true });
+    });
+}
+
 // ---- Props & types ----
 interface MenuProps {
     selectedBranch: Branch | null;
@@ -56,6 +75,38 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
     const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
+
+    const [branchCategoryLevel, setBranchCategoryLevel] = useState<1 | 2>(1);
+    useEffect(() => {
+        if (!selectedBranch || String(selectedBranch.id) === 'all') {
+            setBranchCategoryLevel(1);
+            return;
+        }
+        if (selectedBranch.menuCategoryLevel !== undefined && selectedBranch.menuCategoryLevel !== null) {
+            setBranchCategoryLevel(selectedBranch.menuCategoryLevel);
+            return;
+        }
+        let cancelled = false;
+        const token = localStorage.getItem('token');
+        fetch(`/branch/${selectedBranch.id}`, {
+            headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        })
+            .then((r) => r.json())
+            .then((json) => {
+                if (cancelled) return;
+                const b = json?.data ?? json;
+                setBranchCategoryLevel(Number(b?.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1);
+            })
+            .catch(() => {
+                if (!cancelled) setBranchCategoryLevel(1);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedBranch?.id, selectedBranch?.menuCategoryLevel]);
+
+    const isTwoLevelBranch = isSpecificBranch && branchCategoryLevel === 2;
+
     const categoryListRef = useRef<HTMLDivElement | null>(null);
     const menuItemsScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -101,6 +152,9 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [categoryDesc, setCategoryDesc] = useState('');
     const [categorySubmitting, setCategorySubmitting] = useState(false);
     const [categoryToDelete, setCategoryToDelete] = useState<MenuCategory | null>(null);
+    const [selectedMainCategoryId, setSelectedMainCategoryId] = useState<string | null>(null);
+    /** When creating a category: null = main, string = parent main id for sub */
+    const [categoryCreateParentId, setCategoryCreateParentId] = useState<string | null>(null);
     const [categoryBaseline, setCategoryBaseline] = useState<{
         id: string | null;
         name: string;
@@ -172,22 +226,50 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         }
     }, [branchId]);
 
+    const sortedCategories = useMemo(() => sortMenuCategoriesByName(categories), [categories]);
+
     useEffect(() => {
         refreshData();
         setSearchTerm('');
         setSelectedCategory(null);
+        setSelectedMainCategoryId(null);
         setAvailFilter('all');
     }, [refreshData]);
 
-    // Auto-select first category (removes "All Categories" view)
+    // Auto-select category: flat list (level 1) or main then sub (level 2)
     useEffect(() => {
         if (!isSpecificBranch) return;
         if (categories.length === 0) {
             setSelectedCategory(null);
+            setSelectedMainCategoryId(null);
             return;
         }
-        setSelectedCategory((prev) => (prev && categories.some((c) => c.id === prev) ? prev : categories[0].id));
-    }, [categories, isSpecificBranch]);
+        if (!isTwoLevelBranch) {
+            setSelectedMainCategoryId(null);
+            const first = sortedCategories[0]?.id ?? null;
+            setSelectedCategory((prev) => (prev && categories.some((c) => c.id === prev) ? prev : first));
+            return;
+        }
+        const mains = categories.filter((c) => !c.parentId);
+        const sortedMains = sortMenuCategoriesByName(mains);
+        if (sortedMains.length === 0) {
+            setSelectedMainCategoryId(null);
+            setSelectedCategory(null);
+            return;
+        }
+        setSelectedMainCategoryId((prev) => (prev && sortedMains.some((m) => m.id === prev) ? prev : sortedMains[0].id));
+    }, [categories, isSpecificBranch, isTwoLevelBranch, sortedCategories]);
+
+    useEffect(() => {
+        if (!isSpecificBranch || !isTwoLevelBranch || !selectedMainCategoryId) return;
+        const subs = categories.filter((c) => c.parentId === selectedMainCategoryId);
+        const sortedSubs = sortMenuCategoriesByName(subs);
+        if (sortedSubs.length === 0) {
+            setSelectedCategory(null);
+            return;
+        }
+        setSelectedCategory((prev) => (prev && sortedSubs.some((s) => s.id === prev) ? prev : sortedSubs[0].id));
+    }, [categories, isSpecificBranch, isTwoLevelBranch, selectedMainCategoryId]);
 
     // ==================== Filtering ====================
     const filteredMenus = useMemo(() => {
@@ -213,8 +295,12 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     const selectedCategoryLabel = useMemo(() => {
         if (!selectedCategory) return '';
-        return categories.find((c) => c.id === selectedCategory)?.name ?? '';
-    }, [categories, selectedCategory, t]);
+        const sub = categories.find((c) => c.id === selectedCategory);
+        if (!sub) return '';
+        if (!isTwoLevelBranch || !sub.parentId) return sub.name;
+        const main = categories.find((c) => c.id === sub.parentId);
+        return main ? `${main.name} › ${sub.name}` : sub.name;
+    }, [categories, selectedCategory, isTwoLevelBranch]);
 
     const ITEMS_PER_PAGE = 50;
     const shouldPaginate = filteredMenus.length > ITEMS_PER_PAGE;
@@ -299,31 +385,41 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         resetForm();
     };
 
-    const sortedCategories = useMemo(() => {
-        const splitLeadingNumber = (name: string) => {
-            const s = String(name || '').trim();
-            const m = s.match(/^(\d+)\s*[\.\)\-]?\s*(.*)$/);
-            if (!m) return { hasNum: false, num: Number.POSITIVE_INFINITY, rest: s };
-            return { hasNum: true, num: Number(m[1]), rest: (m[2] || '').trim() };
-        };
+    const sortedMainCategories = useMemo(
+        () => sortMenuCategoriesByName(categories.filter((c) => !c.parentId)),
+        [categories],
+    );
 
-        return [...categories].sort((a, b) => {
-            const A = splitLeadingNumber(String(a.name || ''));
-            const B = splitLeadingNumber(String(b.name || ''));
+    const sortedSubCategories = useMemo(
+        () =>
+            selectedMainCategoryId
+                ? sortMenuCategoriesByName(categories.filter((c) => c.parentId === selectedMainCategoryId))
+                : [],
+        [categories, selectedMainCategoryId],
+    );
 
-            if (A.hasNum && B.hasNum && A.num !== B.num) return A.num - B.num;
-            if (A.hasNum !== B.hasNum) return A.hasNum ? -1 : 1; // numbered first
-
-            return A.rest.localeCompare(B.rest, undefined, { sensitivity: 'base', numeric: true });
-        });
-    }, [categories]);
+    const leafCategoriesForItemForm = useMemo(
+        () =>
+            isTwoLevelBranch
+                ? sortMenuCategoriesByName(categories.filter((c) => c.parentId))
+                : sortedCategories,
+        [categories, isTwoLevelBranch, sortedCategories],
+    );
 
     const handleSelectCategory = useCallback((e: React.MouseEvent<HTMLButtonElement>, categoryId: string) => {
         e.currentTarget.blur();
         setSelectedCategory(categoryId);
-        // Use existing app main scroller only (prevents multi-container flicker).
         scrollPageToTop();
     }, [scrollPageToTop]);
+
+    const handleSelectMain = useCallback(
+        (e: React.MouseEvent<HTMLButtonElement>, mainId: string) => {
+            e.currentTarget.blur();
+            setSelectedMainCategoryId(mainId);
+            scrollPageToTop();
+        },
+        [scrollPageToTop],
+    );
 
     const canSubmitItem = useMemo(() => {
         const baselinePrice = Number(itemBaseline.price || 0);
@@ -353,11 +449,25 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         editingItem,
     ]);
 
-    const openCategoryModal = () => {
+    const openAddMainCategory = () => {
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
         setCategoryBaseline({ id: null, name: '', desc: '' });
+        setCategoryCreateParentId(null);
+        setIsCategoryPanelOpen(true);
+    };
+
+    const openAddSubCategory = () => {
+        if (!selectedMainCategoryId) {
+            toast.error(t('menu_page.select_main_first'));
+            return;
+        }
+        setEditingCategory(null);
+        setCategoryName('');
+        setCategoryDesc('');
+        setCategoryBaseline({ id: null, name: '', desc: '' });
+        setCategoryCreateParentId(selectedMainCategoryId);
         setIsCategoryPanelOpen(true);
     };
 
@@ -367,6 +477,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
+        setCategoryCreateParentId(null);
     };
 
     const handleOpenEditCategory = (e: React.MouseEvent, category: MenuCategory) => {
@@ -375,6 +486,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setCategoryName(category.name || '');
         setCategoryDesc('');
         setCategoryBaseline({ id: String(category.id), name: category.name || '', desc: '' });
+        setCategoryCreateParentId(null);
         setIsCategoryPanelOpen(true);
     };
 
@@ -401,7 +513,13 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 closeCategoryModal();
                 refreshData();
             } else {
-                await createMenuCategory(branchId, { name, description: categoryDesc.trim() || null });
+                const parentPayload =
+                    isTwoLevelBranch && categoryCreateParentId ? categoryCreateParentId : null;
+                await createMenuCategory(branchId, {
+                    name,
+                    description: categoryDesc.trim() || null,
+                    parentId: parentPayload,
+                });
                 toast.success(t('category.category_created_successfully'));
                 closeCategoryModal();
                 refreshData();
@@ -787,7 +905,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <div>
                 <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.category')}</label>
                 <Select2
-                    options={[{ value: '', label: t('menu_page.modal.uncategorized') }, ...sortedCategories.map((c) => ({ value: c.id, label: c.name }))]}
+                    options={[
+                        { value: '', label: t('menu_page.modal.uncategorized') },
+                        ...leafCategoriesForItemForm.map((c) => ({ value: c.id, label: c.name })),
+                    ]}
                     value={formCategory || ''}
                     onChange={(v) => setFormCategory(v ? String(v) : '')}
                     placeholder={t('menu_page.modal.select_category')}
@@ -954,107 +1075,304 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         </div>
 
                         <div className="flex gap-6 items-stretch min-h-[560px]">
-                            {/* Main Category (Categories list) */}
-                            <section className="w-[320px] xl:w-[420px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
-                                <div className="px-5 py-4 border-b border-gray-100">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div>
-                                            <div className="text-sm font-black tracking-wide text-brand-text uppercase">
-                                                Menu Category
-                                            </div>
-                                            <div className="text-xs text-brand-muted mt-1">
-                                                Select a Menu Category to show items.
+                            {isTwoLevelBranch ? (
+                                <>
+                                    <section className="w-[260px] xl:w-[280px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                        <div className="px-4 py-4 border-b border-gray-100">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div>
+                                                    <div className="text-xs font-black tracking-wide text-brand-text uppercase">
+                                                        {t('menu_page.main_category')}
+                                                    </div>
+                                                    <div className="text-[11px] text-brand-muted mt-1 leading-snug">
+                                                        {t('menu_page.category_hint_two')}
+                                                    </div>
+                                                </div>
+                                                {canCreate('menu_management') && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={openAddMainCategory}
+                                                        className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer shrink-0"
+                                                        aria-label={t('menu_page.add_main')}
+                                                        disabled={branchId === 'all'}
+                                                        title={t('menu_page.add_main')}
+                                                    >
+                                                        +
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
-                                        {canCreate('menu_management') && (
-                                            <button
-                                                type="button"
-                                                onClick={openCategoryModal}
-                                                className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
-                                                aria-label="Add category"
-                                                disabled={branchId === 'all'}
-                                            >
-                                                +
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <div
-                                    ref={categoryListRef}
-                                    data-category-scroller
-                                    className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar"
-                                >
-                                    {sortedCategories.map((cat) => {
-                                        const active = cat.id === selectedCategory;
-                                        const count = menus.filter((m) => m.categoryId === cat.id).length;
-                                        return (
-                                            <div
-                                                key={cat.id}
-                                                className={cn(
-                                                    'group flex items-center rounded-xl transition-colors relative',
-                                                    active ? 'bg-brand-primary/10' : 'hover:bg-brand-bg',
-                                                )}
-                                            >
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => handleSelectCategory(e, cat.id)}
-                                                    className={cn(
-                                                        'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
-                                                        active ? 'text-brand-primary' : 'text-brand-text',
-                                                    )}
-                                                >
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <span className={cn('flex-1 font-bold break-words', active ? '' : 'font-semibold')}>
-                                                            {cat.name}
-                                                        </span>
-                                                        <span
+                                        <div
+                                            ref={categoryListRef}
+                                            data-category-scroller
+                                            className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar"
+                                        >
+                                            {sortedMainCategories.map((cat) => {
+                                                const active = cat.id === selectedMainCategoryId;
+                                                const subIds = categories
+                                                    .filter((c) => c.parentId === cat.id)
+                                                    .map((c) => c.id);
+                                                const count = menus.filter((m) => m.categoryId && subIds.includes(m.categoryId)).length;
+                                                return (
+                                                    <div
+                                                        key={cat.id}
+                                                        className={cn(
+                                                            'group flex items-center rounded-xl transition-colors relative',
+                                                            active ? 'bg-brand-primary/10' : 'hover:bg-brand-bg',
+                                                        )}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => handleSelectMain(e, cat.id)}
                                                             className={cn(
-                                                                'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
-                                                                active
-                                                                    ? 'bg-brand-primary/15 text-brand-primary'
-                                                                    : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
+                                                                'flex-1 text-left px-3 py-2.5 min-w-0 cursor-pointer',
+                                                                active ? 'text-brand-primary' : 'text-brand-text',
                                                             )}
                                                         >
-                                                            {count}
-                                                        </span>
-                                                    </div>
-                                                </button>
-                                                {(canUpdate('menu_management') || canDelete('menu_management')) && (
-                                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
-                                                        {canUpdate('menu_management') && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => handleOpenEditCategory(e, cat)}
-                                                                className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
-                                                                aria-label="Edit menu category"
-                                                            >
-                                                                <Edit2 size={14} />
-                                                            </button>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className={cn('flex-1 font-bold break-words text-sm', active ? '' : 'font-semibold')}>
+                                                                    {cat.name}
+                                                                </span>
+                                                                <span
+                                                                    className={cn(
+                                                                        'text-[10px] px-1.5 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                                                        active
+                                                                            ? 'bg-brand-primary/15 text-brand-primary'
+                                                                            : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
+                                                                    )}
+                                                                >
+                                                                    {count}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                        {(canUpdate('menu_management') || canDelete('menu_management')) && (
+                                                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                                                                {canUpdate('menu_management') && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => handleOpenEditCategory(e, cat)}
+                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                                                        aria-label="Edit main category"
+                                                                    >
+                                                                        <Edit2 size={14} />
+                                                                    </button>
+                                                                )}
+                                                                {canDelete('menu_management') && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => handleDeleteCategory(e, cat)}
+                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                                                        aria-label="Delete main category"
+                                                                    >
+                                                                        <Trash2 size={14} />
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         )}
-                                                        {canDelete('menu_management') && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => handleDeleteCategory(e, cat)}
-                                                                className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                                                                aria-label="Delete menu category"
-                                                            >
-                                                                <Trash2 size={14} />
-                                                            </button>
-                                                        )}
                                                     </div>
+                                                );
+                                            })}
+                                            {sortedMainCategories.length === 0 && (
+                                                <div className="px-3 py-5 text-xs text-brand-muted">{t('menu_page.no_main_categories')}</div>
+                                            )}
+                                        </div>
+                                    </section>
+
+                                    <section className="w-[260px] xl:w-[300px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                        <div className="px-4 py-4 border-b border-gray-100">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div>
+                                                    <div className="text-xs font-black tracking-wide text-brand-text uppercase">
+                                                        {t('menu_page.sub_category')}
+                                                    </div>
+                                                    <div className="text-[11px] text-brand-muted mt-1 leading-snug">
+                                                        {t('menu_page.pick_sub_for_items')}
+                                                    </div>
+                                                </div>
+                                                {canCreate('menu_management') && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={openAddSubCategory}
+                                                        className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                                                        aria-label={t('menu_page.add_sub')}
+                                                        disabled={branchId === 'all' || !selectedMainCategoryId}
+                                                        title={t('menu_page.add_sub')}
+                                                    >
+                                                        +
+                                                    </button>
                                                 )}
                                             </div>
-                                        );
-                                    })}
-
-                                    {categories.length === 0 && (
-                                        <div className="px-4 py-6 text-sm text-brand-muted">
-                                            No Menu Category.
                                         </div>
-                                    )}
-                                </div>
-                            </section>
+                                        <div className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                            {sortedSubCategories.map((cat) => {
+                                                const active = cat.id === selectedCategory;
+                                                const count = menus.filter((m) => m.categoryId === cat.id).length;
+                                                return (
+                                                    <div
+                                                        key={cat.id}
+                                                        className={cn(
+                                                            'group flex items-center rounded-xl transition-colors relative',
+                                                            active ? 'bg-violet-100/80' : 'hover:bg-brand-bg',
+                                                        )}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => handleSelectCategory(e, cat.id)}
+                                                            className={cn(
+                                                                'flex-1 text-left px-3 py-2.5 min-w-0 cursor-pointer',
+                                                                active ? 'text-violet-800' : 'text-brand-text',
+                                                            )}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className={cn('flex-1 font-bold break-words text-sm', active ? '' : 'font-semibold')}>
+                                                                    {cat.name}
+                                                                </span>
+                                                                <span
+                                                                    className={cn(
+                                                                        'text-[10px] px-1.5 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                                                        active
+                                                                            ? 'bg-violet-200 text-violet-900'
+                                                                            : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
+                                                                    )}
+                                                                >
+                                                                    {count}
+                                                                </span>
+                                                            </div>
+                                                        </button>
+                                                        {(canUpdate('menu_management') || canDelete('menu_management')) && (
+                                                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                                                                {canUpdate('menu_management') && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => handleOpenEditCategory(e, cat)}
+                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                                                        aria-label="Edit subcategory"
+                                                                    >
+                                                                        <Edit2 size={14} />
+                                                                    </button>
+                                                                )}
+                                                                {canDelete('menu_management') && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => handleDeleteCategory(e, cat)}
+                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                                                        aria-label="Delete subcategory"
+                                                                    >
+                                                                        <Trash2 size={14} />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                            {selectedMainCategoryId && sortedSubCategories.length === 0 && (
+                                                <div className="px-3 py-5 text-xs text-brand-muted">{t('menu_page.no_subcategories')}</div>
+                                            )}
+                                            {!selectedMainCategoryId && (
+                                                <div className="px-3 py-5 text-xs text-brand-muted">{t('menu_page.select_main_first')}</div>
+                                            )}
+                                        </div>
+                                    </section>
+                                </>
+                            ) : (
+                                <section className="w-[320px] xl:w-[420px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+                                    <div className="px-5 py-4 border-b border-gray-100">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <div className="text-sm font-black tracking-wide text-brand-text uppercase">
+                                                    {t('menu_page.modal.category')}
+                                                </div>
+                                                <div className="text-xs text-brand-muted mt-1">{t('menu_page.category_hint_single')}</div>
+                                            </div>
+                                            {canCreate('menu_management') && (
+                                                <button
+                                                    type="button"
+                                                    onClick={openAddMainCategory}
+                                                    className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer"
+                                                    aria-label="Add category"
+                                                    disabled={branchId === 'all'}
+                                                >
+                                                    +
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        ref={categoryListRef}
+                                        data-category-scroller
+                                        className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar"
+                                    >
+                                        {sortedCategories.map((cat) => {
+                                            const active = cat.id === selectedCategory;
+                                            const count = menus.filter((m) => m.categoryId === cat.id).length;
+                                            return (
+                                                <div
+                                                    key={cat.id}
+                                                    className={cn(
+                                                        'group flex items-center rounded-xl transition-colors relative',
+                                                        active ? 'bg-brand-primary/10' : 'hover:bg-brand-bg',
+                                                    )}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleSelectCategory(e, cat.id)}
+                                                        className={cn(
+                                                            'flex-1 text-left px-4 py-3 min-w-0 cursor-pointer',
+                                                            active ? 'text-brand-primary' : 'text-brand-text',
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <span className={cn('flex-1 font-bold break-words', active ? '' : 'font-semibold')}>
+                                                                {cat.name}
+                                                            </span>
+                                                            <span
+                                                                className={cn(
+                                                                    'text-[11px] px-2 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                                                    active
+                                                                        ? 'bg-brand-primary/15 text-brand-primary'
+                                                                        : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
+                                                                )}
+                                                            >
+                                                                {count}
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                    {(canUpdate('menu_management') || canDelete('menu_management')) && (
+                                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                                                            {canUpdate('menu_management') && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleOpenEditCategory(e, cat)}
+                                                                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                                                    aria-label="Edit menu category"
+                                                                >
+                                                                    <Edit2 size={14} />
+                                                                </button>
+                                                            )}
+                                                            {canDelete('menu_management') && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleDeleteCategory(e, cat)}
+                                                                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                                                    aria-label="Delete menu category"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+
+                                        {categories.length === 0 && (
+                                            <div className="px-4 py-6 text-sm text-brand-muted">No Menu Category.</div>
+                                        )}
+                                    </div>
+                                </section>
+                            )}
 
                             {/* Table Items */}
                             <section className="flex-1 min-w-0">
@@ -1339,7 +1657,15 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <SidePanel
                 isOpen={isCategoryPanelOpen}
                 onClose={closeCategoryModal}
-                title={editingCategory ? 'Edit Category' : t('categories.add_new_category')}
+                title={
+                    editingCategory
+                        ? 'Edit Category'
+                        : isTwoLevelBranch
+                          ? categoryCreateParentId
+                              ? t('menu_page.new_sub_category')
+                              : t('menu_page.new_main_category')
+                          : t('categories.add_new_category')
+                }
                 width="md"
                 footer={
                     <div className="flex items-center justify-end gap-3">

@@ -112,10 +112,21 @@ class CategoryController {
 				return ApiResponse.badRequest(res, 'Please select a branch to create a category.');
 			}
 
+			const rawParent = req.body?.PARENT_CAT_ID ?? req.body?.parent_cat_id ?? req.body?.parent_id ?? null;
+			let PARENT_CAT_ID = null;
+			if (rawParent != null && rawParent !== '') {
+				const p = Number(rawParent);
+				if (!Number.isFinite(p)) {
+					return ApiResponse.badRequest(res, 'Invalid parent category id');
+				}
+				PARENT_CAT_ID = p;
+			}
+
 			const categoryId = await CategoryModel.create({
 				CAT_NAME: payload.CAT_NAME.trim(),
 				CAT_DESC: payload.CAT_DESC || null,
 				BRANCH_ID: branchId,
+				PARENT_CAT_ID,
 				user_id,
 			});
 

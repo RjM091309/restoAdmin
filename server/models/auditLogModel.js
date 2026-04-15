@@ -6,10 +6,57 @@
 // ============================================
 
 const pool = require('../config/db');
+const { ensureIdNoAutoIncrement } = require('../utils/mysqlSchemaHelpers');
 
 class AuditLogModel {
+	static _schemaReady = false;
+	static _schemaPromise = null;
+
+	/**
+	 * Ensures audit_logs exists and IDNo is AUTO_INCREMENT (legacy dumps had IDNo NOT NULL without auto increment).
+	 */
+	static async ensureSchema() {
+		if (AuditLogModel._schemaReady) return;
+		if (AuditLogModel._schemaPromise) return AuditLogModel._schemaPromise;
+
+		AuditLogModel._schemaPromise = (async () => {
+			await pool.execute(`
+				CREATE TABLE IF NOT EXISTS audit_logs (
+					IDNo INT NOT NULL AUTO_INCREMENT,
+					USER_ID INT DEFAULT NULL,
+					BRANCH_ID INT DEFAULT NULL,
+					ACTION VARCHAR(100) DEFAULT NULL,
+					TABLE_NAME VARCHAR(50) DEFAULT NULL,
+					RECORD_ID INT DEFAULT NULL,
+					CREATED_DT DATETIME DEFAULT CURRENT_TIMESTAMP,
+					PRIMARY KEY (IDNo),
+					KEY idx_audit_logs_created (CREATED_DT)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+			`);
+
+			const ok = await ensureIdNoAutoIncrement(pool, 'audit_logs');
+			if (!ok) {
+				throw new Error(
+					'audit_logs.IDNo is not AUTO_INCREMENT. Check PRIMARY KEY on IDNo and run: ' +
+						'ALTER TABLE audit_logs MODIFY COLUMN IDNo INT NOT NULL AUTO_INCREMENT;'
+				);
+			}
+
+			AuditLogModel._schemaReady = true;
+			AuditLogModel._schemaPromise = null;
+		})().catch((error) => {
+			AuditLogModel._schemaPromise = null;
+			AuditLogModel._schemaReady = false;
+			throw error;
+		});
+
+		return AuditLogModel._schemaPromise;
+	}
+
 	// Create audit log entry
 	static async create(data) {
+		await AuditLogModel.ensureSchema();
+
 		const {
 			user_id,
 			branch_id,
@@ -39,6 +86,8 @@ class AuditLogModel {
 
 	// Get audit logs with filters
 	static async getAll(filters = {}) {
+		await AuditLogModel.ensureSchema();
+
 		let query = `
 			SELECT 
 				al.IDNo,

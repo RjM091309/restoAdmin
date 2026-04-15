@@ -6,6 +6,7 @@
 // ============================================
 
 const pool = require('../config/db');
+const CategoryModel = require('./categoryModel');
 
 class MenuModel {
 	// Get all active menus with category name
@@ -168,8 +169,9 @@ class MenuModel {
 
 	// Get all categories for dropdown, optionally filtered by branch
 	static async getCategories(branchId = null) {
+		await CategoryModel.ensureSchema();
 		let query = `
-			SELECT IDNo, CAT_NAME AS CATEGORY_NAME 
+			SELECT IDNo, CAT_NAME AS CATEGORY_NAME, PARENT_CAT_ID
 			FROM categories 
 			WHERE ACTIVE = 1 
 		`;

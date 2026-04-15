@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const BranchModel = require('./branchModel');
 
 class UserBranchModel {
 
@@ -30,6 +31,7 @@ class UserBranchModel {
 
 	// Get all branches for a user
 	static async getBranchesByUserId(userId) {
+		await BranchModel.ensureSchema();
 		const query = `
 			SELECT 
 				b.IDNo,
@@ -37,6 +39,7 @@ class UserBranchModel {
 				b.BRANCH_NAME,
 				b.ADDRESS,
 				b.PHONE,
+				b.MENU_CATEGORY_LEVEL,
 				b.ACTIVE
 			FROM user_info u
 			INNER JOIN branches b ON b.IDNo = u.BRANCH_ID

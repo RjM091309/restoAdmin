@@ -4,6 +4,8 @@ export interface MenuCategory {
     id: string;
     name: string;
     branchId: string | null;
+    /** If set, this category is a subcategory of the given main category id */
+    parentId: string | null;
 }
 
 export interface MenuRecord {
@@ -67,6 +69,7 @@ type CategoryApiRecord = {
     IDNo: number;
     CATEGORY_NAME?: string;
     BRANCH_ID?: number | null;
+    PARENT_CAT_ID?: number | null;
 };
 
 // Menu API calls use /data-api prefix to avoid conflict with SPA /menu route
@@ -131,6 +134,8 @@ const mapCategoryRecord = (row: CategoryApiRecord): MenuCategory => ({
     id: String(row.IDNo),
     name: row.CATEGORY_NAME || 'Uncategorized',
     branchId: row.BRANCH_ID !== undefined && row.BRANCH_ID !== null ? String(row.BRANCH_ID) : null,
+    parentId:
+        row.PARENT_CAT_ID !== undefined && row.PARENT_CAT_ID !== null ? String(row.PARENT_CAT_ID) : null,
 });
 
 // ---- Public API ----
@@ -175,7 +180,7 @@ export const getMenuCategories = async (branchId?: string): Promise<MenuCategory
     return data.map(mapCategoryRecord);
 };
 
-export type CreateMenuCategoryPayload = { name: string; description?: string | null };
+export type CreateMenuCategoryPayload = { name: string; description?: string | null; parentId?: string | null };
 export type UpdateMenuCategoryPayload = { name: string; description?: string | null };
 
 export async function createMenuCategory(branchId: string | null, payload: CreateMenuCategoryPayload): Promise<{ id: number }> {
@@ -184,6 +189,9 @@ export async function createMenuCategory(branchId: string | null, payload: Creat
         CAT_DESC: payload.description?.trim() || null,
     };
     if (branchId && branchId !== 'all') body.branch_id = branchId;
+    if (payload.parentId && String(payload.parentId).trim() !== '') {
+        body.PARENT_CAT_ID = String(payload.parentId).trim();
+    }
 
     const response = await fetch(buildUrl('/category'), {
         method: 'POST',
