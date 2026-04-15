@@ -99,9 +99,12 @@ class BillingModel {
 			status,
 			user_id
 		} = data;
+		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing');
+		const nextId = Number(idRows?.[0]?.nextId) || 1;
 
 		const query = `
 			INSERT INTO billing (
+				IDNo,
 				BRANCH_ID,
 				ORDER_ID,
 				PAYMENT_METHOD,
@@ -111,10 +114,11 @@ class BillingModel {
 				STATUS,
 				ENCODED_BY,
 				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`;
 
 		await pool.execute(query, [
+			nextId,
 			branch_id,
 			order_id,
 			payment_method || 'CASH',
@@ -163,12 +167,14 @@ class BillingModel {
 
 	static async recordTransaction(data) {
 		const { order_id, payment_method, amount_paid, payment_ref, user_id } = data;
+		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM payment_transactions');
+		const nextId = Number(idRows?.[0]?.nextId) || 1;
 		const query = `
 			INSERT INTO payment_transactions (
-				ORDER_ID, PAYMENT_METHOD, AMOUNT_PAID, PAYMENT_REF, ENCODED_BY
-			) VALUES (?, ?, ?, ?, ?)
+				IDNo, ORDER_ID, PAYMENT_METHOD, AMOUNT_PAID, PAYMENT_REF, ENCODED_BY
+			) VALUES (?, ?, ?, ?, ?, ?)
 		`;
-		await pool.execute(query, [order_id, payment_method, amount_paid, payment_ref, user_id]);
+		await pool.execute(query, [nextId, order_id, payment_method, amount_paid, payment_ref, user_id]);
 	}
 
 	static async getPaymentHistory(orderId) {
@@ -350,6 +356,7 @@ class BillingModel {
 
 		const insertQuery = `
 			INSERT INTO billing (
+				IDNo,
 				BRANCH_ID,
 				ORDER_ID,
 				PAYMENT_METHOD,
@@ -361,10 +368,13 @@ class BillingModel {
 				STATUS,
 				ENCODED_BY,
 				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`;
+		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing');
+		const nextId = Number(idRows?.[0]?.nextId) || 1;
 
 		await pool.execute(insertQuery, [
+			nextId,
 			order.BRANCH_ID || null,
 			orderId,
 			'CASH',

@@ -37,9 +37,12 @@ class OrderItemsModel {
 		if (!items.length) {
 			return;
 		}
+		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM order_items');
+		let nextId = Number(idRows?.[0]?.nextId) || 1;
 
 		const query = `
 			INSERT INTO order_items (
+				IDNo,
 				ORDER_ID,
 				MENU_ID,
 				QTY,
@@ -52,6 +55,7 @@ class OrderItemsModel {
 		`;
 
 		const values = items.map(item => [
+			nextId++,
 			orderId,
 			item.menu_id,
 			item.qty,
@@ -72,8 +76,12 @@ class OrderItemsModel {
 			await connection.execute('DELETE FROM order_items WHERE ORDER_ID = ?', [orderId]);
 
 			if (items.length) {
+				const [idRows] = await connection.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM order_items');
+				let nextId = Number(idRows?.[0]?.nextId) || 1;
+
 				const query = `
 					INSERT INTO order_items (
+						IDNo,
 						ORDER_ID,
 						MENU_ID,
 						QTY,
@@ -86,6 +94,7 @@ class OrderItemsModel {
 				`;
 
 				const values = items.map(item => [
+					nextId++,
 					orderId,
 					item.menu_id,
 					item.qty,

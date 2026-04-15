@@ -46,28 +46,90 @@ class NotificationModel {
 			) VALUES (?, ?, ?, ?, ?, 0, ?)
 		`;
 
+		const executeInsert = async (includeBranch) => {
+			const query = includeBranch ? queryWithBranch : queryWithoutBranch;
+			const values = includeBranch
+				? [user_id, branchVal, title, message, type, link, createdDt]
+				: [user_id, title, message, type, link, createdDt];
+			const [result] = await pool.execute(query, values);
+			return {
+				insertId: result.insertId,
+				branchId: includeBranch ? branchVal : null,
+				createdAt: createdDt
+			};
+		};
+
+		const executeInsertWithManualId = async (includeBranch) => {
+			for (let attempt = 0; attempt < 5; attempt += 1) {
+				const [rows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM notifications');
+				const nextId = Number(rows[0]?.nextId ?? 1) || 1;
+				try {
+					const query = includeBranch
+						? `
+							INSERT INTO notifications (
+								IDNo,
+								USER_ID,
+								BRANCH_ID,
+								TITLE,
+								MESSAGE,
+								TYPE,
+								LINK,
+								IS_READ,
+								CREATED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+						`
+						: `
+							INSERT INTO notifications (
+								IDNo,
+								USER_ID,
+								TITLE,
+								MESSAGE,
+								TYPE,
+								LINK,
+								IS_READ,
+								CREATED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+						`;
+					const values = includeBranch
+						? [nextId, user_id, branchVal, title, message, type, link, createdDt]
+						: [nextId, user_id, title, message, type, link, createdDt];
+					await pool.execute(query, values);
+					return {
+						insertId: nextId,
+						branchId: includeBranch ? branchVal : null,
+						createdAt: createdDt
+					};
+				} catch (insertErr) {
+					if (insertErr?.code === 'ER_DUP_ENTRY') {
+						continue;
+					}
+					throw insertErr;
+				}
+			}
+			throw new Error('Failed to allocate unique notifications.IDNo after retries');
+		};
+
 		try {
-			const [result] = await pool.execute(queryWithBranch, [
-				user_id,
-				branchVal,
-				title,
-				message,
-				type,
-				link,
-				createdDt
-			]);
-			return { insertId: result.insertId, branchId: branchVal, createdAt: createdDt };
+			return await executeInsert(true);
 		} catch (err) {
-			if (err.code === 'ER_BAD_FIELD_ERROR' && err.sqlMessage && err.sqlMessage.includes('BRANCH_ID')) {
-				const [result] = await pool.execute(queryWithoutBranch, [
-					user_id,
-					title,
-					message,
-					type,
-					link,
-					createdDt
-				]);
-				return { insertId: result.insertId, branchId: null, createdAt: createdDt };
+			const msg = String(err?.message || err?.sqlMessage || '');
+			const missingBranchColumn = err?.code === 'ER_BAD_FIELD_ERROR' && msg.includes('BRANCH_ID');
+			const missingIdDefault = msg.includes('IDNo') && msg.includes('default');
+
+			if (missingBranchColumn) {
+				try {
+					return await executeInsert(false);
+				} catch (fallbackErr) {
+					const fallbackMsg = String(fallbackErr?.message || fallbackErr?.sqlMessage || '');
+					if (fallbackMsg.includes('IDNo') && fallbackMsg.includes('default')) {
+						return executeInsertWithManualId(false);
+					}
+					throw fallbackErr;
+				}
+			}
+
+			if (missingIdDefault) {
+				return executeInsertWithManualId(true);
 			}
 			throw err;
 		}

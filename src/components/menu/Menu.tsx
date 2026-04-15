@@ -475,10 +475,10 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     const isEditingSelf = c.id === (editingCategory?.id || '');
                     const alreadyUnderCurrentMain = !!categoryParentId && c.parentId === categoryParentId;
                     const hasMenus = menus.some((m) => m.categoryId === c.id);
-                    // Existing categories for re-assignment:
-                    // - current subcategories, OR
-                    // - top-level legacy/unassigned categories with menu items.
-                    const isExistingAssignable = !!c.parentId || (!c.parentId && hasMenus);
+                    // Existing categories for this dropdown should be UNASSIGNED legacy categories only:
+                    // - top-level (no parent), with existing menu links.
+                    // Categories already linked under any main (parentId present) must not appear here.
+                    const isExistingAssignable = !c.parentId && hasMenus;
                     return (
                         isExistingAssignable &&
                         !isCurrentMain &&
