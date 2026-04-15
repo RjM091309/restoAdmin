@@ -6,6 +6,7 @@ import {
     Plus,
     Edit2,
     Trash2,
+    Unlink2,
     UtensilsCrossed,
     AlertTriangle,
     Loader2,
@@ -26,6 +27,7 @@ import {
     createMenuCategory,
     updateMenuCategory,
     deleteMenuCategory,
+    migrateFlatCategoriesUnderMain,
     updateMenu,
     deleteMenu,
     resolveImageUrl,
@@ -135,6 +137,14 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     // ----- Data -----
     const [menus, setMenus] = useState<MenuRecord[]>([]);
     const [categories, setCategories] = useState<MenuCategory[]>([]);
+    const needsFlatCategoryMigration = useMemo(
+        () =>
+            isTwoLevelBranch &&
+            isSpecificBranch &&
+            categories.length > 0 &&
+            !categories.some((c) => c.parentId),
+        [isTwoLevelBranch, isSpecificBranch, categories],
+    );
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -153,8 +163,21 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const [categorySubmitting, setCategorySubmitting] = useState(false);
     const [categoryToDelete, setCategoryToDelete] = useState<MenuCategory | null>(null);
     const [selectedMainCategoryId, setSelectedMainCategoryId] = useState<string | null>(null);
-    /** When creating a category: null = main, string = parent main id for sub */
-    const [categoryCreateParentId, setCategoryCreateParentId] = useState<string | null>(null);
+    /** Parent main category id in panel: null = main, string = sub under that main */
+    const [categoryParentId, setCategoryParentId] = useState<string | null>(null);
+    /** For add-sub flow: optionally pick an existing root category to move under selected main */
+    const [existingCategoryToAttachId, setExistingCategoryToAttachId] = useState<string | null>(null);
+    const [migrateModalOpen, setMigrateModalOpen] = useState(false);
+    const [migrateMainName, setMigrateMainName] = useState('');
+    const [migrateSubmitting, setMigrateSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (selectedBranch && String(selectedBranch.id) !== 'all') {
+            setMigrateMainName(String(selectedBranch.name || 'Menu').replace(/\+/g, ' '));
+        } else {
+            setMigrateMainName('Menu');
+        }
+    }, [selectedBranch?.id, selectedBranch?.name]);
     const [categoryBaseline, setCategoryBaseline] = useState<{
         id: string | null;
         name: string;
@@ -271,6 +294,15 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setSelectedCategory((prev) => (prev && sortedSubs.some((s) => s.id === prev) ? prev : sortedSubs[0].id));
     }, [categories, isSpecificBranch, isTwoLevelBranch, selectedMainCategoryId]);
 
+    /** Level 2: may legacy rows na naka-CATEGORY_ID sa main pa rin (flat era). Dapat pa ring makita kapag main/sub ang scope. */
+    const menuScopeReady = useMemo(() => {
+        if (!isTwoLevelBranch) return !!selectedCategory;
+        if (!selectedMainCategoryId) return false;
+        const subsUnderMain = categories.filter((c) => c.parentId === selectedMainCategoryId);
+        if (subsUnderMain.length === 0) return true;
+        return !!selectedCategory;
+    }, [isTwoLevelBranch, selectedMainCategoryId, selectedCategory, categories]);
+
     // ==================== Filtering ====================
     const filteredMenus = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
@@ -279,11 +311,22 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 !term ||
                 m.name.toLowerCase().includes(term) ||
                 m.categoryName.toLowerCase().includes(term);
-            const matchCat = selectedCategory ? m.categoryId === selectedCategory : false;
+            let matchCat = false;
+            if (!isTwoLevelBranch) {
+                matchCat = selectedCategory ? m.categoryId === selectedCategory : false;
+            } else if (selectedMainCategoryId) {
+                const subsUnderMain = categories.filter((c) => c.parentId === selectedMainCategoryId);
+                if (subsUnderMain.length === 0) {
+                    matchCat = m.categoryId === selectedMainCategoryId;
+                } else if (selectedCategory) {
+                    matchCat =
+                        m.categoryId === selectedCategory || m.categoryId === selectedMainCategoryId;
+                }
+            }
             const matchAvail = availFilter === 'all' || (availFilter === 'available' ? m.isAvailable : !m.isAvailable);
             return matchSearch && matchCat && matchAvail;
         });
-    }, [menus, searchTerm, selectedCategory, availFilter]);
+    }, [menus, searchTerm, selectedCategory, availFilter, isTwoLevelBranch, selectedMainCategoryId, categories]);
 
     // ==================== Stats ====================
     const stats = useMemo(() => {
@@ -294,13 +337,20 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     }, [menus, filteredMenus]);
 
     const selectedCategoryLabel = useMemo(() => {
+        if (isTwoLevelBranch && selectedMainCategoryId) {
+            const main = categories.find((c) => c.id === selectedMainCategoryId);
+            const subsUnderMain = categories.filter((c) => c.parentId === selectedMainCategoryId);
+            if (subsUnderMain.length === 0) {
+                return main?.name ?? '';
+            }
+        }
         if (!selectedCategory) return '';
         const sub = categories.find((c) => c.id === selectedCategory);
         if (!sub) return '';
         if (!isTwoLevelBranch || !sub.parentId) return sub.name;
         const main = categories.find((c) => c.id === sub.parentId);
         return main ? `${main.name} › ${sub.name}` : sub.name;
-    }, [categories, selectedCategory, isTwoLevelBranch]);
+    }, [categories, selectedCategory, isTwoLevelBranch, selectedMainCategoryId]);
 
     const ITEMS_PER_PAGE = 50;
     const shouldPaginate = filteredMenus.length > ITEMS_PER_PAGE;
@@ -308,7 +358,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [selectedCategory, availFilter]);
+    }, [selectedCategory, availFilter, selectedMainCategoryId]);
 
     const pagedMenus = useMemo(() => {
         if (!shouldPaginate) return filteredMenus;
@@ -385,9 +435,29 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         resetForm();
     };
 
-    const sortedMainCategories = useMemo(
-        () => sortMenuCategoriesByName(categories.filter((c) => !c.parentId)),
-        [categories],
+    const sortedMainCategories = useMemo(() => {
+        const parentIds = new Set(
+            categories
+                .map((c) => c.parentId)
+                .filter((id): id is string => Boolean(id)),
+        );
+        return sortMenuCategoriesByName(
+            categories.filter((c) => {
+                if (c.parentId) return false;
+                const hasMenus = menus.some((m) => m.categoryId === c.id);
+                const hasSubs = parentIds.has(c.id);
+                // Level 2 main panel should show group headers (has subs) or empty/planned mains.
+                // Unassigned legacy categories usually have menus but no subs -> hide from main panel.
+                return hasSubs || !hasMenus;
+            }),
+        );
+    }, [categories, menus]);
+    const categoryParentOptions = useMemo(
+        () =>
+            sortedMainCategories
+                .filter((c) => !editingCategory || c.id !== editingCategory.id)
+                .map((c) => ({ value: c.id, label: c.name })),
+        [sortedMainCategories, editingCategory],
     );
 
     const sortedSubCategories = useMemo(
@@ -396,6 +466,29 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 ? sortMenuCategoriesByName(categories.filter((c) => c.parentId === selectedMainCategoryId))
                 : [],
         [categories, selectedMainCategoryId],
+    );
+    const existingRootCategoryOptions = useMemo(
+        () => {
+            return sortMenuCategoriesByName(
+                categories.filter((c) => {
+                    const isCurrentMain = c.id === (categoryParentId || '');
+                    const isEditingSelf = c.id === (editingCategory?.id || '');
+                    const alreadyUnderCurrentMain = !!categoryParentId && c.parentId === categoryParentId;
+                    const hasMenus = menus.some((m) => m.categoryId === c.id);
+                    // Existing categories for re-assignment:
+                    // - current subcategories, OR
+                    // - top-level legacy/unassigned categories with menu items.
+                    const isExistingAssignable = !!c.parentId || (!c.parentId && hasMenus);
+                    return (
+                        isExistingAssignable &&
+                        !isCurrentMain &&
+                        !isEditingSelf &&
+                        !alreadyUnderCurrentMain
+                    );
+                }),
+            ).map((c) => ({ value: c.id, label: c.name }));
+        },
+        [categories, categoryParentId, editingCategory?.id, menus],
     );
 
     const leafCategoriesForItemForm = useMemo(
@@ -454,7 +547,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setCategoryName('');
         setCategoryDesc('');
         setCategoryBaseline({ id: null, name: '', desc: '' });
-        setCategoryCreateParentId(null);
+        setCategoryParentId(null);
+        setExistingCategoryToAttachId(null);
         setIsCategoryPanelOpen(true);
     };
 
@@ -467,7 +561,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setCategoryName('');
         setCategoryDesc('');
         setCategoryBaseline({ id: null, name: '', desc: '' });
-        setCategoryCreateParentId(selectedMainCategoryId);
+        setCategoryParentId(selectedMainCategoryId);
+        setExistingCategoryToAttachId(null);
         setIsCategoryPanelOpen(true);
     };
 
@@ -477,7 +572,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
-        setCategoryCreateParentId(null);
+        setCategoryParentId(null);
+        setExistingCategoryToAttachId(null);
     };
 
     const handleOpenEditCategory = (e: React.MouseEvent, category: MenuCategory) => {
@@ -486,13 +582,32 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setCategoryName(category.name || '');
         setCategoryDesc('');
         setCategoryBaseline({ id: String(category.id), name: category.name || '', desc: '' });
-        setCategoryCreateParentId(null);
+        setCategoryParentId(category.parentId || null);
+        setExistingCategoryToAttachId(null);
         setIsCategoryPanelOpen(true);
     };
 
     const handleDeleteCategory = (e: React.MouseEvent, category: MenuCategory) => {
         e.stopPropagation();
         setCategoryToDelete(category);
+    };
+
+    const handleRemoveCategoryFromMain = async (e: React.MouseEvent, category: MenuCategory) => {
+        e.stopPropagation();
+        if (!category.parentId) return;
+        setCategorySubmitting(true);
+        try {
+            await updateMenuCategory(category.id, {
+                name: category.name,
+                parentId: null,
+            });
+            toast.success(`Category "${category.name}" removed from main category.`);
+            await refreshData();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Failed to remove category from main');
+        } finally {
+            setCategorySubmitting(false);
+        }
     };
 
     const handleSaveCategory = async () => {
@@ -508,19 +623,32 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setCategorySubmitting(true);
         try {
             if (editingCategory) {
-                await updateMenuCategory(editingCategory.id, { name, description: categoryDesc.trim() || null });
+                await updateMenuCategory(editingCategory.id, {
+                    name,
+                    description: categoryDesc.trim() || null,
+                    parentId: isTwoLevelBranch ? categoryParentId : null,
+                });
                 toast.success('Category updated successfully');
                 closeCategoryModal();
                 refreshData();
             } else {
                 const parentPayload =
-                    isTwoLevelBranch && categoryCreateParentId ? categoryCreateParentId : null;
-                await createMenuCategory(branchId, {
-                    name,
-                    description: categoryDesc.trim() || null,
-                    parentId: parentPayload,
-                });
-                toast.success(t('category.category_created_successfully'));
+                    isTwoLevelBranch && categoryParentId ? categoryParentId : null;
+                if (isTwoLevelBranch && parentPayload && existingCategoryToAttachId) {
+                    await updateMenuCategory(existingCategoryToAttachId, {
+                        name,
+                        description: categoryDesc.trim() || null,
+                        parentId: parentPayload,
+                    });
+                    toast.success('Existing category moved under selected main category.');
+                } else {
+                    await createMenuCategory(branchId, {
+                        name,
+                        description: categoryDesc.trim() || null,
+                        parentId: parentPayload,
+                    });
+                    toast.success(t('category.category_created_successfully'));
+                }
                 closeCategoryModal();
                 refreshData();
             }
@@ -531,14 +659,36 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         }
     };
 
+    const handleMigrateFlatUnderMain = useCallback(async () => {
+        const name = migrateMainName.trim();
+        if (!name || branchId === 'all') {
+            toast.error(t('categories.messages.name_required'));
+            return;
+        }
+        setMigrateSubmitting(true);
+        try {
+            const result = await migrateFlatCategoriesUnderMain(branchId, name);
+            toast.success(t('menu_page.migrate_flat_success', { count: result.moved }));
+            setMigrateModalOpen(false);
+            await refreshData();
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('menu_page.migrate_flat_error'));
+        } finally {
+            setMigrateSubmitting(false);
+        }
+    }, [migrateMainName, branchId, refreshData, t]);
+
     const canSubmitCategory = useMemo(() => {
         const valid = !!categoryName.trim() && branchId !== 'all';
         if (!valid) return false;
+        const currentParent = isTwoLevelBranch ? (categoryParentId || '') : '';
+        const baselineParent = editingCategory && isTwoLevelBranch ? (editingCategory.parentId || '') : '';
         const baselineMatch =
             categoryName === categoryBaseline.name &&
-            categoryDesc === categoryBaseline.desc;
+            categoryDesc === categoryBaseline.desc &&
+            currentParent === baselineParent;
         return !baselineMatch;
-    }, [categoryName, categoryDesc, categoryBaseline, branchId]);
+    }, [categoryName, categoryDesc, categoryBaseline, branchId, categoryParentId, editingCategory, isTwoLevelBranch]);
 
     // ==================== Ingredients modal ====================
     const openIngredientsModal = async (item: MenuRecord) => {
@@ -1058,7 +1208,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                             {stats.selectedCount}
                                         </div>
                                             <div className="text-xs text-brand-muted mt-1">
-                                                {selectedCategory ? (
+                                                {menuScopeReady && selectedCategoryLabel ? (
                                                     <>
                                                         Menu Category: <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>
                                                     </>
@@ -1112,7 +1262,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                 const subIds = categories
                                                     .filter((c) => c.parentId === cat.id)
                                                     .map((c) => c.id);
-                                                const count = menus.filter((m) => m.categoryId && subIds.includes(m.categoryId)).length;
+                                                // Main panel badge should show number of subcategories, not menu items.
+                                                const count = subIds.length;
                                                 return (
                                                     <div
                                                         key={cat.id}
@@ -1254,11 +1405,13 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                                 {canDelete('menu_management') && (
                                                                     <button
                                                                         type="button"
-                                                                        onClick={(e) => handleDeleteCategory(e, cat)}
-                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
-                                                                        aria-label="Delete subcategory"
+                                                                        onClick={(e) => handleRemoveCategoryFromMain(e, cat)}
+                                                                        className="p-1.5 rounded-lg text-brand-muted hover:text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer"
+                                                                        aria-label="Remove subcategory from main"
+                                                                        title="Remove from main category"
+                                                                        disabled={categorySubmitting}
                                                                     >
-                                                                        <Trash2 size={14} />
+                                                                        <Unlink2 size={14} />
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -1382,7 +1535,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                             <div>
                                                 <div className="text-sm font-black tracking-wide text-brand-text uppercase">Menu Items</div>
                                                 <div className="text-xs text-brand-muted mt-1">
-                                                    {selectedCategory ? (
+                                                    {menuScopeReady && selectedCategoryLabel ? (
                                                         <>
                                                             Showing items for <span className="font-bold text-brand-text">{selectedCategoryLabel}</span>.
                                                         </>
@@ -1391,7 +1544,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                                     )}
                                                 </div>
                                             </div>
-                                            {selectedCategory && (
+                                            {menuScopeReady && (
                                                 <div className="flex items-center gap-3">
                                                 <div className="relative">
                                                     <Search
@@ -1438,14 +1591,14 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                         <div ref={menuItemsScrollRef} className="h-full overflow-auto overflow-x-hidden custom-scrollbar">
                                             <AnimatePresence mode="wait">
                                                 <motion.div
-                                                    key={`table-${selectedCategory ?? 'none'}-${availFilter}`}
+                                                    key={`table-${selectedMainCategoryId ?? 'n'}-${selectedCategory ?? 'none'}-${availFilter}`}
                                                     initial={{ opacity: 0, x: 40 }}
                                                     animate={{ opacity: 1, x: 0 }}
                                                     exit={{ opacity: 0, x: -40 }}
                                                     transition={{ duration: 0.24, ease: 'easeOut' }}
                                                     className="w-full"
                                                 >
-                                                    {!selectedCategory ? (
+                                                    {!menuScopeReady ? (
                                                         <div className="px-6 py-10 text-sm text-brand-muted">
                                                             Select a Menu Category to load menu items.
                                                         </div>
@@ -1661,7 +1814,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     editingCategory
                         ? 'Edit Category'
                         : isTwoLevelBranch
-                          ? categoryCreateParentId
+                          ? categoryParentId
                               ? t('menu_page.new_sub_category')
                               : t('menu_page.new_main_category')
                           : t('categories.add_new_category')
@@ -1700,6 +1853,50 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                         />
                     </div>
+                    {isTwoLevelBranch && (editingCategory || !categoryParentId) && (
+                        <div>
+                            <label className="block text-sm font-bold text-brand-text mb-2">Main Category</label>
+                            <Select2
+                                options={[{ value: '', label: 'Main category (no parent)' }, ...categoryParentOptions]}
+                                value={categoryParentId || ''}
+                                onChange={(v) => setCategoryParentId(v ? String(v) : null)}
+                                placeholder="Select main category"
+                                clearable={false}
+                            />
+                        </div>
+                    )}
+                    {isTwoLevelBranch && !editingCategory && !!categoryParentId && (
+                        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                            <div className="text-xs font-bold uppercase tracking-wider text-brand-muted">Main Category</div>
+                            <div className="mt-1 text-sm font-bold text-brand-text">
+                                {categories.find((c) => c.id === categoryParentId)?.name || '—'}
+                            </div>
+                        </div>
+                    )}
+                    {isTwoLevelBranch && !editingCategory && !!categoryParentId && (
+                        <div>
+                            <label className="block text-sm font-bold text-brand-text mb-2">Existing Category (optional)</label>
+                            <Select2
+                                options={[{ value: '', label: 'Create new subcategory' }, ...existingRootCategoryOptions]}
+                                value={existingCategoryToAttachId || ''}
+                                onChange={(v) => {
+                                    const selectedId = v ? String(v) : '';
+                                    setExistingCategoryToAttachId(selectedId || null);
+                                    if (!selectedId) return;
+                                    const existing = categories.find((c) => c.id === selectedId);
+                                    if (existing) {
+                                        setCategoryName(existing.name || '');
+                                        setCategoryDesc('');
+                                    }
+                                }}
+                                placeholder="Pick existing category to attach"
+                                clearable={false}
+                            />
+                            <p className="mt-1 text-xs text-brand-muted">
+                                Choose an existing top-level category to move under this main category.
+                            </p>
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-brand-text mb-2">{t('categories.form_description')}</label>
                         <textarea
@@ -1712,6 +1909,51 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     </div>
                 </div>
             </SidePanel>
+
+            <Modal
+                isOpen={migrateModalOpen}
+                onClose={() => !migrateSubmitting && setMigrateModalOpen(false)}
+                title={t('menu_page.migrate_flat_modal_title')}
+                maxWidth="md"
+                footer={
+                    <div className="flex items-center justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setMigrateModalOpen(false)}
+                            disabled={migrateSubmitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('menu_page.modal.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void handleMigrateFlatUnderMain()}
+                            disabled={migrateSubmitting || !migrateMainName.trim()}
+                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary hover:bg-brand-primary/90 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {migrateSubmitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('menu_page.migrate_flat_confirm')}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-brand-muted">{t('menu_page.migrate_flat_modal_body')}</p>
+                    <div>
+                        <label className="block text-xs font-bold text-brand-text uppercase tracking-wider mb-2">
+                            {t('menu_page.migrate_flat_main_name')}
+                        </label>
+                        <input
+                            type="text"
+                            value={migrateMainName}
+                            onChange={(e) => setMigrateMainName(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none"
+                            placeholder={t('menu_page.migrate_flat_main_placeholder')}
+                            disabled={migrateSubmitting}
+                        />
+                    </div>
+                </div>
+            </Modal>
 
             {/* Delete category confirmation modal (confirmation-only) */}
             <Modal

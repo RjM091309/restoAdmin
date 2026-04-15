@@ -103,11 +103,45 @@ class CategoryModel {
 	}
 
 	static async update(id, data) {
-		const { CAT_NAME, CAT_DESC, user_id } = data;
+		await CategoryModel.ensureSchema();
+		const { CAT_NAME, CAT_DESC, PARENT_CAT_ID, user_id } = data;
+		const categoryId = Number(id);
+		let parentId = null;
+		if (PARENT_CAT_ID != null && PARENT_CAT_ID !== '') {
+			const p = Number(PARENT_CAT_ID);
+			if (Number.isFinite(p)) {
+				if (p === categoryId) {
+					throw new Error('Category cannot be its own parent');
+				}
+				const [targetRows] = await pool.execute(
+					`SELECT IDNo, BRANCH_ID, PARENT_CAT_ID FROM categories WHERE IDNo = ? AND ACTIVE = 1 LIMIT 1`,
+					[categoryId]
+				);
+				const target = targetRows[0];
+				if (!target) {
+					throw new Error('Category not found');
+				}
+				const [parentRows] = await pool.execute(
+					`SELECT IDNo, BRANCH_ID, PARENT_CAT_ID FROM categories WHERE IDNo = ? AND ACTIVE = 1 LIMIT 1`,
+					[p]
+				);
+				const parent = parentRows[0];
+				if (!parent) {
+					throw new Error('Parent category not found');
+				}
+				if (Number(parent.BRANCH_ID) !== Number(target.BRANCH_ID)) {
+					throw new Error('Parent category must belong to the same branch');
+				}
+				if (parent.PARENT_CAT_ID != null) {
+					throw new Error('Subcategories cannot be nested (parent must be a main category)');
+				}
+				parentId = p;
+			}
+		}
 		const now = new Date();
 		const [result] = await pool.execute(
-			'UPDATE categories SET CAT_NAME = ?, CAT_DESC = ?, EDITED_BY = ?, EDITED_DT = ? WHERE IDNo = ? AND ACTIVE = 1',
-			[CAT_NAME.trim(), CAT_DESC || null, user_id, now, id]
+			'UPDATE categories SET CAT_NAME = ?, CAT_DESC = ?, PARENT_CAT_ID = ?, EDITED_BY = ?, EDITED_DT = ? WHERE IDNo = ? AND ACTIVE = 1',
+			[CAT_NAME.trim(), CAT_DESC || null, parentId, user_id, now, categoryId]
 		);
 		return result.affectedRows > 0;
 	}
@@ -124,6 +158,55 @@ class CategoryModel {
 		const now = new Date();
 		const [result] = await pool.execute('UPDATE categories SET ACTIVE = 0, EDITED_BY = ?, EDITED_DT = ? WHERE IDNo = ?', [user_id, now, id]);
 		return result.affectedRows > 0;
+	}
+
+	/**
+	 * One-time: branch was flat (all PARENT_CAT_ID null). Create one new main row and set all existing
+	 * categories for the branch to be its subcategories. Refuses if any row already has a parent (already migrated).
+	 */
+	static async groupFlatRootsUnderNewMain(branchId, mainCatName, user_id) {
+		await CategoryModel.ensureSchema();
+		const bid = Number(branchId);
+		if (!Number.isFinite(bid)) {
+			throw new Error('Invalid branch id');
+		}
+
+		const [hasSubs] = await pool.execute(
+			`SELECT COUNT(*) AS c FROM categories WHERE BRANCH_ID = ? AND ACTIVE = 1 AND PARENT_CAT_ID IS NOT NULL`,
+			[bid]
+		);
+		if (Number(hasSubs[0]?.c) > 0) {
+			throw new Error(
+				'This branch already has subcategories. This tool only runs when every category is still top-level (no parent).'
+			);
+		}
+
+		const [roots] = await pool.execute(
+			`SELECT IDNo FROM categories WHERE BRANCH_ID = ? AND ACTIVE = 1`,
+			[bid]
+		);
+		if (!roots.length) {
+			return { moved: 0, newMainId: null };
+		}
+
+		const name = String(mainCatName || '').trim() || 'Menu';
+		const newMainId = await CategoryModel.create({
+			CAT_NAME: name,
+			CAT_DESC: null,
+			BRANCH_ID: bid,
+			PARENT_CAT_ID: null,
+			user_id,
+		});
+
+		const rootIds = roots.map((r) => r.IDNo);
+		const placeholders = rootIds.map(() => '?').join(',');
+		const now = new Date();
+		const [result] = await pool.execute(
+			`UPDATE categories SET PARENT_CAT_ID = ?, EDITED_BY = ?, EDITED_DT = ? WHERE BRANCH_ID = ? AND ACTIVE = 1 AND IDNo IN (${placeholders}) AND IDNo <> ?`,
+			[newMainId, user_id, now, bid, ...rootIds, newMainId]
+		);
+
+		return { moved: result.affectedRows || 0, newMainId };
 	}
 }
 
