@@ -76,6 +76,21 @@ class OrderModel {
 		return rows[0] || null;
 	}
 
+	static async findLatestByOrderNo(branchId, orderNo) {
+		if (!branchId || !orderNo || String(orderNo).trim() === '') {
+			return null;
+		}
+		const query = `
+			SELECT IDNo, BRANCH_ID, ORDER_NO, STATUS, ENCODED_DT
+			FROM orders
+			WHERE BRANCH_ID = ? AND ORDER_NO = ? AND STATUS != -2
+			ORDER BY IDNo DESC
+			LIMIT 1
+		`;
+		const [rows] = await pool.execute(query, [branchId, String(orderNo).trim()]);
+		return rows[0] || null;
+	}
+
 	static async create(data) {
 		const {
 			BRANCH_ID,

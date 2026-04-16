@@ -773,6 +773,14 @@ class ApiController {
 				user_id: user_id
 			};
 
+			const existingOrder = await OrderModel.findLatestByOrderNo(orderData.BRANCH_ID, orderData.ORDER_NO);
+			if (existingOrder) {
+				return res.status(400).json({
+					success: false,
+					error: `Order #${orderData.ORDER_NO} already exists. Please use a different order number.`,
+				});
+			}
+
 			orderData.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(orderData.TABLE_ID, service_charge);
 			orderData.GRAND_TOTAL = OrderModel.computeGrandTotal(
 				orderData.SUBTOTAL,

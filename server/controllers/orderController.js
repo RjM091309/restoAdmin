@@ -68,7 +68,7 @@ class OrderController {
 
 			const payload = {
 				BRANCH_ID: branchId,
-				ORDER_NO: req.body.ORDER_NO,
+				ORDER_NO: String(req.body.ORDER_NO || '').trim(),
 				TABLE_ID: req.body.TABLE_ID,
 				ORDER_TYPE: req.body.ORDER_TYPE,
 				STATUS: parseInt(req.body.STATUS) || 3,
@@ -79,6 +79,18 @@ class OrderController {
 				GRAND_TOTAL: parseFloat(req.body.GRAND_TOTAL) || 0,
 				user_id: req.session.user_id || req.user?.user_id
 			};
+
+			if (!payload.ORDER_NO) {
+				return ApiResponse.badRequest(res, 'Order number is required');
+			}
+
+			const existingOrder = await OrderModel.findLatestByOrderNo(payload.BRANCH_ID, payload.ORDER_NO);
+			if (existingOrder) {
+				return ApiResponse.badRequest(
+					res,
+					`Order #${payload.ORDER_NO} already exists. Please use a different order number.`
+				);
+			}
 
 			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(payload.TABLE_ID, req.body.SERVICE_CHARGE);
 			payload.GRAND_TOTAL = OrderModel.computeGrandTotal(
@@ -180,6 +192,8 @@ class OrderController {
 	 * - syncing reports tables (best-effort)
 	 */
 	static async createManualSettled(req, res) {
+		let createdOrderId = null;
+		let actorUserId = req.session?.user_id || req.user?.user_id || null;
 		try {
 			// Branch resolution:
 			// - Admin (permissions=1): allow explicit branch_id from body to override session branch.
@@ -214,6 +228,7 @@ class OrderController {
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id;
+			actorUserId = userId || actorUserId;
 			const paymentMethod = (req.body.payment_method || req.body.PAYMENT_METHOD || 'CASH');
 			const paymentRef = req.body.payment_ref || req.body.PAYMENT_REF || 'Manual order (settled)';
 
@@ -236,9 +251,8 @@ class OrderController {
 				TABLE_ID: req.body.TABLE_ID ?? req.body.table_id ?? null,
 				ORDER_TYPE: req.body.ORDER_TYPE ?? req.body.order_type ?? null,
 				ENCODED_DT: req.body.ENCODED_DT ?? req.body.encoded_dt ?? null,
-				// create as CONFIRMED first so inventory deductions get STATUS=2,
-				// then we will mark them settled and update order to STATUS=1
-				STATUS: 2,
+				// Manual orders should be persisted as SETTLED immediately.
+				STATUS: 1,
 				SUBTOTAL: parseFloat(req.body.SUBTOTAL ?? req.body.subtotal) || 0,
 				TAX_AMOUNT: parseFloat(req.body.TAX_AMOUNT ?? req.body.tax_amount) || 0,
 				SERVICE_CHARGE: parseFloat(req.body.SERVICE_CHARGE ?? req.body.service_charge) || 0,
@@ -262,6 +276,24 @@ class OrderController {
 				return ApiResponse.badRequest(res, 'Order number is required');
 			}
 
+			// Idempotency/safety guard:
+			// if the same manual order number already exists in this branch and is already
+			// settled, return that record instead of creating a duplicate.
+			const existingOrder = await OrderModel.findLatestByOrderNo(payload.BRANCH_ID, payload.ORDER_NO);
+			if (existingOrder) {
+				if (Number(existingOrder.STATUS) === 1) {
+					return ApiResponse.success(
+						res,
+						{ id: Number(existingOrder.IDNo), order_no: payload.ORDER_NO, status: 1 },
+						'Manual order already exists and is settled'
+					);
+				}
+				return ApiResponse.badRequest(
+					res,
+					`Order #${payload.ORDER_NO} already exists. Please use a different order number.`
+				);
+			}
+
 			// Normalize items to match expected schema in OrderItemsModel
 			const itemsNormalized = items.map((it) => {
 				const qty = Number(it.qty ?? it.QTY) || 1;
@@ -277,14 +309,13 @@ class OrderController {
 			});
 
 			const orderId = await OrderModel.create(payload);
+			createdOrderId = Number(orderId);
 			await OrderItemsModel.createForOrder(orderId, itemsNormalized, userId);
 
-			// Deduct inventory and record inventory_deductions at STATUS=2, then mark as settled
+			// Deduct inventory entries are created by the shared deduction flow.
+			// Then align deductions to settled status for reporting consistency.
 			await InventoryDeductionService.deductOnOrderConfirmed(Number(orderId), userId);
 			await InventoryDeductionModel.updateStatusByOrderId(Number(orderId), 1, userId);
-
-			// Mark order as SETTLED
-			await OrderModel.updateStatus(orderId, 1, userId);
 
 			// Billing: create or update to PAID
 			const amountDue = Number(payload.GRAND_TOTAL) || 0;
@@ -369,6 +400,15 @@ class OrderController {
 			);
 		} catch (error) {
 			console.error('Error creating manual settled order:', error);
+			// Safety net: avoid leaving half-created manual orders stuck at CONFIRMED.
+			if (createdOrderId) {
+				try {
+					await OrderModel.updateStatus(createdOrderId, -1, actorUserId);
+					await InventoryDeductionModel.updateStatusByOrderId(createdOrderId, -1, actorUserId);
+				} catch (cleanupError) {
+					console.error('[MANUAL ORDER] Cleanup failed after error:', cleanupError?.message || cleanupError);
+				}
+			}
 			return ApiResponse.error(res, 'Failed to create manual settled order', 500, error.message);
 		}
 	}
