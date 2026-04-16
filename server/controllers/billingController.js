@@ -187,7 +187,8 @@ class BillingController {
 				amount_paid: amount_paid || 0,
 				payment_ref: payment_ref || null,
 				status: status || 3,
-				user_id: user_id
+				user_id: user_id,
+				encoded_dt: order.ENCODED_DT || null,
 			});
 
 			return ApiResponse.created(res, { order_id: parseInt(order_id) }, 'Billing record created successfully');

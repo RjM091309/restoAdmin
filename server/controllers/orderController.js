@@ -310,7 +310,12 @@ class OrderController {
 
 			const orderId = await OrderModel.create(payload);
 			createdOrderId = Number(orderId);
-			await OrderItemsModel.createForOrder(orderId, itemsNormalized, userId);
+			await OrderItemsModel.createForOrder(orderId, itemsNormalized, userId, payload.ENCODED_DT ?? null);
+
+			const billingEncodedDt =
+				payload.ENCODED_DT != null && String(payload.ENCODED_DT).trim() !== ''
+					? payload.ENCODED_DT
+					: null;
 
 			// Deduct inventory entries are created by the shared deduction flow.
 			// Then align deductions to settled status for reporting consistency.
@@ -327,6 +332,7 @@ class OrderController {
 					amount_paid: amountDue,
 					payment_method: paymentMethod,
 					payment_ref: paymentRef || null,
+					encoded_dt: billingEncodedDt,
 				});
 			} else {
 				await BillingModel.createForOrder({
@@ -338,6 +344,7 @@ class OrderController {
 					payment_ref: paymentRef || null,
 					status: 1,
 					user_id: userId,
+					encoded_dt: billingEncodedDt,
 				});
 			}
 
@@ -348,6 +355,7 @@ class OrderController {
 					amount_paid: amountDue,
 					payment_ref: paymentRef || null,
 					user_id: userId,
+					encoded_dt: billingEncodedDt,
 				});
 			} catch (e) {
 				console.error('[MANUAL ORDER] Failed to record billing transaction:', e?.message || e);
@@ -468,7 +476,8 @@ class OrderController {
 					order_id: id,
 					amount_due: payload.GRAND_TOTAL,
 					status: 3,
-					user_id: req.session.user_id || req.user?.user_id
+					user_id: req.session.user_id || req.user?.user_id,
+					encoded_dt: order?.ENCODED_DT ?? null,
 				});
 			}
 

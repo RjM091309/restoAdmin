@@ -33,10 +33,12 @@ class OrderItemsModel {
 		return rows;
 	}
 
-	static async createForOrder(orderId, items, user_id) {
+	static async createForOrder(orderId, items, user_id, encoded_dt = null) {
 		if (!items.length) {
 			return;
 		}
+		const encodedDtValue =
+			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 		const query = `
 			INSERT INTO order_items (
 				ORDER_ID,
@@ -58,19 +60,21 @@ class OrderItemsModel {
 			item.line_total,
 			item.status || 3,  // Default: 3=PENDING
 			user_id,
-			new Date()
+			encodedDtValue || new Date()
 		]);
 
 		await pool.query(query, [values]);
 	}
 
-	static async replaceForOrder(orderId, items, user_id) {
+	static async replaceForOrder(orderId, items, user_id, encoded_dt = null) {
 		const connection = await pool.getConnection();
 		try {
 			await connection.beginTransaction();
 			await connection.execute('DELETE FROM order_items WHERE ORDER_ID = ?', [orderId]);
 
 			if (items.length) {
+				const encodedDtValue =
+					encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 				const query = `
 					INSERT INTO order_items (
 						ORDER_ID,
@@ -92,7 +96,7 @@ class OrderItemsModel {
 					item.line_total,
 					item.status || 3,  // Default: 3=PENDING
 					user_id,
-					new Date()
+					encodedDtValue || new Date()
 				]);
 
 				await connection.query(query, [values]);

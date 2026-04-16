@@ -97,10 +97,13 @@ class BillingModel {
 			amount_paid,
 			payment_ref,
 			status,
-			user_id
+			user_id,
+			encoded_dt
 		} = data;
 		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing');
 		const nextId = Number(idRows?.[0]?.nextId) || 1;
+		const encodedDtValue =
+			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 
 		const query = `
 			INSERT INTO billing (
@@ -127,7 +130,7 @@ class BillingModel {
 			payment_ref || null,
 			status || 3,
 			user_id,
-			new Date()
+			encodedDtValue || new Date()
 		]);
 	}
 
@@ -137,12 +140,15 @@ class BillingModel {
 			amount_due,
 			amount_paid,
 			payment_ref,
-			status
+			status,
+			encoded_dt
 		} = data;
 
 		// Fetch current billing record to preserve values if they aren't provided
 		const current = await this.getByOrderId(orderId);
 		if (!current) return false;
+		const encodedDtValue =
+			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 
 		const query = `
 			UPDATE billing SET
@@ -150,7 +156,8 @@ class BillingModel {
 				AMOUNT_DUE = ?,
 				AMOUNT_PAID = ?,
 				PAYMENT_REF = ?,
-				STATUS = ?
+				STATUS = ?,
+				ENCODED_DT = COALESCE(?, ENCODED_DT)
 			WHERE ORDER_ID = ?
 		`;
 
@@ -160,21 +167,32 @@ class BillingModel {
 			amount_paid !== undefined ? amount_paid : current.AMOUNT_PAID,
 			payment_ref || current.PAYMENT_REF || null,
 			status !== undefined ? status : current.STATUS,
+			encodedDtValue,
 			orderId
 		]);
 		return true;
 	}
 
 	static async recordTransaction(data) {
-		const { order_id, payment_method, amount_paid, payment_ref, user_id } = data;
+		const { order_id, payment_method, amount_paid, payment_ref, user_id, encoded_dt } = data;
 		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM payment_transactions');
 		const nextId = Number(idRows?.[0]?.nextId) || 1;
+		const encodedDtValue =
+			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 		const query = `
 			INSERT INTO payment_transactions (
-				IDNo, ORDER_ID, PAYMENT_METHOD, AMOUNT_PAID, PAYMENT_REF, ENCODED_BY
-			) VALUES (?, ?, ?, ?, ?, ?)
+				IDNo, ORDER_ID, PAYMENT_METHOD, AMOUNT_PAID, PAYMENT_REF, ENCODED_BY, ENCODED_DT
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
 		`;
-		await pool.execute(query, [nextId, order_id, payment_method, amount_paid, payment_ref, user_id]);
+		await pool.execute(query, [
+			nextId,
+			order_id,
+			payment_method,
+			amount_paid,
+			payment_ref,
+			user_id,
+			encodedDtValue || new Date(),
+		]);
 	}
 
 	static async getPaymentHistory(orderId) {

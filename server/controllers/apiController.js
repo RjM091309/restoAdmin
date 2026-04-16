@@ -681,13 +681,34 @@ class ApiController {
 				if (order.TABLE_ID) await TableModel.updateStatus(order.TABLE_ID, 1);
 				const existingBilling = await BillingModel.getByOrderId(order_id);
 				if (existingBilling) {
-					await BillingModel.updateForOrder(order_id, { status: 1, amount_paid: order.GRAND_TOTAL, payment_method: paymentMethod });
+					await BillingModel.updateForOrder(order_id, {
+						status: 1,
+						amount_paid: order.GRAND_TOTAL,
+						payment_method: paymentMethod,
+						encoded_dt: order.ENCODED_DT || null,
+					});
 				} else {
-					await BillingModel.createForOrder({ branch_id: order.BRANCH_ID, order_id: order_id, payment_method: paymentMethod, amount_due: order.GRAND_TOTAL, amount_paid: order.GRAND_TOTAL, status: 1, user_id: user_id });
+					await BillingModel.createForOrder({
+						branch_id: order.BRANCH_ID,
+						order_id: order_id,
+						payment_method: paymentMethod,
+						amount_due: order.GRAND_TOTAL,
+						amount_paid: order.GRAND_TOTAL,
+						status: 1,
+						user_id: user_id,
+						encoded_dt: order.ENCODED_DT || null,
+					});
 				}
 
 				try {
-					await BillingModel.recordTransaction({ order_id: order_id, payment_method: paymentMethod, amount_paid: order.GRAND_TOTAL, payment_ref: 'Settled via Cashier App', user_id: user_id });
+					await BillingModel.recordTransaction({
+						order_id: order_id,
+						payment_method: paymentMethod,
+						amount_paid: order.GRAND_TOTAL,
+						payment_ref: 'Settled via Cashier App',
+						user_id: user_id,
+						encoded_dt: order.ENCODED_DT || null,
+					});
 				} catch (e) {
 					console.error(`[${timestamp}] [TRANSACTION ERROR] ${e.message}`);
 				}
