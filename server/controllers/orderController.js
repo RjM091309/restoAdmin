@@ -9,6 +9,7 @@ const OrderModel = require('../models/orderModel');
 const OrderItemsModel = require('../models/orderItemsModel');
 const BillingModel = require('../models/billingModel');
 const TableModel = require('../models/tableModel');
+const UserBranchModel = require('../models/userBranchModel');
 const NotificationModel = require('../models/notificationModel');
 const InventoryDeductionService = require('../services/inventoryDeductionService');
 const InventoryDeductionModel = require('../models/inventoryDeductionModel');
@@ -48,10 +49,20 @@ class OrderController {
 
 	static async create(req, res) {
 		try {
-			// Prioritize session branch_id
-			const branchId = req.session?.branch_id || req.body.BRANCH_ID || req.query.branch_id || req.user?.branch_id;
-			if (!branchId) {
-				return res.status(400).json({ error: 'Branch ID is required. Please select a branch first.' });
+			// Match manual-settled / admin UX: admins may set BRANCH_ID in body (e.g. receipt order, URL ?branchId=).
+			// Non-admins always use session/user branch (ignore forged body.branch_id).
+			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
+			const explicitBranchIdRaw = req.body?.BRANCH_ID ?? req.body?.branch_id ?? null;
+			const sessionBranchIdRaw = req.session?.branch_id ?? req.user?.branch_id ?? req.query?.branch_id ?? null;
+			const branchId =
+				isAdmin &&
+				explicitBranchIdRaw != null &&
+				String(explicitBranchIdRaw).trim() !== '' &&
+				String(explicitBranchIdRaw) !== 'all'
+					? explicitBranchIdRaw
+					: sessionBranchIdRaw;
+			if (!branchId || String(branchId).trim() === '' || String(branchId) === 'all') {
+				return ApiResponse.badRequest(res, 'Branch ID is required. Please select a branch first.');
 			}
 
 			const items = Array.isArray(req.body.ORDER_ITEMS) ? req.body.ORDER_ITEMS : (Array.isArray(req.body.items) ? req.body.items : []);
@@ -195,15 +206,33 @@ class OrderController {
 		let createdOrderId = null;
 		let actorUserId = req.session?.user_id || req.user?.user_id || null;
 		try {
+			const userId = req.session?.user_id || req.user?.user_id;
 			// Branch resolution:
 			// - Admin (permissions=1): allow explicit branch_id from body to override session branch.
 			// - Non-admin: do NOT allow overriding; always use session/user branch.
 			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
 			const explicitBranchIdRaw = req.body?.BRANCH_ID ?? req.body?.branch_id ?? null;
 			const sessionBranchIdRaw = req.session?.branch_id ?? req.user?.branch_id ?? req.query?.branch_id ?? null;
-			const resolvedBranchId = (isAdmin && explicitBranchIdRaw != null && String(explicitBranchIdRaw).trim() !== '' && String(explicitBranchIdRaw) !== 'all')
+			let resolvedBranchId = (isAdmin && explicitBranchIdRaw != null && String(explicitBranchIdRaw).trim() !== '' && String(explicitBranchIdRaw) !== 'all')
 				? explicitBranchIdRaw
 				: sessionBranchIdRaw;
+
+			// Fallback for JWT/session payloads that don't include branch_id:
+			// 1) infer from selected table
+			// 2) infer from user's assigned branch
+			if (!resolvedBranchId) {
+				const tableIdRaw = req.body?.TABLE_ID ?? req.body?.table_id ?? null;
+				if (tableIdRaw != null && String(tableIdRaw).trim() !== '') {
+					const table = await TableModel.getById(tableIdRaw);
+					if (table?.BRANCH_ID) resolvedBranchId = table.BRANCH_ID;
+				}
+			}
+			if (!resolvedBranchId && userId) {
+				const branches = await UserBranchModel.getBranchesByUserId(userId);
+				if (Array.isArray(branches) && branches.length > 0 && branches[0]?.IDNo) {
+					resolvedBranchId = branches[0].IDNo;
+				}
+			}
 
 			if (!resolvedBranchId) {
 				return ApiResponse.badRequest(res, 'Branch ID is required. Please select a branch first.');
@@ -227,7 +256,6 @@ class OrderController {
 				}
 			}
 
-			const userId = req.session?.user_id || req.user?.user_id;
 			actorUserId = userId || actorUserId;
 			const paymentMethod = (req.body.payment_method || req.body.PAYMENT_METHOD || 'CASH');
 			const paymentRef = req.body.payment_ref || req.body.PAYMENT_REF || 'Manual order (settled)';

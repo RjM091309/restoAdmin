@@ -64,9 +64,9 @@ app.use((req, res, next) => {
 });
 
 // Body parser middleware for handling form submissions
-// Increased limit to 10MB for large import payloads (receipts, sales hourly summary, etc.)
-app.use(express.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+// 25MB keeps receipt stitch payloads stable while still bounded.
+app.use(express.json({ limit: '25mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '25mb' }));
 
 // Serve API info page (simple HTML for browser access)
 app.use(express.static(path.join(__dirname, 'public'), {

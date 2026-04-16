@@ -21,6 +21,7 @@ const { generateTokenPair, verifyRefreshToken } = require('../utils/jwt');
 const socketService = require('../utils/socketService');
 const TranslationService = require('../utils/translationService');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils');
+const { stitchReceiptDataUrls } = require('../services/receiptStitchService');
 const pool = require('../config/db');
 
 class ApiController {
@@ -179,6 +180,39 @@ class ApiController {
 			return res.status(500).json({
 				success: false,
 				error: 'Failed to fetch receipt scanner API key'
+			});
+		}
+	}
+
+	static async stitchReceiptImages(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const pages = Array.isArray(req.body?.images) ? req.body.images : [];
+			if (!pages.length) {
+				return res.status(400).json({
+					success: false,
+					error: 'images[] is required'
+				});
+			}
+
+			const stitchedDataUrl = await stitchReceiptDataUrls(pages, {
+				maxWidth: req.body?.maxWidth,
+				maxHeight: req.body?.maxHeight,
+				quality: req.body?.quality
+			});
+
+			return res.json({
+				success: true,
+				data: {
+					image: stitchedDataUrl,
+					count: pages.length
+				}
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] POST /api/receiptscanner/stitch - Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: error?.message || 'Failed to stitch receipt images'
 			});
 		}
 	}

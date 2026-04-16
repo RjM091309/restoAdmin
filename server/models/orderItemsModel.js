@@ -9,22 +9,22 @@ const pool = require('../config/db');
 
 class OrderItemsModel {
 	static async getByOrderId(orderId) {
+		// Use scalar subqueries for menu/user labels — a JOIN against `menu` can multiply rows if
+		// duplicate MENU_ID rows exist in `menu`, which makes the Orders detail view show inflated line lists.
 		const query = `
 			SELECT
 				oi.IDNo,
 				oi.ORDER_ID,
 				oi.MENU_ID,
-				m.MENU_NAME,
+				(SELECT m.MENU_NAME FROM menu m WHERE m.IDNo = oi.MENU_ID ORDER BY m.IDNo ASC LIMIT 1) AS MENU_NAME,
 				oi.QTY,
 				oi.UNIT_PRICE,
 				oi.LINE_TOTAL,
 				oi.STATUS,
 				oi.REMARKS,
 				oi.EDITED_BY,
-				u.FIRSTNAME AS PREPARED_BY
+				(SELECT u.FIRSTNAME FROM user_info u WHERE u.IDNo = oi.EDITED_BY LIMIT 1) AS PREPARED_BY
 			FROM order_items oi
-			LEFT JOIN menu m ON m.IDNo = oi.MENU_ID
-			LEFT JOIN user_info u ON u.IDNo = oi.EDITED_BY
 			WHERE oi.ORDER_ID = ?
 			ORDER BY oi.ENCODED_DT ASC
 		`;

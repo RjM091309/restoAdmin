@@ -31,6 +31,9 @@ router.post("/refresh", ApiController.refreshToken);
 // GET - Receipt scanner Gemini API key from DB
 // URL: /api/receiptscanner/gemini-key
 router.get("/receiptscanner/gemini-key", optionalJWT, ApiController.getReceiptScannerApiKey);
+// POST - Stitch multiple receipt images into one long strip
+// URL: /api/receiptscanner/stitch
+router.post("/receiptscanner/stitch", optionalJWT, ApiController.stitchReceiptImages);
 
 // ============================================
 // PROTECTED ROUTES (JWT authentication required)
