@@ -89,6 +89,12 @@ const formatExpenseAmountInput = (raw: string): string => {
 
 const parseExpenseAmount = (value: string): number => Number(String(value || '').replace(/,/g, '').trim());
 
+/**
+ * Per-expense quantity for table + edit form. API `stockQty` is joined from inventory (running stock per
+ * ingredient), while `expQty` is the amount for this line — they can differ when the same item has multiple rows.
+ */
+const expenseLineQty = (row: ExpenseRecord): number => (row.expQty != null ? row.expQty : row.stockQty ?? 0);
+
 /** YYYY-MM-DD in Asia/Manila for an instant (aligns with dashboard daily-expenses / MySQL DATE in PH). */
 const getManilaYmdFromDate = (d: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -744,12 +750,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             {
               header: 'Qty',
               render: (row: ExpenseRecord) => {
-                const qty = row.expQty != null ? row.expQty : row.stockQty;
+                const qty = expenseLineQty(row);
                 const unit = row.unit ?? 'pcs';
                 return (
                   <div className="flex items-center justify-end gap-1">
                     <span className="text-right px-2 py-1 rounded">
-                      {formatQty(qty ?? 0, unit)}
+                      {formatQty(qty, unit)}
                     </span>
                     <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span>
                   </div>
@@ -991,6 +997,15 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setIsExpensePanelOpen(true);
   };
 
+  const toExpenseFormValues = (row: ExpenseRecord) => ({
+    expDesc: row.expDesc ?? '',
+    expAmount: row.expAmount ? formatExpenseAmountInput(String(row.expAmount)) : '',
+    expSource: row.expSource ?? '',
+    stockQty: String(expenseLineQty(row)),
+    unit: row.unit ?? 'pcs',
+    encodedDate: expenseEncodedYmd(row.encodedDt) ?? getManilaDateStr(new Date()),
+  });
+
   const handleOpenEditExpense = (row: ExpenseRecord) => {
     if (String(row.id || '').startsWith('template-')) {
       // Template rows are placeholders (no real DB ID). Try to open the latest
@@ -1002,14 +1017,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       });
       if (latestReal) {
         setEditingExpense(latestReal);
-        setExpenseForm({
-          expDesc: latestReal.expDesc ?? '',
-          expAmount: latestReal.expAmount ? formatExpenseAmountInput(String(latestReal.expAmount)) : '',
-          expSource: latestReal.expSource ?? '',
-          stockQty: latestReal.stockQty != null ? String(latestReal.stockQty) : '',
-          unit: latestReal.unit ?? 'pcs',
-          encodedDate: expenseEncodedYmd(latestReal.encodedDt) ?? getManilaDateStr(new Date()),
-        });
+        setExpenseForm(toExpenseFormValues(latestReal));
         setIsExpensePanelOpen(true);
         toast.success('Opened latest existing entry for this item.');
         return;
@@ -1020,14 +1028,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       return;
     }
     setEditingExpense(row);
-    setExpenseForm({
-      expDesc: row.expDesc ?? '',
-      expAmount: row.expAmount ? formatExpenseAmountInput(String(row.expAmount)) : '',
-      expSource: row.expSource ?? '',
-      stockQty: row.stockQty != null ? String(row.stockQty) : '',
-      unit: row.unit ?? 'pcs',
-      encodedDate: expenseEncodedYmd(row.encodedDt) ?? getManilaDateStr(new Date()),
-    });
+    setExpenseForm(toExpenseFormValues(row));
     setIsExpensePanelOpen(true);
   };
 
@@ -2338,7 +2339,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
               </div>
               <div className="space-y-3">
                 <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-                  Qty (for inventory) <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
+                  Qty <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
                 </label>
                 <div className="flex items-center gap-2">
                   <input
