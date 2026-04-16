@@ -240,28 +240,40 @@ class ExpenseModel {
 		} catch (err) {
 			const msg = String(err.message || '');
 			if (msg.includes('IDNo') && msg.includes('default')) {
-				const [rows] = await pool.execute(
-					`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM expenses`
-				);
-				const nextId = Number(rows[0]?.nextId ?? rows[0]?.nextid ?? 1) || 1;
-				await pool.execute(
-					`
-					INSERT INTO expenses (
-						IDNo,
-						BRANCH_ID,
-						MASTER_CAT_ID,
-						EXP_DESC,
-						EXP_AMOUNT,
-						EXP_QTY,
-						EXP_SOURCE,
-						ACTIVE,
-						ENCODED_BY,
-						ENCODED_DT
-					) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
-					`,
-					[nextId, ...values]
-				);
-				return nextId;
+				// Legacy schema path: IDNo has no default/auto-increment.
+				// Retry on duplicate key to tolerate concurrent inserts.
+				for (let attempt = 0; attempt < 5; attempt += 1) {
+					const [rows] = await pool.execute(
+						`SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM expenses`
+					);
+					const nextId = Number(rows[0]?.nextId ?? 1) || 1;
+					try {
+						await pool.execute(
+							`
+							INSERT INTO expenses (
+								IDNo,
+								BRANCH_ID,
+								MASTER_CAT_ID,
+								EXP_DESC,
+								EXP_AMOUNT,
+								EXP_QTY,
+								EXP_SOURCE,
+								ACTIVE,
+								ENCODED_BY,
+								ENCODED_DT
+							) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
+							`,
+							[nextId, ...values]
+						);
+						return nextId;
+					} catch (insertErr) {
+						if (insertErr?.code === 'ER_DUP_ENTRY') {
+							continue;
+						}
+						throw insertErr;
+					}
+				}
+				throw new Error('Failed to allocate unique expenses.IDNo after retries');
 			}
 			if (msg.includes('EXP_QTY') || msg.includes('Unknown column')) {
 				// Fallback when EXP_QTY column doesn't exist yet

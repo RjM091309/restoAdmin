@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Loader2, Plus, Edit2, Trash2, MapPin, Building2, Hash } from 'lucide-react';
+import { Search, Loader2, Plus, Edit2, Trash2, MapPin, Building2, Hash, Layers } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { SidePanel } from '../ui/SidePanel';
@@ -16,6 +16,8 @@ interface BranchRow {
   name: string;
   address: string;
   phone: string;
+  /** 1 = main category only; 2 = main + subcategory */
+  categoryLevel: 1 | 2;
   status: 'Active' | 'Inactive';
 }
 
@@ -48,6 +50,7 @@ export const Branches: React.FC = () => {
     name: '',
     address: '',
     phone: '',
+    categoryLevel: 1 as 1 | 2,
   });
 
   const fetchBranches = useCallback(async () => {
@@ -66,6 +69,7 @@ export const Branches: React.FC = () => {
         name: b.BRANCH_NAME || '—',
         address: b.ADDRESS || '—',
         phone: b.PHONE || '—',
+        categoryLevel: Number(b.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1,
         status: b.ACTIVE === 1 ? 'Active' : 'Inactive',
       }));
       setBranches(mappedData);
@@ -95,7 +99,7 @@ export const Branches: React.FC = () => {
 
   const handleOpenAddPanel = () => {
     setEditingBranch(null);
-    setFormData({ code: '', name: '', address: '', phone: '' });
+    setFormData({ code: '', name: '', address: '', phone: '', categoryLevel: 1 });
     setIsPanelOpen(true);
   };
 
@@ -106,6 +110,7 @@ export const Branches: React.FC = () => {
       name: branch.name,
       address: branch.address === '—' ? '' : branch.address,
       phone: branch.phone === '—' ? '' : branch.phone,
+      categoryLevel: branch.categoryLevel,
     });
     setIsPanelOpen(true);
   };
@@ -128,6 +133,7 @@ export const Branches: React.FC = () => {
         BRANCH_NAME: formData.name.trim(),
         ADDRESS: formData.address.trim() || undefined,
         PHONE: formData.phone.trim() || undefined,
+        MENU_CATEGORY_LEVEL: formData.categoryLevel,
       };
       const url = editingBranch ? `/branch/${editingBranch.id}` : '/branch';
       const method = editingBranch ? 'PUT' : 'POST';
@@ -187,6 +193,19 @@ export const Branches: React.FC = () => {
     {
       header: t('manage_branches.name'),
       render: (b) => <span className="text-sm font-bold">{b.name}</span>,
+    },
+    {
+      header: t('manage_branches.menu_category_level_column'),
+      render: (b) => (
+        <span
+          className={cn(
+            'text-xs font-bold px-2 py-1 rounded-lg',
+            b.categoryLevel === 2 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
+          )}
+        >
+          {b.categoryLevel === 2 ? t('manage_branches.summary_main_sub') : t('manage_branches.summary_main_only')}
+        </span>
+      ),
     },
     {
       header: t('manage_branches.address'),
@@ -258,7 +277,7 @@ export const Branches: React.FC = () => {
             <SkeletonPageHeader />
             <SkeletonStatCards />
             <div className="bg-white rounded-2xl shadow-sm p-6">
-              <SkeletonTable columns={6} rows={10} />
+              <SkeletonTable columns={7} rows={10} />
             </div>
           </motion.div>
         ) : error ? (
@@ -324,7 +343,7 @@ export const Branches: React.FC = () => {
         onClose={() => {
           if (!isSubmitting) {
             setIsPanelOpen(false);
-            setFormData({ code: '', name: '', address: '', phone: '' });
+            setFormData({ code: '', name: '', address: '', phone: '', categoryLevel: 1 });
           }
         }}
         title={editingBranch ? t('manage_branches.edit_branch') : t('manage_branches.add_new_branch')}
@@ -401,19 +420,57 @@ export const Branches: React.FC = () => {
               />
             </div>
           </div>
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-              {t('manage_branches.phone')}
-            </label>
-            <input
-              type="text"
-              placeholder={t('manage_branches.enter_phone')}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              autoComplete="off"
-            />
-          </div>
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                {t('manage_branches.phone')}
+              </label>
+              <input
+                type="text"
+                placeholder={t('manage_branches.enter_phone')}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="space-y-3" role="radiogroup" aria-labelledby="branch-menu-category-level-label">
+              <label
+                id="branch-menu-category-level-label"
+                className="text-xs font-bold text-brand-text uppercase tracking-wider block flex items-center gap-2"
+              >
+                <Layers size={14} className="text-brand-muted" />
+                {t('manage_branches.menu_category_level')}
+              </label>
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="radio"
+                    name="menuCategoryLevel"
+                    className="mt-1 h-4 w-4 shrink-0 accent-brand-primary"
+                    checked={formData.categoryLevel === 1}
+                    onChange={() => setFormData((prev) => ({ ...prev, categoryLevel: 1 }))}
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-brand-text">{t('manage_branches.menu_category_level_1_title')}</span>
+                    <span className="mt-0.5 block text-xs text-brand-muted">{t('manage_branches.menu_category_level_1_desc')}</span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="radio"
+                    name="menuCategoryLevel"
+                    className="mt-1 h-4 w-4 shrink-0 accent-brand-primary"
+                    checked={formData.categoryLevel === 2}
+                    onChange={() => setFormData((prev) => ({ ...prev, categoryLevel: 2 }))}
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-brand-text">{t('manage_branches.menu_category_level_2_title')}</span>
+                    <span className="mt-0.5 block text-xs text-brand-muted">{t('manage_branches.menu_category_level_2_desc')}</span>
+                  </span>
+                </label>
+              </div>
+            </div>
         </form>
       </SidePanel>
 

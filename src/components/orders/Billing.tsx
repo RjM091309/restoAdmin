@@ -70,6 +70,74 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
 
   const EPS = 1e-6;
 
+  // Keep date rendering consistent with Orders: treat backend `ENCODED_DT` as Asia/Manila
+  // when no explicit timezone is present (e.g. MySQL 'YYYY-MM-DD HH:mm:ss').
+  const MANILA_TIMEZONE = 'Asia/Manila';
+  const MANILA_UTC_OFFSET_HOURS = 8; // Asia/Manila is UTC+8 (no DST)
+
+  const parseManilaLocalDateTimeToUtcMs = useCallback((value: string): number | null => {
+    const m = String(value).match(
+      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d+)?$/,
+    );
+    if (!m) return null;
+
+    const year = Number(m[1]);
+    const monthIndex = Number(m[2]) - 1;
+    const day = Number(m[3]);
+    const hour = Number(m[4]);
+    const minute = Number(m[5]);
+    const second = Number(m[6]);
+    const ms = m[7] ? Number(m[7].slice(1).padEnd(3, '0').slice(0, 3)) : 0;
+
+    return Date.UTC(
+      year,
+      monthIndex,
+      day,
+      hour - MANILA_UTC_OFFSET_HOURS,
+      minute,
+      second,
+      ms,
+    );
+  }, []);
+
+  const parseEncodedDtToUtcMs = useCallback(
+    (encoded: string): number | null => {
+      if (!encoded) return null;
+
+      // If timezone info is present, rely on JS Date parsing.
+      if (/[zZ]$/.test(encoded) || /[+-]\d{2}:?\d{2}$/.test(encoded)) {
+        const d = new Date(encoded);
+        return Number.isNaN(d.getTime()) ? null : d.getTime();
+      }
+
+      // If backend returns without timezone:
+      // - 'YYYY-MM-DD HH:mm:ss'
+      // - 'YYYY-MM-DDTHH:mm:ss'
+      if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(encoded)) {
+        const manilaMs = parseManilaLocalDateTimeToUtcMs(encoded);
+        if (manilaMs != null) return manilaMs;
+      }
+
+      const d = new Date(encoded.replace(' ', 'T'));
+      return Number.isNaN(d.getTime()) ? null : d.getTime();
+    },
+    [parseManilaLocalDateTimeToUtcMs],
+  );
+
+  const formatEncodedDt = useCallback(
+    (encoded: string | null | undefined) => {
+      if (!encoded) return '—';
+      const utcMs = parseEncodedDtToUtcMs(encoded);
+      if (utcMs == null) return '—';
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: MANILA_TIMEZONE,
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(new Date(utcMs));
+    },
+    [parseEncodedDtToUtcMs],
+  );
+
   const formatMoneyNoDecimals = useCallback((value: unknown) => {
     const n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) return '0';
@@ -353,12 +421,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
             <div className="min-w-0">
               <p className="text-sm font-bold">{r.ORDER_NO}</p>
               <p className="text-[10px] text-brand-muted">
-                {r.ENCODED_DT
-                  ? new Date(r.ENCODED_DT).toLocaleString(undefined, {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })
-                  : t('billing.n_a')}
+                {r.ENCODED_DT ? formatEncodedDt(r.ENCODED_DT) : t('billing.n_a')}
               </p>
             </div>
           </div>
@@ -700,12 +763,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
                       {t('billing.date')}
                     </p>
                     <p className="mt-1 text-brand-muted">
-                      {row.ENCODED_DT
-                        ? new Date(row.ENCODED_DT).toLocaleString(undefined, {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
-                          })
-                        : t('billing.n_a')}
+                      {row.ENCODED_DT ? formatEncodedDt(row.ENCODED_DT) : t('billing.n_a')}
                     </p>
                   </div>
                   <div className="min-w-0">

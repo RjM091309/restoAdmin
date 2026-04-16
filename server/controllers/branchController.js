@@ -179,11 +179,14 @@ class BranchController {
 			}
 
 			const user_id = req.session?.user_id || req.user?.user_id;
+			const MENU_CATEGORY_LEVEL = body.MENU_CATEGORY_LEVEL ?? body.menu_category_level;
+
 			const branchId = await BranchModel.create({
 				BRANCH_CODE,
 				BRANCH_NAME,
 				ADDRESS: ADDRESS || undefined,
-				PHONE: PHONE || undefined
+				PHONE: PHONE || undefined,
+				MENU_CATEGORY_LEVEL,
 			});
 
 			try {
@@ -214,7 +217,8 @@ class BranchController {
 				return ApiResponse.badRequest(res, 'Invalid branch ID');
 			}
 
-			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE } = req.body;
+			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE, MENU_CATEGORY_LEVEL, menu_category_level } = req.body;
+			const categoryLevel = MENU_CATEGORY_LEVEL ?? menu_category_level;
 
 			if (!BRANCH_CODE || BRANCH_CODE.trim() === '') {
 				return ApiResponse.badRequest(res, 'Branch code is required');
@@ -234,7 +238,8 @@ class BranchController {
 				BRANCH_CODE,
 				BRANCH_NAME,
 				ADDRESS,
-				PHONE
+				PHONE,
+				MENU_CATEGORY_LEVEL: categoryLevel,
 			});
 
 			if (!updated) {

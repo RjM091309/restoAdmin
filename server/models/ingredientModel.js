@@ -7,6 +7,7 @@
 
 const pool = require('../config/db');
 const BranchModel = require('./branchModel');
+const { ensureIdNoAutoIncrement } = require('../utils/mysqlSchemaHelpers');
 
 class IngredientModel {
 	static _schemaReady = false;
@@ -80,6 +81,15 @@ class IngredientModel {
 				}
 			} catch (alterErr) {
 				console.warn('[IngredientModel] CATEGORY_ID rename skipped:', alterErr?.message);
+			}
+
+			// Legacy DBs: ingredients may exist without AUTO_INCREMENT on IDNo (CREATE IF NOT EXISTS does not upgrade).
+			const ingredientsIdOk = await ensureIdNoAutoIncrement(pool, 'ingredients');
+			if (!ingredientsIdOk) {
+				throw new Error(
+					'ingredients.IDNo is not AUTO_INCREMENT. Add PRIMARY KEY on IDNo if missing, then: ' +
+						'ALTER TABLE ingredients MODIFY COLUMN IDNo INT NOT NULL AUTO_INCREMENT;'
+				);
 			}
 
 			// Migrate: insert distinct expenses (STATE=1) into ingredients as master list

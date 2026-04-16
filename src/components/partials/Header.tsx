@@ -17,6 +17,8 @@ type DateRange = {
 export type Branch = {
   id: string | number;
   name: string;
+  /** From branches.MENU_CATEGORY_LEVEL: 1 = single category list; 2 = main + subcategory */
+  menuCategoryLevel?: 1 | 2;
 };
 
 type HeaderProps = {
@@ -165,6 +167,7 @@ export const Header: React.FC<HeaderProps> = ({
           const data = (json.data ?? json).map((b: any) => ({
             id: b.IDNo,
             name: b.BRANCH_LABEL || b.BRANCH_NAME,
+            menuCategoryLevel: Number(b.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1,
           }));
           const userBranchId = user?.branch_id ? String(user.branch_id) : '';
 
@@ -188,10 +191,12 @@ export const Header: React.FC<HeaderProps> = ({
           const branchNameFromUrl = params.get('branchName');
 
           if (branchIdFromUrl) {
-            // URL has branch — keep selectedBranch in sync so direct links (e.g. /expenses-mock?branchId=3) load correct data
-            const urlBranch: Branch = {
+            // URL has branch — prefer full row from /branch list (includes menuCategoryLevel)
+            const fromList = data.find((b: Branch) => String(b.id) === String(branchIdFromUrl));
+            const urlBranch: Branch = fromList ?? {
               id: branchIdFromUrl,
               name: branchNameFromUrl?.replace(/\+/g, ' ') || (branchIdFromUrl === 'all' ? t('header.all_branches') : `Branch ${branchIdFromUrl}`),
+              menuCategoryLevel: 1,
             };
             const matches =
               selectedBranch &&

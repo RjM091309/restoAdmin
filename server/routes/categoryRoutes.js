@@ -29,6 +29,9 @@ router.get("/category/:id", authenticate, CategoryController.getById);
 // POST - Create new category
 router.post("/category", authenticate, CategoryController.create);
 
+// POST - One-time: flat categories → one new main + all existing become subs (must be before /category/:id)
+router.post("/category/migrate-flat-under-main", authenticate, CategoryController.migrateFlatUnderMain);
+
 // ============================================
 // PUT ROUTES
 // ============================================

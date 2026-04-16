@@ -4,6 +4,8 @@ export interface MenuCategory {
     id: string;
     name: string;
     branchId: string | null;
+    /** If set, this category is a subcategory of the given main category id */
+    parentId: string | null;
 }
 
 export interface MenuRecord {
@@ -67,6 +69,7 @@ type CategoryApiRecord = {
     IDNo: number;
     CATEGORY_NAME?: string;
     BRANCH_ID?: number | null;
+    PARENT_CAT_ID?: number | null;
 };
 
 // Menu API calls use /data-api prefix to avoid conflict with SPA /menu route
@@ -131,6 +134,8 @@ const mapCategoryRecord = (row: CategoryApiRecord): MenuCategory => ({
     id: String(row.IDNo),
     name: row.CATEGORY_NAME || 'Uncategorized',
     branchId: row.BRANCH_ID !== undefined && row.BRANCH_ID !== null ? String(row.BRANCH_ID) : null,
+    parentId:
+        row.PARENT_CAT_ID !== undefined && row.PARENT_CAT_ID !== null ? String(row.PARENT_CAT_ID) : null,
 });
 
 // ---- Public API ----
@@ -175,8 +180,8 @@ export const getMenuCategories = async (branchId?: string): Promise<MenuCategory
     return data.map(mapCategoryRecord);
 };
 
-export type CreateMenuCategoryPayload = { name: string; description?: string | null };
-export type UpdateMenuCategoryPayload = { name: string; description?: string | null };
+export type CreateMenuCategoryPayload = { name: string; description?: string | null; parentId?: string | null };
+export type UpdateMenuCategoryPayload = { name: string; description?: string | null; parentId?: string | null };
 
 export async function createMenuCategory(branchId: string | null, payload: CreateMenuCategoryPayload): Promise<{ id: number }> {
     const body: Record<string, string | number | null> = {
@@ -184,6 +189,9 @@ export async function createMenuCategory(branchId: string | null, payload: Creat
         CAT_DESC: payload.description?.trim() || null,
     };
     if (branchId && branchId !== 'all') body.branch_id = branchId;
+    if (payload.parentId && String(payload.parentId).trim() !== '') {
+        body.PARENT_CAT_ID = String(payload.parentId).trim();
+    }
 
     const response = await fetch(buildUrl('/category'), {
         method: 'POST',
@@ -198,18 +206,46 @@ export async function createMenuCategory(branchId: string | null, payload: Creat
     return json.data as { id: number };
 }
 
+/** One-time: create one main category and attach all existing top-level categories as its subs (same branch). */
+export async function migrateFlatCategoriesUnderMain(
+    branchId: string,
+    mainCategoryName: string
+): Promise<{ moved: number; newMainId: number | null }> {
+    const body: Record<string, string> = {
+        MAIN_CAT_NAME: mainCategoryName.trim() || 'Menu',
+        branch_id: branchId,
+    };
+    const response = await fetch(buildUrl('/category/migrate-flat-under-main'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const json = (await response.json()) as ApiResponse<{ moved: number; newMainId: number | null }>;
+    if (!response.ok || !json.success) {
+        throw new Error((json as { error?: string }).error || 'Migration failed');
+    }
+    return json.data as { moved: number; newMainId: number | null };
+}
+
 export async function updateMenuCategory(
     id: string,
     payload: UpdateMenuCategoryPayload
 ): Promise<void> {
+    const body: Record<string, string | null> = {
+        CAT_NAME: payload.name.trim(),
+    };
+    if (payload.description !== undefined) {
+        body.CAT_DESC = payload.description?.trim() || null;
+    }
+    if (payload.parentId !== undefined) {
+        body.PARENT_CAT_ID = payload.parentId && String(payload.parentId).trim() !== '' ? String(payload.parentId) : null;
+    }
     const response = await fetch(buildUrl(`/category/${id}`), {
         method: 'PUT',
         credentials: 'include',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            CAT_NAME: payload.name.trim(),
-            CAT_DESC: payload.description?.trim() || null,
-        }),
+        body: JSON.stringify(body),
     });
     const json = (await response.json()) as ApiResponse<null> & { error?: string };
     if (!response.ok || !json.success) {

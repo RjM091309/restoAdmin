@@ -93,8 +93,11 @@ class OrderModel {
 		} = data;
 
 		const hasEncodedDt = ENCODED_DT != null && String(ENCODED_DT).trim() !== '';
+		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders');
+		const nextId = Number(idRows?.[0]?.nextId) || 1;
 
 		const columnsBase = [
+			'IDNo',
 			'BRANCH_ID',
 			'ORDER_NO',
 			'TABLE_ID',
@@ -108,6 +111,7 @@ class OrderModel {
 			'ENCODED_BY',
 		];
 		const valuesBase = [
+			nextId,
 			BRANCH_ID,
 			ORDER_NO,
 			TABLE_ID || null,
@@ -139,7 +143,7 @@ class OrderModel {
 			: valuesBase;
 
 		const [result] = await pool.execute(query, values);
-		return result.insertId;
+		return result.insertId || nextId;
 	}
 
 	static async update(id, data) {
@@ -183,7 +187,7 @@ class OrderModel {
 			id
 		];
 
-		const [result] = await pool.execute(query, values);
+		await pool.execute(query, values);
 		return true; // Return true as long as no exception occurred
 	}
 
