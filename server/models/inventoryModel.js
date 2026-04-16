@@ -229,7 +229,9 @@ class InventoryModel {
 					ingredientId = ins.insertId;
 				}
 				await pool.execute(`UPDATE expenses SET INGREDIENT_ID = ? WHERE IDNo = ? AND ACTIVE = 1`, [ingredientId, expenseId]);
-			} else if (unit && String(unit).trim()) {
+			}
+			// After resolving ingredient (including first-time link to an existing row), sync UNIT when the client sends it.
+			if (ingredientId != null && unit != null && String(unit).trim()) {
 				await pool.execute(`UPDATE ingredients SET UNIT = ? WHERE IDNo = ? AND ACTIVE = 1`, [safeUnit, ingredientId]);
 			}
 
