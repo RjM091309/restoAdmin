@@ -68,6 +68,26 @@ function sortMenuCategoriesByName(categories: MenuCategory[]): MenuCategory[] {
     });
 }
 
+function isDrinkCategoryName(name: string | null | undefined): boolean {
+    const normalized = String(name || '').trim().toLowerCase();
+    if (normalized === 'drink' || normalized === 'drinks') return true;
+    return /\bdrinks?\b/.test(normalized);
+}
+
+function isPrimeBbqBranchName(name: string | null | undefined): boolean {
+    const normalized = String(name || '').trim().toLowerCase();
+    return normalized === 'prime bbq' || (normalized.includes('prime') && normalized.includes('bbq'));
+}
+
+function normalizeId(value: unknown): string {
+    return String(value ?? '').trim();
+}
+
+function isRootCategory(parentId: unknown): boolean {
+    const normalized = normalizeId(parentId);
+    return normalized === '' || normalized === '0' || normalized.toLowerCase() === 'null';
+}
+
 // ---- Props & types ----
 interface MenuProps {
     selectedBranch: Branch | null;
@@ -77,7 +97,6 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
     const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
-
     const [branchCategoryLevel, setBranchCategoryLevel] = useState<1 | 2>(1);
     useEffect(() => {
         if (!selectedBranch || String(selectedBranch.id) === 'all') {
@@ -151,6 +170,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     // ----- Filters -----
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [activeCategoryRequiresSubMenu, setActiveCategoryRequiresSubMenu] = useState(false);
     const [availFilter, setAvailFilter] = useState<string>('all');
 
     // ----- Modals -----
@@ -312,6 +332,11 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 m.name.toLowerCase().includes(term) ||
                 m.categoryName.toLowerCase().includes(term);
             let matchCat = false;
+            // When searching, include ALL items in the branch (across all mains/subs),
+            // regardless of current main/sub selection.
+            if (term) {
+                matchCat = true;
+            } else
             if (!isTwoLevelBranch) {
                 matchCat = selectedCategory ? m.categoryId === selectedCategory : false;
             } else if (selectedMainCategoryId) {
@@ -452,13 +477,88 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             }),
         );
     }, [categories, menus]);
-    const categoryParentOptions = useMemo(
+    const drinkMainCategory = useMemo(
         () =>
-            sortedMainCategories
-                .filter((c) => !editingCategory || c.id !== editingCategory.id)
-                .map((c) => ({ value: c.id, label: c.name })),
-        [sortedMainCategories, editingCategory],
+            categories.find((c) => isRootCategory(c.parentId) && isDrinkCategoryName(c.name)) || null,
+        [categories],
     );
+    /** DRINK main selected, or a subcategory whose parent is DRINK (middle column + add-sub flows). */
+    const inDrinkSubContext = useMemo(() => {
+        if (!drinkMainCategory || !selectedCategory) return false;
+        if (normalizeId(selectedCategory) === normalizeId(drinkMainCategory.id)) return true;
+        const sel = categories.find((c) => normalizeId(c.id) === normalizeId(selectedCategory));
+        return normalizeId(sel?.parentId) === normalizeId(drinkMainCategory.id);
+    }, [drinkMainCategory, selectedCategory, categories]);
+    const drinkSubCategories = useMemo(
+        () =>
+            drinkMainCategory
+                ? sortMenuCategoriesByName(
+                      categories.filter((c) => normalizeId(c.parentId) === normalizeId(drinkMainCategory.id)),
+                  )
+                : [],
+        [categories, drinkMainCategory],
+    );
+
+    /** Level 1: kapag DRINK ang napili at may subcategories, buksan agad ang unang sub para makita ang items doon. */
+    useEffect(() => {
+        if (isTwoLevelBranch || !drinkMainCategory) return;
+        if (!selectedCategory) return;
+        if (normalizeId(selectedCategory) !== normalizeId(drinkMainCategory.id)) return;
+        const firstSub = drinkSubCategories[0];
+        if (!firstSub) return;
+        setSelectedCategory(firstSub.id);
+    }, [isTwoLevelBranch, drinkMainCategory, selectedCategory, drinkSubCategories]);
+
+    const activeSinglePrimaryCategoryId = useMemo(() => {
+        if (isTwoLevelBranch || !selectedCategory) return null;
+        const selected = categories.find((c) => c.id === selectedCategory);
+        return selected?.parentId || selectedCategory;
+    }, [isTwoLevelBranch, selectedCategory, categories]);
+    const singleLevelSidebarCategories = useMemo(() => {
+        if (isTwoLevelBranch || !drinkMainCategory) return sortedCategories;
+        // Hide DRINK subcategories from the left list; they appear in the middle column.
+        return sortMenuCategoriesByName(categories.filter((c) => isRootCategory(c.parentId)));
+    }, [isTwoLevelBranch, drinkMainCategory, sortedCategories, categories]);
+    const requiresDrinkSubMenu = useCallback(
+        (categoryId: string | null) => {
+            if (isTwoLevelBranch || !categoryId) return false;
+            const selected = categories.find((c) => normalizeId(c.id) === normalizeId(categoryId));
+            const selectedParent = categories.find((c) => normalizeId(c.id) === normalizeId(selected?.parentId));
+            return (
+                (!!drinkMainCategory &&
+                    (normalizeId(categoryId) === normalizeId(drinkMainCategory.id) ||
+                        normalizeId(selected?.parentId) === normalizeId(drinkMainCategory.id))) ||
+                isDrinkCategoryName(selected?.name) ||
+                isDrinkCategoryName(selectedParent?.name)
+            );
+        },
+        [isTwoLevelBranch, categories, drinkMainCategory],
+    );
+    const getCategoryMenuCount = useCallback(
+        (categoryId: string) => {
+            const normalizedCategoryId = normalizeId(categoryId);
+            const subCategoryIds = categories
+                .filter((c) => normalizeId(c.parentId) === normalizedCategoryId)
+                .map((c) => normalizeId(c.id));
+            const idSet = new Set([normalizedCategoryId, ...subCategoryIds]);
+            return menus.filter((m) => idSet.has(normalizeId(m.categoryId))).length;
+        },
+        [categories, menus],
+    );
+
+    useEffect(() => {
+        setActiveCategoryRequiresSubMenu(requiresDrinkSubMenu(selectedCategory));
+    }, [selectedCategory, requiresDrinkSubMenu]);
+    const categoryParentOptions = useMemo(() => {
+        if (isTwoLevelBranch) {
+            return sortedMainCategories
+                .filter((c) => !editingCategory || c.id !== editingCategory.id)
+                .map((c) => ({ value: c.id, label: c.name }));
+        }
+        if (!drinkMainCategory) return [];
+        if (editingCategory?.id === drinkMainCategory.id) return [];
+        return [{ value: drinkMainCategory.id, label: drinkMainCategory.name }];
+    }, [isTwoLevelBranch, sortedMainCategories, editingCategory, drinkMainCategory]);
 
     const sortedSubCategories = useMemo(
         () =>
@@ -502,8 +602,49 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const handleSelectCategory = useCallback((e: React.MouseEvent<HTMLButtonElement>, categoryId: string) => {
         e.currentTarget.blur();
         setSelectedCategory(categoryId);
+        setActiveCategoryRequiresSubMenu(requiresDrinkSubMenu(categoryId));
         scrollPageToTop();
-    }, [scrollPageToTop]);
+    }, [scrollPageToTop, requiresDrinkSubMenu]);
+
+    const jumpToItemCategory = useCallback((item: MenuRecord) => {
+        const targetCategoryId = item.categoryId ? String(item.categoryId) : '';
+        if (!targetCategoryId) return;
+
+        const target = categories.find((c) => normalizeId(c.id) === normalizeId(targetCategoryId));
+        const parentId = target?.parentId ? String(target.parentId) : null;
+
+        if (isTwoLevelBranch) {
+            // If item is in a subcategory, open its main and select the sub.
+            // If item is in a main category (legacy/flat), select that main and clear sub.
+            if (parentId) {
+                setSelectedMainCategoryId(parentId);
+                setSelectedCategory(targetCategoryId);
+            } else {
+                setSelectedMainCategoryId(targetCategoryId);
+                setSelectedCategory(null);
+            }
+        } else {
+            setSelectedMainCategoryId(null);
+            setSelectedCategory(targetCategoryId);
+        }
+
+        setActiveCategoryRequiresSubMenu(requiresDrinkSubMenu(targetCategoryId));
+        scrollPageToTop();
+    }, [categories, isTwoLevelBranch, requiresDrinkSubMenu, scrollPageToTop]);
+
+    const getItemCategoryPathLabel = useCallback((item: MenuRecord): string => {
+        const categoryId = item.categoryId ? String(item.categoryId) : '';
+        if (!categoryId) return item.categoryName || 'Uncategorized';
+
+        const cat = categories.find((c) => normalizeId(c.id) === normalizeId(categoryId));
+        if (!cat) return item.categoryName || 'Uncategorized';
+
+        if (cat.parentId) {
+            const parent = categories.find((c) => normalizeId(c.id) === normalizeId(cat.parentId));
+            return parent ? `${parent.name} › ${cat.name}` : cat.name;
+        }
+        return cat.name;
+    }, [categories]);
 
     const handleSelectMain = useCallback(
         (e: React.MouseEvent<HTMLButtonElement>, mainId: string) => {
@@ -553,15 +694,20 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     };
 
     const openAddSubCategory = () => {
-        if (!selectedMainCategoryId) {
-            toast.error(t('menu_page.select_main_first'));
+        const targetParentId = isTwoLevelBranch
+            ? selectedMainCategoryId
+            : inDrinkSubContext
+              ? drinkMainCategory?.id || null
+              : null;
+        if (!targetParentId) {
+            toast.error(isTwoLevelBranch ? t('menu_page.select_main_first') : 'Select DRINK (or a DRINK subcategory) first.');
             return;
         }
         setEditingCategory(null);
         setCategoryName('');
         setCategoryDesc('');
         setCategoryBaseline({ id: null, name: '', desc: '' });
-        setCategoryParentId(selectedMainCategoryId);
+        setCategoryParentId(targetParentId);
         setExistingCategoryToAttachId(null);
         setIsCategoryPanelOpen(true);
     };
@@ -620,20 +766,22 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             toast.error(t('categories.messages.select_branch'));
             return;
         }
+        const parentPayload =
+            categoryParentId && categoryParentOptions.some((opt) => opt.value === categoryParentId)
+                ? categoryParentId
+                : null;
         setCategorySubmitting(true);
         try {
             if (editingCategory) {
                 await updateMenuCategory(editingCategory.id, {
                     name,
                     description: categoryDesc.trim() || null,
-                    parentId: isTwoLevelBranch ? categoryParentId : null,
+                    parentId: parentPayload,
                 });
                 toast.success('Category updated successfully');
                 closeCategoryModal();
                 refreshData();
             } else {
-                const parentPayload =
-                    isTwoLevelBranch && categoryParentId ? categoryParentId : null;
                 if (isTwoLevelBranch && parentPayload && existingCategoryToAttachId) {
                     await updateMenuCategory(existingCategoryToAttachId, {
                         name,
@@ -681,14 +829,20 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const canSubmitCategory = useMemo(() => {
         const valid = !!categoryName.trim() && branchId !== 'all';
         if (!valid) return false;
-        const currentParent = isTwoLevelBranch ? (categoryParentId || '') : '';
-        const baselineParent = editingCategory && isTwoLevelBranch ? (editingCategory.parentId || '') : '';
+        const currentParent =
+            categoryParentId && categoryParentOptions.some((opt) => opt.value === categoryParentId)
+                ? categoryParentId
+                : '';
+        const baselineParent =
+            editingCategory && editingCategory.parentId && categoryParentOptions.some((opt) => opt.value === editingCategory.parentId)
+                ? editingCategory.parentId
+                : '';
         const baselineMatch =
             categoryName === categoryBaseline.name &&
             categoryDesc === categoryBaseline.desc &&
             currentParent === baselineParent;
         return !baselineMatch;
-    }, [categoryName, categoryDesc, categoryBaseline, branchId, categoryParentId, editingCategory, isTwoLevelBranch]);
+    }, [categoryName, categoryDesc, categoryBaseline, branchId, categoryParentId, editingCategory, categoryParentOptions]);
 
     // ==================== Ingredients modal ====================
     const openIngredientsModal = async (item: MenuRecord) => {
@@ -965,7 +1119,19 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                         </div>
                     </div>
                     <div className="min-w-0">
-                        <p className="text-sm font-bold text-brand-text truncate">{item.name}</p>
+                        <button
+                            type="button"
+                            onClick={() => jumpToItemCategory(item)}
+                            className="text-left w-full"
+                            title="Go to this item’s category"
+                        >
+                            <p className="text-sm font-bold text-brand-text truncate hover:underline">{item.name}</p>
+                            {searchTerm.trim().length > 0 && (
+                                <p className="text-xs font-semibold text-brand-muted truncate mt-0.5">
+                                    {getItemCategoryPathLabel(item)}
+                                </p>
+                            )}
+                        </button>
                     </div>
                 </div>
             ),
@@ -1023,7 +1189,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 </div>
             ),
         },
-    ], [t, canUpdate, canDelete, handleImageHoverEnter, handleImageHoverLeave, formatPriceNoDecimals]);
+    ], [t, canUpdate, canDelete, handleImageHoverEnter, handleImageHoverLeave, formatPriceNoDecimals, jumpToItemCategory, searchTerm, getItemCategoryPathLabel]);
 
     // ==================== Modal form content ====================
     const modalContent = (
@@ -1429,6 +1595,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                     </section>
                                 </>
                             ) : (
+                                <>
                                 <section className="w-[320px] xl:w-[420px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
                                     <div className="px-5 py-4 border-b border-gray-100">
                                         <div className="flex items-center justify-between gap-3">
@@ -1457,9 +1624,9 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                         data-category-scroller
                                         className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar"
                                     >
-                                        {sortedCategories.map((cat) => {
-                                            const active = cat.id === selectedCategory;
-                                            const count = menus.filter((m) => m.categoryId === cat.id).length;
+                                        {singleLevelSidebarCategories.map((cat) => {
+                                            const active = cat.id === activeSinglePrimaryCategoryId;
+                                            const count = getCategoryMenuCount(cat.id);
                                             return (
                                                 <div
                                                     key={cat.id}
@@ -1525,6 +1692,105 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                         )}
                                     </div>
                                 </section>
+                                <section
+                                    className={cn(
+                                        'w-[260px] xl:w-[300px] shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col',
+                                        !activeCategoryRequiresSubMenu && 'hidden',
+                                    )}
+                                >
+                                    <div className="px-4 py-4 border-b border-gray-100">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div>
+                                                <div className="text-xs font-black tracking-wide text-brand-text uppercase">
+                                                    {t('menu_page.sub_category')}
+                                                </div>
+                                                <div className="text-[11px] text-brand-muted mt-1 leading-snug">
+                                                    {t('menu_page.pick_sub_for_items')}
+                                                </div>
+                                            </div>
+                                            {canCreate('menu_management') && (
+                                                <button
+                                                    type="button"
+                                                    onClick={openAddSubCategory}
+                                                    className="h-8 w-8 rounded-full border border-gray-200 flex items-center justify-center text-brand-primary text-lg leading-none hover:bg-brand-primary/5 transition-colors cursor-pointer shrink-0 disabled:opacity-40"
+                                                    aria-label={t('menu_page.add_sub')}
+                                                    disabled={branchId === 'all' || !drinkMainCategory}
+                                                    title={t('menu_page.add_sub')}
+                                                >
+                                                    +
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="px-2 pb-2 pt-0 flex-1 min-h-0 overflow-auto custom-scrollbar">
+                                        {drinkSubCategories.map((cat) => {
+                                            const active = cat.id === selectedCategory;
+                                            const count = menus.filter((m) => m.categoryId === cat.id).length;
+                                            return (
+                                                <div
+                                                    key={cat.id}
+                                                    className={cn(
+                                                        'group flex items-center rounded-xl transition-colors relative',
+                                                        active ? 'bg-violet-100/80' : 'hover:bg-brand-bg',
+                                                    )}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleSelectCategory(e, cat.id)}
+                                                        className={cn(
+                                                            'flex-1 text-left px-3 py-2.5 min-w-0 cursor-pointer',
+                                                            active ? 'text-violet-800' : 'text-brand-text',
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className={cn('flex-1 font-bold break-words text-sm', active ? '' : 'font-semibold')}>
+                                                                {cat.name}
+                                                            </span>
+                                                            <span
+                                                                className={cn(
+                                                                    'text-[10px] px-1.5 py-0.5 rounded-full shrink-0 transition-opacity group-hover:opacity-0',
+                                                                    active
+                                                                        ? 'bg-violet-200 text-violet-900'
+                                                                        : 'bg-gray-100 text-brand-muted group-hover:bg-gray-200',
+                                                                )}
+                                                            >
+                                                                {count}
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                    {(canUpdate('menu_management') || canDelete('menu_management')) && (
+                                                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto">
+                                                            {canUpdate('menu_management') && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleOpenEditCategory(e, cat)}
+                                                                    className="p-1.5 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors cursor-pointer"
+                                                                    aria-label="Edit subcategory"
+                                                                >
+                                                                    <Edit2 size={14} />
+                                                                </button>
+                                                            )}
+                                                            {canDelete('menu_management') && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => handleDeleteCategory(e, cat)}
+                                                                    className="p-1.5 rounded-lg text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                                                                    aria-label="Delete subcategory"
+                                                                >
+                                                                    <Trash2 size={14} />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                        {drinkSubCategories.length === 0 && (
+                                            <div className="px-3 py-5 text-xs text-brand-muted">{t('menu_page.no_subcategories')}</div>
+                                        )}
+                                    </div>
+                                </section>
+                                </>
                             )}
 
                             {/* Table Items */}
@@ -1863,6 +2129,23 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                                 placeholder="Select main category"
                                 clearable={false}
                             />
+                        </div>
+                    )}
+                    {!isTwoLevelBranch &&
+                        categoryParentOptions.length > 0 &&
+                        (categoryParentId === drinkMainCategory?.id || editingCategory?.parentId === drinkMainCategory?.id) && (
+                        <div>
+                            <label className="block text-sm font-bold text-brand-text mb-2">Parent Category</label>
+                            <Select2
+                                options={[{ value: '', label: 'Top-level (no parent)' }, ...categoryParentOptions]}
+                                value={categoryParentId || ''}
+                                onChange={(v) => setCategoryParentId(v ? String(v) : null)}
+                                placeholder="Select parent category"
+                                clearable={false}
+                            />
+                            <p className="mt-1 text-xs text-brand-muted">
+                                Only DRINK can have subcategories in Level 1 mode.
+                            </p>
                         </div>
                     )}
                     {isTwoLevelBranch && !editingCategory && !!categoryParentId && (
