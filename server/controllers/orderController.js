@@ -209,13 +209,27 @@ class OrderController {
 			const userId = req.session?.user_id || req.user?.user_id;
 			// Branch resolution:
 			// - Admin (permissions=1): allow explicit branch_id from body to override session branch.
-			// - Non-admin: do NOT allow overriding; always use session/user branch.
+			// - Non-admin: allow explicit branch_id ONLY if user is assigned to that branch.
 			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
 			const explicitBranchIdRaw = req.body?.BRANCH_ID ?? req.body?.branch_id ?? null;
 			const sessionBranchIdRaw = req.session?.branch_id ?? req.user?.branch_id ?? req.query?.branch_id ?? null;
-			let resolvedBranchId = (isAdmin && explicitBranchIdRaw != null && String(explicitBranchIdRaw).trim() !== '' && String(explicitBranchIdRaw) !== 'all')
-				? explicitBranchIdRaw
-				: sessionBranchIdRaw;
+			const explicitBranchId =
+				explicitBranchIdRaw != null && String(explicitBranchIdRaw).trim() !== '' && String(explicitBranchIdRaw) !== 'all'
+					? String(explicitBranchIdRaw).trim()
+					: null;
+			let resolvedBranchId = sessionBranchIdRaw;
+			if (explicitBranchId) {
+				if (isAdmin) {
+					resolvedBranchId = explicitBranchId;
+				} else if (userId) {
+					// Only allow if the user is assigned to this branch.
+					const branches = await UserBranchModel.getBranchesByUserId(userId);
+					const allowed = Array.isArray(branches) && branches.some((b) => String(b?.IDNo) === explicitBranchId);
+					if (allowed) {
+						resolvedBranchId = explicitBranchId;
+					}
+				}
+			}
 
 			// Fallback for JWT/session payloads that don't include branch_id:
 			// 1) infer from selected table
