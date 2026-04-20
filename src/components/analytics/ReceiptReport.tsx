@@ -15,6 +15,7 @@ import {
   type ApiReceiptReportRow,
   type ApiReceiptDetail,
 } from '../../services/analyticsService';
+import { getOrderById, getOrderItems } from '../../services/orderService';
 
 type ReceiptReportProps = {
   selectedBranch: Branch | null;
@@ -449,7 +450,87 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
           setDetailError(null);
           setDetailLoading(true);
           try {
-            const detail: ApiReceiptDetail = await fetchReceiptDetailApi(row.id);
+            const [detail, order, orderItems] = await Promise.all([
+              fetchReceiptDetailApi(row.id),
+              getOrderById(String(row.id)),
+              getOrderItems(String(row.id)),
+            ]);
+
+            const fromOrderItems: ReceiptLineItem[] = (orderItems || []).map((it) => ({
+              name: String(it.MENU_NAME || `#${it.MENU_ID}`),
+              qty: Number(it.QTY || 0),
+              unitPrice: Number(it.UNIT_PRICE || 0),
+              amount: Number(it.LINE_TOTAL || 0),
+              note: it.REMARKS ?? undefined,
+            }));
+
+            // If service charge is stored on the order header (not as an order_item),
+            // include it so the slip matches the totals.
+            const hasChargeAlready = fromOrderItems.some((it) =>
+              /\b(room|service)\s*charge\b/i.test(String(it?.name || '').trim()),
+            );
+            const headerCharge = order ? Number((order as any).SERVICE_CHARGE || 0) : 0;
+
+            let itemsForSlip = fromOrderItems;
+            if (!hasChargeAlready && headerCharge > 0) {
+              const tableId = (order as any)?.TABLE_ID;
+              if (tableId != null && String(tableId).trim() !== '') {
+                try {
+                  const res = await fetch(`/data-api/restaurant_table/${encodeURIComponent(String(tableId))}`, {
+                    credentials: 'include',
+                    headers: (() => {
+                      const token = localStorage.getItem('token');
+                      return {
+                        Accept: 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      } as Record<string, string>;
+                    })(),
+                  });
+                  const json = await res.json().catch(() => ({} as any));
+                  const tbl = json?.data ?? json;
+                  const tableNumber = String(tbl?.TABLE_NUMBER ?? tbl?.tableNumber ?? '').trim();
+                  const isRoom = /\broom\b/i.test(tableNumber);
+                  const roomChargeUnit = Number(tbl?.ROOM_CHARGE ?? tbl?.roomCharge ?? 0);
+
+                  if (isRoom && roomChargeUnit > 0) {
+                    const q = headerCharge / roomChargeUnit;
+                    const qty =
+                      Number.isFinite(q) && Math.abs(q - Math.round(q)) < 1e-9 && q > 0
+                        ? Math.round(q)
+                        : 1;
+                    const unitPrice = qty > 1 ? roomChargeUnit : headerCharge;
+                    itemsForSlip = [
+                      ...fromOrderItems,
+                      { name: 'Room charge', qty, unitPrice, amount: headerCharge, note: undefined },
+                    ];
+                  } else {
+                    itemsForSlip = [
+                      ...fromOrderItems,
+                      { name: 'Service charge', qty: 1, unitPrice: headerCharge, amount: headerCharge, note: undefined },
+                    ];
+                  }
+                } catch {
+                  itemsForSlip = [
+                    ...fromOrderItems,
+                    { name: 'Service charge', qty: 1, unitPrice: headerCharge, amount: headerCharge, note: undefined },
+                  ];
+                }
+              } else {
+                itemsForSlip = [
+                  ...fromOrderItems,
+                  { name: 'Service charge', qty: 1, unitPrice: headerCharge, amount: headerCharge, note: undefined },
+                ];
+              }
+            }
+
+            const fallbackItems: ReceiptLineItem[] = (detail.items || []).map((item) => ({
+              name: item.name,
+              qty: item.qty,
+              unitPrice: item.unitPrice,
+              amount: item.amount,
+              note: item.note ?? undefined,
+            }));
+
             setReceiptDetail({
               orderLabel: detail.orderLabel,
               staff: detail.staff,
@@ -457,13 +538,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
               serviceType: detail.serviceType,
               paymentMethod: detail.paymentMethod,
               transactionNo: detail.transactionNo,
-              items: detail.items.map((item) => ({
-                name: item.name,
-                qty: item.qty,
-                unitPrice: item.unitPrice,
-                amount: item.amount,
-                note: item.note ?? undefined,
-              })),
+              items: itemsForSlip.length ? itemsForSlip : fallbackItems,
             });
           } catch (error) {
             console.error('Failed to load receipt detail', error);

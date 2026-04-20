@@ -38,6 +38,19 @@ class TableController {
 		}
 	}
 
+	// Get single restaurant table by ID
+	static async getById(req, res) {
+		try {
+			const { id } = req.params;
+			const table = await TableModel.getById(id);
+			if (!table) return ApiResponse.notFound(res, 'Restaurant table');
+			return ApiResponse.success(res, table, 'Restaurant table retrieved successfully');
+		} catch (error) {
+			console.error('Error fetching restaurant table:', error);
+			return ApiResponse.error(res, 'Failed to fetch restaurant table', 500, error.message);
+		}
+	}
+
 	// Create new restaurant table
 	static async create(req, res) {
 		try {

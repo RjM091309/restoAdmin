@@ -19,6 +19,9 @@ const TableController = require('../controllers/tableController');
 // GET - Fetch all restaurant tables (for DataTables)
 router.get("/restaurant_tables", authenticate, TableController.getAll);
 
+// GET - Fetch a single restaurant table (for room charge computations)
+router.get("/restaurant_table/:id", authenticate, TableController.getById);
+
 // GET - Get transaction history for a table
 router.get("/restaurant_table/:id/transactions", authenticate, TableController.getTransactionHistory);
 

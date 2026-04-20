@@ -378,13 +378,17 @@ def receipt_detail(order_id: int) -> dict:
                 'POS 1' AS pos,
                 'Dine in' AS serviceType,
                 COALESCE(b.PAYMENT_METHOD, 'UNKNOWN') AS paymentMethod,
-                m.MENU_NAME AS name,
+                CASE
+                    WHEN m.MENU_NAME IS NOT NULL AND m.MENU_NAME <> '' THEN m.MENU_NAME
+                    WHEN COALESCE(o.SERVICE_CHARGE, 0) > 0 AND COALESCE(oi.LINE_TOTAL, 0) = COALESCE(o.SERVICE_CHARGE, 0) THEN 'Room charge'
+                    ELSE CONCAT('#', oi.MENU_ID)
+                END AS name,
                 oi.QTY AS qty,
                 oi.UNIT_PRICE AS unitPrice,
                 oi.LINE_TOTAL AS amount
             FROM orders o
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
-            INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+            LEFT JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             WHERE o.IDNo = %s
             ORDER BY oi.IDNo ASC
