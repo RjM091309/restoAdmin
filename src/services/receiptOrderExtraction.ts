@@ -13,6 +13,9 @@ export type ReceiptOrderItemNormalized = {
 
 export type ReceiptOrderGroup = {
     order_id: number;
+    order_no: string;
+    order_type: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY';
+    table_no?: string;
     order_total_amount: number;
     items: {
         item_name: string;
@@ -67,6 +70,33 @@ function isJunkLineName(n: string): boolean {
     return false;
 }
 
+function cleanTableNoFromReceipt(input: string): string {
+    let s = String(input ?? '').trim();
+    if (!s) return '';
+    const m = s.match(/^table\s*:\s*(.+)$/i);
+    if (m) s = m[1].trim();
+    return s.replace(/\s+/g, ' ').trim();
+}
+
+function formatOrderNoWithDate(base: Date): string {
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    return `ORD-${base.getFullYear()}${pad2(base.getMonth() + 1)}${pad2(base.getDate())}-${pad2(base.getHours())}${pad2(
+        base.getMinutes()
+    )}${pad2(base.getSeconds())}`;
+}
+
+function normalizeOrderType(input: string): 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY' {
+    const t = String(input ?? '')
+        .trim()
+        .toUpperCase();
+    if (!t) return 'DINE_IN';
+    if (t.includes('DELIVER')) return 'DELIVERY';
+    if (t.includes('TAKE') || t.includes('TO GO') || t.includes('TO-GO') || t.includes('PICKUP')) return 'TAKE_OUT';
+    if (t === 'DELIVERY' || t === 'TAKE_OUT' || t === 'DINE_IN') return t as 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY';
+    if (t.includes('DINE')) return 'DINE_IN';
+    return 'DINE_IN';
+}
+
 /**
  * Extract sold line items from a customer / POS receipt image (orders flow).
  * Returns grouped `orders` plus flattened `items` for mapping UI.
@@ -91,6 +121,9 @@ GROUPED ORDERS (critical):
 
 Each order object must have:
 - order_id (integer, 1-based, in appearance order)
+- order_no (string): receipt order number if found; if missing, generate with format ORD-YYYYMMDD-HHMMSS. If one scan has multiple blocks, make each order_no unique.
+- order_type (string): "Dine in", "Take out", or "Delivery". Default to "Dine in" if unclear.
+- table_no (string, optional): table number/label if shown (value only, e.g. "12", "VIP-2", "Take out_1"). If missing, output empty string.
 - items: array of line items belonging only to that order
 - order_total_amount: sum of that block's line_price values (decimals only). Compute this yourself.
 
@@ -135,6 +168,9 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
                             type: Type.OBJECT,
                             properties: {
                                 order_id: { type: Type.NUMBER },
+                                order_no: { type: Type.STRING },
+                                order_type: { type: Type.STRING },
+                                table_no: { type: Type.STRING },
                                 order_total_amount: { type: Type.NUMBER },
                                 items: {
                                     type: Type.ARRAY,
@@ -150,7 +186,7 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
                                     },
                                 },
                             },
-                            required: ['order_id', 'items', 'order_total_amount'],
+                            required: ['order_id', 'order_no', 'order_type', 'table_no', 'items', 'order_total_amount'],
                         },
                     },
                     receipt_grand_total: { type: Type.NUMBER },
@@ -179,6 +215,9 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
     for (const rawOrder of parsed.orders) {
         const ro = rawOrder as {
             order_id?: number;
+            order_no?: string;
+            order_type?: string;
+            table_no?: string;
             items?: unknown;
             order_total_amount?: number;
         };
@@ -209,6 +248,9 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
 
         normalizedOrders.push({
             order_id: 0,
+            order_no: String(ro.order_no ?? '').trim(),
+            order_type: normalizeOrderType(String(ro.order_type ?? 'DINE_IN')),
+            table_no: cleanTableNoFromReceipt(String(ro.table_no ?? '')),
             items: cleanedItems,
             order_total_amount: 0,
         });
@@ -219,9 +261,15 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
     }
 
     const renumbered = normalizedOrders.map((o, idx) => {
+        const now = new Date();
+        const base = new Date(now.getTime() + idx * 1000);
+        const orderNo = o.order_no && o.order_no.trim() ? o.order_no.trim() : formatOrderNoWithDate(base);
         const sumLines = o.items.reduce((s, x) => s + x.line_price, 0);
         return {
             order_id: idx + 1,
+            order_no: orderNo,
+            order_type: o.order_type,
+            table_no: o.table_no || '',
             items: o.items.map((it) => ({ ...it })),
             order_total_amount: sumLines,
         };

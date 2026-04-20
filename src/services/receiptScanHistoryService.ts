@@ -35,6 +35,9 @@ export type ReceiptScanHistoryListRow = {
     SOURCE: string;
     ORDER_ID?: number | null;
     ORDER_NO?: string | null; // from join (optional)
+    ORDER_SUBTOTAL?: number | null;
+    ORDER_SERVICE_CHARGE?: number | null;
+    ORDER_GRAND_TOTAL?: number | null;
     RECEIPT_GRAND_TOTAL?: number | null;
 };
 

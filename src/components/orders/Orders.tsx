@@ -174,6 +174,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptExtracting, setReceiptExtracting] = useState(false);
     const [receiptError, setReceiptError] = useState<string | null>(null);
     const [receiptExtractResult, setReceiptExtractResult] = useState<ReceiptOrderExtractionResult | null>(null);
+    const [receiptMetaById, setReceiptMetaById] = useState<Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string }>>({});
+    const [receiptMapOpenByOrderId, setReceiptMapOpenByOrderId] = useState<Record<number, boolean>>({});
     const [receiptRows, setReceiptRows] = useState<
         {
             id: string;
@@ -188,6 +190,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptSubmitting, setReceiptSubmitting] = useState(false);
     const receiptFileInputRef = useRef<HTMLInputElement>(null);
     const receiptCameraInputRef = useRef<HTMLInputElement>(null);
+    const [receiptSegments, setReceiptSegments] = useState<string[]>([]);
+    const [receiptStitching, setReceiptStitching] = useState(false);
+    const RECEIPT_MAX_PAGES = 8;
 
     const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
     const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
@@ -206,6 +211,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
     // ==================== Helper ====================
+    const orderTypeLabel = (v: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY') => {
+        if (v === 'TAKE_OUT') return t('orders.take_out');
+        if (v === 'DELIVERY') return t('orders.delivery');
+        return t('orders.dine_in');
+    };
+
     const getStatusLabel = (status: number) => {
         switch (Number(status)) {
             case ORDER_STATUS.PENDING: return t('orders.pending');
@@ -972,9 +983,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptOrderTableId('');
         setReceiptOrderBranchId('');
         setReceiptImage(null);
+        setReceiptSegments([]);
+        setReceiptStitching(false);
         setReceiptError(null);
         setReceiptRows([]);
         setReceiptExtractResult(null);
+        setReceiptMetaById({});
+        setReceiptMapOpenByOrderId({});
         // Default: present date only (YYYY-MM-DD), time will be current timestamp.
         // Preserve user's previously selected date across multiple receipt orders.
         if (!receiptOrderDate) {
@@ -1010,6 +1025,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             const key = await fetchReceiptScannerGeminiKey();
             const result = await extractOrderLinesFromReceiptImage(compressedDataUrl, key);
             setReceiptExtractResult(result);
+            const metaMap: Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string }> = {};
+            (result.orders || []).forEach((o) => {
+                if (!o?.order_id) return;
+                metaMap[o.order_id] = {
+                    orderNo: String((o as any).order_no ?? '').trim() || generateOrderNo(),
+                    orderType: ((o as any).order_type as any) || 'DINE_IN',
+                    tableNo: String((o as any).table_no ?? '').trim() || '',
+                };
+            });
+            setReceiptMetaById(metaMap);
+            setReceiptMapOpenByOrderId({});
             const bid = isAllBranches ? receiptOrderBranchId : branchId;
             const menus = await getMenus(bid).then((m) =>
                 (Array.isArray(m) ? m : []).filter((x) => x.active && (x.effectiveAvailable ?? x.isAvailable))
@@ -1037,30 +1063,177 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
     };
 
-    const processReceiptFile = (file: File | undefined) => {
-        if (!file || !file.type.startsWith('image/')) {
-            toast.error(t('orders.receipt_invalid_image'));
-            return;
+    const fileToDataUrl = (file: File): Promise<string> =>
+        new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+        });
+
+    const compressReceiptFileToJpegDataUrl = async (file: File): Promise<string> => {
+        // Prefer bitmap decoding so EXIF orientation is respected (especially for camera captures).
+        try {
+            const blobUrl = URL.createObjectURL(file);
+            try {
+                const blob = await fetch(blobUrl).then((r) => r.blob());
+                const bmp: ImageBitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+                const w = bmp.width;
+                const h = bmp.height;
+                const MAX_W = 1600;
+                const MAX_H = 12000;
+                let scale = 1;
+                if (w > MAX_W) scale = Math.min(scale, MAX_W / w);
+                if (h > MAX_H) scale = Math.min(scale, MAX_H / h);
+                const dw = Math.max(1, Math.round(w * scale));
+                const dh = Math.max(1, Math.round(h * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = dw;
+                canvas.height = dh;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    const dataUrl = await fileToDataUrl(file);
+                    return await compressReceiptImage(dataUrl);
+                }
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(bmp, 0, 0, dw, dh);
+                try {
+                    return canvas.toDataURL('image/jpeg', 0.92);
+                } catch {
+                    const dataUrl = await fileToDataUrl(file);
+                    return await compressReceiptImage(dataUrl);
+                }
+            } finally {
+                URL.revokeObjectURL(blobUrl);
+            }
+        } catch {
+            const dataUrl = await fileToDataUrl(file);
+            return await compressReceiptImage(dataUrl);
         }
+    };
+
+    const stitchImagesVertically = async (dataUrls: string[]): Promise<string> => {
+        if (!dataUrls.length) throw new Error('No images to combine');
+        if (dataUrls.length === 1) return dataUrls[0];
+        const load = (url: string) =>
+            new Promise<HTMLImageElement>((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Failed to load image'));
+                img.src = url;
+            });
+        const images = await Promise.all(dataUrls.map((u) => load(u)));
+        const targetW = Math.max(...images.map((i) => i.naturalWidth));
+        const rowHeights = images.map((img) => Math.max(1, Math.round((img.naturalHeight * targetW) / img.naturalWidth)));
+        const totalH = rowHeights.reduce((a, b) => a + b, 0);
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = totalH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not create canvas');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, totalH);
+        let y = 0;
+        images.forEach((img, idx) => {
+            const h = rowHeights[idx];
+            ctx.drawImage(img, 0, y, targetW, h);
+            y += h;
+        });
+        try {
+            return canvas.toDataURL('image/jpeg', 0.92);
+        } catch {
+            return canvas.toDataURL('image/png');
+        }
+    };
+
+    const stitchReceiptImagesViaApi = async (images: string[]): Promise<string> => {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/receiptscanner/stitch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+                images,
+                maxWidth: 1400,
+                maxHeight: 8192,
+                quality: 90,
+            }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json?.success === false || !json?.data?.image) {
+            throw new Error(json?.error || json?.message || 'Failed to stitch images');
+        }
+        return String(json.data.image);
+    };
+
+    const appendReceiptSegmentsFromFiles = async (files: File[]) => {
         if (isAllBranches && !receiptOrderBranchId) {
             toast.error(t('orders.receipt_select_branch_first'));
             return;
         }
-        const reader = new FileReader();
-        reader.onload = async () => {
-            const dataUrl = reader.result as string;
-            setReceiptRows([]);
-            setReceiptExtractResult(null);
-            let compressed = dataUrl;
-            try {
-                compressed = await compressReceiptImage(dataUrl);
-            } catch {
-                /* use original */
+        const candidates = (Array.isArray(files) ? files : []).filter((f) => f && f.type && f.type.startsWith('image/'));
+        if (!candidates.length) {
+            toast.error(t('orders.receipt_invalid_image'));
+            return;
+        }
+        const room = Math.max(0, RECEIPT_MAX_PAGES - receiptSegments.length);
+        const toProcess = candidates.slice(0, room);
+        if (!toProcess.length) return;
+        setReceiptError(null);
+        setReceiptRows([]);
+        setReceiptExtractResult(null);
+        setReceiptImage(null);
+        try {
+            const newSegs = await Promise.all(toProcess.map((f) => compressReceiptFileToJpegDataUrl(f)));
+            setReceiptSegments((prev) => [...prev, ...newSegs]);
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
+        }
+    };
+
+    const removeReceiptSegment = (index: number) => {
+        setReceiptSegments((prev) => prev.filter((_, i) => i !== index));
+    };
+
+    const finishReceiptScan = async () => {
+        if (receiptSegments.length === 0) return;
+        if (isAllBranches && !receiptOrderBranchId) {
+            toast.error(t('orders.receipt_select_branch_first'));
+            return;
+        }
+        setReceiptStitching(true);
+        setReceiptExtracting(true);
+        setReceiptError(null);
+        try {
+            let stitched = receiptSegments.length === 1 ? receiptSegments[0] : null;
+            if (!stitched) {
+                try {
+                    stitched = await stitchReceiptImagesViaApi(receiptSegments);
+                } catch {
+                    stitched = await stitchImagesVertically(receiptSegments);
+                }
             }
+            let compressed = stitched;
+            try {
+                compressed = await compressReceiptImage(stitched);
+            } catch {
+                /* keep stitched */
+            }
+            setReceiptSegments([]);
             setReceiptImage(compressed);
             await runReceiptExtractionOnImage(compressed);
-        };
-        reader.readAsDataURL(file);
+        } catch (e) {
+            setReceiptError(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
+            setReceiptRows([]);
+            setReceiptExtractResult(null);
+        } finally {
+            setReceiptStitching(false);
+            setReceiptExtracting(false);
+        }
     };
 
     const updateReceiptRowMenu = (rowId: string, menuId: string | null) => {
@@ -1092,6 +1265,46 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
         return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
     }, [receiptRows]);
+
+    const receiptPreviewServiceCharge = useMemo(() => {
+        if (String(effectiveReceiptBranchId ?? '') !== '10') return 0;
+        return receiptRowsByOrder.reduce((sum, [, blockRows]) => {
+            const blockSubtotal = blockRows.reduce((s, row) => {
+                if (!row.menuId) return s;
+                const menu = receiptOrderMenus.find((m) => m.id === row.menuId);
+                if (!menu) return s;
+                return s + Number(row.qty) * Number(menu.price || 0);
+            }, 0);
+            return sum + Math.round(blockSubtotal * 0.1);
+        }, 0);
+    }, [effectiveReceiptBranchId, receiptOrderMenus, receiptRowsByOrder]);
+
+    const receiptPreviewTotalDue = useMemo(() => {
+        return receiptPreviewSubtotal + receiptPreviewServiceCharge;
+    }, [receiptPreviewSubtotal, receiptPreviewServiceCharge]);
+
+    // Receipt-based totals (same as tablet UI): computed from extracted receipt line totals.
+    const receiptPreviewReceiptTotal = useMemo(() => {
+        if (receiptExtractResult?.orders?.length) {
+            return receiptExtractResult.orders.reduce((sum, o) => sum + Number(o.order_total_amount || 0), 0);
+        }
+        return receiptRowsByOrder.reduce((sum, [, blockRows]) => sum + blockRows.reduce((s, r) => s + Number(r.receiptLineTotal || 0), 0), 0);
+    }, [receiptExtractResult?.orders, receiptRowsByOrder]);
+
+    const receiptPreviewServiceChargeReceipt = useMemo(() => {
+        if (String(effectiveReceiptBranchId ?? '') !== '10') return 0;
+        if (receiptExtractResult?.orders?.length) {
+            return receiptExtractResult.orders.reduce((sum, o) => sum + Math.round(Number(o.order_total_amount || 0) * 0.1), 0);
+        }
+        return receiptRowsByOrder.reduce((sum, [, blockRows]) => {
+            const blockTotal = blockRows.reduce((s, r) => s + Number(r.receiptLineTotal || 0), 0);
+            return sum + Math.round(blockTotal * 0.1);
+        }, 0);
+    }, [effectiveReceiptBranchId, receiptExtractResult?.orders, receiptRowsByOrder]);
+
+    const receiptPreviewTotalDueReceipt = useMemo(() => {
+        return receiptPreviewReceiptTotal + receiptPreviewServiceChargeReceipt;
+    }, [receiptPreviewReceiptTotal, receiptPreviewServiceChargeReceipt]);
 
     const loadReceiptHistory = useCallback(async () => {
         setReceiptHistoryLoading(true);
@@ -1137,17 +1350,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [receiptHistoryRows, dateRange.start, dateRange.end]);
 
     const submitReceiptOrder = async () => {
-        if (!receiptOrderNo.trim()) {
-            setSwal({
-                type: 'warning',
-                title: t('orders.swal.order_no_required_title'),
-                text: t('orders.swal.order_no_required_text'),
-                onConfirm: () => setSwal(null),
-            });
-            return;
-        }
         if (isAllBranches && !receiptOrderBranchId) {
             toast.error(t('orders.receipt_select_branch_first'));
+            return;
+        }
+        if (!receiptRows.some((r) => r.menuId)) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.receipt_no_menu_mapped_title'),
+                text: t('orders.receipt_no_menu_mapped_text'),
+                onConfirm: () => setSwal(null),
+            });
             return;
         }
         const resolvedBranch = isAllBranches ? receiptOrderBranchId : branchId;
@@ -1188,80 +1401,117 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             const menuList = await getMenus(resolvedBranch).then((m) =>
                 (Array.isArray(m) ? m : []).filter((x) => x.active && (x.effectiveAvailable ?? x.isAvailable))
             );
-            const merged = new Map<string, NewOrderItem>();
+            const byOrder = new Map<number, typeof receiptRows>();
             for (const row of receiptRows) {
-                if (!row.menuId) continue;
-                const menu = menuList.find((m) => String(m.id) === String(row.menuId));
-                if (!menu) continue;
-                const qty = Number(row.qty);
-                if (!Number.isFinite(qty) || qty <= 0) continue;
-                const unitPrice = Number(menu.price || 0);
-                const prev = merged.get(String(row.menuId));
-                if (prev) merged.set(String(row.menuId), { ...prev, qty: prev.qty + qty });
-                else merged.set(String(row.menuId), { menuId: String(row.menuId), name: menu.name, unitPrice, qty });
+                const key = Number.isFinite(row.orderId) && row.orderId > 0 ? Math.floor(row.orderId) : 1;
+                const bucket = byOrder.get(key);
+                if (bucket) bucket.push(row);
+                else byOrder.set(key, [row]);
             }
-            if (merged.size === 0) {
-                setSwal({
-                    type: 'warning',
-                    title: t('orders.receipt_no_menu_mapped_title'),
-                    text: t('orders.receipt_no_menu_mapped_text'),
-                    onConfirm: () => setSwal(null),
+
+            const createdOrderIds: number[] = [];
+            const createdOrderNos: string[] = [];
+            const shouldAddServiceCharge = String(resolvedBranch) === '10';
+
+            for (const [orderId, blockRows] of [...byOrder.entries()].sort((a, b) => a[0] - b[0])) {
+                const merged = new Map<string, NewOrderItem>();
+                for (const row of blockRows) {
+                    if (!row.menuId) continue;
+                    const menu = menuList.find((m) => String(m.id) === String(row.menuId));
+                    if (!menu) continue;
+                    const qty = Number(row.qty);
+                    if (!Number.isFinite(qty) || qty <= 0) continue;
+                    const unitPrice = Number(menu.price || 0);
+                    const prev = merged.get(String(row.menuId));
+                    if (prev) merged.set(String(row.menuId), { ...prev, qty: prev.qty + qty });
+                    else merged.set(String(row.menuId), { menuId: String(row.menuId), name: menu.name, unitPrice, qty });
+                }
+                if (merged.size === 0) continue;
+                const builtItems = Array.from(merged.values());
+                const subtotal = builtItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
+                const items = builtItems.map((it) => ({
+                    menu_id: Number(it.menuId),
+                    qty: Number(it.qty),
+                    unit_price: Number(it.unitPrice),
+                    line_total: Number(it.qty) * Number(it.unitPrice),
+                    status: ORDER_STATUS.PENDING,
+                }));
+                const meta = receiptMetaById[orderId];
+                const orderNo = meta?.orderNo && meta.orderNo.trim() ? meta.orderNo.trim() : generateOrderNo();
+                const orderType = meta?.orderType ?? receiptOrderType;
+                const serviceCharge = shouldAddServiceCharge ? Math.round(subtotal * 0.1) : 0;
+
+                const created = await createManualSettledOrder({
+                    ORDER_NO: orderNo,
+                    order_no: orderNo,
+                    BRANCH_ID: resolvedBranch,
+                    branch_id: resolvedBranch,
+                    TABLE_ID: receiptOrderTableId ? Number(receiptOrderTableId) : null,
+                    ORDER_TYPE: orderType,
+                    order_type: orderType,
+                    ENCODED_DT: encodedDt,
+                    STATUS: ORDER_STATUS.SETTLED,
+                    SUBTOTAL: subtotal,
+                    TAX_AMOUNT: 0,
+                    SERVICE_CHARGE: serviceCharge,
+                    DISCOUNT_AMOUNT: 0,
+                    // prevent server-side double add, consistent with ReceiptLens flow
+                    GRAND_TOTAL: subtotal,
+                    ORDER_ITEMS: items,
+                    items,
+                    payment_method: 'CASH',
+                    payment_ref: 'Receipt scan auto-settled',
+                    PAYMENT_METHOD: 'CASH',
+                    PAYMENT_REF: 'Receipt scan auto-settled',
                 });
-                return;
+                if (created?.id != null) {
+                    createdOrderIds.push(Number(created.id));
+                    createdOrderNos.push(orderNo);
+                }
             }
-            const builtItems = Array.from(merged.values());
-            const subtotal = builtItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
-            const items = builtItems.map((it) => ({
-                menu_id: Number(it.menuId),
-                qty: Number(it.qty),
-                unit_price: Number(it.unitPrice),
-                line_total: Number(it.qty) * Number(it.unitPrice),
-                status: ORDER_STATUS.PENDING,
-            }));
-            const created = await createManualSettledOrder({
-                ORDER_NO: receiptOrderNo.trim(),
-                order_no: receiptOrderNo.trim(),
-                BRANCH_ID: resolvedBranch,
-                branch_id: resolvedBranch,
-                TABLE_ID: receiptOrderTableId ? Number(receiptOrderTableId) : null,
-                ORDER_TYPE: receiptOrderType,
-                order_type: receiptOrderType,
-                ENCODED_DT: encodedDt,
-                STATUS: ORDER_STATUS.SETTLED,
-                SUBTOTAL: subtotal,
-                TAX_AMOUNT: 0,
-                SERVICE_CHARGE: 0,
-                DISCOUNT_AMOUNT: 0,
-                GRAND_TOTAL: subtotal,
-                ORDER_ITEMS: items,
-                items,
-                payment_method: 'CASH',
-                payment_ref: 'Receipt scan auto-settled',
-                PAYMENT_METHOD: 'CASH',
-                PAYMENT_REF: 'Receipt scan auto-settled',
-            });
-            const savedOrderNo = receiptOrderNo.trim();
-            const snapImage = receiptImage;
-            const snapExtract = receiptExtractResult;
-            const snapRows = receiptRows;
-            const snapMenuSub = receiptPreviewSubtotal;
-            void saveReceiptScanHistory({
-                branch_id: String(resolvedBranch),
-                source: 'resto_admin',
-                order_id: created?.id != null ? Number(created.id) : null,
-                encoded_dt: encodedDt,
-                receipt_grand_total: snapExtract?.receipt_grand_total ?? null,
-                receipt_image_data_url: snapImage,
-            }).catch(() => {
+
+            // Save one receipt-scan history row per created order (reuse same uploaded image path).
+            try {
+                const firstOrderId = createdOrderIds[0] ?? null;
+                let receiptImagePath: string | null = null;
+                if (firstOrderId != null) {
+                    const first = await saveReceiptScanHistory({
+                        branch_id: String(resolvedBranch),
+                        source: 'resto_admin',
+                        order_id: firstOrderId,
+                        encoded_dt: encodedDt,
+                        receipt_grand_total: receiptExtractResult?.receipt_grand_total ?? null,
+                        receipt_image_data_url: receiptImage,
+                    });
+                    receiptImagePath = (first as any)?.receipt_image_path ?? null;
+                }
+                for (const oid of createdOrderIds.slice(1)) {
+                    await saveReceiptScanHistory({
+                        branch_id: String(resolvedBranch),
+                        source: 'resto_admin',
+                        order_id: oid,
+                        encoded_dt: encodedDt,
+                        receipt_grand_total: receiptExtractResult?.receipt_grand_total ?? null,
+                        receipt_image_path: receiptImagePath,
+                    });
+                }
+            } catch {
                 toast.warning(t('orders.receipt_history_save_failed'));
-            });
+            }
+
             setReceiptOrderOpen(false);
             setReceiptOrderTableId('');
             setReceiptImage(null);
+            setReceiptSegments([]);
             setReceiptRows([]);
             setReceiptExtractResult(null);
+            setReceiptMetaById({});
             await loadOrders();
-            toast.success(t('orders.swal.created_text', { orderNo: savedOrderNo }));
+            toast.success(
+                createdOrderNos.length > 1
+                    ? `Created ${createdOrderNos.length} orders from receipt`
+                    : t('orders.swal.created_text', { orderNo: createdOrderNos[0] ?? receiptOrderNo.trim() })
+            );
         } catch (e) {
             if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
                 const list = e.insufficient
@@ -1913,7 +2163,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     ) : null}
                                     <th className="px-3 py-2 font-bold">{t('orders.receipt_history_source')}</th>
                                     <th className="px-3 py-2 font-bold">{t('orders.order_no')}</th>
-                                    <th className="px-3 py-2 font-bold text-right">{t('orders.receipt_history_grand_total')}</th>
+                                    <th className="px-3 py-2 font-bold text-right">Order total</th>
                                     <th className="px-3 py-2 w-28" />
                                 </tr>
                             </thead>
@@ -1927,11 +2177,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         <td className="px-3 py-2 font-mono text-xs">{r.SOURCE}</td>
                                         <td className="px-3 py-2 font-mono">{r.ORDER_NO ?? '—'}</td>
                                         <td className="px-3 py-2 text-right tabular-nums">
-                                            {r.RECEIPT_GRAND_TOTAL != null
-                                                ? `₱${Number(r.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                            {r.ORDER_GRAND_TOTAL != null
+                                                ? `₱${Number(r.ORDER_GRAND_TOTAL).toLocaleString(undefined, {
                                                       maximumFractionDigits: 0,
                                                   })}`
-                                                : '—'}
+                                                : r.RECEIPT_GRAND_TOTAL != null
+                                                    ? `₱${Number(r.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                                          maximumFractionDigits: 0,
+                                                      })}`
+                                                    : '—'}
                                         </td>
                                         <td className="px-3 py-2">
                                             <button
@@ -1993,13 +2247,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 </div>
                             </div>
                             <div className="min-w-0">
-                                <span className="text-brand-muted">{t('orders.receipt_history_grand_total')}</span>
+                                <span className="text-brand-muted">Order total</span>
                                 <div className="tabular-nums font-semibold truncate">
-                                    {receiptHistoryDetail.RECEIPT_GRAND_TOTAL != null
-                                        ? `₱${Number(receiptHistoryDetail.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                    {receiptHistoryDetail.ORDER_GRAND_TOTAL != null
+                                        ? `₱${Number(receiptHistoryDetail.ORDER_GRAND_TOTAL).toLocaleString(undefined, {
                                               maximumFractionDigits: 0,
                                           })}`
-                                        : '—'}
+                                        : receiptHistoryDetail.RECEIPT_GRAND_TOTAL != null
+                                            ? `₱${Number(receiptHistoryDetail.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                                  maximumFractionDigits: 0,
+                                              })}`
+                                            : '—'}
                                 </div>
                             </div>
                         </div>
@@ -2060,14 +2318,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 : o.ORDER_TYPE || '—'}
                                                         </div>
                                                     </div>
-                                                    <div className="text-right shrink-0">
-                                                        <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
-                                                            Total
-                                                        </div>
-                                                        <div className="text-sm font-extrabold text-brand-primary tabular-nums">
-                                                            ₱{Number(o.GRAND_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                                        </div>
-                                                    </div>
                                                 </div>
 
                                                 <div className="p-3">
@@ -2110,18 +2360,34 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                     )}
 
                                                     {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) || (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
-                                                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                                            <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                                                <span className="text-brand-muted font-bold uppercase tracking-widest">Subtotal</span>
-                                                                <span className="font-extrabold tabular-nums">
-                                                                    ₱{Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                                                </span>
-                                                            </div>
-                                                            <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                                                <span className="text-brand-muted font-bold uppercase tracking-widest">Service</span>
-                                                                <span className="font-extrabold tabular-nums">
-                                                                    ₱{Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                                                </span>
+                                                        <div className="mt-3">
+                                                            <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+                                                                <div className="flex flex-col gap-2 text-sm">
+                                                                    <div className="flex items-center justify-between gap-3">
+                                                                        <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                                                            Subtotal
+                                                                        </span>
+                                                                        <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                                                            ₱{Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between gap-3">
+                                                                        <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                                                            Service charge
+                                                                        </span>
+                                                                        <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                                                            ₱{Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="pt-2 mt-1 border-t border-gray-200/80 flex items-center justify-between gap-3">
+                                                                        <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                                                            Total
+                                                                        </span>
+                                                                        <span className="font-black tabular-nums w-[92px] text-right text-violet-700 text-base">
+                                                                            ₱{Number(o.GRAND_TOTAL || (Number(o.SUBTOTAL || 0) + Number(o.SERVICE_CHARGE || 0))).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     ) : null}
@@ -2301,27 +2567,53 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 isOpen={receiptOrderOpen}
                 onClose={closeReceiptOrder}
                 title={t('orders.receipt_order_title')}
-                maxWidth="4xl"
+                maxWidth="6xl"
                 footer={
-                    <div className="flex items-center justify-end gap-3">
-                        <button
-                            type="button"
-                            onClick={closeReceiptOrder}
-                            disabled={receiptSubmitting || receiptExtracting}
-                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
-                        >
-                            {t('orders.cancel')}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={submitReceiptOrder}
-                            disabled={receiptSubmitting || receiptExtracting || receiptOrderMenusLoading}
-                            className="px-6 py-2.5 rounded-xl font-bold text-white bg-violet-600 shadow-lg shadow-violet-600/30 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center gap-2"
-                        >
-                            {receiptSubmitting && <Loader2 size={16} className="animate-spin" />}
-                            {t('orders.create_order_btn')}
-                        </button>
-                    </div>
+                    receiptRows.length === 0 ? (
+                        <div className="flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => void finishReceiptScan()}
+                                disabled={receiptExtracting || receiptStitching || receiptSegments.length === 0}
+                                className="px-6 py-2.5 rounded-xl font-bold text-white bg-violet-600 shadow-lg shadow-violet-600/30 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                                title={receiptSegments.length === 0 ? 'Add at least 1 page first' : 'Scan receipt'}
+                            >
+                                {(receiptExtracting || receiptStitching) && <Loader2 size={16} className="animate-spin" />}
+                                <ScanLine size={16} />
+                                Scan receipt
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => receiptCameraInputRef.current?.click()}
+                                disabled={receiptExtracting || receiptStitching || receiptSegments.length >= RECEIPT_MAX_PAGES}
+                                className="px-6 py-2.5 rounded-xl font-bold text-brand-text bg-white border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50 flex items-center gap-2"
+                                title={receiptSegments.length >= RECEIPT_MAX_PAGES ? 'Max pages reached' : 'Add page'}
+                            >
+                                <Camera size={16} />
+                                Add page
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={closeReceiptOrder}
+                                disabled={receiptSubmitting || receiptExtracting}
+                                className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                            >
+                                {t('orders.cancel')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={submitReceiptOrder}
+                                disabled={receiptSubmitting || receiptExtracting || receiptOrderMenusLoading}
+                                className="px-6 py-2.5 rounded-xl font-bold text-white bg-violet-600 shadow-lg shadow-violet-600/30 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {receiptSubmitting && <Loader2 size={16} className="animate-spin" />}
+                                {t('orders.create_order_btn')}
+                            </button>
+                        </div>
+                    )
                 }
             >
                 <div className="space-y-6">
@@ -2350,44 +2642,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-5">
                         <div className="space-y-2">
                             <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('orders.order_no_label')}
-                            </label>
-                            <input
-                                type="text"
-                                value={receiptOrderNo}
-                                onChange={(e) => setReceiptOrderNo(e.target.value)}
-                                placeholder={t('orders.order_no_placeholder')}
-                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-violet-500/20 outline-none"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('orders.order_type')}
-                            </label>
-                            <Select2
-                                options={[
-                                    { value: 'DINE_IN', label: t('orders.dine_in') },
-                                    { value: 'TAKE_OUT', label: t('orders.take_out') },
-                                    { value: 'DELIVERY', label: t('orders.delivery') },
-                                ]}
-                                value={receiptOrderType}
-                                onChange={(v) => setReceiptOrderType((v as typeof receiptOrderType) || 'DINE_IN')}
-                                placeholder={t('orders.select_type')}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('table.table_number')}
-                            </label>
-                            <Select2
-                                options={receiptTableSelectOptions}
-                                value={receiptOrderTableId || null}
-                                onChange={(v) => setReceiptOrderTableId(v ? String(v) : '')}
-                                placeholder={t('table.table_number')}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
                                 {t('orders.date')}
                             </label>
                             <input
@@ -2403,9 +2657,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         ref={receiptFileInputRef}
                         type="file"
                         accept="image/*"
+                        multiple
                         className="hidden"
                         onChange={(e) => {
-                            processReceiptFile(e.target.files?.[0]);
+                            void appendReceiptSegmentsFromFiles(Array.from(e.target.files || []));
                             e.target.value = '';
                         }}
                     />
@@ -2416,7 +2671,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         capture="environment"
                         className="hidden"
                         onChange={(e) => {
-                            processReceiptFile(e.target.files?.[0]);
+                            void appendReceiptSegmentsFromFiles(Array.from(e.target.files || []));
                             e.target.value = '';
                         }}
                     />
@@ -2428,7 +2683,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         }}
                         onDrop={(e) => {
                             e.preventDefault();
-                            processReceiptFile(e.dataTransfer.files[0]);
+                            void appendReceiptSegmentsFromFiles(Array.from(e.dataTransfer.files || []));
                         }}
                         className={cn(
                             'rounded-2xl border-2 border-dashed p-6 text-center transition-colors',
@@ -2437,58 +2692,139 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 : 'border-violet-200 bg-violet-50/40 hover:border-violet-300'
                         )}
                     >
-                        {receiptExtracting ? (
+                        {receiptExtracting || receiptStitching ? (
                             <div className="flex flex-col items-center gap-3 py-6 text-brand-muted">
                                 <Loader2 className="w-10 h-10 animate-spin text-violet-600" />
                                 <p className="text-sm font-medium">{t('orders.receipt_scanning')}</p>
                             </div>
                         ) : (
                             <>
-                                <Upload className="w-10 h-10 mx-auto text-violet-500 mb-3" />
-                                <p className="text-sm font-bold text-brand-text mb-1">{t('orders.receipt_drop_hint')}</p>
-                                <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-                                    <button
-                                        type="button"
-                                        disabled={isAllBranches && !receiptOrderBranchId}
-                                        onClick={() => receiptFileInputRef.current?.click()}
-                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50 disabled:opacity-50"
-                                    >
-                                        <Upload size={16} />
-                                        {t('orders.receipt_choose_file')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled={isAllBranches && !receiptOrderBranchId}
-                                        onClick={() => receiptCameraInputRef.current?.click()}
-                                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50 disabled:opacity-50"
-                                    >
-                                        <Camera size={16} />
-                                        {t('orders.receipt_take_photo')}
-                                    </button>
-                                    {receiptImage && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setReceiptImage(null);
-                                                setReceiptRows([]);
-                                                setReceiptExtractResult(null);
-                                                setReceiptError(null);
-                                            }}
-                                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-brand-muted hover:bg-white/80"
-                                        >
-                                            <RefreshCw size={16} />
-                                            {t('orders.receipt_clear')}
-                                        </button>
-                                    )}
-                                </div>
-                                {receiptImage && !receiptExtracting && (
-                                    <div className="mt-4 flex justify-center">
-                                        <img
-                                            src={receiptImage}
-                                            alt=""
-                                            className="max-h-40 rounded-lg border border-gray-200 shadow-sm"
-                                        />
+                                {receiptSegments.length > 0 && !receiptImage ? (
+                                    <div className="w-full max-w-3xl mx-auto space-y-4">
+                                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                                            <div className="text-left">
+                                                <p className="text-sm font-extrabold text-brand-text">
+                                                    Receipt pages ({receiptSegments.length}/{RECEIPT_MAX_PAGES})
+                                                </p>
+                                                <p className="text-xs text-brand-muted mt-1">
+                                                    Add pages top → bottom with slight overlap, then use the footer buttons below.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                                            {receiptSegments.map((src, idx) => (
+                                                <div
+                                                    key={`seg-${idx}`}
+                                                    className="relative shrink-0 w-24 sm:w-28 rounded-xl border border-gray-200 bg-white overflow-hidden"
+                                                >
+                                                    <img
+                                                        src={src}
+                                                        alt={`Page ${idx + 1}`}
+                                                        className="w-full h-28 object-cover object-top"
+                                                    />
+                                                    <span className="absolute bottom-0 inset-x-0 py-0.5 text-[10px] font-mono text-center bg-black/55 text-white">
+                                                        {idx + 1}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            removeReceiptSegment(idx);
+                                                        }}
+                                                        className="absolute top-1 right-1 w-7 h-7 rounded-lg bg-black/50 text-white flex items-center justify-center"
+                                                        aria-label={`Remove page ${idx + 1}`}
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center justify-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => receiptFileInputRef.current?.click()}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50"
+                                            >
+                                                <Upload size={16} />
+                                                Add from files
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setReceiptSegments([]);
+                                                    setReceiptImage(null);
+                                                    setReceiptRows([]);
+                                                    setReceiptExtractResult(null);
+                                                    setReceiptError(null);
+                                                }}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-brand-muted hover:bg-white/80"
+                                            >
+                                                <RefreshCw size={16} />
+                                                {t('orders.receipt_clear')}
+                                            </button>
+                                        </div>
                                     </div>
+                                ) : (
+                                    <>
+                                        <Upload className="w-10 h-10 mx-auto text-violet-500 mb-3" />
+                                        <p className="text-sm font-bold text-brand-text mb-1">{t('orders.receipt_drop_hint')}</p>
+                                        <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                                            <button
+                                                type="button"
+                                                disabled={isAllBranches && !receiptOrderBranchId}
+                                                onClick={() => receiptFileInputRef.current?.click()}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50 disabled:opacity-50"
+                                            >
+                                                <Upload size={16} />
+                                                {t('orders.receipt_choose_file')}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={isAllBranches && !receiptOrderBranchId}
+                                                onClick={() => receiptCameraInputRef.current?.click()}
+                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50 disabled:opacity-50"
+                                            >
+                                                <Camera size={16} />
+                                                {t('orders.receipt_take_photo')}
+                                            </button>
+                                            {(receiptImage || receiptSegments.length > 0) && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setReceiptSegments([]);
+                                                        setReceiptImage(null);
+                                                        setReceiptRows([]);
+                                                        setReceiptExtractResult(null);
+                                                        setReceiptError(null);
+                                                    }}
+                                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-brand-muted hover:bg-white/80"
+                                                >
+                                                    <RefreshCw size={16} />
+                                                    {t('orders.receipt_clear')}
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {receiptSegments.length > 0 && !receiptImage ? (
+                                            <div className="mt-4 flex flex-col items-center gap-3">
+                                                <p className="text-xs text-brand-muted">
+                                                    Added {receiptSegments.length} page(s). Use the footer buttons below to scan or add more pages.
+                                                </p>
+                                            </div>
+                                        ) : null}
+
+                                        {receiptImage && !receiptExtracting && (
+                                            <div className="mt-4 flex justify-center">
+                                                <img
+                                                    src={receiptImage}
+                                                    alt=""
+                                                    className="max-h-40 rounded-lg border border-gray-200 shadow-sm"
+                                                />
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </>
                         )}
@@ -2523,91 +2859,227 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     const blockTotal =
                                         blockMeta?.order_total_amount ??
                                         blockRows.reduce((s, r) => s + r.receiptLineTotal, 0);
+                                    const meta = receiptMetaById[orderId] ?? {
+                                        orderNo: generateOrderNo(),
+                                        orderType: 'DINE_IN',
+                                        tableNo: '',
+                                    };
+                                    const tableLabel = (() => {
+                                        const id = String(receiptOrderTableId ?? '').trim();
+                                        if (id) {
+                                            const hit = receiptTableSelectOptions.find((t) => String(t.value) === id);
+                                            if (hit?.label) return String(hit.label);
+                                        }
+                                        return meta.tableNo && String(meta.tableNo).trim() ? String(meta.tableNo).trim() : '—';
+                                    })();
+                                    const encodedLabel = (() => {
+                                        const raw = String(receiptOrderDate || '').trim();
+                                        if (!raw) return '—';
+                                        try {
+                                            const [yy, mm, dd] = raw.split('-').map((x) => Number(x));
+                                            if (!yy || !mm || !dd) return raw;
+                                            const d = new Date(Date.UTC(yy, mm - 1, dd));
+                                            return new Intl.DateTimeFormat('en-US', {
+                                                timeZone: 'Asia/Manila',
+                                                month: 'short',
+                                                day: '2-digit',
+                                                year: 'numeric',
+                                            }).format(d);
+                                        } catch {
+                                            return raw;
+                                        }
+                                    })();
+                                    const shouldAddServiceCharge = String(effectiveReceiptBranchId ?? '') === '10';
                                     return (
                                         <React.Fragment key={`receipt-order-${orderId}`}>
                                             <ReceiptOrderBlockCard
                                                 title={`ORDER ${orderId}`}
-                                                blockTotalLabel={`TOTAL AMOUNT · ₱${blockTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                                             >
-                                                {blockRows.map((row) => {
-                                                    const menu = row.menuId
-                                                        ? receiptOrderMenus.find((m) => m.id === row.menuId)
-                                                        : undefined;
-                                                    const menuLine =
-                                                        menu != null
-                                                            ? Number(row.qty) * Number(menu.price || 0)
-                                                            : 0;
-                                                    return (
-                                                        <div
-                                                            key={row.id}
-                                                            className="rounded-xl border border-gray-100 bg-gray-50/50 p-4 shadow-sm"
-                                                        >
-                                                            <p className="text-sm font-medium text-brand-text leading-snug">{row.extractedName}</p>
-                                                            {row.menuSelection ? (
-                                                                <p className="text-xs text-brand-muted mt-1.5">{row.menuSelection}</p>
-                                                            ) : null}
-                                                            <div className="mt-4 grid grid-cols-1 sm:grid-cols-[minmax(0,7rem)_1fr] gap-3 sm:items-end">
-                                                                <div className="space-y-1">
-                                                                    <label className="text-[10px] font-bold text-brand-muted uppercase tracking-wider">
-                                                                        {t('orders.qty')}
-                                                                    </label>
-                                                                    <input
-                                                                        type="number"
-                                                                        min={0.01}
-                                                                        step={0.01}
-                                                                        value={row.qty}
-                                                                        onChange={(e) =>
-                                                                            updateReceiptRowQty(row.id, Number(e.target.value))
-                                                                        }
-                                                                        className="w-full min-h-[44px] bg-white border border-gray-200 rounded-xl px-3 py-2 text-right text-sm font-mono"
-                                                                    />
-                                                                </div>
-                                                                <div className="space-y-1 min-w-0">
-                                                                    <label className="text-[10px] font-bold text-brand-muted uppercase tracking-wider">
-                                                                        {t('orders.menu_item')}
-                                                                    </label>
-                                                                    <Select2
-                                                                        options={receiptOrderMenus.map((m) => ({
-                                                                            value: m.id,
-                                                                            label: `${m.name} — ₱${Number(m.price).toLocaleString()}`,
-                                                                        }))}
-                                                                        value={row.menuId || null}
-                                                                        onChange={(v) => updateReceiptRowMenu(row.id, v ? String(v) : null)}
-                                                                        placeholder={t('orders.select_menu_item')}
-                                                                        disabled={receiptOrderMenusLoading}
-                                                                    />
-                                                                </div>
+                                                <div className="rounded-2xl border border-gray-200 bg-[#fffdf7] p-4 sm:p-5 font-mono text-[12px] leading-relaxed">
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <div className="text-[11px] uppercase tracking-[0.12em] text-gray-500">Order No</div>
+                                                                <div className="text-[13px] font-semibold text-slate-900 break-all">{meta.orderNo || '—'}</div>
                                                             </div>
-                                                            <div className="mt-4 pt-3 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                                                <span className="text-xs text-brand-muted">
-                                                                    {t('orders.menu_item')} total:{' '}
-                                                                    <span className="font-semibold text-brand-text tabular-nums">
-                                                                        {menu ? `₱${menuLine.toLocaleString()}` : '—'}
-                                                                    </span>
-                                                                </span>
-                                                                <span className="text-xs font-mono text-brand-muted text-right">
-                                                                    Receipt line{' '}
-                                                                    <span className="text-sm font-semibold text-brand-text tabular-nums">
-                                                                        ₱{row.receiptLineTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                                                    </span>
-                                                                </span>
+                                                            <div className="text-right shrink-0">
+                                                                <div className="text-[11px] uppercase tracking-[0.12em] text-gray-500">Type</div>
+                                                                <div className="text-[13px] font-semibold text-slate-900">{orderTypeLabel(meta.orderType)}</div>
                                                             </div>
                                                         </div>
-                                                    );
-                                                })}
+
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <div className="text-[11px] uppercase tracking-[0.12em] text-gray-500">Table</div>
+                                                                <div className="text-[13px] font-semibold text-slate-900 break-words">{tableLabel}</div>
+                                                            </div>
+                                                            <div className="text-right shrink-0">
+                                                                <div className="text-[11px] uppercase tracking-[0.12em] text-gray-500">Encoded</div>
+                                                                <div className="text-[13px] font-semibold text-slate-900">{encodedLabel}</div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="pt-2">
+                                                            <div className="border-t border-dashed border-slate-300/70" />
+                                                            <div className="mt-2 grid grid-cols-12 gap-2 text-[11px] uppercase tracking-[0.12em] text-gray-500">
+                                                                <div className="col-span-5">Item</div>
+                                                                <div className="col-span-2 text-right">Qty</div>
+                                                                <div className="col-span-2 text-right leading-tight">Unit price</div>
+                                                                <div className="col-span-3 text-right">Amount</div>
+                                                            </div>
+                                                            <div className="mt-2 border-t border-dashed border-slate-200" />
+                                                        </div>
+
+                                                        <div className="space-y-2 pt-1">
+                                                            {blockRows.map((row) => {
+                                                                const qty = Number(row.qty) || 1;
+                                                                const amt = Number(row.receiptLineTotal) || 0;
+                                                                const unit = qty > 0 ? amt / qty : 0;
+                                                                const unitRounded = Math.round(unit * 100) / 100;
+                                                                const unitFrac = !Number.isInteger(unitRounded);
+                                                                return (
+                                                                    <div key={row.id} className="pb-2 border-b border-dashed border-slate-200/80 last:border-b-0 last:pb-0">
+                                                                        <div className="grid grid-cols-12 gap-2 items-start">
+                                                                            <div className="col-span-5 min-w-0">
+                                                                                <div className="text-[13px] font-semibold text-slate-900 leading-snug break-words">
+                                                                                    {row.extractedName}
+                                                                                </div>
+                                                                                {row.menuSelection ? (
+                                                                                    <div className="text-[12px] text-slate-500 leading-snug break-words mt-1">
+                                                                                        {row.menuSelection}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                            </div>
+                                                                            <div className="col-span-2 text-right text-[13px] font-semibold tabular-nums text-slate-900">
+                                                                                {qty}
+                                                                            </div>
+                                                                            <div className="col-span-2 text-right text-[13px] font-semibold tabular-nums text-slate-900">
+                                                                                ₱{unitRounded.toLocaleString(undefined, {
+                                                                                    maximumFractionDigits: unitFrac ? 2 : 0,
+                                                                                    minimumFractionDigits: unitFrac ? 2 : 0,
+                                                                                })}
+                                                                            </div>
+                                                                            <div className="col-span-3 text-right text-[13px] font-semibold tabular-nums text-slate-900">
+                                                                                ₱{amt.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+
+                                                        <div className="pt-2">
+                                                            <div className="border-t border-dashed border-slate-300/70" />
+                                                            <div className="mt-2 space-y-1">
+                                                                <div className="flex items-center justify-between text-[13px] font-semibold text-slate-900">
+                                                                    <span className="tracking-[0.12em] uppercase text-[11px] text-gray-500">TOTAL AMOUNT</span>
+                                                                    <span className="tabular-nums">₱{blockTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                </div>
+                                                                {shouldAddServiceCharge ? (
+                                                                    <>
+                                                                        <div className="flex items-center justify-between text-[13px] font-semibold text-slate-900">
+                                                                            <span className="tracking-[0.12em] uppercase text-[11px] text-gray-500">SERVICE CHARGE (10%)</span>
+                                                                            <span className="tabular-nums">₱{Math.round(blockTotal * 0.1).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center justify-between text-[13px] font-semibold text-slate-900">
+                                                                            <span className="tracking-[0.12em] uppercase text-[11px] text-gray-500">TOTAL DUE</span>
+                                                                            <span className="tabular-nums">₱{(blockTotal + Math.round(blockTotal * 0.1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                        </div>
+                                                                    </>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-4">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            setReceiptMapOpenByOrderId((prev) => ({ ...prev, [orderId]: !prev[orderId] }))
+                                                        }
+                                                        className="text-xs font-bold text-brand-primary hover:underline"
+                                                    >
+                                                        {receiptMapOpenByOrderId[orderId] ? 'Hide mapping controls' : 'Show mapping controls'}
+                                                    </button>
+                                                </div>
+
+                                                {receiptMapOpenByOrderId[orderId] ? (
+                                                    <div className="mt-3 space-y-3">
+                                                        {blockRows.map((row) => (
+                                                            <div key={`map-${row.id}`} className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+                                                                <div className="text-sm font-semibold text-brand-text">{row.extractedName}</div>
+                                                                {row.menuSelection ? (
+                                                                    <div className="text-xs text-brand-muted mt-1">{row.menuSelection}</div>
+                                                                ) : null}
+                                                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,7rem)_1fr] gap-3 sm:items-end">
+                                                                    <div className="space-y-1">
+                                                                        <label className="text-[10px] font-bold text-brand-muted uppercase tracking-wider">
+                                                                            {t('orders.qty')}
+                                                                        </label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min={0.01}
+                                                                            step={0.01}
+                                                                            value={row.qty}
+                                                                            onChange={(e) => updateReceiptRowQty(row.id, Number(e.target.value))}
+                                                                            className="w-full min-h-[44px] bg-white border border-gray-200 rounded-xl px-3 py-2 text-right text-sm font-mono"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="space-y-1 min-w-0">
+                                                                        <label className="text-[10px] font-bold text-brand-muted uppercase tracking-wider">
+                                                                            {t('orders.menu_item')}
+                                                                        </label>
+                                                                        <Select2
+                                                                            options={receiptOrderMenus.map((m) => ({
+                                                                                value: m.id,
+                                                                                label: `${m.name} — ₱${Number(m.price).toLocaleString()}`,
+                                                                            }))}
+                                                                            value={row.menuId || null}
+                                                                            onChange={(v) => updateReceiptRowMenu(row.id, v ? String(v) : null)}
+                                                                            placeholder={t('orders.select_menu_item')}
+                                                                            disabled={receiptOrderMenusLoading}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
                                             </ReceiptOrderBlockCard>
                                         </React.Fragment>
                                     );
                                 })}
                             </div>
 
-                            <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-                                <span className="font-bold text-brand-text">{t('orders.grand_total')} (menu)</span>
-                                <span className="font-extrabold text-violet-600 tabular-nums">
-                                    ₱{receiptPreviewSubtotal.toLocaleString(undefined, { minimumFractionDigits: 0 })}
-                                </span>
+                            <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="font-bold text-brand-text">
+                                        {String(effectiveReceiptBranchId ?? '') === '10' ? 'Total due (receipt)' : 'Grand Total (receipt)'}
+                                    </span>
+                                    <span className="font-extrabold text-violet-600 tabular-nums">
+                                        ₱
+                                        {(String(effectiveReceiptBranchId ?? '') === '10'
+                                            ? receiptPreviewTotalDueReceipt
+                                            : receiptPreviewReceiptTotal
+                                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </span>
+                                </div>
+                                {String(effectiveReceiptBranchId ?? '') === '10' ? (
+                                    <div className="mt-2 text-xs text-brand-muted flex flex-wrap items-center justify-between gap-2">
+                                        <span>
+                                            Items ₱{receiptPreviewReceiptTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })} + SC ₱
+                                            {receiptPreviewServiceChargeReceipt.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        </span>
+                                        <span className="font-mono">
+                                            {receiptRowsByOrder.length} order{receiptRowsByOrder.length === 1 ? '' : 's'}
+                                        </span>
+                                    </div>
+                                ) : null}
                             </div>
-                            <p className="text-xs text-brand-muted">{t('orders.receipt_price_note')}</p>
+                            <p className="text-xs text-brand-muted">
+                                Totals above are based on receipt extracted amounts (same as tablet UI). Menu mapping affects what will be saved to the order.
+                            </p>
                         </div>
                     )}
                 </div>
