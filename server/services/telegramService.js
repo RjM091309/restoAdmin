@@ -90,6 +90,43 @@ class TelegramService {
 		];
 	}
 
+	static buildPersistentReplyKeyboard() {
+		return {
+			keyboard: [
+				[
+					{ text: '합계 Total' },
+					{ text: "김형제 Kim's B" },
+				],
+				[
+					{ text: '블루문 Blue M' },
+					{ text: '금호반점 Keum' },
+				],
+				[
+					{ text: 'EESOME' },
+					{ text: '프리미엄 Pre' },
+				],
+				[
+					{ text: 'NOIR by EESOME' },
+					{ text: '신규 New' },
+				],
+			],
+			resize_keyboard: true,
+			one_time_keyboard: false,
+			is_persistent: true,
+		};
+	}
+
+	static REPORT_TEXT_TO_CALLBACK = {
+		'합계 Total': 'report_total',
+		"김형제 Kim's B": 'report_kims',
+		'블루문 Blue M': 'report_blue_m',
+		'금호반점 Keum': 'report_keum',
+		EESOME: 'report_eesome',
+		'프리미엄 Pre': 'report_pre',
+		'NOIR by EESOME': 'report_noir_eesome',
+		'신규 New': 'report_new',
+	};
+
 	static async getSettings() {
 		const settings = await TelegramSettingsModel.getSettings();
 		if (!settings) return null;
@@ -115,7 +152,7 @@ class TelegramService {
 		});
 	}
 
-	static async sendMessage({ message, chatId = null, parseMode = 'HTML' }) {
+	static async sendMessage({ message, chatId = null, parseMode = 'HTML', replyMarkup = null }) {
 		if (!message || !String(message).trim()) {
 			throw new Error('message is required');
 		}
@@ -130,11 +167,16 @@ class TelegramService {
 			throw new Error('Telegram chat ID is not configured');
 		}
 
-		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', {
+		const payload = {
 			chat_id: String(targetChatId),
 			text: String(message),
 			parse_mode: parseMode,
-		});
+		};
+		if (replyMarkup && typeof replyMarkup === 'object') {
+			payload.reply_markup = replyMarkup;
+		}
+
+		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', payload);
 		if (response.statusCode < 200 || response.statusCode >= 300 || response.body?.ok !== true) {
 			const reason = response.body?.description || `HTTP ${response.statusCode}`;
 			throw new Error(`Telegram send failed: ${reason}`);
@@ -171,14 +213,38 @@ class TelegramService {
 		return response.body.result;
 	}
 
+	static async sendPersistentMenu({ chatId = null, message = 'Select the report you want to view:' }) {
+		const settings = await TelegramService.getSettings();
+		if (!settings?.botToken) {
+			throw new Error('Telegram bot token is not configured');
+		}
+
+		const targetChatId = chatId || settings.chatId;
+		if (!targetChatId) {
+			throw new Error('Telegram chat ID is not configured');
+		}
+
+		const payload = {
+			chat_id: String(targetChatId),
+			text: String(message),
+			reply_markup: TelegramService.buildPersistentReplyKeyboard(),
+		};
+
+		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', payload);
+		if (response.statusCode < 200 || response.statusCode >= 300 || response.body?.ok !== true) {
+			const reason = response.body?.description || `HTTP ${response.statusCode}`;
+			throw new Error(`Telegram persistent menu send failed: ${reason}`);
+		}
+
+		return response.body.result;
+	}
+
 	static async configureBotMenu(botToken) {
 		await TelegramService.callTelegramApi(botToken, 'setMyCommands', {
-			commands: [
-				{ command: 'reports', description: 'Show report buttons' },
-			],
+			commands: [],
 		});
 		await TelegramService.callTelegramApi(botToken, 'setChatMenuButton', {
-			menu_button: { type: 'commands' },
+			menu_button: { type: 'default' },
 		});
 	}
 
@@ -340,10 +406,8 @@ class TelegramService {
 		const lines = [
 			'<b>합계 Total</b>',
 			'',
-			`Last Update : ${TelegramService.formatLastUpdate(latestEncodedDt)}`,
-			'',
 			`전체 매출: ${TelegramService.formatNumber(overall.monthlyRevenue)}      지출: ${TelegramService.formatNumber(overall.monthlyExpense)}`,
-			`순익: ${TelegramService.formatNumber(overall.netProfit)}      전월대비: ${overallMoM.toFixed(1)}%`,
+			`순익: ${TelegramService.formatNumber(overall.netProfit)}      전월대비: ${TelegramService.formatMonthIndex(overallMoM)}`,
 			'',
 		];
 
@@ -352,7 +416,9 @@ class TelegramService {
 			lines.push(
 				`월 매출: ${TelegramService.formatNumber(group.monthlyRevenue)}      지출: ${TelegramService.formatNumber(group.monthlyExpense)}`
 			);
-			lines.push(`순익: ${TelegramService.formatNumber(group.netProfit)}      전월대비: ${group.monthOverMonthPct.toFixed(1)}%`);
+			lines.push(
+				`순익: ${TelegramService.formatNumber(group.netProfit)}      전월대비: ${TelegramService.formatMonthIndex(group.monthOverMonthPct)}`
+			);
 			lines.push('');
 		}
 
@@ -423,6 +489,14 @@ class TelegramService {
 	static formatNumber(value) {
 		const n = Number(value || 0);
 		return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+	}
+
+	static formatMonthIndex(percentChange) {
+		const n = Number(percentChange);
+		if (!Number.isFinite(n)) return '0.0%';
+		if (Math.abs(n) < 1e-9) return '0.0%';
+		const index = 100 + n;
+		return `${index.toFixed(1)}%`;
 	}
 
 	static async getLatestEncodedDt(branchId = null) {
@@ -651,7 +725,7 @@ class TelegramService {
 			`<b>${title}</b>`,
 			'',
 			`월매출: ${TelegramService.formatNumber(metrics.monthlyRevenue)}      지출: ${TelegramService.formatNumber(metrics.monthlyExpense)}`,
-			`순익: ${TelegramService.formatNumber(metrics.netProfit)}      전월대비: ${metrics.monthOverMonthPct.toFixed(1)}%`,
+			`순익: ${TelegramService.formatNumber(metrics.netProfit)}      전월대비: ${TelegramService.formatMonthIndex(metrics.monthOverMonthPct)}`,
 			'',
 			'주간 매출(Weekly)',
 			...weeklyLines,
@@ -688,6 +762,9 @@ class TelegramService {
 				chat_id: String(callbackQuery.message.chat.id),
 				text: reportMessage,
 				parse_mode: 'HTML',
+				reply_markup: {
+					inline_keyboard: TelegramService.buildReportButtons(),
+				},
 			});
 			return { handled: true, type: 'callback_query' };
 		}
@@ -700,16 +777,30 @@ class TelegramService {
 				chatId: String(chatId),
 				message: 'Welcome to Restaurant System',
 				parseMode: 'HTML',
+				replyMarkup: TelegramService.buildPersistentReplyKeyboard(),
 			});
 			return { handled: true, type: 'start_message' };
 		}
 
-		if (chatId && normalizedText === '/reports') {
-			await TelegramService.sendInlineMenu({
-				chatId: String(chatId),
-				message: 'Select the report you want to view:',
+		if (chatId && Object.prototype.hasOwnProperty.call(TelegramService.REPORT_TEXT_TO_CALLBACK, text)) {
+			const callbackData = TelegramService.REPORT_TEXT_TO_CALLBACK[text];
+			if (!TelegramService.FORMATTED_CALLBACKS.has(callbackData)) {
+				await TelegramService.sendMessage({
+					chatId: String(chatId),
+					message: 'Not configured yet',
+					parseMode: 'HTML',
+				});
+				return { handled: true, type: 'reply_keyboard_unconfigured' };
+			}
+
+			const reportMessage = await TelegramService.buildReportMessage(callbackData);
+			await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', {
+				chat_id: String(chatId),
+				text: reportMessage,
+				parse_mode: 'HTML',
+				reply_markup: TelegramService.buildPersistentReplyKeyboard(),
 			});
-			return { handled: true, type: 'command_menu' };
+			return { handled: true, type: 'reply_keyboard_report' };
 		}
 
 		return { handled: false, type: 'ignored' };
