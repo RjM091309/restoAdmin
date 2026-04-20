@@ -488,17 +488,18 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                   });
                   const json = await res.json().catch(() => ({} as any));
                   const tbl = json?.data ?? json;
-                  const tableNumber = String(tbl?.TABLE_NUMBER ?? tbl?.tableNumber ?? '').trim();
-                  const isRoom = /\broom\b/i.test(tableNumber);
                   const roomChargeUnit = Number(tbl?.ROOM_CHARGE ?? tbl?.roomCharge ?? 0);
 
-                  if (isRoom && roomChargeUnit > 0) {
+                  // Orders module treats "room charge" based on table ROOM_CHARGE (not on table label text).
+                  if (roomChargeUnit > 0) {
                     const q = headerCharge / roomChargeUnit;
-                    const qty =
-                      Number.isFinite(q) && Math.abs(q - Math.round(q)) < 1e-9 && q > 0
-                        ? Math.round(q)
-                        : 1;
-                    const unitPrice = qty > 1 ? roomChargeUnit : headerCharge;
+                    const qty = (() => {
+                      if (!Number.isFinite(q) || q <= 0) return 1;
+                      // Allow decimals (e.g. 1.5 x 5,000) but keep whole numbers clean.
+                      if (Math.abs(q - Math.round(q)) < 1e-9) return Math.round(q);
+                      return Math.round(q * 100) / 100;
+                    })();
+                    const unitPrice = roomChargeUnit;
                     itemsForSlip = [
                       ...fromOrderItems,
                       { name: 'Room charge', qty, unitPrice, amount: headerCharge, note: undefined },

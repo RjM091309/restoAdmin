@@ -18,10 +18,8 @@ import { DataTable, type ColumnDef } from '../ui/DataTable';
 import {
   fetchDailySalesApi,
   fetchMenuReportApi,
-  fetchTopSellingApi,
   type ApiDailySalesItem,
   type ApiMenuReportRow,
-  type ApiTopSellingItem,
 } from '../../services/analyticsService';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
@@ -102,10 +100,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const [rows, setRows] = useState<MenuReportRow[]>([]);
   const [reportLoading, setReportLoading] = useState(true);
 
-  const [topSellingData, setTopSellingData] = useState<ApiTopSellingItem[]>([]);
-  const [topSellingLoading, setTopSellingLoading] = useState(false);
-  const [topSellingError, setTopSellingError] = useState<string | null>(null);
-
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
   /** When set, chart shows only this product's bar; when null, shows stacked bars for all. */
   const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null);
@@ -154,31 +148,9 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   useEffect(() => {
-    const loadTopSelling = async () => {
-      setTopSellingLoading(true);
-      setTopSellingError(null);
-      try {
-        const params = new URLSearchParams();
-        if (dateRange.start) params.set('start_date', dateRange.start);
-        if (dateRange.end) params.set('end_date', dateRange.end);
-        if (selectedBranch && String(selectedBranch.id) !== 'all') {
-          params.set('branch_id', String(selectedBranch.id));
-        }
-        params.set('limit', '5');
-
-        const apiData = await fetchTopSellingApi(params);
-        setTopSellingData(apiData);
-      } catch (err) {
-        console.error(err);
-        setTopSellingError(t('sales_analytics.network_error'));
-        setTopSellingData([]);
-      } finally {
-        setTopSellingLoading(false);
-      }
-    };
-
-    void loadTopSelling();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id, t]);
+    // Top 5 is computed client-side from menu-report rows so it can include
+    // synthetic rows like Room charge / Service charge (not in menu masterlist).
+  }, []);
 
   useEffect(() => {
     const loadDailySales = async () => {
@@ -416,21 +388,24 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
   const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
 
-  // Net sales from menu report rows (same source as SalesAnalytics logic); match by product name
+  // Top 5 products by net sales, computed from menu-report rows (includes charges rows).
   const baseTopProducts: TopProductRow[] = useMemo(
     () =>
-      topSellingData.map((item, index) => {
-        const targetName = String(item.MENU_NAME ?? '').trim().toLowerCase();
-        const menuRow = rows.find((r) => String(r.goods ?? '').trim().toLowerCase() === targetName);
-        const netSales = menuRow != null ? menuRow.netSales : item.total_revenue;
-        return {
-          key: String(item.IDNo ?? index),
-          name: item.MENU_NAME,
+      [...rows]
+        .filter((r) => Number(r.netSales || 0) > 0)
+        .sort((a, b) => Number(b.netSales || 0) - Number(a.netSales || 0))
+        .slice(0, 5)
+        .map((r, index) => ({
+          // Use the display name as the series key so tooltips show names (not synthetic IDs like -9998).
+          // If duplicate names exist, append the id for uniqueness.
+          key: rows.some((x) => x !== r && String(x.goods).trim() === String(r.goods).trim())
+            ? `${String(r.goods).trim()}__${String(r.id ?? index)}`
+            : String(r.goods).trim(),
+          name: r.goods,
           color: BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length],
-          netSales,
-        };
-      }),
-    [topSellingData, rows]
+          netSales: Number(r.netSales || 0),
+        })),
+    [rows]
   );
 
   const productGraphData = useMemo(() => {
@@ -458,7 +433,13 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   }, [baseTopProducts]);
 
   const tooltipProps = {
-    formatter: (value: number) => money(Number(value)),
+    formatter: (value: number, name: string) => {
+      // Map series key back to display name (strip uniqueness suffix).
+      const display = String(name).split('__')[0];
+      return [money(Number(value)), display] as any;
+    },
+    // Ensure tooltip items are sorted by highest value first.
+    itemSorter: (item: any) => -Number(item?.value || 0),
     cursor: false as const,
     contentStyle: {
       backgroundColor: '#ffffff',
@@ -558,25 +539,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
               <span className="text-brand-muted">{t('sales_analytics.net_sales')}</span>
             </div>
             <div className="overflow-hidden rounded-xl min-h-[120px] flex items-stretch justify-center">
-              {topSellingLoading ? (
-                <div className="flex items-center justify-center py-10 w-full">
-                  <Loader2 size={20} className="animate-spin text-violet-500" />
-                </div>
-              ) : topSellingError ? (
-                <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
-                  <AlertCircle size={24} className="text-red-400 mb-1.5" />
-                  <p className="text-xs text-red-500 font-medium mb-1">{topSellingError}</p>
-                  <button
-                    onClick={() => {
-                      // simple re-trigger by changing state dependency
-                      setTopSellingError(null);
-                    }}
-                    className="mt-1 text-[11px] text-violet-600 font-bold hover:underline cursor-pointer"
-                  >
-                    {t('sales_analytics.retry')}
-                  </button>
-                </div>
-              ) : topProductRows.length === 0 ? (
+              {topProductRows.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 px-4 text-center w-full">
                   <Store size={26} className="text-gray-300 mb-1.5" />
                   <p className="text-xs text-brand-muted font-medium">

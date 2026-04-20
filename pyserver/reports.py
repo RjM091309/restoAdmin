@@ -116,6 +116,17 @@ def menu_report(
             menu_filter = " AND m.BRANCH_ID = %s"
             params.append(branch_id)
 
+        # Params note:
+        # - billing_join_filter placeholders appear THREE times below (menu list + 2 synthetic charge rows),
+        #   so we must supply billing params three times.
+        # - menu_filter placeholder appears only in the first SELECT.
+        billing_params = []
+        if start_date and end_date:
+            billing_params.extend([start_date, end_date])
+        if branch_id:
+            billing_params.append(branch_id)
+        menu_params = [branch_id] if branch_id else []
+
         query = f"""
             SELECT
                 m.IDNo AS id,
@@ -140,10 +151,73 @@ def menu_report(
             WHERE 1=1
             {menu_filter}
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
+
+            UNION ALL
+
+            SELECT
+                -9998 AS id,
+                'Room Charge' AS goods,
+                'Charges' AS category,
+                COALESCE(COUNT(DISTINCT CASE WHEN b.ORDER_ID IS NULL THEN NULL ELSE o.IDNo END), 0) AS salesQty,
+                COALESCE(SUM(CASE WHEN b.ORDER_ID IS NULL THEN 0 ELSE o.SERVICE_CHARGE END), 0) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN (
+                SELECT b.ORDER_ID
+                FROM billing b
+                WHERE b.STATUS IN (1, 2){billing_join_filter}
+                GROUP BY b.ORDER_ID
+            ) b ON b.ORDER_ID = o.IDNo
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0 AND COALESCE(rt.ROOM_CHARGE, 0) > 0
+            {'' if not branch_id else ' AND o.BRANCH_ID = %s'}
+
+            UNION ALL
+
+            SELECT
+                -9999 AS id,
+                'Service Charge' AS goods,
+                'Charges' AS category,
+                COALESCE(COUNT(DISTINCT CASE WHEN b.ORDER_ID IS NULL THEN NULL ELSE o.IDNo END), 0) AS salesQty,
+                COALESCE(SUM(CASE WHEN b.ORDER_ID IS NULL THEN 0 ELSE o.SERVICE_CHARGE END), 0) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN (
+                SELECT b.ORDER_ID
+                FROM billing b
+                WHERE b.STATUS IN (1, 2){billing_join_filter}
+                GROUP BY b.ORDER_ID
+            ) b ON b.ORDER_ID = o.IDNo
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0 AND COALESCE(rt.ROOM_CHARGE, 0) = 0
+            {'' if not branch_id else ' AND o.BRANCH_ID = %s'}
+
             ORDER BY totalSales DESC
         """
 
-        cur.execute(query, params)
+        # Build exec params in correct placeholder order:
+        # - first billing subquery params
+        # - menu_filter params
+        # - second billing subquery params (room charge)
+        # - optional room union branch filter param
+        # - third billing subquery params (service charge)
+        # - optional service union branch filter param
+        exec_params = (
+            billing_params
+            + menu_params
+            + billing_params
+            + ([branch_id] if branch_id else [])
+            + billing_params
+            + ([branch_id] if branch_id else [])
+        )
+
+        cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
         conn.close()
