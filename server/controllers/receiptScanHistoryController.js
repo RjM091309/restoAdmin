@@ -197,7 +197,18 @@ class ReceiptScanHistoryController {
 		try {
 			const orderId = req.params.orderId;
 			const row = await ReceiptScanHistoryModel.getLatestByOrderId(orderId);
-			if (!row) return ApiResponse.notFound(res, 'Receipt scan record');
+			// For billing UI: "no receipt" is a valid state, not an error.
+			if (!row) {
+				return ApiResponse.success(
+					res,
+					{
+						ORDER_ID: orderId != null && String(orderId).trim() !== '' ? Number(orderId) : null,
+						receipt_image_data_url: null,
+						orders: [],
+					},
+					'No receipt image'
+				);
+			}
 
 			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
 			const userId = req.session?.user_id || req.user?.user_id || null;

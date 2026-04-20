@@ -2350,7 +2350,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                                 {Number(it.QTY || 0)}
                                                                             </td>
                                                                             <td className="px-3 py-2 text-right tabular-nums font-bold">
-                                                                                ₱{Number(it.LINE_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                                {Number(it.LINE_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                                                             </td>
                                                                         </tr>
                                                                     ))}
@@ -2368,7 +2368,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                             Subtotal
                                                                         </span>
                                                                         <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
-                                                                            ₱{Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            {Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                                                         </span>
                                                                     </div>
                                                                     <div className="flex items-center justify-between gap-3">
@@ -2376,7 +2376,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                             Service charge
                                                                         </span>
                                                                         <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
-                                                                            ₱{Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            {Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                                                         </span>
                                                                     </div>
                                                                     <div className="pt-2 mt-1 border-t border-gray-200/80 flex items-center justify-between gap-3">

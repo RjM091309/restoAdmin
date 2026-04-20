@@ -931,14 +931,6 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
                                 : o.ORDER_TYPE || '—'}
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
-                              Total
-                            </div>
-                            <div className="text-sm font-extrabold text-brand-primary tabular-nums">
-                              ₱{formatMoneyNoDecimals(o.GRAND_TOTAL || 0)}
-                            </div>
-                          </div>
                         </div>
 
                         <div className="p-3">
@@ -977,7 +969,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
                                         {Number(it.QTY || 0)}
                                       </td>
                                       <td className="px-3 py-2 text-right tabular-nums font-bold">
-                                        ₱{formatMoneyNoDecimals(it.LINE_TOTAL || 0)}
+                                        {formatMoneyNoDecimals(it.LINE_TOTAL || 0)}
                                       </td>
                                     </tr>
                                   ))}
@@ -988,22 +980,36 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
 
                           {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) ||
                           (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                <span className="text-brand-muted font-bold uppercase tracking-widest">
-                                  Subtotal
-                                </span>
-                                <span className="font-extrabold tabular-nums">
-                                  ₱{formatMoneyNoDecimals(o.SUBTOTAL || 0)}
-                                </span>
-                              </div>
-                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                <span className="text-brand-muted font-bold uppercase tracking-widest">
-                                  Service
-                                </span>
-                                <span className="font-extrabold tabular-nums">
-                                  ₱{formatMoneyNoDecimals(o.SERVICE_CHARGE || 0)}
-                                </span>
+                            <div className="mt-3">
+                              <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+                                <div className="flex flex-col gap-2 text-sm">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Subtotal
+                                    </span>
+                                    <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                      {formatMoneyNoDecimals(o.SUBTOTAL || 0)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Service charge
+                                    </span>
+                                    <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                      {formatMoneyNoDecimals(o.SERVICE_CHARGE || 0)}
+                                    </span>
+                                  </div>
+                                  <div className="pt-2 mt-1 border-t border-gray-200/80 flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Total
+                                    </span>
+                                    <span className="font-black tabular-nums w-[92px] text-right text-violet-700 text-base">
+                                      ₱{formatMoneyNoDecimals(
+                                        o.GRAND_TOTAL || (Number(o.SUBTOTAL || 0) + Number(o.SERVICE_CHARGE || 0)),
+                                      )}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ) : null}

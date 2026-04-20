@@ -73,6 +73,10 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
     return `${t('common.currency_symbol')}${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
+  const moneyNoSymbol = (value: number) => {
+    const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+    return safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  };
 
   const headerTextClass = 'text-[13px] font-medium whitespace-nowrap bg-white';
   const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';
@@ -634,14 +638,6 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                                 : o.ORDER_TYPE || '—'}
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
-                              Total
-                            </div>
-                            <div className="text-sm font-extrabold text-brand-primary tabular-nums">
-                              {money(Number(o.GRAND_TOTAL || 0))}
-                            </div>
-                          </div>
                         </div>
 
                         <div className="p-3">
@@ -680,7 +676,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                                         {Number(it.QTY || 0)}
                                       </td>
                                       <td className="px-3 py-2 text-right tabular-nums font-bold">
-                                        {money(Number(it.LINE_TOTAL || 0))}
+                                        {moneyNoSymbol(Number(it.LINE_TOTAL || 0))}
                                       </td>
                                     </tr>
                                   ))}
@@ -691,22 +687,34 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
 
                           {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) ||
                           (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                <span className="text-brand-muted font-bold uppercase tracking-widest">
-                                  Subtotal
-                                </span>
-                                <span className="font-extrabold tabular-nums">
-                                  {money(Number(o.SUBTOTAL || 0))}
-                                </span>
-                              </div>
-                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
-                                <span className="text-brand-muted font-bold uppercase tracking-widest">
-                                  Service
-                                </span>
-                                <span className="font-extrabold tabular-nums">
-                                  {money(Number(o.SERVICE_CHARGE || 0))}
-                                </span>
+                            <div className="mt-3">
+                              <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+                                <div className="flex flex-col gap-2 text-sm">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Subtotal
+                                    </span>
+                                    <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                      {moneyNoSymbol(Number(o.SUBTOTAL || 0))}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Service charge
+                                    </span>
+                                    <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
+                                      {moneyNoSymbol(Number(o.SERVICE_CHARGE || 0))}
+                                    </span>
+                                  </div>
+                                  <div className="pt-2 mt-1 border-t border-gray-200/80 flex items-center justify-between gap-3">
+                                    <span className="text-brand-muted font-bold uppercase tracking-widest text-[11px]">
+                                      Total
+                                    </span>
+                                    <span className="font-black tabular-nums w-[92px] text-right text-violet-700 text-base">
+                                      {money(Number(o.GRAND_TOTAL || (Number(o.SUBTOTAL || 0) + Number(o.SERVICE_CHARGE || 0))))}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ) : null}
