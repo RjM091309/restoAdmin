@@ -152,7 +152,7 @@ class TelegramService {
 		});
 	}
 
-	static async sendMessage({ message, chatId = null, parseMode = 'HTML' }) {
+	static async sendMessage({ message, chatId = null, parseMode = 'HTML', replyMarkup = null }) {
 		if (!message || !String(message).trim()) {
 			throw new Error('message is required');
 		}
@@ -167,11 +167,16 @@ class TelegramService {
 			throw new Error('Telegram chat ID is not configured');
 		}
 
-		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', {
+		const payload = {
 			chat_id: String(targetChatId),
 			text: String(message),
 			parse_mode: parseMode,
-		});
+		};
+		if (replyMarkup && typeof replyMarkup === 'object') {
+			payload.reply_markup = replyMarkup;
+		}
+
+		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', payload);
 		if (response.statusCode < 200 || response.statusCode >= 300 || response.body?.ok !== true) {
 			const reason = response.body?.description || `HTTP ${response.statusCode}`;
 			throw new Error(`Telegram send failed: ${reason}`);
@@ -236,12 +241,10 @@ class TelegramService {
 
 	static async configureBotMenu(botToken) {
 		await TelegramService.callTelegramApi(botToken, 'setMyCommands', {
-			commands: [
-				{ command: 'reports', description: 'Show report buttons' },
-			],
+			commands: [],
 		});
 		await TelegramService.callTelegramApi(botToken, 'setChatMenuButton', {
-			menu_button: { type: 'commands' },
+			menu_button: { type: 'default' },
 		});
 	}
 
@@ -774,20 +777,9 @@ class TelegramService {
 				chatId: String(chatId),
 				message: 'Welcome to Restaurant System',
 				parseMode: 'HTML',
-			});
-			await TelegramService.sendPersistentMenu({
-				chatId: String(chatId),
-				message: 'Choose a report from the keyboard below:',
+				replyMarkup: TelegramService.buildPersistentReplyKeyboard(),
 			});
 			return { handled: true, type: 'start_message' };
-		}
-
-		if (chatId && normalizedText === '/reports') {
-			await TelegramService.sendPersistentMenu({
-				chatId: String(chatId),
-				message: 'Choose a report from the keyboard below:',
-			});
-			return { handled: true, type: 'command_menu' };
 		}
 
 		if (chatId && Object.prototype.hasOwnProperty.call(TelegramService.REPORT_TEXT_TO_CALLBACK, text)) {
