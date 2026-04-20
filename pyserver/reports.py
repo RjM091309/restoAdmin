@@ -93,8 +93,8 @@ def menu_report(
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
-        date_filter = ""
-        branch_filter = ""
+        billing_join_filter = ""
+        menu_filter = ""
         params: List[object] = []
 
         print(
@@ -106,11 +106,14 @@ def menu_report(
 
         if start_date and end_date:
             # Align date filter with billing-based analytics (daily-sales)
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
+            billing_join_filter += " AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
             params.extend([start_date, end_date])
         if branch_id:
             # Use billing.BRANCH_ID for consistency with other analytics
-            branch_filter = "AND b.BRANCH_ID = %s"
+            billing_join_filter += " AND b.BRANCH_ID = %s"
+            params.append(branch_id)
+            # Limit menu masterlist to the selected branch only
+            menu_filter = " AND m.BRANCH_ID = %s"
             params.append(branch_id)
 
         query = f"""
@@ -118,22 +121,25 @@ def menu_report(
                 m.IDNo AS id,
                 m.MENU_NAME AS goods,
                 COALESCE(c.CAT_NAME, 'Uncategorized') AS category,
-                COALESCE(SUM(oi.QTY), 0) AS salesQty,
-                COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
+                COALESCE(SUM(CASE WHEN b.ORDER_ID IS NULL THEN 0 ELSE oi.QTY END), 0) AS salesQty,
+                COALESCE(SUM(CASE WHEN b.ORDER_ID IS NULL THEN 0 ELSE oi.LINE_TOTAL END), 0) AS totalSales,
                 0 AS refundQty,
                 0 AS refundAmount,
                 0 AS discounts,
                 0 AS unitCost
-            FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
-            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
-            INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+            FROM menu m
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            LEFT JOIN order_items oi ON oi.MENU_ID = m.IDNo
+            LEFT JOIN orders o ON o.IDNo = oi.ORDER_ID
+            LEFT JOIN (
+                SELECT b.ORDER_ID
+                FROM billing b
+                WHERE b.STATUS IN (1, 2){billing_join_filter}
+                GROUP BY b.ORDER_ID
+            ) b ON b.ORDER_ID = o.IDNo
             WHERE 1=1
-            {date_filter}
-            {branch_filter}
+            {menu_filter}
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
-            HAVING salesQty > 0
             ORDER BY totalSales DESC
         """
 
