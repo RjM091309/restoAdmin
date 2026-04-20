@@ -23,7 +23,12 @@ const i18n = require('i18n');
 const compression = require('compression');
 const cors = require('cors');
 const loyverseService = require('./utils/loyverseService');
-const { ensureOrderItemsLineCostColumn, ensureReceiptScanHistoryTable } = require('./utils/ensureSchema');
+const TelegramService = require('./services/telegramService');
+const {
+	ensureOrderItemsLineCostColumn,
+	ensureReceiptScanHistoryTable,
+	ensureTelegramSettingsTable,
+} = require('./utils/ensureSchema');
 const app = express();
 app.use(compression());
 
@@ -227,14 +232,23 @@ app.use((err, req, res, next) => {
 	try {
 		await ensureOrderItemsLineCostColumn();
 		await ensureReceiptScanHistoryTable();
+		await ensureTelegramSettingsTable();
 	} catch (e) {
-		console.error('[Schema] ensureOrderItemsLineCostColumn / receipt_scan_history:', e?.message || e);
+		console.error('[Schema] ensure startup schema failed:', e?.message || e);
 	}
 
 	const server = app.listen(app.get('port'), function () {
 		console.log('Server started on port ' + app.get('port'));
 		console.log('API Server running at http://localhost:' + app.get('port'));
 		console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
+
+		const telegramPollingEnabled = String(process.env.TELEGRAM_POLLING_ENABLED || 'true').toLowerCase() !== 'false';
+		if (telegramPollingEnabled) {
+			TelegramService.startPolling().catch((error) => {
+				console.error('[Telegram] Failed to start polling:', error?.message || error);
+			});
+			// console.log('[Telegram] Long polling enabled');
+		}
 
 		// Optional startup health check for Python analytics service.
 		// Disabled by default to avoid noisy logs when PyServer is not running.

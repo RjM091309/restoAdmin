@@ -26,6 +26,7 @@ module.exports = [
     require('./orderRoutes'),             // Order routes
     require('./receiptScanHistoryRoutes'), // Receipt scan audit (images + summary)
     require('./reportsRoutes'),           // Reports routes
+    require('./telegramRoutes'),          // Telegram integration routes
     require('./tableRoutes'),             // Restaurant table routes
     require('./uploadRoutes'),            // Upload routes
     require('./userManagementRoutes'),    // User management routes
