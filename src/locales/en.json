@@ -1160,6 +1160,7 @@
 		"close": "Close"
 	},
 	"orders": {
+		"service_charge": "Service charge",
 		"manual_order": "Manual Order",
 		"manual_order_helper": "Creates an order that is settled immediately (no Billing processing).",
 		"create_manual_order": "Create Manual Order (Settled)",
@@ -1183,6 +1184,15 @@
 		"receipt_extract_failed": "Could not read this receipt. Try a clearer photo.",
 		"receipt_no_menu_mapped_title": "Map at least one line",
 		"receipt_no_menu_mapped_text": "Choose a menu item for one or more lines before creating the order.",
+		"receipt_history": "Receipt scan history",
+		"receipt_history_sub": "Receipt images and extracted line items saved per scan (ReceiptLens or admin).",
+		"receipt_history_empty": "No receipt scans in this date range.",
+		"receipt_history_view": "View",
+		"receipt_history_source": "Source",
+		"receipt_history_branch": "Branch",
+		"receipt_history_grand_total": "Receipt total",
+		"receipt_history_detail_title": "Receipt scan detail",
+		"receipt_history_save_failed": "Order created but saving receipt history failed (check server logs).",
 		"edit_order": "Edit Order",
 		"order_items": "Order Items",
 		"additional_order": "Additional Order",

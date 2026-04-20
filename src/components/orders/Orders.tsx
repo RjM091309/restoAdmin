@@ -23,6 +23,7 @@ import {
     Camera,
     Upload,
     RefreshCw,
+    History,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -54,6 +55,13 @@ import { bestMenuMatchForReceiptLine } from '../../services/receiptOrderMenuMatc
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 import { useUser } from '../../context/UserContext';
+import {
+    fetchReceiptScanHistoryList,
+    fetchReceiptScanHistoryById,
+    saveReceiptScanHistory,
+    type ReceiptScanHistoryListRow,
+    type ReceiptScanHistoryDetail,
+} from '../../services/receiptScanHistoryService';
 
 // ---- Props & types ----
 interface OrdersProps {
@@ -158,6 +166,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptOrderType, setReceiptOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [receiptOrderTableId, setReceiptOrderTableId] = useState('');
     const [receiptOrderBranchId, setReceiptOrderBranchId] = useState('');
+    const [receiptOrderDate, setReceiptOrderDate] = useState<string>('');
     const [receiptOrderMenus, setReceiptOrderMenus] = useState<MenuRecord[]>([]);
     const [receiptOrderMenusLoading, setReceiptOrderMenusLoading] = useState(false);
     const [receiptBranchTables, setReceiptBranchTables] = useState<{ value: string; label: string }[]>([]);
@@ -179,6 +188,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptSubmitting, setReceiptSubmitting] = useState(false);
     const receiptFileInputRef = useRef<HTMLInputElement>(null);
     const receiptCameraInputRef = useRef<HTMLInputElement>(null);
+
+    const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
+    const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
+    const [receiptHistoryLoading, setReceiptHistoryLoading] = useState(false);
+    const [receiptHistoryDetailOpen, setReceiptHistoryDetailOpen] = useState(false);
+    const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<ReceiptScanHistoryDetail | null>(null);
+    const [receiptHistoryDetailLoading, setReceiptHistoryDetailLoading] = useState(false);
 
     // ----- Add items to existing order (detail modal) -----
     const [detailMenus, setDetailMenus] = useState<MenuRecord[]>([]);
@@ -515,6 +531,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [detailOrder?.IDNo, detailOrder?.TABLE_ID, detailOrder?.BRANCH_ID, detailOrder?.STATUS]);
 
     const detailServiceCharge = detailOrder ? Number(detailOrder.SERVICE_CHARGE ?? 0) : 0;
+    const detailIsRoomCharge = detailRoomChargeUnit > 0;
     const detailRoomChargeUnitForRow = detailRoomChargeUnit > 0 ? detailRoomChargeUnit : detailServiceCharge;
     const detailRoomChargeQtyForRow =
         detailRoomChargeUnitForRow > 0 ? Math.max(0.5, Math.round((detailServiceCharge / detailRoomChargeUnitForRow) * 2) / 2) : 0.5;
@@ -958,6 +975,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptError(null);
         setReceiptRows([]);
         setReceiptExtractResult(null);
+        // Default: present date only (YYYY-MM-DD), time will be current timestamp.
+        // Preserve user's previously selected date across multiple receipt orders.
+        if (!receiptOrderDate) {
+            const now = new Date();
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Manila',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+            }).formatToParts(now);
+            const get = (type: string) => String(parts.find((p) => p.type === type)?.value ?? '0');
+            const y = get('year');
+            const m = get('month');
+            const d = get('day');
+            setReceiptOrderDate(`${y}-${m}-${d}`);
+        }
         setReceiptOrderOpen(true);
     };
 
@@ -1060,6 +1093,49 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
     }, [receiptRows]);
 
+    const loadReceiptHistory = useCallback(async () => {
+        setReceiptHistoryLoading(true);
+        try {
+            const bid = isAllBranches ? 'all' : branchId;
+            const rows = await fetchReceiptScanHistoryList(bid, 250);
+            setReceiptHistoryRows(Array.isArray(rows) ? rows : []);
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('orders.failed_to_load'));
+            setReceiptHistoryRows([]);
+        } finally {
+            setReceiptHistoryLoading(false);
+        }
+    }, [branchId, isAllBranches, t]);
+
+    const openReceiptHistoryPanel = () => {
+        setReceiptHistoryOpen(true);
+        void loadReceiptHistory();
+    };
+
+    const openReceiptHistoryDetail = async (id: number) => {
+        setReceiptHistoryDetailOpen(true);
+        setReceiptHistoryDetailLoading(true);
+        setReceiptHistoryDetail(null);
+        try {
+            const row = await fetchReceiptScanHistoryById(id);
+            setReceiptHistoryDetail(row);
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('orders.failed_to_load'));
+            setReceiptHistoryDetailOpen(false);
+        } finally {
+            setReceiptHistoryDetailLoading(false);
+        }
+    };
+
+    const filteredReceiptHistory = useMemo(() => {
+        return receiptHistoryRows.filter((r) => {
+            if (!dateRange.start || !dateRange.end) return true;
+            const ymd = String(r.ENCODED_DT ?? '').match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+            if (!ymd) return true;
+            return ymd >= dateRange.start && ymd <= dateRange.end;
+        });
+    }, [receiptHistoryRows, dateRange.start, dateRange.end]);
+
     const submitReceiptOrder = async () => {
         if (!receiptOrderNo.trim()) {
             setSwal({
@@ -1077,6 +1153,37 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         const resolvedBranch = isAllBranches ? receiptOrderBranchId : branchId;
         setReceiptSubmitting(true);
         try {
+            const now = new Date();
+            const pad2 = (n: number) => String(n).padStart(2, '0');
+            // Use Asia/Manila time consistently so ENCODED_DT matches backend timestamps.
+            const getManilaParts = (d: Date) => {
+                const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Asia/Manila',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).formatToParts(d);
+                const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+                return {
+                    year: get('year'),
+                    month: get('month'),
+                    day: get('day'),
+                    hour: get('hour'),
+                    minute: get('minute'),
+                    second: get('second'),
+                };
+            };
+            const manilaNow = getManilaParts(now);
+            const todayStr = `${manilaNow.year}-${pad2(manilaNow.month)}-${pad2(manilaNow.day)}`;
+            const selectedDate = (receiptOrderDate && receiptOrderDate.trim()) ? receiptOrderDate : todayStr;
+            const [yy, mm, dd] = selectedDate.split('-').map((x) => Number(x));
+            const timePart = `${pad2(manilaNow.hour)}:${pad2(manilaNow.minute)}:${pad2(manilaNow.second)}`;
+            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
+
             // Fresh menu list — avoids empty/stale state if user saves before useEffect finishes loading menus.
             const menuList = await getMenus(resolvedBranch).then((m) =>
                 (Array.isArray(m) ? m : []).filter((x) => x.active && (x.effectiveAvailable ?? x.isAvailable))
@@ -1111,7 +1218,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 line_total: Number(it.qty) * Number(it.unitPrice),
                 status: ORDER_STATUS.PENDING,
             }));
-            await createOrder({
+            const created = await createManualSettledOrder({
                 ORDER_NO: receiptOrderNo.trim(),
                 order_no: receiptOrderNo.trim(),
                 BRANCH_ID: resolvedBranch,
@@ -1119,7 +1226,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 TABLE_ID: receiptOrderTableId ? Number(receiptOrderTableId) : null,
                 ORDER_TYPE: receiptOrderType,
                 order_type: receiptOrderType,
-                STATUS: ORDER_STATUS.PENDING,
+                ENCODED_DT: encodedDt,
+                STATUS: ORDER_STATUS.SETTLED,
                 SUBTOTAL: subtotal,
                 TAX_AMOUNT: 0,
                 SERVICE_CHARGE: 0,
@@ -1127,6 +1235,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 GRAND_TOTAL: subtotal,
                 ORDER_ITEMS: items,
                 items,
+                payment_method: 'CASH',
+                payment_ref: 'Receipt scan auto-settled',
+                PAYMENT_METHOD: 'CASH',
+                PAYMENT_REF: 'Receipt scan auto-settled',
+            });
+            const savedOrderNo = receiptOrderNo.trim();
+            const snapImage = receiptImage;
+            const snapExtract = receiptExtractResult;
+            const snapRows = receiptRows;
+            const snapMenuSub = receiptPreviewSubtotal;
+            void saveReceiptScanHistory({
+                branch_id: String(resolvedBranch),
+                source: 'resto_admin',
+                order_id: created?.id != null ? Number(created.id) : null,
+                encoded_dt: encodedDt,
+                receipt_grand_total: snapExtract?.receipt_grand_total ?? null,
+                receipt_image_data_url: snapImage,
+            }).catch(() => {
+                toast.warning(t('orders.receipt_history_save_failed'));
             });
             setReceiptOrderOpen(false);
             setReceiptOrderTableId('');
@@ -1134,7 +1261,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptRows([]);
             setReceiptExtractResult(null);
             await loadOrders();
-            toast.success(t('orders.swal.created_text', { orderNo: receiptOrderNo.trim() }));
+            toast.success(t('orders.swal.created_text', { orderNo: savedOrderNo }));
         } catch (e) {
             if (e instanceof InventoryInsufficientError && e.insufficient?.length) {
                 const list = e.insufficient
@@ -1685,6 +1812,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     {t('orders.upload_receipt')}
                                 </button>
                                 <button
+                                    type="button"
+                                    onClick={openReceiptHistoryPanel}
+                                    className="bg-slate-700 text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-slate-700/20 hover:bg-slate-800 transition-all"
+                                    title={t('orders.receipt_history_sub')}
+                                >
+                                    <History size={18} />
+                                    {t('orders.receipt_history')}
+                                </button>
+                                <button
                                     onClick={openManualOrder}
                                     className="bg-emerald-600 text-white px-6 py-2.5 rounded-xl text-base font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all"
                                     title={t('orders.manual_order_helper')}
@@ -1743,6 +1879,262 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            <Modal
+                isOpen={receiptHistoryOpen}
+                onClose={() => setReceiptHistoryOpen(false)}
+                title={t('orders.receipt_history')}
+                maxWidth="5xl"
+                footer={
+                    <button
+                        type="button"
+                        onClick={() => setReceiptHistoryOpen(false)}
+                        className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+                    >
+                        {t('orders.cancel')}
+                    </button>
+                }
+            >
+                <p className="text-sm text-brand-muted mb-4">{t('orders.receipt_history_sub')}</p>
+                {receiptHistoryLoading ? (
+                    <div className="flex justify-center py-12">
+                        <Loader2 size={32} className="animate-spin text-brand-primary" />
+                    </div>
+                ) : filteredReceiptHistory.length === 0 ? (
+                    <p className="text-center text-brand-muted py-8">{t('orders.receipt_history_empty')}</p>
+                ) : (
+                    <div className="overflow-x-auto rounded-xl border border-gray-200">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50 text-left">
+                                <tr>
+                                    <th className="px-3 py-2 font-bold">{t('orders.date')}</th>
+                                    {isAllBranches ? (
+                                        <th className="px-3 py-2 font-bold">{t('orders.receipt_history_branch')}</th>
+                                    ) : null}
+                                    <th className="px-3 py-2 font-bold">{t('orders.receipt_history_source')}</th>
+                                    <th className="px-3 py-2 font-bold">{t('orders.order_no')}</th>
+                                    <th className="px-3 py-2 font-bold text-right">{t('orders.receipt_history_grand_total')}</th>
+                                    <th className="px-3 py-2 w-28" />
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {filteredReceiptHistory.map((r) => (
+                                    <tr key={r.IDNo} className="hover:bg-gray-50/80">
+                                        <td className="px-3 py-2 whitespace-nowrap">{formatEncodedDt(r.ENCODED_DT)}</td>
+                                        {isAllBranches ? (
+                                            <td className="px-3 py-2">{r.BRANCH_NAME ?? r.BRANCH_ID}</td>
+                                        ) : null}
+                                        <td className="px-3 py-2 font-mono text-xs">{r.SOURCE}</td>
+                                        <td className="px-3 py-2 font-mono">{r.ORDER_NO ?? '—'}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums">
+                                            {r.RECEIPT_GRAND_TOTAL != null
+                                                ? `₱${Number(r.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                                      maximumFractionDigits: 0,
+                                                  })}`
+                                                : '—'}
+                                        </td>
+                                        <td className="px-3 py-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => void openReceiptHistoryDetail(r.IDNo)}
+                                                className="text-brand-primary font-bold hover:underline"
+                                            >
+                                                {t('orders.receipt_history_view')}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                isOpen={receiptHistoryDetailOpen}
+                onClose={() => {
+                    setReceiptHistoryDetailOpen(false);
+                    setReceiptHistoryDetail(null);
+                }}
+                title={t('orders.receipt_history_detail_title')}
+                maxWidth="6xl"
+                footer={
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setReceiptHistoryDetailOpen(false);
+                            setReceiptHistoryDetail(null);
+                        }}
+                        className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+                    >
+                        {t('orders.cancel')}
+                    </button>
+                }
+            >
+                {receiptHistoryDetailLoading ? (
+                    <div className="flex justify-center py-12">
+                        <Loader2 size={32} className="animate-spin text-brand-primary" />
+                    </div>
+                ) : receiptHistoryDetail ? (
+                    <div className="flex flex-col gap-3 h-full min-h-0">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                            <div className="min-w-0">
+                                <span className="text-brand-muted">{t('orders.date')}</span>
+                                <div className="font-semibold truncate">{formatEncodedDt(receiptHistoryDetail.ENCODED_DT)}</div>
+                            </div>
+                            <div className="min-w-0">
+                                <span className="text-brand-muted">{t('orders.receipt_history_source')}</span>
+                                <div className="font-mono truncate">{receiptHistoryDetail.SOURCE}</div>
+                            </div>
+                            <div className="min-w-0">
+                                <span className="text-brand-muted">{t('orders.order_no')}</span>
+                                <div className="font-mono truncate">
+                                    {receiptHistoryDetail.ORDER_NO ?? (receiptHistoryDetail.ORDER_ID != null ? `#${receiptHistoryDetail.ORDER_ID}` : '—')}
+                                </div>
+                            </div>
+                            <div className="min-w-0">
+                                <span className="text-brand-muted">{t('orders.receipt_history_grand_total')}</span>
+                                <div className="tabular-nums font-semibold truncate">
+                                    {receiptHistoryDetail.RECEIPT_GRAND_TOTAL != null
+                                        ? `₱${Number(receiptHistoryDetail.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
+                                              maximumFractionDigits: 0,
+                                          })}`
+                                        : '—'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 overflow-hidden bg-gray-50">
+                            {receiptHistoryDetail.receipt_image_data_url ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const url = receiptHistoryDetail.receipt_image_data_url;
+                                        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                                    }}
+                                    className="w-full p-2"
+                                    title="Click to view full size"
+                                >
+                                    <img
+                                        src={receiptHistoryDetail.receipt_image_data_url}
+                                        alt="Receipt"
+                                        className="block w-full h-auto max-h-[78vh] object-contain rounded-xl bg-white"
+                                        draggable={false}
+                                    />
+                                </button>
+                            ) : (
+                                <div className="h-[40vh] flex items-center justify-center text-brand-muted">
+                                    No receipt image
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+                            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                        Order breakdown
+                                    </div>
+                                    <div className="text-[11px] text-brand-muted mt-0.5">
+                                        Click image to view full size
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-4 space-y-4">
+                                {(receiptHistoryDetail.orders || []).length === 0 ? (
+                                    <div className="text-sm text-brand-muted">No order items found.</div>
+                                ) : (
+                                    (receiptHistoryDetail.orders || []).map((o) => {
+                                        const items = o.items || [];
+                                        return (
+                                            <div key={String(o.ORDER_ID)} className="rounded-xl border border-gray-100 overflow-hidden">
+                                                <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="text-sm font-extrabold text-brand-text truncate">
+                                                            {o.ORDER_NO ? o.ORDER_NO : `#${o.ORDER_ID}`}
+                                                        </div>
+                                                        <div className="text-[11px] text-brand-muted truncate">
+                                                            {o.TABLE_NUMBER != null && String(o.TABLE_NUMBER).trim() !== ''
+                                                                ? `Table ${o.TABLE_NUMBER}`
+                                                                : o.ORDER_TYPE || '—'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
+                                                            Total
+                                                        </div>
+                                                        <div className="text-sm font-extrabold text-brand-primary tabular-nums">
+                                                            ₱{Number(o.GRAND_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="p-3">
+                                                    {items.length === 0 ? (
+                                                        <div className="text-sm text-brand-muted">No items.</div>
+                                                    ) : (
+                                                        <div className="overflow-hidden rounded-lg border border-gray-100">
+                                                            <table className="w-full text-xs">
+                                                                <thead className="bg-white">
+                                                                    <tr className="text-brand-muted">
+                                                                        <th className="px-3 py-2 text-left font-bold uppercase tracking-widest">Item</th>
+                                                                        <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[56px]">Qty</th>
+                                                                        <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[92px]">Total</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-gray-50">
+                                                                    {items.map((it) => (
+                                                                        <tr key={String(it.ORDER_ITEM_ID)} className="text-brand-text">
+                                                                            <td className="px-3 py-2">
+                                                                                <div className="font-semibold leading-snug">
+                                                                                    {it.MENU_NAME || `#${it.MENU_ID ?? ''}`}
+                                                                                </div>
+                                                                                {it.REMARKS ? (
+                                                                                    <div className="text-[11px] text-brand-muted mt-0.5 break-words">
+                                                                                        {it.REMARKS}
+                                                                                    </div>
+                                                                                ) : null}
+                                                                            </td>
+                                                                            <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                                                                                {Number(it.QTY || 0)}
+                                                                            </td>
+                                                                            <td className="px-3 py-2 text-right tabular-nums font-bold">
+                                                                                ₱{Number(it.LINE_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+
+                                                    {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) || (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
+                                                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                                            <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                                                <span className="text-brand-muted font-bold uppercase tracking-widest">Subtotal</span>
+                                                                <span className="font-extrabold tabular-nums">
+                                                                    ₱{Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                </span>
+                                                            </div>
+                                                            <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                                                <span className="text-brand-muted font-bold uppercase tracking-widest">Service</span>
+                                                                <span className="font-extrabold tabular-nums">
+                                                                    ₱{Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
+            </Modal>
 
             {/* New Order Modal */}
             <Modal
@@ -1955,7 +2347,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-5">
                         <div className="space-y-2">
                             <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
                                 {t('orders.order_no_label')}
@@ -1992,6 +2384,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 value={receiptOrderTableId || null}
                                 onChange={(v) => setReceiptOrderTableId(v ? String(v) : '')}
                                 placeholder={t('table.table_number')}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('orders.date')}
+                            </label>
+                            <input
+                                type="date"
+                                value={receiptOrderDate}
+                                onChange={(e) => setReceiptOrderDate(e.target.value)}
+                                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-violet-500/20 outline-none"
                             />
                         </div>
                     </div>
@@ -2636,7 +3039,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             {(detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) &&
                                                 Number(detailOrder.SERVICE_CHARGE) > 0 && (
                                                     <tr key="__ROOM_CHARGE__">
-                                                        <td className="px-4 py-2 font-medium">{t('table.room_charge') ?? 'Room charge'}</td>
+                                                        <td className="px-4 py-2 font-medium">
+                                                            {detailIsRoomCharge
+                                                                ? (t('table.room_charge') ?? 'Room charge')
+                                                                : (t('orders.service_charge') ?? 'Service charge')}
+                                                        </td>
                                                         <td className="px-4 py-2 text-right">{detailRoomChargeQtyForRow}</td>
                                                         <td className="px-4 py-2 text-right">₱{Number(detailRoomChargeUnitForRow).toLocaleString()}</td>
                                                         <td className="px-4 py-2 text-right font-bold">₱{Number(detailServiceCharge).toLocaleString()}</td>

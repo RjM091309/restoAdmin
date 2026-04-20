@@ -4,10 +4,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Search, X } from 'lucide-react';
+import { Search, X, Receipt, Loader2 } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Skeleton } from '../ui/Skeleton';
+import { Modal } from '../ui/Modal';
 import {
   fetchReceiptReportApi,
   fetchReceiptDetailApi,
@@ -61,6 +62,11 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
   const [receiptDetail, setReceiptDetail] = useState<ReceiptDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  const [receiptImageOpen, setReceiptImageOpen] = useState(false);
+  const [receiptImageLoading, setReceiptImageLoading] = useState(false);
+  const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
+  const [receiptOrders, setReceiptOrders] = useState<any[]>([]);
 
   const money = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -153,6 +159,27 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     return receiptDetail;
   }, [selectedReceipt, receiptDetail]);
 
+  const openReceiptImage = async (row: ReceiptReportRow) => {
+    setReceiptImageOpen(true);
+    setReceiptImageLoading(true);
+    setReceiptImageUrl(null);
+    setReceiptOrders([]);
+    try {
+      const res = await fetch(`/data-api/receipt-scan-history/order/${row.id}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || json?.message || 'No receipt image found');
+      }
+      setReceiptImageUrl(json?.data?.receipt_image_data_url ?? null);
+      setReceiptOrders(Array.isArray(json?.data?.orders) ? json.data.orders : []);
+    } catch (e) {
+      console.error('Failed to load receipt image', e);
+      setReceiptImageOpen(false);
+    } finally {
+      setReceiptImageLoading(false);
+    }
+  };
+
   const columns: ColumnDef<ReceiptReportRow>[] = [
     {
       header: t('receipt_report.columns.receipt_number'),
@@ -196,6 +223,25 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} text-right`,
       render: (item) => money(item.total),
+    },
+    {
+      header: 'Receipt',
+      className: 'w-[90px] text-right',
+      headerClassName: headerTextClass,
+      cellClassName: `${bodyTextClass} text-right`,
+      render: (item) => (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void openReceiptImage(item);
+          }}
+          className="inline-flex items-center justify-center p-2 rounded-lg text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors"
+          title="View receipt"
+        >
+          <Receipt size={16} />
+        </button>
+      ),
     },
   ];
 
@@ -521,6 +567,157 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
           </AnimatePresence>,
           document.body
         )}
+
+      <Modal
+        isOpen={receiptImageOpen}
+        onClose={() => {
+          setReceiptImageOpen(false);
+          setReceiptImageUrl(null);
+          setReceiptOrders([]);
+        }}
+        title="Receipt"
+        maxWidth="6xl"
+      >
+        {receiptImageLoading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 size={32} className="animate-spin text-brand-primary" />
+          </div>
+        ) : receiptImageUrl ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-gray-200 overflow-hidden bg-gray-50">
+              <button
+                type="button"
+                onClick={() => {
+                  if (receiptImageUrl) window.open(receiptImageUrl, '_blank', 'noopener,noreferrer');
+                }}
+                className="w-full p-2"
+                title="Click to view full size"
+              >
+                <img
+                  src={receiptImageUrl}
+                  alt="Receipt"
+                  className="block w-full h-auto max-h-[78vh] object-contain rounded-xl bg-white"
+                  draggable={false}
+                />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="text-xs font-bold text-brand-muted uppercase tracking-widest">
+                  Order breakdown
+                </div>
+                <div className="text-[11px] text-brand-muted mt-0.5">
+                  Click image to view full size
+                </div>
+              </div>
+              <div className="p-4 space-y-4">
+                {receiptOrders.length === 0 ? (
+                  <div className="text-sm text-brand-muted">No order items found.</div>
+                ) : (
+                  receiptOrders.map((o) => {
+                    const items: any[] = Array.isArray(o?.items) ? o.items : [];
+                    return (
+                      <div key={String(o.ORDER_ID)} className="rounded-xl border border-gray-100 overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-extrabold text-brand-text truncate">
+                              {o.ORDER_NO ? o.ORDER_NO : `#${o.ORDER_ID}`}
+                            </div>
+                            <div className="text-[11px] text-brand-muted truncate">
+                              {o.TABLE_NUMBER != null && String(o.TABLE_NUMBER).trim() !== ''
+                                ? `Table ${o.TABLE_NUMBER}`
+                                : o.ORDER_TYPE || '—'}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
+                              Total
+                            </div>
+                            <div className="text-sm font-extrabold text-brand-primary tabular-nums">
+                              {money(Number(o.GRAND_TOTAL || 0))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-3">
+                          {items.length === 0 ? (
+                            <div className="text-sm text-brand-muted">No items.</div>
+                          ) : (
+                            <div className="overflow-hidden rounded-lg border border-gray-100">
+                              <table className="w-full text-xs">
+                                <thead className="bg-white">
+                                  <tr className="text-brand-muted">
+                                    <th className="px-3 py-2 text-left font-bold uppercase tracking-widest">
+                                      Item
+                                    </th>
+                                    <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[56px]">
+                                      Qty
+                                    </th>
+                                    <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[92px]">
+                                      Total
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {items.map((it) => (
+                                    <tr key={String(it.ORDER_ITEM_ID)} className="text-brand-text">
+                                      <td className="px-3 py-2">
+                                        <div className="font-semibold leading-snug">
+                                          {it.MENU_NAME || `#${it.MENU_ID ?? ''}`}
+                                        </div>
+                                        {it.REMARKS ? (
+                                          <div className="text-[11px] text-brand-muted mt-0.5 break-words">
+                                            {it.REMARKS}
+                                          </div>
+                                        ) : null}
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                                        {Number(it.QTY || 0)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums font-bold">
+                                        {money(Number(it.LINE_TOTAL || 0))}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) ||
+                          (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                <span className="text-brand-muted font-bold uppercase tracking-widest">
+                                  Subtotal
+                                </span>
+                                <span className="font-extrabold tabular-nums">
+                                  {money(Number(o.SUBTOTAL || 0))}
+                                </span>
+                              </div>
+                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                <span className="text-brand-muted font-bold uppercase tracking-widest">
+                                  Service
+                                </span>
+                                <span className="font-extrabold tabular-nums">
+                                  {money(Number(o.SERVICE_CHARGE || 0))}
+                                </span>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-brand-muted">No receipt image.</div>
+        )}
+      </Modal>
     </div>
   );
 };

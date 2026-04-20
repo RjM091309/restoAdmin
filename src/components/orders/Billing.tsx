@@ -163,6 +163,11 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRows, setHistoryRows] = useState<PaymentHistoryRow[]>([]);
 
+  const [receiptModalOpen, setReceiptModalOpen] = useState(false);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
+  const [receiptOrders, setReceiptOrders] = useState<any[]>([]);
+
   const loadBilling = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -335,6 +340,31 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
     }
   };
 
+  const openReceiptModal = async (record: BillingRecord) => {
+    setActiveRecord(record);
+    setReceiptModalOpen(true);
+    setReceiptLoading(true);
+    setReceiptImageUrl(null);
+    setReceiptOrders([]);
+    try {
+      const res = await fetch(`/data-api/receipt-scan-history/order/${record.ORDER_ID}`, {
+        headers: authHeaders(),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.error || json?.message || 'No receipt image found');
+      }
+      const url = json?.data?.receipt_image_data_url ?? null;
+      setReceiptImageUrl(url);
+      setReceiptOrders(Array.isArray(json?.data?.orders) ? json.data.orders : []);
+    } catch (e: any) {
+      toast.error(e?.message || 'No receipt image found');
+      setReceiptModalOpen(false);
+    } finally {
+      setReceiptLoading(false);
+    }
+  };
+
   const closePaymentModal = () => {
     if (submittingPayment) return;
     setPaymentModalOpen(false);
@@ -478,6 +508,13 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
         className: 'text-right',
         render: (r) => (
           <div className="flex justify-end items-center gap-2">
+            <button
+              onClick={() => void openReceiptModal(r)}
+              className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+              title="View receipt"
+            >
+              <Receipt size={16} />
+            </button>
             <button
               onClick={() => openHistoryModal(r)}
               className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
@@ -797,6 +834,172 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
           </div>
         )}
       </SidePanel>
+
+      {/* Receipt Image Modal */}
+      <Modal
+        isOpen={receiptModalOpen}
+        onClose={() => {
+          if (receiptLoading) return;
+          setReceiptModalOpen(false);
+          setReceiptImageUrl(null);
+          setReceiptOrders([]);
+        }}
+        title="Receipt"
+        maxWidth="6xl"
+        footer={
+          <button
+            type="button"
+            onClick={() => {
+              setReceiptModalOpen(false);
+              setReceiptImageUrl(null);
+              setReceiptOrders([]);
+            }}
+            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
+          >
+            {t('billing.cancel')}
+          </button>
+        }
+      >
+        {receiptLoading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 size={32} className="animate-spin text-brand-primary" />
+          </div>
+        ) : receiptImageUrl ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-gray-200 overflow-hidden bg-gray-50">
+              <button
+                type="button"
+                onClick={() => {
+                  if (receiptImageUrl) window.open(receiptImageUrl, '_blank', 'noopener,noreferrer');
+                }}
+                className="w-full p-2"
+                title="Click to view full size"
+              >
+                <img
+                  src={receiptImageUrl}
+                  alt="Receipt"
+                  className="block w-full h-auto max-h-[78vh] object-contain rounded-xl bg-white"
+                  draggable={false}
+                />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <div className="text-xs font-bold text-brand-muted uppercase tracking-widest">
+                  Order breakdown
+                </div>
+                <div className="text-[11px] text-brand-muted mt-0.5">
+                  Click image to view full size
+                </div>
+              </div>
+              <div className="p-4 space-y-4">
+                {receiptOrders.length === 0 ? (
+                  <div className="text-sm text-brand-muted">No order items found.</div>
+                ) : (
+                  receiptOrders.map((o) => {
+                    const items: any[] = Array.isArray(o?.items) ? o.items : [];
+                    return (
+                      <div key={String(o.ORDER_ID)} className="rounded-xl border border-gray-100 overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-extrabold text-brand-text truncate">
+                              {o.ORDER_NO ? o.ORDER_NO : `#${o.ORDER_ID}`}
+                            </div>
+                            <div className="text-[11px] text-brand-muted truncate">
+                              {o.TABLE_NUMBER != null && String(o.TABLE_NUMBER).trim() !== ''
+                                ? `Table ${o.TABLE_NUMBER}`
+                                : o.ORDER_TYPE || '—'}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
+                              Total
+                            </div>
+                            <div className="text-sm font-extrabold text-brand-primary tabular-nums">
+                              ₱{formatMoneyNoDecimals(o.GRAND_TOTAL || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-3">
+                          {items.length === 0 ? (
+                            <div className="text-sm text-brand-muted">No items.</div>
+                          ) : (
+                            <div className="overflow-hidden rounded-lg border border-gray-100">
+                              <table className="w-full text-xs">
+                                <thead className="bg-white">
+                                  <tr className="text-brand-muted">
+                                    <th className="px-3 py-2 text-left font-bold uppercase tracking-widest">
+                                      Item
+                                    </th>
+                                    <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[56px]">
+                                      Qty
+                                    </th>
+                                    <th className="px-3 py-2 text-right font-bold uppercase tracking-widest w-[92px]">
+                                      Total
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50">
+                                  {items.map((it) => (
+                                    <tr key={String(it.ORDER_ITEM_ID)} className="text-brand-text">
+                                      <td className="px-3 py-2">
+                                        <div className="font-semibold leading-snug">
+                                          {it.MENU_NAME || `#${it.MENU_ID ?? ''}`}
+                                        </div>
+                                        {it.REMARKS ? (
+                                          <div className="text-[11px] text-brand-muted mt-0.5 break-words">
+                                            {it.REMARKS}
+                                          </div>
+                                        ) : null}
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums font-semibold">
+                                        {Number(it.QTY || 0)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums font-bold">
+                                        ₱{formatMoneyNoDecimals(it.LINE_TOTAL || 0)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {(o.SERVICE_CHARGE != null && Number(o.SERVICE_CHARGE) > 0) ||
+                          (o.SUBTOTAL != null && o.GRAND_TOTAL != null) ? (
+                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                <span className="text-brand-muted font-bold uppercase tracking-widest">
+                                  Subtotal
+                                </span>
+                                <span className="font-extrabold tabular-nums">
+                                  ₱{formatMoneyNoDecimals(o.SUBTOTAL || 0)}
+                                </span>
+                              </div>
+                              <div className="rounded-lg bg-gray-50 px-3 py-2 flex items-center justify-between">
+                                <span className="text-brand-muted font-bold uppercase tracking-widest">
+                                  Service
+                                </span>
+                                <span className="font-extrabold tabular-nums">
+                                  ₱{formatMoneyNoDecimals(o.SERVICE_CHARGE || 0)}
+                                </span>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-brand-muted">No receipt image.</div>
+        )}
+      </Modal>
     </div>
   );
 };

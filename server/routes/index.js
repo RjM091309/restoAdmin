@@ -24,6 +24,7 @@ module.exports = [
     require('./menuRoutes'),              // Menu routes
     require('./notificationRoutes'),     // Notification routes
     require('./orderRoutes'),             // Order routes
+    require('./receiptScanHistoryRoutes'), // Receipt scan audit (images + summary)
     require('./reportsRoutes'),           // Reports routes
     require('./tableRoutes'),             // Restaurant table routes
     require('./uploadRoutes'),            // Upload routes

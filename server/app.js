@@ -23,7 +23,7 @@ const i18n = require('i18n');
 const compression = require('compression');
 const cors = require('cors');
 const loyverseService = require('./utils/loyverseService');
-const { ensureOrderItemsLineCostColumn } = require('./utils/ensureSchema');
+const { ensureOrderItemsLineCostColumn, ensureReceiptScanHistoryTable } = require('./utils/ensureSchema');
 const app = express();
 app.use(compression());
 
@@ -226,8 +226,9 @@ app.use((err, req, res, next) => {
 (async () => {
 	try {
 		await ensureOrderItemsLineCostColumn();
+		await ensureReceiptScanHistoryTable();
 	} catch (e) {
-		console.error('[Schema] ensureOrderItemsLineCostColumn:', e?.message || e);
+		console.error('[Schema] ensureOrderItemsLineCostColumn / receipt_scan_history:', e?.message || e);
 	}
 
 	const server = app.listen(app.get('port'), function () {
