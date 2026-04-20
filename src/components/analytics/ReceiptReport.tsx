@@ -67,6 +67,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
   const [receiptImageLoading, setReceiptImageLoading] = useState(false);
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
   const [receiptOrders, setReceiptOrders] = useState<any[]>([]);
+  const [receiptImageError, setReceiptImageError] = useState<string | null>(null);
 
   const money = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -164,17 +165,19 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     setReceiptImageLoading(true);
     setReceiptImageUrl(null);
     setReceiptOrders([]);
+    setReceiptImageError(null);
     try {
       const res = await fetch(`/data-api/receipt-scan-history/order/${row.id}`);
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json?.success === false) {
-        throw new Error(json?.error || json?.message || 'No receipt image found');
+        throw new Error(json?.error || json?.message || 'No receipt image found for this order');
       }
       setReceiptImageUrl(json?.data?.receipt_image_data_url ?? null);
       setReceiptOrders(Array.isArray(json?.data?.orders) ? json.data.orders : []);
     } catch (e) {
       console.error('Failed to load receipt image', e);
-      setReceiptImageOpen(false);
+      const msg = e instanceof Error ? e.message : 'No receipt image found for this order';
+      setReceiptImageError(msg);
     } finally {
       setReceiptImageLoading(false);
     }
@@ -574,6 +577,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
           setReceiptImageOpen(false);
           setReceiptImageUrl(null);
           setReceiptOrders([]);
+          setReceiptImageError(null);
         }}
         title="Receipt"
         maxWidth="6xl"
@@ -713,6 +717,11 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                 )}
               </div>
             </div>
+          </div>
+        ) : receiptImageError ? (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-6 text-sm text-brand-muted">
+            <div className="font-bold text-brand-text mb-1">No receipt image</div>
+            <div>{receiptImageError}</div>
           </div>
         ) : (
           <div className="text-sm text-brand-muted">No receipt image.</div>

@@ -167,6 +167,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
   const [receiptOrders, setReceiptOrders] = useState<any[]>([]);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
 
   const loadBilling = useCallback(async () => {
     setLoading(true);
@@ -346,20 +347,21 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
     setReceiptLoading(true);
     setReceiptImageUrl(null);
     setReceiptOrders([]);
+    setReceiptError(null);
     try {
       const res = await fetch(`/data-api/receipt-scan-history/order/${record.ORDER_ID}`, {
         headers: authHeaders(),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || json?.success === false) {
-        throw new Error(json?.error || json?.message || 'No receipt image found');
+        throw new Error(json?.error || json?.message || 'No receipt image found for this order');
       }
       const url = json?.data?.receipt_image_data_url ?? null;
       setReceiptImageUrl(url);
       setReceiptOrders(Array.isArray(json?.data?.orders) ? json.data.orders : []);
     } catch (e: any) {
-      toast.error(e?.message || 'No receipt image found');
-      setReceiptModalOpen(false);
+      const msg = e?.message || 'No receipt image found for this order';
+      setReceiptError(msg);
     } finally {
       setReceiptLoading(false);
     }
@@ -509,21 +511,36 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
         render: (r) => (
           <div className="flex justify-end items-center gap-2">
             <button
-              onClick={() => void openReceiptModal(r)}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void openReceiptModal(r);
+              }}
               className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
               title="View receipt"
             >
               <Receipt size={16} />
             </button>
             <button
-              onClick={() => openHistoryModal(r)}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openHistoryModal(r);
+              }}
               className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
               title={t('billing.view')}
             >
               <Eye size={16} />
             </button>
             <button
-              onClick={() => openPaymentModal(r)}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openPaymentModal(r);
+              }}
               disabled={r.STATUS === 1}
               className={cn(
                 'p-2 rounded-lg transition-colors flex items-center gap-1',
@@ -843,6 +860,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
           setReceiptModalOpen(false);
           setReceiptImageUrl(null);
           setReceiptOrders([]);
+          setReceiptError(null);
         }}
         title="Receipt"
         maxWidth="6xl"
@@ -853,6 +871,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
               setReceiptModalOpen(false);
               setReceiptImageUrl(null);
               setReceiptOrders([]);
+              setReceiptError(null);
             }}
             className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors"
           >
@@ -995,6 +1014,14 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
                 )}
               </div>
             </div>
+          </div>
+        ) : receiptError ? (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-6 text-sm text-brand-muted">
+            <div className="font-bold text-brand-text mb-1">No receipt image</div>
+            <div>{receiptError}</div>
+            {activeRecord?.ORDER_NO ? (
+              <div className="mt-2 text-xs font-mono">Order: {activeRecord.ORDER_NO}</div>
+            ) : null}
           </div>
         ) : (
           <div className="text-sm text-brand-muted">No receipt image.</div>
