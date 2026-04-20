@@ -121,4 +121,17 @@ async function ensureReceiptScanHistoryTable() {
 	}
 }
 
-module.exports = { ensureOrderItemsLineCostColumn, ensureReceiptScanHistoryTable };
+async function ensureTelegramSettingsTable() {
+	try {
+		const TelegramSettingsModel = require('../models/telegramSettingsModel');
+		await TelegramSettingsModel.ensureSchema();
+	} catch (err) {
+		console.error('[Schema] ensure telegram_settings failed:', err.message || err);
+	}
+}
+
+module.exports = {
+	ensureOrderItemsLineCostColumn,
+	ensureReceiptScanHistoryTable,
+	ensureTelegramSettingsTable,
+};

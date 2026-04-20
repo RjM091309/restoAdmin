@@ -1,0 +1,786 @@
+const https = require('https');
+const TelegramSettingsModel = require('../models/telegramSettingsModel');
+const CashReconciliationModel = require('../models/cashReconciliationModel');
+const pool = require('../config/db');
+const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
+function requestJson(url, method = 'POST', payload = null) {
+	return new Promise((resolve, reject) => {
+		const request = https.request(
+			url,
+			{
+				method,
+				headers: {
+					'Content-Type': 'application/json',
+				},
+			},
+			(response) => {
+				let rawBody = '';
+				response.on('data', (chunk) => {
+					rawBody += chunk;
+				});
+				response.on('end', () => {
+					try {
+						const parsed = rawBody ? JSON.parse(rawBody) : {};
+						resolve({ statusCode: response.statusCode, body: parsed });
+					} catch (err) {
+						reject(new Error(`Invalid Telegram response: ${err.message}`));
+					}
+				});
+			}
+		);
+
+		request.on('error', reject);
+		if (payload != null) {
+			request.write(JSON.stringify(payload));
+		}
+		request.end();
+	});
+}
+
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class TelegramService {
+	static _pollingActive = false;
+	static _lastUpdateId = null;
+	static _webhookClearedForToken = null;
+	static _menuConfiguredForToken = null;
+
+	static CALLBACK_BRANCH_IDS = {
+		report_total: null, // all branches
+		report_kims: 2, // Kim's B
+		report_blue_m: 3, // Blue M
+		report_keum: 9, // Keum
+		report_eesome: 10, // EESOME
+		report_noir_eesome: 11, // NOIR by EESOME
+		report_pre: 12, // Pre
+		report_new: null, // reserved
+	};
+	static FORMATTED_CALLBACKS = new Set([
+		'report_total',
+		'report_kims',
+		'report_blue_m',
+		'report_keum',
+		'report_eesome',
+		'report_pre',
+		'report_noir_eesome',
+	]);
+
+	static buildReportButtons() {
+		return [
+			[
+				{ text: '합계 Total', callback_data: 'report_total' },
+				{ text: "김형제 Kim's B", callback_data: 'report_kims' },
+			],
+			[
+				{ text: '블루문 Blue M', callback_data: 'report_blue_m' },
+				{ text: '금호반점 Keum', callback_data: 'report_keum' },
+			],
+			[
+				{ text: 'EESOME', callback_data: 'report_eesome' },
+				{ text: '프리미엄 Pre', callback_data: 'report_pre' },
+			],
+			[
+				{ text: 'NOIR by EESOME', callback_data: 'report_noir_eesome' },
+				{ text: '신규 New', callback_data: 'report_new' },
+			],
+		];
+	}
+
+	static async getSettings() {
+		const settings = await TelegramSettingsModel.getSettings();
+		if (!settings) return null;
+		return {
+			botToken: settings.BOT_TOKEN,
+			chatId: settings.CHAT_ID || null,
+			updatedAt: settings.UPDATED_DT,
+		};
+	}
+
+	static async saveSettings({ botToken, chatId = null }) {
+		if (!botToken || typeof botToken !== 'string') {
+			throw new Error('botToken is required');
+		}
+		const trimmedToken = botToken.trim();
+		if (!trimmedToken) {
+			throw new Error('botToken is required');
+		}
+		const normalizedChatId = chatId == null || String(chatId).trim() === '' ? null : String(chatId).trim();
+		return TelegramSettingsModel.upsertSettings({
+			botToken: trimmedToken,
+			chatId: normalizedChatId,
+		});
+	}
+
+	static async sendMessage({ message, chatId = null, parseMode = 'HTML' }) {
+		if (!message || !String(message).trim()) {
+			throw new Error('message is required');
+		}
+
+		const settings = await TelegramService.getSettings();
+		if (!settings?.botToken) {
+			throw new Error('Telegram bot token is not configured');
+		}
+
+		const targetChatId = chatId || settings.chatId;
+		if (!targetChatId) {
+			throw new Error('Telegram chat ID is not configured');
+		}
+
+		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', {
+			chat_id: String(targetChatId),
+			text: String(message),
+			parse_mode: parseMode,
+		});
+		if (response.statusCode < 200 || response.statusCode >= 300 || response.body?.ok !== true) {
+			const reason = response.body?.description || `HTTP ${response.statusCode}`;
+			throw new Error(`Telegram send failed: ${reason}`);
+		}
+
+		return response.body.result;
+	}
+
+	static async sendInlineMenu({ chatId = null, message = 'Piliin ang report na gusto mo:' }) {
+		const settings = await TelegramService.getSettings();
+		if (!settings?.botToken) {
+			throw new Error('Telegram bot token is not configured');
+		}
+
+		const targetChatId = chatId || settings.chatId;
+		if (!targetChatId) {
+			throw new Error('Telegram chat ID is not configured');
+		}
+
+		const payload = {
+			chat_id: String(targetChatId),
+			text: String(message),
+			reply_markup: {
+				inline_keyboard: TelegramService.buildReportButtons(),
+			},
+		};
+
+		const response = await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', payload);
+		if (response.statusCode < 200 || response.statusCode >= 300 || response.body?.ok !== true) {
+			const reason = response.body?.description || `HTTP ${response.statusCode}`;
+			throw new Error(`Telegram menu send failed: ${reason}`);
+		}
+
+		return response.body.result;
+	}
+
+	static async configureBotMenu(botToken) {
+		await TelegramService.callTelegramApi(botToken, 'setMyCommands', {
+			commands: [
+				{ command: 'reports', description: 'Show report buttons' },
+			],
+		});
+		await TelegramService.callTelegramApi(botToken, 'setChatMenuButton', {
+			menu_button: { type: 'commands' },
+		});
+	}
+
+	static async callTelegramApi(botToken, method, payload) {
+		const endpoint = `https://api.telegram.org/bot${botToken}/${method}`;
+		return requestJson(endpoint, 'POST', payload);
+	}
+
+	static async getTelegramUpdates(botToken, options = {}) {
+		const params = new URLSearchParams();
+		if (options.offset != null) params.set('offset', String(options.offset));
+		if (options.timeout != null) params.set('timeout', String(options.timeout));
+
+		const endpoint = `https://api.telegram.org/bot${botToken}/getUpdates?${params.toString()}`;
+		return requestJson(endpoint, 'GET');
+	}
+
+	static normalizeText(value) {
+		return String(value || '').trim().toLowerCase();
+	}
+
+	static async resolveBranchId(callbackData) {
+		if (!Object.prototype.hasOwnProperty.call(TelegramService.CALLBACK_BRANCH_IDS, callbackData)) {
+			return null;
+		}
+		const branchId = TelegramService.CALLBACK_BRANCH_IDS[callbackData];
+		return Number.isFinite(Number(branchId)) ? Number(branchId) : null;
+	}
+
+	static buildReportTitle(callbackData) {
+		const titles = {
+			report_total: '합계 Total',
+			report_kims: "김형제 Kim's B",
+			report_blue_m: '블루문 Blue M',
+			report_keum: '금호반점 Keum',
+			report_eesome: 'EESOME',
+			report_pre: '프리미엄 Pre',
+			report_noir_eesome: 'NOIR by EESOME',
+			report_new: '신규 New',
+		};
+		return titles[callbackData] || 'Report';
+	}
+
+	static async calculateMetricsForRange(startDate, endDate, previousStartDate, previousEndDate, branchId = null) {
+		const [monthlyRows, monthlyDailyExpenses, monthlyExpenseSummary, monthlyExpenseBreakdown, monthlyBranchSales, currentRecon] = await Promise.all([
+			TelegramService.getDashboardDailySales(startDate, endDate, branchId),
+			TelegramService.getDashboardDailyExpenses(startDate, endDate, branchId),
+			TelegramService.getDashboardExpenseSummary(startDate, endDate, branchId),
+			TelegramService.getDashboardExpenseBreakdown(startDate, endDate, branchId).catch(() => []),
+			TelegramService.getDashboardBranchSales(startDate, endDate, branchId),
+			CashReconciliationModel.aggregatesForRange(branchId, startDate, endDate),
+		]);
+		const [previousRows, previousBranchSales, previousRecon] = await Promise.all([
+			TelegramService.getDashboardDailySales(previousStartDate, previousEndDate, branchId),
+			TelegramService.getDashboardBranchSales(previousStartDate, previousEndDate, branchId),
+			CashReconciliationModel.aggregatesForRange(branchId, previousStartDate, previousEndDate),
+		]);
+
+		const monthlyReconTotal = parseFloat(currentRecon?.total || 0) || 0;
+		const previousReconTotal = parseFloat(previousRecon?.total || 0) || 0;
+
+		const totalSalesFromDaily = monthlyRows.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const totalSalesFromBranch = monthlyBranchSales.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const monthlyRevenue = (totalSalesFromDaily || totalSalesFromBranch) + monthlyReconTotal;
+
+		const previousSalesFromDaily = previousRows.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const previousSalesFromBranch = previousBranchSales.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const previousRevenue = (previousSalesFromDaily || previousSalesFromBranch) + previousReconTotal;
+
+		const totalExpensesFromDaily = monthlyDailyExpenses.reduce(
+			(sum, row) => sum + (parseFloat(row.total_expense) || 0),
+			0
+		);
+		const totalExpensesFromBreakdown = (monthlyExpenseBreakdown || []).reduce(
+			(sum, row) => sum + (parseFloat(row?.total_amount) || 0),
+			0
+		);
+		const monthlyExpense = totalExpensesFromBreakdown || monthlyExpenseSummary || totalExpensesFromDaily;
+		const netProfit = monthlyRevenue - monthlyExpense;
+		const monthOverMonthPct = previousRevenue > 0 ? ((monthlyRevenue - previousRevenue) / previousRevenue) * 100 : 0;
+
+		return {
+			monthlyRevenue,
+			previousRevenue,
+			monthlyExpense,
+			netProfit,
+			monthOverMonthPct,
+		};
+	}
+
+	static async buildTotalReportMessage() {
+		const todayDate = new Date();
+		const currentMonth = TelegramService.getDateRangeForMonth(todayDate);
+		const previousMonth = TelegramService.getPreviousMonthRange(todayDate);
+
+		const groups = [
+			{ label: "김형제 Kim's B", branchIds: [2] },
+			{ label: '블루문 Blue M', branchIds: [3] },
+			{ label: '금호반점 Keum', branchIds: [9] },
+			// Temporary grouped view: keep EESOME + NOIR combined until separation is requested.
+			{ label: 'EESOME', branchIds: [10, 11] },
+			{ label: '프리미엄 Pre', branchIds: [12] },
+		];
+
+		const groupResults = await Promise.all(
+			groups.map(async (group) => {
+				const metricsPerBranch = await Promise.all(
+					group.branchIds.map((branchId) =>
+						TelegramService.calculateMetricsForRange(
+							currentMonth.start,
+							currentMonth.end,
+							previousMonth.start,
+							previousMonth.end,
+							branchId
+						)
+					)
+				);
+
+				const totals = metricsPerBranch.reduce(
+					(acc, metrics) => {
+						acc.monthlyRevenue += metrics.monthlyRevenue;
+						acc.previousRevenue += metrics.previousRevenue;
+						acc.monthlyExpense += metrics.monthlyExpense;
+						acc.netProfit += metrics.netProfit;
+						return acc;
+					},
+					{ monthlyRevenue: 0, previousRevenue: 0, monthlyExpense: 0, netProfit: 0 }
+				);
+				const monthOverMonthPct = totals.previousRevenue > 0
+					? ((totals.monthlyRevenue - totals.previousRevenue) / totals.previousRevenue) * 100
+					: 0;
+
+				return {
+					label: group.label,
+					monthlyRevenue: totals.monthlyRevenue,
+					previousRevenue: totals.previousRevenue,
+					monthlyExpense: totals.monthlyExpense,
+					netProfit: totals.netProfit,
+					monthOverMonthPct,
+				};
+			})
+		);
+
+		const overall = groupResults.reduce(
+			(acc, row) => {
+				acc.monthlyRevenue += row.monthlyRevenue;
+				acc.previousRevenue += row.previousRevenue;
+				acc.monthlyExpense += row.monthlyExpense;
+				acc.netProfit += row.netProfit;
+				return acc;
+			},
+			{ monthlyRevenue: 0, previousRevenue: 0, monthlyExpense: 0, netProfit: 0 }
+		);
+		const overallMoM = overall.previousRevenue > 0
+			? ((overall.monthlyRevenue - overall.previousRevenue) / overall.previousRevenue) * 100
+			: 0;
+
+		const latestEncodedDt = await TelegramService.getLatestEncodedDt(null);
+		const lines = [
+			'<b>합계 Total</b>',
+			'',
+			`Last Update : ${TelegramService.formatLastUpdate(latestEncodedDt)}`,
+			'',
+			`전체 매출: ${TelegramService.formatNumber(overall.monthlyRevenue)}      지출: ${TelegramService.formatNumber(overall.monthlyExpense)}`,
+			`순익: ${TelegramService.formatNumber(overall.netProfit)}      전월대비: ${overallMoM.toFixed(1)}%`,
+			'',
+		];
+
+		for (const group of groupResults) {
+			lines.push(`<b>${group.label}</b>`);
+			lines.push(
+				`월 매출: ${TelegramService.formatNumber(group.monthlyRevenue)}      지출: ${TelegramService.formatNumber(group.monthlyExpense)}`
+			);
+			lines.push(`순익: ${TelegramService.formatNumber(group.netProfit)}      전월대비: ${group.monthOverMonthPct.toFixed(1)}%`);
+			lines.push('');
+		}
+
+		lines.push(`기간: ${TelegramService.formatYmdKorean(currentMonth.start)} ~ ${TelegramService.formatYmdKorean(currentMonth.end)}`);
+		return lines.join('\n');
+	}
+
+	static getDateRangeForMonth(baseDate = new Date()) {
+		const year = baseDate.getFullYear();
+		const month = baseDate.getMonth();
+		const start = new Date(year, month, 1);
+		// Dashboard default behavior is month-to-date, not full month until last day.
+		const end = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+		return {
+			start: TelegramService.formatDateLocalYmd(start),
+			end: TelegramService.formatDateLocalYmd(end),
+		};
+	}
+
+	static getPreviousMonthRange(baseDate = new Date()) {
+		const year = baseDate.getFullYear();
+		const month = baseDate.getMonth();
+		const start = new Date(year, month - 1, 1);
+		const previousMonthLastDay = new Date(year, month, 0).getDate();
+		const comparableDay = Math.min(baseDate.getDate(), previousMonthLastDay);
+		const end = new Date(year, month - 1, comparableDay);
+		return {
+			start: TelegramService.formatDateLocalYmd(start),
+			end: TelegramService.formatDateLocalYmd(end),
+		};
+	}
+
+	static formatDateLocalYmd(dateObj) {
+		const y = dateObj.getFullYear();
+		const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+		const d = String(dateObj.getDate()).padStart(2, '0');
+		return `${y}-${m}-${d}`;
+	}
+
+	static formatYmdKorean(value) {
+		const d = TelegramService.parseDateToLocal(value);
+		if (!d) return String(value || '');
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}년 ${m}월 ${day}일`;
+	}
+
+	static parseDateToLocal(value) {
+		if (!value) return null;
+		if (value instanceof Date) {
+			return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+		}
+
+		const ymdMatch = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		if (ymdMatch) {
+			const year = Number(ymdMatch[1]);
+			const month = Number(ymdMatch[2]) - 1;
+			const day = Number(ymdMatch[3]);
+			return new Date(year, month, day);
+		}
+
+		const d = new Date(value);
+		if (Number.isNaN(d.getTime())) return null;
+		return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+	}
+
+	static formatNumber(value) {
+		const n = Number(value || 0);
+		return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+	}
+
+	static async getLatestEncodedDt(branchId = null) {
+		let query = `
+			SELECT MAX(ENCODED_DT) AS latest_encoded_dt
+			FROM billing
+			WHERE STATUS IN (1, 2)
+		`;
+		const params = [];
+		if (branchId) {
+			query += ` AND BRANCH_ID = ?`;
+			params.push(branchId);
+		}
+
+		const [rows] = await pool.execute(query, params);
+		return rows?.[0]?.latest_encoded_dt || null;
+	}
+
+	static formatLastUpdate(value) {
+		if (!value) return 'N/A';
+		const d = new Date(value);
+		if (Number.isNaN(d.getTime())) return 'N/A';
+		return d.toLocaleDateString('en-US', {
+			month: 'long',
+			day: 'numeric',
+			year: 'numeric',
+		});
+	}
+
+	static getCalendarWeekRangeForMonth(baseDate = new Date()) {
+		const year = baseDate.getFullYear();
+		const month = baseDate.getMonth();
+		const monthStart = new Date(year, month, 1);
+		const monthEnd = new Date(year, month + 1, 0);
+
+		const monthStartMondayIndex = (monthStart.getDay() + 6) % 7;
+		const calendarStart = new Date(monthStart);
+		calendarStart.setDate(calendarStart.getDate() - monthStartMondayIndex);
+
+		const monthEndMondayIndex = (monthEnd.getDay() + 6) % 7;
+		const calendarEnd = new Date(monthEnd);
+		calendarEnd.setDate(calendarEnd.getDate() + (6 - monthEndMondayIndex));
+
+		const dayMs = 24 * 60 * 60 * 1000;
+		const weekCount = Math.floor((calendarEnd - calendarStart) / dayMs / 7) + 1;
+		return {
+			start: TelegramService.formatDateLocalYmd(calendarStart),
+			end: TelegramService.formatDateLocalYmd(calendarEnd),
+			weekCount,
+		};
+	}
+
+	static buildWeeklyBuckets(rows, reconByDate = {}, calendarStartYmd, weekCount = 5) {
+		const weekly = Array.from({ length: Math.max(1, weekCount) }, () => 0);
+		const calendarStart = TelegramService.parseDateToLocal(calendarStartYmd);
+		if (!calendarStart) return weekly;
+		const dayMs = 24 * 60 * 60 * 1000;
+
+		const getWeekIndex = (dateValue) => {
+			const d = TelegramService.parseDateToLocal(dateValue);
+			if (!d) return -1;
+			const dayDiff = Math.floor((d - calendarStart) / dayMs);
+			if (dayDiff < 0) return -1;
+			const index = Math.floor(dayDiff / 7);
+			if (index < 0 || index >= weekly.length) return -1;
+			return index;
+		};
+
+		for (const row of rows || []) {
+			if (!row?.date) continue;
+			const weekIndex = getWeekIndex(row.date);
+			if (weekIndex < 0) continue;
+			weekly[weekIndex] += parseFloat(row.total_sales || row.revenue || 0) || 0;
+		}
+
+		for (const [ymd, reconAmount] of Object.entries(reconByDate || {})) {
+			const weekIndex = getWeekIndex(ymd);
+			if (weekIndex < 0) continue;
+			weekly[weekIndex] += parseFloat(reconAmount || 0) || 0;
+		}
+		return weekly;
+	}
+
+	static async getDashboardDailySales(startDate, endDate, branchId = null) {
+		const params = new URLSearchParams();
+		params.set('start_date', startDate);
+		params.set('end_date', endDate);
+		if (branchId) params.set('branch_id', String(branchId));
+
+		const response = await fetch(`${PYSERVER_BASE_URL}/api/analytics/daily-sales?${params.toString()}`);
+		if (!response.ok) {
+			throw new Error(`PyServer daily-sales failed: HTTP ${response.status}`);
+		}
+
+		const json = await response.json();
+		if (!json?.success) {
+			throw new Error(json?.message || 'PyServer daily-sales failed');
+		}
+
+		const rows = Array.isArray(json?.data?.data) ? json.data.data : [];
+		return rows.map((row) => ({
+			date: row.sale_date,
+			total_sales: parseFloat(row.total_sales || 0) || 0,
+		}));
+	}
+
+	static async getDashboardExpenseSummary(startDate, endDate, branchId = null) {
+		const params = new URLSearchParams();
+		params.set('start_date', startDate);
+		params.set('end_date', endDate);
+		if (branchId) params.set('branch_id', String(branchId));
+
+		const response = await fetch(`${PYSERVER_BASE_URL}/api/analytics/expense-summary?${params.toString()}`);
+		if (!response.ok) {
+			throw new Error(`PyServer expense-summary failed: HTTP ${response.status}`);
+		}
+
+		const json = await response.json();
+		if (!json?.success) {
+			throw new Error(json?.message || 'PyServer expense-summary failed');
+		}
+
+		return parseFloat(json?.data?.total_expense || 0) || 0;
+	}
+
+	static async getDashboardDailyExpenses(startDate, endDate, branchId = null) {
+		const params = new URLSearchParams();
+		params.set('start_date', startDate);
+		params.set('end_date', endDate);
+		if (branchId) params.set('branch_id', String(branchId));
+
+		const response = await fetch(`${PYSERVER_BASE_URL}/api/analytics/daily-expenses?${params.toString()}`);
+		if (!response.ok) {
+			throw new Error(`PyServer daily-expenses failed: HTTP ${response.status}`);
+		}
+
+		const json = await response.json();
+		if (!json?.success) {
+			throw new Error(json?.message || 'PyServer daily-expenses failed');
+		}
+
+		return Array.isArray(json?.data?.data) ? json.data.data : [];
+	}
+
+	static async getDashboardExpenseBreakdown(startDate, endDate, branchId = null) {
+		const params = new URLSearchParams();
+		params.set('start_date', startDate);
+		params.set('end_date', endDate);
+		if (branchId) params.set('branch_id', String(branchId));
+
+		const response = await fetch(`${PYSERVER_BASE_URL}/api/analytics/expense-breakdown?${params.toString()}`);
+		if (!response.ok) {
+			throw new Error(`PyServer expense-breakdown failed: HTTP ${response.status}`);
+		}
+
+		const json = await response.json();
+		if (!json?.success) {
+			throw new Error(json?.message || 'PyServer expense-breakdown failed');
+		}
+
+		return Array.isArray(json?.data?.data) ? json.data.data : [];
+	}
+
+	static async getDashboardBranchSales(startDate, endDate, branchId = null) {
+		const params = new URLSearchParams();
+		params.set('start_date', startDate);
+		params.set('end_date', endDate);
+		if (branchId) params.set('branch_id', String(branchId));
+
+		const response = await fetch(`${PYSERVER_BASE_URL}/api/analytics/branch-sales?${params.toString()}`);
+		if (!response.ok) {
+			throw new Error(`PyServer branch-sales failed: HTTP ${response.status}`);
+		}
+
+		const json = await response.json();
+		if (!json?.success) {
+			throw new Error(json?.message || 'PyServer branch-sales failed');
+		}
+
+		return Array.isArray(json?.data?.data) ? json.data.data : [];
+	}
+
+	static async buildReportMessage(callbackData) {
+		if (callbackData === 'report_total') {
+			return TelegramService.buildTotalReportMessage();
+		}
+
+		const todayDate = new Date();
+		const branchId = await TelegramService.resolveBranchId(callbackData);
+		const currentMonth = TelegramService.getDateRangeForMonth(todayDate);
+		const previousMonth = TelegramService.getPreviousMonthRange(todayDate);
+		const weeklyCalendarRange = TelegramService.getCalendarWeekRangeForMonth(todayDate);
+
+		const metrics = await TelegramService.calculateMetricsForRange(
+			currentMonth.start,
+			currentMonth.end,
+			previousMonth.start,
+			previousMonth.end,
+			branchId
+		);
+		const [weeklyRows, weeklyRecon] = await Promise.all([
+			TelegramService.getDashboardDailySales(weeklyCalendarRange.start, weeklyCalendarRange.end, branchId),
+			CashReconciliationModel.aggregatesForRange(branchId, weeklyCalendarRange.start, weeklyCalendarRange.end),
+		]);
+		const latestEncodedDt = await TelegramService.getLatestEncodedDt(branchId);
+		const weeklyBuckets = TelegramService.buildWeeklyBuckets(
+			weeklyRows,
+			weeklyRecon?.byDate || {},
+			weeklyCalendarRange.start,
+			weeklyCalendarRange.weekCount
+		);
+		const weeklyLines = [];
+		for (let i = 0; i < weeklyBuckets.length; i += 2) {
+			const left = `${i + 1}주: ${TelegramService.formatNumber(weeklyBuckets[i])}`;
+			const rightIndex = i + 1;
+			if (rightIndex < weeklyBuckets.length) {
+				const right = `${rightIndex + 1}주: ${TelegramService.formatNumber(weeklyBuckets[rightIndex])}`;
+				weeklyLines.push(`${left}      ${right}`);
+			} else {
+				weeklyLines.push(left);
+			}
+		}
+		const title = TelegramService.buildReportTitle(callbackData);
+
+		return [
+			`<b>${title}</b>`,
+			'',
+			`월매출: ${TelegramService.formatNumber(metrics.monthlyRevenue)}      지출: ${TelegramService.formatNumber(metrics.monthlyExpense)}`,
+			`순익: ${TelegramService.formatNumber(metrics.netProfit)}      전월대비: ${metrics.monthOverMonthPct.toFixed(1)}%`,
+			'',
+			'주간 매출(Weekly)',
+			...weeklyLines,
+			'',
+			`Last Update : ${TelegramService.formatLastUpdate(latestEncodedDt)}`,
+		].join('\n');
+	}
+
+	static async handleIncomingUpdate(update) {
+		const settings = await TelegramService.getSettings();
+		if (!settings?.botToken) {
+			throw new Error('Telegram bot token is not configured');
+		}
+
+		const callbackQuery = update?.callback_query;
+		if (callbackQuery?.id && callbackQuery?.message?.chat?.id && callbackQuery?.data) {
+			if (!TelegramService.FORMATTED_CALLBACKS.has(callbackQuery.data)) {
+				await TelegramService.callTelegramApi(settings.botToken, 'answerCallbackQuery', {
+					callback_query_id: callbackQuery.id,
+					text: 'Not configured yet',
+					show_alert: false,
+				});
+				return { handled: true, type: 'callback_query' };
+			}
+
+			const reportMessage = await TelegramService.buildReportMessage(callbackQuery.data);
+			await TelegramService.callTelegramApi(settings.botToken, 'answerCallbackQuery', {
+				callback_query_id: callbackQuery.id,
+				text: 'Report ready',
+				show_alert: false,
+			});
+
+			await TelegramService.callTelegramApi(settings.botToken, 'sendMessage', {
+				chat_id: String(callbackQuery.message.chat.id),
+				text: reportMessage,
+				parse_mode: 'HTML',
+			});
+			return { handled: true, type: 'callback_query' };
+		}
+
+		const text = String(update?.message?.text || '').trim();
+		const chatId = update?.message?.chat?.id;
+		const normalizedText = text.toLowerCase();
+		if (chatId && normalizedText === '/start') {
+			await TelegramService.sendMessage({
+				chatId: String(chatId),
+				message: 'Welcome to Restaurant System',
+				parseMode: 'HTML',
+			});
+			return { handled: true, type: 'start_message' };
+		}
+
+		if (chatId && normalizedText === '/reports') {
+			await TelegramService.sendInlineMenu({
+				chatId: String(chatId),
+				message: 'Select the report you want to view:',
+			});
+			return { handled: true, type: 'command_menu' };
+		}
+
+		return { handled: false, type: 'ignored' };
+	}
+
+	static isPollingActive() {
+		return TelegramService._pollingActive;
+	}
+
+	static stopPolling() {
+		TelegramService._pollingActive = false;
+	}
+
+	static async startPolling() {
+		if (TelegramService._pollingActive) {
+			return;
+		}
+		TelegramService._pollingActive = true;
+
+		while (TelegramService._pollingActive) {
+			try {
+				const settings = await TelegramService.getSettings();
+				if (!settings?.botToken) {
+					await sleep(3000);
+					continue;
+				}
+
+				if (TelegramService._webhookClearedForToken !== settings.botToken) {
+					await TelegramService.callTelegramApi(settings.botToken, 'deleteWebhook', {
+						drop_pending_updates: false,
+					});
+					TelegramService._webhookClearedForToken = settings.botToken;
+				}
+
+				if (TelegramService._menuConfiguredForToken !== settings.botToken) {
+					await TelegramService.configureBotMenu(settings.botToken);
+					TelegramService._menuConfiguredForToken = settings.botToken;
+				}
+
+				const updatesResponse = await TelegramService.getTelegramUpdates(settings.botToken, {
+					offset: TelegramService._lastUpdateId != null ? TelegramService._lastUpdateId + 1 : undefined,
+					timeout: 25,
+				});
+
+				if (updatesResponse.statusCode >= 200 && updatesResponse.statusCode < 300 && updatesResponse.body?.ok) {
+					const updates = Array.isArray(updatesResponse.body.result) ? updatesResponse.body.result : [];
+					for (const update of updates) {
+						TelegramService._lastUpdateId = Number(update.update_id);
+						try {
+							await TelegramService.handleIncomingUpdate(update);
+						} catch (handlerError) {
+							console.error('[Telegram] Update handling failed:', handlerError?.message || handlerError);
+						}
+					}
+				} else {
+					const reason = updatesResponse.body?.description || `HTTP ${updatesResponse.statusCode}`;
+					console.error('[Telegram] getUpdates failed:', reason);
+					await sleep(2000);
+				}
+			} catch (error) {
+				console.error('[Telegram] Polling loop error:', error?.message || error);
+				await sleep(3000);
+			}
+		}
+	}
+
+	static maskToken(token) {
+		if (!token) return null;
+		if (token.length <= 8) return '********';
+		return `${token.slice(0, 4)}...${token.slice(-4)}`;
+	}
+}
+
+module.exports = TelegramService;
