@@ -45,6 +45,43 @@ async function saveWebpToUploads(buffer) {
 	return `/uploads/receipt-scan-history/${name}`;
 }
 
+function getPublicBaseUrl(req) {
+	const envBase = process.env.PUBLIC_API_BASE_URL || process.env.PUBLIC_BASE_URL || '';
+	if (envBase && String(envBase).trim()) return String(envBase).trim().replace(/\/+$/, '');
+
+	// Prefer forwarded headers when behind a reverse proxy.
+	const xfProto = req.get('x-forwarded-proto');
+	const xfHost = req.get('x-forwarded-host');
+	const xfPort = req.get('x-forwarded-port');
+
+	const proto = (xfProto ? String(xfProto).split(',')[0].trim() : req.protocol) || 'http';
+	let host = (xfHost ? String(xfHost).split(',')[0].trim() : req.get('host')) || '';
+
+	// Some proxies set host without port, plus a separate x-forwarded-port.
+	if (xfPort && host && !/:\d+$/.test(host)) {
+		const port = String(xfPort).split(',')[0].trim();
+		if (port && port !== '80' && port !== '443') host = `${host}:${port}`;
+	}
+	return `${proto}://${host}`;
+}
+
+function toPublicReceiptUrl(req, receiptImageValue) {
+	if (receiptImageValue == null) return null;
+	const raw = String(receiptImageValue).trim();
+	if (!raw) return null;
+
+	// Already absolute.
+	if (/^https?:\/\//i.test(raw)) return raw;
+
+	// If we stored a local uploads path, prefer returning a relative URL so the frontend can
+	// fetch it via its `/uploads` proxy (avoids localhost loopback / PNA blocks in browsers).
+	if (raw.startsWith('/uploads/')) return raw;
+
+	// Other relative paths: make absolute based on public base.
+	const baseUrl = getPublicBaseUrl(req);
+	return raw.startsWith('/') ? baseUrl + raw : `${baseUrl}/${raw}`;
+}
+
 class ReceiptScanHistoryController {
 	static _bundleFromRow(row) {
 		if (!row) return null;
@@ -119,7 +156,7 @@ class ReceiptScanHistoryController {
 				if (!allowed) return ApiResponse.forbidden(res, 'Not allowed');
 			}
 
-			const baseUrl = req.protocol + '://' + req.get('host');
+			const baseUrl = getPublicBaseUrl(req);
 			const bundle = await ReceiptScanHistoryModel.getOrderBundleByReceiptImage(row.RECEIPT_IMAGE);
 			const itemsByOrderId = new Map();
 			for (const it of bundle.items || []) {
@@ -138,9 +175,7 @@ class ReceiptScanHistoryController {
 				orders = orders.filter((o) => Number(o?.ORDER_ID) === clickedId);
 			}
 
-			const imageDataUrl = row.RECEIPT_IMAGE
-				? (String(row.RECEIPT_IMAGE).startsWith('http') ? String(row.RECEIPT_IMAGE) : baseUrl + String(row.RECEIPT_IMAGE))
-				: null;
+			const imageDataUrl = toPublicReceiptUrl(req, row.RECEIPT_IMAGE);
 
 			const { RECEIPT_IMAGE, ...rest } = row;
 			return ApiResponse.success(
@@ -177,7 +212,7 @@ class ReceiptScanHistoryController {
 				if (!allowed) return ApiResponse.forbidden(res, 'Not allowed');
 			}
 
-			const baseUrl = req.protocol + '://' + req.get('host');
+			const baseUrl = getPublicBaseUrl(req);
 			const bundle = await ReceiptScanHistoryModel.getOrderBundleByReceiptImage(row.RECEIPT_IMAGE);
 			const itemsByOrderId = new Map();
 			for (const it of bundle.items || []) {
@@ -196,9 +231,7 @@ class ReceiptScanHistoryController {
 				orders = orders.filter((o) => Number(o?.ORDER_ID) === requestedId);
 			}
 
-			const imageDataUrl = row.RECEIPT_IMAGE
-				? (String(row.RECEIPT_IMAGE).startsWith('http') ? String(row.RECEIPT_IMAGE) : baseUrl + String(row.RECEIPT_IMAGE))
-				: null;
+			const imageDataUrl = toPublicReceiptUrl(req, row.RECEIPT_IMAGE);
 			const { RECEIPT_IMAGE, ...rest } = row;
 			return ApiResponse.success(
 				res,

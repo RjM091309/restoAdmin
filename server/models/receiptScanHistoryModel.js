@@ -92,9 +92,13 @@ class ReceiptScanHistoryModel {
 			sql += ` AND h.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		sql += ` ORDER BY h.ENCODED_DT DESC, h.IDNo DESC LIMIT ? OFFSET ?`;
-		params.push(Math.min(Math.max(1, Number(limit) || 100), 500), Math.max(0, Number(offset) || 0));
-		const [rows] = await pool.execute(sql, params);
+		// Some MySQL/MariaDB builds reject bound parameters for LIMIT/OFFSET in prepared statements.
+		// Inline clamped integers instead (branchId remains parameterized).
+		const safeLimit = Math.min(Math.max(1, Number(limit) || 100), 500);
+		const safeOffset = Math.max(0, Number(offset) || 0);
+		sql += ` ORDER BY h.ENCODED_DT DESC, h.IDNo DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`;
+		// Use text protocol to avoid server-side prepared statement LIMIT/OFFSET issues on some builds.
+		const [rows] = await pool.query(sql, params);
 		return rows;
 	}
 

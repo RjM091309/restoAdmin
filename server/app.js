@@ -32,6 +32,10 @@ const {
 const app = express();
 app.use(compression());
 
+// Respect reverse proxies (nginx/traefik) so req.protocol/host can be derived from forwarded headers.
+// This matters when generating absolute URLs for assets (e.g. receipt scan uploads).
+app.set('trust proxy', true);
+
 const API_INFO_FILE = path.join(__dirname, 'public', 'api-info.html');
 
 // CORS configuration - must be at the top to handle preflight requests

@@ -144,7 +144,8 @@ class AuditLogModel {
 		const offset = filters.offset || 0;
 		params.push(limit, offset);
 
-		const [rows] = await pool.execute(query, params);
+		// Use text protocol to avoid server-side prepared statement paging edge-cases.
+		const [rows] = await pool.query(query, params);
 		return rows;
 	}
 
