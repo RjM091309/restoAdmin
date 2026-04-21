@@ -264,6 +264,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
   const [receiptHistoryLoading, setReceiptHistoryLoading] = useState(false);
   const [receiptHistoryError, setReceiptHistoryError] = useState<string | null>(null);
+  const [receiptHistoryPageSize, setReceiptHistoryPageSize] = useState<number>(20);
   const [receiptHistoryDetailOpen, setReceiptHistoryDetailOpen] = useState(false);
   const [receiptHistoryDetailLoading, setReceiptHistoryDetailLoading] = useState(false);
   const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<ReceiptScanHistoryDetail | null>(null);
@@ -631,7 +632,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setReceiptHistoryError(null);
     void (async () => {
       try {
-        const rows = await fetchReceiptScanHistoryList(String(branchId), 200);
+        const rows = await fetchReceiptScanHistoryList(String(branchId), receiptHistoryPageSize);
         if (!cancelled) setReceiptHistoryRows(rows);
       } catch (e) {
         if (!cancelled) setReceiptHistoryError(e instanceof Error ? e.message : 'Failed to load history');
@@ -642,7 +643,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     return () => {
       cancelled = true;
     };
-  }, [receiptHistoryOpen, branchId]);
+  }, [receiptHistoryOpen, branchId, receiptHistoryPageSize]);
 
   const openReceiptHistoryDetail = useCallback(async (id: number) => {
     setReceiptHistoryDetailOpen(true);
@@ -819,6 +820,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     if (Number.isNaN(d.getTime())) return receiptEncodedDateYmd;
     return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
   }, [receiptEncodedDateYmd]);
+
+  const receiptHistoryRowsInRange = useMemo(() => {
+    const { start, end } = effectiveDateRange;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return receiptHistoryRows;
+    return (receiptHistoryRows || []).filter((r) => {
+      const ymd = String(r.ENCODED_DT || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
+      return ymd >= start && ymd <= end;
+    });
+  }, [effectiveDateRange, receiptHistoryRows]);
 
   const refreshExpenseAnalyticsFromServer = useCallback(() => {
     setExpenseAnalyticsRefreshKey((k) => k + 1);
@@ -3225,6 +3236,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         }}
         title="Receipt History"
         maxWidth="4xl"
+        containerClassName="items-start pt-10"
         footer={
           <div className="flex items-center justify-end gap-2">
             <button
@@ -3247,8 +3259,24 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
               <div className="text-sm font-black text-brand-text">Scanned receipts</div>
-              <div className="text-xs text-brand-muted">
-                {receiptHistoryLoading ? 'Loading…' : `${receiptHistoryRows.length} record(s)`}
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] font-black uppercase tracking-wide text-brand-muted">
+                  Page length
+                </label>
+                <select
+                  value={String(receiptHistoryPageSize)}
+                  onChange={(e) => setReceiptHistoryPageSize(Number(e.target.value) || 20)}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-brand-text"
+                >
+                  {[20, 30, 40, 50, 100].map((n) => (
+                    <option key={n} value={String(n)}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-brand-muted">
+                  {receiptHistoryLoading ? 'Loading…' : `${receiptHistoryRowsInRange.length} record(s)`}
+                </div>
               </div>
             </div>
             <div className="custom-scrollbar max-h-[60vh] overflow-auto">
@@ -3268,8 +3296,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                         Loading…
                       </td>
                     </tr>
-                  ) : receiptHistoryRows.length ? (
-                    receiptHistoryRows.map((r) => (
+                  ) : receiptHistoryRowsInRange.length ? (
+                    receiptHistoryRowsInRange.map((r) => (
                       <tr key={r.IDNo} className="border-t border-gray-100 hover:bg-gray-50/60 transition-colors">
                         <td className="px-4 py-3 font-semibold text-brand-text">
                           {String(r.ENCODED_DT || '').slice(0, 10)}
@@ -3326,10 +3354,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             <div className="text-sm text-brand-muted">Loading…</div>
           ) : receiptHistoryDetail ? (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-                  <div className="border-b border-gray-100 px-5 py-4 text-sm font-black text-brand-text">Receipt</div>
-                  <div className="custom-scrollbar max-h-[60vh] overflow-auto bg-slate-50 p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:items-stretch">
+                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm flex flex-col min-h-0 lg:h-[60vh]">
+                  <div className="border-b border-gray-100 px-5 py-4 text-sm font-black text-brand-text shrink-0">Receipt</div>
+                  <div className="custom-scrollbar flex-1 min-h-0 overflow-auto bg-slate-50 p-4">
                     {receiptHistoryDetail.receipt_image_data_url ? (
                       <a
                         href={receiptHistoryDetail.receipt_image_data_url}
@@ -3355,7 +3383,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm flex flex-col min-h-0 lg:h-[60vh]">
                   <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
                     <div className="text-sm font-black text-brand-text">Expenses created</div>
                     <div className="text-xs text-brand-muted">
@@ -3366,42 +3394,61 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                       })()}
                     </div>
                   </div>
-                  <div className="custom-scrollbar max-h-[60vh] overflow-auto">
-                    {(() => {
-                      const key = String(receiptHistoryDetail.receipt_image_data_url || '');
-                      const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
-                      if (!rows.length) {
-                        return (
-                          <div className="p-5 text-sm text-brand-muted">
-                            No matching expenses found for this receipt in the current list.
-                          </div>
-                        );
-                      }
+                  <div className="flex-1 min-h-0">
+                  {(() => {
+                    const key = String(receiptHistoryDetail.receipt_image_data_url || '');
+                    const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
+                    if (!rows.length) {
                       return (
-                        <table className="min-w-full text-sm">
-                          <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted">
-                            <tr>
-                              <th className="bg-gray-50 px-4 py-3 text-left">Name</th>
-                              <th className="bg-gray-50 px-4 py-3 text-right">Qty</th>
-                              <th className="bg-gray-50 px-4 py-3 text-left">Unit</th>
-                              <th className="bg-gray-50 px-4 py-3 text-right">Amount</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((r) => (
-                              <tr key={String(r.id)} className="border-t border-gray-100">
-                                <td className="px-4 py-3 font-semibold text-brand-text">
-                                  {String(r.expDesc || r.expName || '').trim() || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums">{formatQty(expenseLineQty(r), r.unit || 'pcs')}</td>
-                                <td className="px-4 py-3 text-brand-muted">{getUnitLabel(r.unit || 'pcs')}</td>
-                                <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(r.expAmount || 0))}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                        <div className="h-full flex items-center justify-center p-5 text-sm text-brand-muted">
+                          No matching expenses found for this receipt in the current list.
+                        </div>
                       );
-                    })()}
+                    }
+
+                    const sortedRows = rows
+                      .slice()
+                      .sort((a, b) => Number(a.id) - Number(b.id));
+                    const total = sortedRows.reduce((s, r) => s + Number(r.expAmount || 0), 0);
+
+                    return (
+                      <div className="flex h-full min-h-0 flex-col">
+                        <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted">
+                              <tr>
+                                <th className="bg-gray-50 px-4 py-3 text-left">Name</th>
+                                <th className="bg-gray-50 px-4 py-3 text-right">Qty</th>
+                                <th className="bg-gray-50 px-4 py-3 text-left">Unit</th>
+                                <th className="bg-gray-50 px-4 py-3 text-right">Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sortedRows.map((r) => (
+                                <tr key={String(r.id)} className="border-t border-gray-100">
+                                  <td className="px-4 py-3 font-semibold text-brand-text">
+                                    {String(r.expDesc || r.expName || '').trim() || '—'}
+                                  </td>
+                                  <td className="px-4 py-3 text-right tabular-nums">
+                                    {formatQty(expenseLineQty(r), r.unit || 'pcs')}
+                                  </td>
+                                  <td className="px-4 py-3 text-brand-muted">{getUnitLabel(r.unit || 'pcs')}</td>
+                                  <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                                    {formatCurrency(Number(r.expAmount || 0))}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-100 bg-gray-50/90 px-5 py-3">
+                          <span className="text-xs font-black uppercase tracking-wide text-brand-muted">Total</span>
+                          <span className="text-base font-black tabular-nums text-brand-text">{formatCurrency(total)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   </div>
                 </div>
               </div>

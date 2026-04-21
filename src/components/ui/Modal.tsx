@@ -16,6 +16,7 @@ export interface ModalProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl';
+  containerClassName?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -25,6 +26,7 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   footer,
   maxWidth = 'md',
+  containerClassName,
 }) => {
   const { t } = useTranslation();
   // Prevent body scroll when modal is open
@@ -64,7 +66,12 @@ export const Modal: React.FC<ModalProps> = ({
           />
 
           {/* Modal Container */}
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+          <div
+            className={cn(
+              'fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none',
+              containerClassName
+            )}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
