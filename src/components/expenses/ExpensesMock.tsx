@@ -15,9 +15,13 @@ import {
   type CreateInventoryCategoryPayload,
 } from '../../services/inventoryService';
 import { getExpenses, type ExpenseRecord, createExpense, updateExpense, deleteExpense, updateInventoryStock } from '../../services/expenseService';
+import { uploadExpenseReceipt } from '../../services/uploadService';
+import { compressReceiptImage, fetchReceiptScannerGeminiKey, stitchReceiptImages } from '../../services/receiptScannerService';
+import { extractExpenseItemsFromReceiptImage, type ReceiptExpenseExtractionResult } from '../../services/receiptExpenseExtraction';
+import { syncIngredientsFromExpenses } from '../../services/ingredientService';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
-import { Edit2, Trash2, Plus, Loader2, Check, X, Search } from 'lucide-react';
+import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS, canonicalUomValue } from '../../lib/uomUtils';
 import { Select2 } from '../ui/Select2';
@@ -53,6 +57,34 @@ type Category = {
 
 const ITEMS_PER_PAGE = 50;
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'];
+
+const DEFAULT_EXTRACTION_CATEGORIES = ['Food Supplies', 'Utilities', 'FRUITS', 'Others'];
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error('Failed to read file'));
+    r.readAsDataURL(file);
+  });
+}
+
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const arr = dataUrl.split(',');
+  const mime = arr[0]?.match(/:(.*?);/)?.[1] || 'image/jpeg';
+  const bstr = atob(arr[1] || '');
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) u8arr[n] = bstr.charCodeAt(n);
+  return new File([u8arr], filename, { type: mime });
+}
+
+function normalizeReceiptUnit(raw: string | null | undefined): string {
+  const s = String(raw || 'pcs')
+    .trim()
+    .replace(/\s+/g, '');
+  return canonicalUomValue(s || 'pcs');
+}
 
 // Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
 
@@ -206,6 +238,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [addingQtyValue, setAddingQtyValue] = useState('');
   const [editingQtyForId, setEditingQtyForId] = useState<string | null>(null);
   const [editingQtyValue, setEditingQtyValue] = useState('');
+
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptUploadLoading, setReceiptUploadLoading] = useState(false);
+  const [receiptExtractLoading, setReceiptExtractLoading] = useState(false);
+  const [receiptScanLoading, setReceiptScanLoading] = useState(false);
+  const [receiptSendLoading, setReceiptSendLoading] = useState(false);
+  const [receiptFileError, setReceiptFileError] = useState<string | null>(null);
+  const [receiptPreviewDataUrl, setReceiptPreviewDataUrl] = useState<string | null>(null);
+  const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null);
+  const [receiptExtractResult, setReceiptExtractResult] = useState<ReceiptExpenseExtractionResult | null>(null);
+  const [receiptEncodedDateYmd, setReceiptEncodedDateYmd] = useState('');
+  const [receiptSegments, setReceiptSegments] = useState<string[]>([]);
+  const [receiptScannedImage, setReceiptScannedImage] = useState<string | null>(null);
+  const [receiptPreviewLightboxOpen, setReceiptPreviewLightboxOpen] = useState(false);
+  const [receiptSaveConfirmOpen, setReceiptSaveConfirmOpen] = useState(false);
 
   const [operationForm, setOperationForm] = useState<{ name: string; description: string; state: number }>({
     name: '',
@@ -451,6 +498,255 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     () => `${formatYmdForLabel(effectiveDateRange.start)} - ${formatYmdForLabel(effectiveDateRange.end)}`,
     [effectiveDateRange.end, effectiveDateRange.start],
   );
+
+  const extractionCategoryTypes = useMemo(() => {
+    const unique = new Set<string>();
+    (masterCategories || []).forEach((c) => {
+      if (!c?.active) return;
+      const t = String(c.categoryType || '').trim();
+      if (t) unique.add(t);
+    });
+    const list = Array.from(unique.values()).slice(0, 40);
+    return list.length ? list : DEFAULT_EXTRACTION_CATEGORIES;
+  }, [masterCategories]);
+
+  const openReceiptModal = useCallback(() => {
+    setReceiptFileError(null);
+    setReceiptPreviewDataUrl(null);
+    setUploadedReceiptPath(null);
+    setReceiptExtractResult(null);
+    setReceiptSegments([]);
+    setReceiptScannedImage(null);
+    setReceiptPreviewLightboxOpen(false);
+    setReceiptSaveConfirmOpen(false);
+    setReceiptUploadLoading(false);
+    setReceiptExtractLoading(false);
+    setReceiptScanLoading(false);
+    setReceiptSendLoading(false);
+    setReceiptEncodedDateYmd(effectiveDateRange.end || '');
+    setIsReceiptModalOpen(true);
+  }, [effectiveDateRange.end]);
+
+  const closeReceiptModal = useCallback(() => {
+    if (receiptUploadLoading || receiptExtractLoading || receiptSendLoading) return;
+    setReceiptPreviewLightboxOpen(false);
+    setReceiptSaveConfirmOpen(false);
+    setIsReceiptModalOpen(false);
+  }, [receiptUploadLoading, receiptExtractLoading, receiptSendLoading]);
+
+  useEffect(() => {
+    if (!receiptPreviewLightboxOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReceiptPreviewLightboxOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [receiptPreviewLightboxOpen]);
+
+  useEffect(() => {
+    if (!receiptScannedImage) setReceiptPreviewLightboxOpen(false);
+  }, [receiptScannedImage]);
+
+  const handleReceiptFilePicked = useCallback(async (file: File | null) => {
+    setReceiptFileError(null);
+    setReceiptPreviewDataUrl(null);
+    setUploadedReceiptPath(null);
+    setReceiptExtractResult(null);
+    setReceiptScannedImage(null);
+    if (!file) return;
+    try {
+      const raw = await fileToDataUrl(file);
+      const jpeg = await compressReceiptImage(raw).catch(() => raw);
+      setReceiptSegments((prev) => [...prev, jpeg].slice(0, 8));
+    } catch (e) {
+      setReceiptFileError(e instanceof Error ? e.message : 'Failed to read receipt');
+    }
+  }, []);
+
+  const scanReceipt = useCallback(async () => {
+    if (!receiptSegments.length) return;
+    setReceiptFileError(null);
+    setReceiptExtractResult(null);
+    setReceiptScanLoading(true);
+    try {
+      let stitched: string;
+      if (receiptSegments.length === 1) stitched = receiptSegments[0];
+      else {
+        stitched = await stitchReceiptImages(receiptSegments, { maxWidth: 1400, maxHeight: 8192, quality: 90 });
+      }
+      const compressed = await compressReceiptImage(stitched).catch(() => stitched);
+      setReceiptScannedImage(compressed);
+      setReceiptPreviewDataUrl(compressed);
+      setReceiptExtractLoading(true);
+      try {
+        const apiKey = await fetchReceiptScannerGeminiKey();
+        const extracted = await extractExpenseItemsFromReceiptImage({
+          imageDataUrl: compressed,
+          apiKey,
+          categories: extractionCategoryTypes,
+        });
+        setReceiptExtractResult(extracted);
+      } catch (e) {
+        setReceiptFileError(e instanceof Error ? e.message : 'Failed to extract receipt items');
+        setReceiptExtractResult(null);
+      } finally {
+        setReceiptExtractLoading(false);
+      }
+    } catch (e) {
+      setReceiptFileError(e instanceof Error ? e.message : 'Failed to scan receipt');
+      setReceiptScannedImage(null);
+      setReceiptPreviewDataUrl(null);
+    } finally {
+      setReceiptScanLoading(false);
+    }
+  }, [receiptSegments, extractionCategoryTypes]);
+
+  const sendExtractedReceiptToExpenses = useCallback(async () => {
+    if (!branchId || branchId === 'all') {
+      toast.error('Select a branch first');
+      return;
+    }
+    if (!receiptExtractResult?.items?.length) return;
+
+    setReceiptFileError(null);
+    setReceiptSendLoading(true);
+    try {
+      let receiptPath = uploadedReceiptPath;
+      if (!receiptPath) {
+        const img = receiptScannedImage || receiptPreviewDataUrl;
+        if (!img) throw new Error('Scan receipt first.');
+        setReceiptUploadLoading(true);
+        try {
+          const file = dataUrlToFile(img, `expense-receipt-${Date.now()}.jpg`);
+          const uploaded = await uploadExpenseReceipt(file);
+          receiptPath = uploaded.path || null;
+          setUploadedReceiptPath(receiptPath);
+        } finally {
+          setReceiptUploadLoading(false);
+        }
+      }
+
+      const resolvedOp = operations.find((o) => o.active && o.state === 1) ?? operations.find((o) => o.active) ?? null;
+      const defaultOpCategoryId = resolvedOp?.id ?? null;
+      const categoryMap = new Map<string, string>();
+
+      const findOrCreateMasterCategory = async (categoryType: string, categoryName: string): Promise<string> => {
+        const key = `${categoryType}|${categoryName}`;
+        const cached = categoryMap.get(key);
+        if (cached) return cached;
+        const existing = masterCategories.find(
+          (c) =>
+            c.active &&
+            String(c.categoryType).trim() === String(categoryType).trim() &&
+            String(c.name).trim() === String(categoryName).trim(),
+        );
+        if (existing) {
+          categoryMap.set(key, existing.id);
+          return existing.id;
+        }
+        const payload: CreateInventoryCategoryPayload = {
+          branchId,
+          name: categoryName,
+          categoryType,
+          description: null,
+          icon: null,
+          opCategoryId: defaultOpCategoryId,
+        };
+        const id = await createInventoryCategory(payload);
+        const idStr = String(id);
+        setMasterCategories((prev) => [
+          ...prev,
+          {
+            id: idStr,
+            branchId,
+            opCategoryId: defaultOpCategoryId,
+            name: categoryName,
+            categoryType,
+            description: null,
+            icon: null,
+            isManualStock: false,
+            active: true,
+          },
+        ]);
+        categoryMap.set(key, idStr);
+        return idStr;
+      };
+
+      const encodedDt =
+        receiptEncodedDateYmd && /^\d{4}-\d{2}-\d{2}$/.test(receiptEncodedDateYmd)
+          ? `${receiptEncodedDateYmd} 12:00:00`
+          : null;
+
+      await Promise.all(
+        receiptExtractResult.items.map(async (item) => {
+          const categoryType = String(item.category || '').trim() || 'Others';
+          const categoryName = categoryType;
+          const qty = item.qty != null && Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
+          const masterCatId = await findOrCreateMasterCategory(categoryType, categoryName);
+          const unit = normalizeReceiptUnit(item.unit || 'pcs');
+          const newId = await createExpense({
+            branchId,
+            masterCatId,
+            expDesc: String(item.name || '').trim() || null,
+            expAmount: Number(item.price || 0),
+            expQty: qty > 0 ? qty : null,
+            expSource: 'Resto_Admin',
+            unit,
+            receiptImagePath: receiptPath ?? null,
+            encodedDt,
+          });
+          try {
+            const stockQty = qty > 0 ? qty : 0;
+            await updateInventoryStock(String(newId), stockQty, branchId, true, unit);
+          } catch {
+            // non-fatal
+          }
+        }),
+      );
+
+      try {
+        await syncIngredientsFromExpenses();
+      } catch {
+        // non-fatal
+      }
+
+      const list = await getExpenses(branchId);
+      setExpenses(list.filter((e) => String(e.branchId) === String(branchId)));
+      toast.success('Receipt items saved to Expenses');
+      setReceiptSaveConfirmOpen(false);
+      setIsReceiptModalOpen(false);
+      setExpenseAnalyticsRefreshKey((k) => k + 1);
+    } catch (e) {
+      setReceiptFileError(e instanceof Error ? e.message : 'Failed to save receipt items to expenses');
+    } finally {
+      setReceiptSendLoading(false);
+    }
+  }, [
+    branchId,
+    operations,
+    masterCategories,
+    receiptExtractResult,
+    receiptEncodedDateYmd,
+    uploadedReceiptPath,
+    receiptScannedImage,
+    receiptPreviewDataUrl,
+  ]);
+
+  const openReceiptSaveConfirm = useCallback(() => {
+    if (!branchId || branchId === 'all') {
+      toast.error('Select a branch first');
+      return;
+    }
+    if (!receiptExtractResult?.items?.length) return;
+    setReceiptSaveConfirmOpen(true);
+  }, [branchId, receiptExtractResult]);
+
+  const receiptSaveEncodedDateLabel = useMemo(() => {
+    if (!receiptEncodedDateYmd || !/^\d{4}-\d{2}-\d{2}$/.test(receiptEncodedDateYmd)) return 'Not set';
+    const d = new Date(`${receiptEncodedDateYmd}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return receiptEncodedDateYmd;
+    return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
+  }, [receiptEncodedDateYmd]);
 
   const refreshExpenseAnalyticsFromServer = useCallback(() => {
     setExpenseAnalyticsRefreshKey((k) => k + 1);
@@ -1597,6 +1893,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     >
       <>
     <div className="pt-6 overflow-x-hidden">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+        <button
+          type="button"
+          onClick={openReceiptModal}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-6 py-2.5 text-base font-bold text-white shadow-lg shadow-violet-600/20 transition-all hover:bg-violet-700 sm:w-auto"
+        >
+          <ScanLine size={18} />
+          Upload Receipt
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 items-stretch">
         <div className="md:col-span-4 flex flex-col gap-4 h-full">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 flex-1">
@@ -2522,6 +2829,446 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           </div>
         </div>
       </SidePanel>
+
+      <Modal
+        isOpen={isReceiptModalOpen}
+        onClose={closeReceiptModal}
+        title="Receipt scanner → Expenses"
+        maxWidth="4xl"
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <div />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={closeReceiptModal}
+                disabled={receiptUploadLoading || receiptExtractLoading || receiptSendLoading}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={openReceiptSaveConfirm}
+                disabled={
+                  !receiptExtractResult?.items?.length ||
+                  receiptSendLoading ||
+                  receiptUploadLoading ||
+                  receiptExtractLoading ||
+                  receiptScanLoading
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {receiptSendLoading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                Save to Expenses
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-brand-muted">
+                <span
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full border',
+                    receiptSegments.length ? 'border-brand-primary bg-brand-primary text-white' : 'border-gray-200 bg-white text-brand-muted',
+                  )}
+                >
+                  1
+                </span>
+                <span>Scan</span>
+              </div>
+              <div className="h-px w-10 bg-gray-200" />
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-brand-muted">
+                <span
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full border',
+                    receiptScannedImage ? 'border-brand-primary bg-brand-primary text-white' : 'border-gray-200 bg-white text-brand-muted',
+                  )}
+                >
+                  2
+                </span>
+                <span>Preview</span>
+              </div>
+              <div className="h-px w-10 bg-gray-200" />
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-brand-muted">
+                <span
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full border',
+                    receiptExtractResult?.items?.length
+                      ? 'border-brand-primary bg-brand-primary text-white'
+                      : 'border-gray-200 bg-white text-brand-muted',
+                  )}
+                >
+                  3
+                </span>
+                <span>Submit</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-[11px] font-black',
+                  uploadedReceiptPath ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-brand-muted',
+                )}
+              >
+                {uploadedReceiptPath ? 'Saved' : 'Not saved'}
+              </span>
+              <span
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-[11px] font-black',
+                  receiptExtractResult?.items?.length
+                    ? 'border-violet-200 bg-violet-50 text-violet-700'
+                    : 'border-gray-200 bg-gray-50 text-brand-muted',
+                )}
+              >
+                {receiptExtractResult?.items?.length ? `${receiptExtractResult.items.length} items` : 'Not extracted'}
+              </span>
+            </div>
+          </div>
+
+          <div
+            className={cn('grid grid-cols-1 gap-4 md:items-stretch', receiptSegments.length > 0 && 'md:grid-cols-2')}
+          >
+            <div className={cn('flex flex-col min-h-[22rem]', receiptSegments.length > 0 && 'md:h-[min(32rem,50vh)]')}>
+              <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-xl border border-brand-primary/10 bg-brand-primary/10">
+                      <Receipt size={14} className="text-brand-primary" />
+                    </div>
+                    <div className="text-sm font-black text-brand-text">Drop your receipt here</div>
+                  </div>
+                  <input
+                    type="date"
+                    value={receiptEncodedDateYmd}
+                    onChange={(e) => setReceiptEncodedDateYmd(e.target.value)}
+                    disabled={receiptSendLoading}
+                    className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="custom-scrollbar flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto p-5">
+                  <div className="rounded-3xl border-2 border-dashed border-gray-200 bg-gray-50/40 p-6">
+                    <div className="flex flex-col items-center text-center">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-primary/10 bg-brand-primary/10">
+                        <ScanLine size={20} className="text-brand-primary" />
+                      </div>
+                      <div className="mt-4 text-2xl font-black tracking-tight text-brand-text">Drop your receipt here</div>
+                      <div className="mt-5 flex justify-center">
+                        <label
+                          className={cn(
+                            'inline-flex w-[140px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-brand-primary px-5 py-2.5 text-sm font-black text-white hover:bg-brand-primary/90',
+                            receiptUploadLoading || receiptExtractLoading || receiptSendLoading ? 'cursor-not-allowed opacity-60' : '',
+                          )}
+                        >
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            disabled={receiptUploadLoading || receiptExtractLoading || receiptSendLoading}
+                            className="hidden"
+                            onChange={(e) => {
+                              const files = Array.from(e.target.files || []);
+                              e.target.value = '';
+                              files.forEach((f) => void handleReceiptFilePicked(f));
+                            }}
+                          />
+                          Browse file
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  {receiptSegments.length > 0 ? (
+                    <div className="flex w-full flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void scanReceipt()}
+                        disabled={receiptScanLoading || receiptUploadLoading || receiptExtractLoading || receiptSendLoading}
+                        className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-black text-white hover:bg-brand-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {receiptScanLoading ? <Loader2 size={16} className="animate-spin" /> : <ScanLine size={16} />}
+                        Scan receipt
+                      </button>
+                      <div className="inline-flex min-w-0 items-center gap-3 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs text-brand-muted">
+                        <span>
+                          <span className="font-black uppercase tracking-wide">Segments</span>: {receiptSegments.length}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReceiptSegments([]);
+                            setReceiptScannedImage(null);
+                            setReceiptPreviewDataUrl(null);
+                            setReceiptExtractResult(null);
+                          }}
+                          disabled={receiptScanLoading || receiptExtractLoading || receiptSendLoading}
+                          className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {(receiptFileError || receiptUploadLoading || uploadedReceiptPath) && (
+                    <div
+                      className={cn(
+                        'rounded-2xl border px-4 py-3 text-xs',
+                        receiptFileError
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : uploadedReceiptPath
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-gray-200 bg-gray-50 text-brand-muted',
+                      )}
+                    >
+                      {receiptFileError
+                        ? receiptFileError
+                        : receiptUploadLoading
+                          ? 'Saving receipt (WebP)…'
+                          : uploadedReceiptPath
+                            ? `Saved: ${uploadedReceiptPath}`
+                            : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {receiptSegments.length > 0 ? (
+              <div
+                className={cn(
+                  'flex min-h-[22rem] animate-in fade-in duration-300 flex-col md:h-[min(32rem,50vh)]',
+                )}
+              >
+                <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                  <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-xl border border-gray-900/10 bg-gray-900/5">
+                        <Receipt size={14} className="text-brand-muted" />
+                      </div>
+                      <div className="text-sm font-black text-brand-text">Preview</div>
+                    </div>
+                    <div />
+                  </div>
+                  <div className="custom-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
+                    {receiptScannedImage ? (
+                      <button
+                        type="button"
+                        onClick={() => setReceiptPreviewLightboxOpen(true)}
+                        className="group relative w-full shrink-0 overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40"
+                        title="View full receipt"
+                      >
+                        <img src={receiptScannedImage} alt="Receipt preview" className="block h-auto w-full" />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 via-black/20 to-transparent px-3 py-3 opacity-0 transition-opacity group-hover:opacity-100">
+                          <span className="text-xs font-bold text-white drop-shadow-sm">Click to open full receipt</span>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="flex min-h-[8rem] flex-1 items-center justify-center rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm text-brand-muted">
+                        Preview will appear after you scan.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex max-h-[min(22rem,42vh)] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm md:max-h-[min(26rem,45vh)]">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-6 w-6 items-center justify-center rounded-xl border border-emerald-500/10 bg-emerald-500/10">
+                  <Check size={14} className="text-emerald-600" />
+                </div>
+                <div className="text-sm font-black text-brand-text">Extracted items</div>
+              </div>
+              {receiptExtractResult?.items?.length ? (
+                <div className="text-xs text-brand-muted">{receiptExtractResult.items.length} item(s)</div>
+              ) : (
+                <div />
+              )}
+            </div>
+            {receiptExtractResult?.items?.length ? (
+              <>
+                <div className="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted shadow-[0_1px_0_0_rgb(15_23_42/0.06)]">
+                      <tr>
+                        <th className="bg-gray-50 px-4 py-3 text-left">Name</th>
+                        <th className="bg-gray-50 px-4 py-3 text-left">Category</th>
+                        <th className="bg-gray-50 px-4 py-3 text-right">Qty</th>
+                        <th className="bg-gray-50 px-4 py-3 text-left">Unit</th>
+                        <th className="bg-gray-50 px-4 py-3 text-right">Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {receiptExtractResult.items.map((it, idx) => (
+                        <tr key={`${idx}-${it.name}`} className="border-t border-gray-100 transition-colors hover:bg-gray-50/60">
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-text">
+                            {String(it.name || '').trim()}
+                          </td>
+                          <td className="px-4 py-3 text-brand-muted">
+                            <span className="inline-flex rounded-lg border border-gray-200 bg-gray-100 px-2 py-1 text-[11px] font-bold">
+                              {String(it.category || '').trim() || 'Others'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">{Number(it.qty || 0) || 0}</td>
+                          <td className="px-4 py-3 text-brand-muted">{String(it.unit || 'pcs').toLowerCase()}</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                            {formatCurrency(Number(it.price || 0))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-100 bg-gray-50/90 px-5 py-3">
+                  <span className="text-xs font-black uppercase tracking-wide text-brand-muted">Total</span>
+                  <span className="text-base font-black tabular-nums text-brand-text">
+                    {formatCurrency(Number(receiptExtractResult.receipt_grand_total || 0))}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="p-5 text-sm text-brand-muted">No extracted items yet.</div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={receiptSaveConfirmOpen}
+        onClose={() => {
+          if (receiptSendLoading || receiptUploadLoading) return;
+          setReceiptSaveConfirmOpen(false);
+        }}
+        title="Are you sure you want to add in expense?"
+        maxWidth="3xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setReceiptSaveConfirmOpen(false)}
+              disabled={receiptSendLoading || receiptUploadLoading}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void sendExtractedReceiptToExpenses()}
+              disabled={receiptSendLoading || receiptUploadLoading}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-primary px-4 py-2 text-sm font-bold text-white shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {receiptSendLoading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+              Confirm
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-sm text-brand-text">
+          <div>
+            <div className="text-[11px] font-black uppercase tracking-wide text-brand-muted">Encoded date</div>
+            <div className="mt-1 font-semibold">{receiptSaveEncodedDateLabel}</div>
+          </div>
+          {receiptExtractResult?.items?.length ? (
+            <div className="flex max-h-[min(22rem,42vh)] flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm md:max-h-[min(26rem,45vh)]">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-xl border border-emerald-500/10 bg-emerald-500/10">
+                    <Check size={14} className="text-emerald-600" />
+                  </div>
+                  <div className="text-sm font-black text-brand-text">Extracted items</div>
+                </div>
+                <div className="text-xs text-brand-muted">{receiptExtractResult.items.length} item(s)</div>
+              </div>
+              <div className="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted shadow-[0_1px_0_0_rgb(15_23_42/0.06)]">
+                    <tr>
+                      <th className="bg-gray-50 px-4 py-3 text-left">Name</th>
+                      <th className="bg-gray-50 px-4 py-3 text-left">Category</th>
+                      <th className="bg-gray-50 px-4 py-3 text-right">Qty</th>
+                      <th className="bg-gray-50 px-4 py-3 text-left">Unit</th>
+                      <th className="bg-gray-50 px-4 py-3 text-right">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiptExtractResult.items.map((it, idx) => (
+                      <tr key={`confirm-${idx}-${it.name}`} className="border-t border-gray-100 transition-colors hover:bg-gray-50/60">
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-brand-text">
+                          {String(it.name || '').trim()}
+                        </td>
+                        <td className="px-4 py-3 text-brand-muted">
+                          <span className="inline-flex rounded-lg border border-gray-200 bg-gray-100 px-2 py-1 text-[11px] font-bold">
+                            {String(it.category || '').trim() || 'Others'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">{Number(it.qty || 0) || 0}</td>
+                        <td className="px-4 py-3 text-brand-muted">{String(it.unit || 'pcs').toLowerCase()}</td>
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                          {formatCurrency(Number(it.price || 0))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-100 bg-gray-50/90 px-5 py-3">
+                <span className="text-xs font-black uppercase tracking-wide text-brand-muted">Total</span>
+                <span className="text-base font-black tabular-nums text-brand-text">
+                  {formatCurrency(Number(receiptExtractResult.receipt_grand_total || 0))}
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <AnimatePresence>
+        {receiptPreviewLightboxOpen && receiptScannedImage ? (
+          <motion.div
+            key="receipt-preview-lightbox"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-[2px]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setReceiptPreviewLightboxOpen(false)}
+            role="presentation"
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="receipt-preview-lightbox-title"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4">
+                <h3 id="receipt-preview-lightbox-title" className="text-lg font-bold text-brand-text">
+                  Receipt Preview
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setReceiptPreviewLightboxOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-50 text-brand-muted transition-colors hover:bg-red-50 hover:text-red-500"
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto bg-slate-50 p-4">
+                <img src={receiptScannedImage} alt="Receipt" className="mx-auto block h-auto w-full max-w-full rounded-lg" />
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* Delete Expense Confirmation */}
       <Modal

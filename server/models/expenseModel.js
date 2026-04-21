@@ -22,7 +22,9 @@ class ExpenseModel {
 					MASTER_CAT_ID INT NOT NULL,
 					EXP_DESC VARCHAR(100) NULL,
 					EXP_AMOUNT DECIMAL(12,2) NOT NULL,
+					EXP_QTY DECIMAL(12,3) NULL,
 					EXP_SOURCE VARCHAR(100) NULL,
+					RECEIPT_IMAGE_PATH VARCHAR(255) NULL,
 					ACTIVE TINYINT(1) NOT NULL DEFAULT 1,
 					ENCODED_BY VARCHAR(100) NOT NULL,
 					ENCODED_DT TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -55,13 +57,14 @@ class ExpenseModel {
 					{ col: 'MASTER_CAT_ID', sql: `ALTER TABLE expenses ADD COLUMN MASTER_CAT_ID INT NULL` },
 					{ col: 'EXP_DESC', sql: `ALTER TABLE expenses ADD COLUMN EXP_DESC VARCHAR(100) NULL` },
 					{ col: 'EXP_AMOUNT', sql: `ALTER TABLE expenses ADD COLUMN EXP_AMOUNT DECIMAL(12,2) NULL` },
+					{ col: 'EXP_QTY', sql: `ALTER TABLE expenses ADD COLUMN EXP_QTY DECIMAL(12,3) NULL AFTER EXP_AMOUNT` },
 					{ col: 'EXP_SOURCE', sql: `ALTER TABLE expenses ADD COLUMN EXP_SOURCE VARCHAR(100) NULL` },
+					{ col: 'RECEIPT_IMAGE_PATH', sql: `ALTER TABLE expenses ADD COLUMN RECEIPT_IMAGE_PATH VARCHAR(255) NULL AFTER EXP_SOURCE` },
 					{ col: 'ACTIVE', sql: `ALTER TABLE expenses ADD COLUMN ACTIVE TINYINT(1) NOT NULL DEFAULT 1` },
 					{ col: 'ENCODED_BY', sql: `ALTER TABLE expenses ADD COLUMN ENCODED_BY VARCHAR(100) NULL` },
 					{ col: 'ENCODED_DT', sql: `ALTER TABLE expenses ADD COLUMN ENCODED_DT TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
 					{ col: 'EDITED_BY', sql: `ALTER TABLE expenses ADD COLUMN EDITED_BY VARCHAR(100) NULL` },
 					{ col: 'EDITED_DT', sql: `ALTER TABLE expenses ADD COLUMN EDITED_DT TIMESTAMP NULL` },
-					{ col: 'EXP_QTY', sql: `ALTER TABLE expenses ADD COLUMN EXP_QTY DECIMAL(12,3) NULL AFTER EXP_AMOUNT` },
 					{ col: 'INGREDIENT_ID', sql: `ALTER TABLE expenses ADD COLUMN INGREDIENT_ID INT NULL AFTER MASTER_CAT_ID` },
 				];
 
@@ -111,6 +114,7 @@ class ExpenseModel {
 				e.EXP_AMOUNT,
 				e.EXP_QTY,
 				e.EXP_SOURCE,
+				e.RECEIPT_IMAGE_PATH,
 				e.ACTIVE,
 				e.ENCODED_BY,
 				e.ENCODED_DT,
@@ -176,6 +180,7 @@ class ExpenseModel {
 				e.EXP_AMOUNT,
 				e.EXP_QTY,
 				e.EXP_SOURCE,
+				e.RECEIPT_IMAGE_PATH,
 				e.ACTIVE,
 				e.ENCODED_BY,
 				e.ENCODED_DT,
@@ -209,6 +214,9 @@ class ExpenseModel {
 		const encodedDt = encodedDtRaw && String(encodedDtRaw).trim() !== '' ? String(encodedDtRaw) : null;
 		const masterCatId = Number(data.MASTER_CAT_ID);
 		const expQty = data.EXP_QTY != null && Number.isFinite(Number(data.EXP_QTY)) ? Number(data.EXP_QTY) : null;
+		const receiptImagePathRaw = data.RECEIPT_IMAGE_PATH ?? data.receiptImagePath ?? data.receipt_image_path ?? null;
+		const receiptImagePath =
+			receiptImagePathRaw && String(receiptImagePathRaw).trim() !== '' ? String(receiptImagePathRaw).trim() : null;
 		const values = [
 			Number(data.BRANCH_ID),
 			masterCatId,
@@ -216,6 +224,7 @@ class ExpenseModel {
 			Number(data.EXP_AMOUNT),
 			expQty,
 			data.EXP_SOURCE || null,
+			receiptImagePath,
 			encodedBy,
 			encodedDt,
 		];
@@ -229,10 +238,11 @@ class ExpenseModel {
 					EXP_AMOUNT,
 					EXP_QTY,
 					EXP_SOURCE,
+					RECEIPT_IMAGE_PATH,
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
+				) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 				`,
 				values
 			);
@@ -258,10 +268,11 @@ class ExpenseModel {
 								EXP_AMOUNT,
 								EXP_QTY,
 								EXP_SOURCE,
+								RECEIPT_IMAGE_PATH,
 								ACTIVE,
 								ENCODED_BY,
 								ENCODED_DT
-							) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 							`,
 							[nextId, ...values]
 						);
@@ -283,11 +294,12 @@ class ExpenseModel {
 					data.EXP_DESC || null,
 					Number(data.EXP_AMOUNT),
 					data.EXP_SOURCE || null,
+					receiptImagePath,
 					encodedBy,
 					encodedDt,
 				];
 				const [result] = await pool.execute(
-					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_SOURCE, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
+					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_SOURCE, RECEIPT_IMAGE_PATH, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
 					valuesNoQty
 				);
 				return result.insertId;
@@ -303,6 +315,14 @@ class ExpenseModel {
 		const shouldUpdateEncoded = encRaw !== undefined;
 		const encodedDt =
 			shouldUpdateEncoded && encRaw != null && String(encRaw).trim() !== '' ? String(encRaw).trim() : shouldUpdateEncoded ? null : undefined;
+		const receiptImagePathRaw = data.RECEIPT_IMAGE_PATH ?? data.receiptImagePath ?? data.receipt_image_path;
+		const shouldUpdateReceiptImage = receiptImagePathRaw !== undefined;
+		const receiptImagePath =
+			shouldUpdateReceiptImage && receiptImagePathRaw != null && String(receiptImagePathRaw).trim() !== ''
+				? String(receiptImagePathRaw).trim()
+				: shouldUpdateReceiptImage
+					? null
+					: undefined;
 
 		try {
 			let sql = `
@@ -323,6 +343,10 @@ class ExpenseModel {
 				data.EXP_SOURCE || null,
 				String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
 			];
+			if (shouldUpdateReceiptImage) {
+				sql += ', RECEIPT_IMAGE_PATH = ?';
+				params.push(receiptImagePath);
+			}
 			if (shouldUpdateEncoded) {
 				sql += ', ENCODED_DT = ?';
 				params.push(encodedDt);
@@ -344,6 +368,10 @@ class ExpenseModel {
 					data.EXP_SOURCE || null,
 					String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
 				];
+				if (shouldUpdateReceiptImage) {
+					sql += ', RECEIPT_IMAGE_PATH = ?';
+					params.push(receiptImagePath);
+				}
 				if (shouldUpdateEncoded) {
 					sql += ', ENCODED_DT = ?';
 					params.push(encodedDt);

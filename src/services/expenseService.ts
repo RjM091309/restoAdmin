@@ -11,6 +11,7 @@ export interface ExpenseRecord {
   expAmount: number;
   expQty?: number | null;
   expSource: string | null;
+  receiptImagePath?: string | null;
   encodedBy: string | null;
   encodedDt: string | null;
   active: boolean;
@@ -39,6 +40,7 @@ type ExpenseApiRecord = {
   EXP_DESC?: string | null;
   EXP_AMOUNT: number | string;
   EXP_SOURCE?: string | null;
+  RECEIPT_IMAGE_PATH?: string | null;
   ACTIVE: number | boolean;
   ENCODED_BY?: string | null;
   ENCODED_DT?: string | null;
@@ -90,6 +92,7 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
   expAmount: typeof row.EXP_AMOUNT === 'string' ? Number(row.EXP_AMOUNT) : Number(row.EXP_AMOUNT || 0),
   expQty: row.EXP_QTY != null && row.EXP_QTY !== '' ? (typeof row.EXP_QTY === 'string' ? Number(row.EXP_QTY) : Number(row.EXP_QTY)) : null,
   expSource: row.EXP_SOURCE ?? null,
+  receiptImagePath: row.RECEIPT_IMAGE_PATH ?? null,
   encodedBy: row.ENCODED_BY ?? null,
   encodedDt: row.ENCODED_DT ?? null,
   active: Boolean(row.ACTIVE),
@@ -121,6 +124,7 @@ export type CreateExpensePayload = {
   expQty?: number | null;
   expSource: string | null;
   unit?: string | null;
+  receiptImagePath?: string | null;
   // MySQL DATETIME/TIMESTAMP format: "YYYY-MM-DD HH:mm:ss"
   encodedDt?: string | null;
 };
@@ -138,6 +142,7 @@ export async function createExpense(payload: CreateExpensePayload): Promise<numb
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
       UNIT: payload.unit ?? 'pcs',
+      RECEIPT_IMAGE_PATH: payload.receiptImagePath ?? null,
       ENCODED_DT: payload.encodedDt ?? null,
     }),
   });
@@ -155,6 +160,7 @@ export type UpdateExpensePayload = {
   expQty?: number | null;
   expSource: string | null;
   unit?: string | null;
+  receiptImagePath?: string | null;
   encodedDt?: string | null;
 };
 
@@ -170,6 +176,7 @@ export async function updateExpense(id: string, payload: UpdateExpensePayload): 
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
       UNIT: payload.unit ?? 'pcs',
+      ...(payload.receiptImagePath !== undefined ? { RECEIPT_IMAGE_PATH: payload.receiptImagePath } : {}),
       ...(payload.encodedDt !== undefined ? { ENCODED_DT: payload.encodedDt } : {}),
     }),
   });

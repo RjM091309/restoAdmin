@@ -34,6 +34,12 @@ class ExpenseController {
 			EXP_AMOUNT: req.body.EXP_AMOUNT ?? req.body.expAmount ?? req.body.amount ?? null,
 			EXP_QTY: req.body.EXP_QTY ?? req.body.expQty ?? req.body.exp_qty ?? null,
 			EXP_SOURCE: req.body.EXP_SOURCE || req.body.expSource || req.body.source || null,
+			RECEIPT_IMAGE_PATH:
+				req.body.RECEIPT_IMAGE_PATH ??
+				req.body.receiptImagePath ??
+				req.body.receipt_image_path ??
+				req.body.receipt_image ??
+				null,
 			ENCODED_DT: req.body.ENCODED_DT ?? req.body.encoded_dt ?? req.body.encodedDt ?? undefined,
 		};
 	}
@@ -117,6 +123,7 @@ class ExpenseController {
 				EXP_AMOUNT: amount,
 				EXP_QTY: payload.EXP_QTY,
 				EXP_SOURCE: payload.EXP_SOURCE,
+				RECEIPT_IMAGE_PATH: payload.RECEIPT_IMAGE_PATH,
 				user_id: userId,
 				ENCODED_BY: encodedBy,
 				ENCODED_DT: encodedDt,
@@ -175,6 +182,7 @@ class ExpenseController {
 				EXP_AMOUNT: amount,
 				EXP_QTY: payload.EXP_QTY,
 				EXP_SOURCE: payload.EXP_SOURCE,
+				RECEIPT_IMAGE_PATH: payload.RECEIPT_IMAGE_PATH,
 				user_id: userId,
 				...(encodedDt !== undefined ? { ENCODED_DT: encodedDt } : {}),
 			});

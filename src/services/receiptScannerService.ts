@@ -76,3 +76,28 @@ export async function fetchReceiptScannerGeminiKey(): Promise<string> {
         throw e instanceof Error ? e : new Error('Failed to load receipt scanner API key');
     }
 }
+
+export async function stitchReceiptImages(images: string[], options?: { maxWidth?: number; maxHeight?: number; quality?: number }): Promise<string> {
+    if (!Array.isArray(images) || images.length === 0) {
+        throw new Error('No images to stitch');
+    }
+    const res = await fetch(`${window.location.origin}/data-api/api/receiptscanner/stitch`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify({
+            images,
+            maxWidth: options?.maxWidth,
+            maxHeight: options?.maxHeight,
+            quality: options?.quality,
+        }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { success?: boolean; data?: { image?: string }; error?: string };
+    if (!res.ok || !json.success || !json.data?.image) {
+        throw new Error(json.error || 'Failed to stitch receipt images');
+    }
+    return String(json.data.image);
+}
