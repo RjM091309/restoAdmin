@@ -19,9 +19,16 @@ import { uploadExpenseReceipt } from '../../services/uploadService';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey, stitchReceiptImages } from '../../services/receiptScannerService';
 import { extractExpenseItemsFromReceiptImage, type ReceiptExpenseExtractionResult } from '../../services/receiptExpenseExtraction';
 import { syncIngredientsFromExpenses } from '../../services/ingredientService';
+import {
+  fetchReceiptScanHistoryById,
+  fetchReceiptScanHistoryList,
+  saveReceiptScanHistory,
+  type ReceiptScanHistoryDetail,
+  type ReceiptScanHistoryListRow,
+} from '../../services/receiptScanHistoryService';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
-import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine } from 'lucide-react';
+import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine, History, Eye } from 'lucide-react';
 import { Skeleton, SkeletonTransition, SkeletonCard, SkeletonTable } from '../ui/Skeleton';
 import { formatQty, getQtyInputStep, getUnitLabel, UOM_OPTIONS, canonicalUomValue } from '../../lib/uomUtils';
 import { Select2 } from '../ui/Select2';
@@ -253,6 +260,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [receiptScannedImage, setReceiptScannedImage] = useState<string | null>(null);
   const [receiptPreviewLightboxOpen, setReceiptPreviewLightboxOpen] = useState(false);
   const [receiptSaveConfirmOpen, setReceiptSaveConfirmOpen] = useState(false);
+  const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
+  const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
+  const [receiptHistoryLoading, setReceiptHistoryLoading] = useState(false);
+  const [receiptHistoryError, setReceiptHistoryError] = useState<string | null>(null);
+  const [receiptHistoryDetailOpen, setReceiptHistoryDetailOpen] = useState(false);
+  const [receiptHistoryDetailLoading, setReceiptHistoryDetailLoading] = useState(false);
+  const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<ReceiptScanHistoryDetail | null>(null);
 
   const [operationForm, setOperationForm] = useState<{ name: string; description: string; state: number }>({
     name: '',
@@ -601,6 +615,50 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     }
   }, [receiptSegments, extractionCategoryTypes]);
 
+  const openReceiptHistory = useCallback(() => {
+    if (!branchId || branchId === 'all') {
+      toast.error('Select a branch first');
+      return;
+    }
+    setReceiptHistoryOpen(true);
+  }, [branchId]);
+
+  useEffect(() => {
+    if (!receiptHistoryOpen) return;
+    if (!branchId || branchId === 'all') return;
+    let cancelled = false;
+    setReceiptHistoryLoading(true);
+    setReceiptHistoryError(null);
+    void (async () => {
+      try {
+        const rows = await fetchReceiptScanHistoryList(String(branchId), 200);
+        if (!cancelled) setReceiptHistoryRows(rows);
+      } catch (e) {
+        if (!cancelled) setReceiptHistoryError(e instanceof Error ? e.message : 'Failed to load history');
+      } finally {
+        if (!cancelled) setReceiptHistoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [receiptHistoryOpen, branchId]);
+
+  const openReceiptHistoryDetail = useCallback(async (id: number) => {
+    setReceiptHistoryDetailOpen(true);
+    setReceiptHistoryDetailLoading(true);
+    setReceiptHistoryDetail(null);
+    try {
+      const d = await fetchReceiptScanHistoryById(id);
+      setReceiptHistoryDetail(d);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load receipt');
+      setReceiptHistoryDetailOpen(false);
+    } finally {
+      setReceiptHistoryDetailLoading(false);
+    }
+  }, []);
+
   const sendExtractedReceiptToExpenses = useCallback(async () => {
     if (!branchId || branchId === 'all') {
       toast.error('Select a branch first');
@@ -676,6 +734,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         receiptEncodedDateYmd && /^\d{4}-\d{2}-\d{2}$/.test(receiptEncodedDateYmd)
           ? `${receiptEncodedDateYmd} 12:00:00`
           : null;
+
+      try {
+        // Audit trail: save scan record so it appears in "Receipt History"
+        await saveReceiptScanHistory({
+          branch_id: branchId,
+          source: 'expenses',
+          order_id: null,
+          encoded_dt: encodedDt,
+          receipt_grand_total: Number(receiptExtractResult.receipt_grand_total || 0),
+          receipt_image_path: receiptPath ?? null,
+        });
+      } catch {
+        // Non-fatal
+      }
 
       await Promise.all(
         receiptExtractResult.items.map(async (item) => {
@@ -1901,6 +1973,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         >
           <ScanLine size={18} />
           Upload Receipt
+        </button>
+        <button
+          type="button"
+          onClick={openReceiptHistory}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-700 px-6 py-2.5 text-base font-bold text-white shadow-lg shadow-slate-700/20 transition-all hover:bg-slate-800 sm:w-auto"
+        >
+          <History size={18} />
+          History
         </button>
       </div>
 
@@ -3134,6 +3214,201 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
               <div className="p-5 text-sm text-brand-muted">No extracted items yet.</div>
             )}
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={receiptHistoryOpen}
+        onClose={() => {
+          if (receiptHistoryDetailOpen) return;
+          setReceiptHistoryOpen(false);
+        }}
+        title="Receipt History"
+        maxWidth="4xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setReceiptHistoryOpen(false)}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {receiptHistoryError ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {receiptHistoryError}
+            </div>
+          ) : null}
+
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+              <div className="text-sm font-black text-brand-text">Scanned receipts</div>
+              <div className="text-xs text-brand-muted">
+                {receiptHistoryLoading ? 'Loading…' : `${receiptHistoryRows.length} record(s)`}
+              </div>
+            </div>
+            <div className="custom-scrollbar max-h-[60vh] overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted">
+                  <tr>
+                    <th className="bg-gray-50 px-4 py-3 text-left">Date</th>
+                    <th className="bg-gray-50 px-4 py-3 text-left">Source</th>
+                    <th className="bg-gray-50 px-4 py-3 text-right">Total</th>
+                    <th className="bg-gray-50 px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receiptHistoryLoading ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-sm text-brand-muted" colSpan={4}>
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : receiptHistoryRows.length ? (
+                    receiptHistoryRows.map((r) => (
+                      <tr key={r.IDNo} className="border-t border-gray-100 hover:bg-gray-50/60 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-brand-text">
+                          {String(r.ENCODED_DT || '').slice(0, 10)}
+                        </td>
+                        <td className="px-4 py-3 text-brand-muted">{r.SOURCE || '—'}</td>
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                          {formatCurrency(Number(r.RECEIPT_GRAND_TOTAL || 0))}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void openReceiptHistoryDetail(Number(r.IDNo))}
+                            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold hover:bg-gray-50"
+                          >
+                            <Eye size={14} />
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-sm text-brand-muted" colSpan={4}>
+                        No history yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={receiptHistoryDetailOpen}
+        onClose={() => setReceiptHistoryDetailOpen(false)}
+        title="Receipt Detail"
+        maxWidth="5xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setReceiptHistoryDetailOpen(false)}
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {receiptHistoryDetailLoading ? (
+            <div className="text-sm text-brand-muted">Loading…</div>
+          ) : receiptHistoryDetail ? (
+            <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                  <div className="border-b border-gray-100 px-5 py-4 text-sm font-black text-brand-text">Receipt</div>
+                  <div className="custom-scrollbar max-h-[60vh] overflow-auto bg-slate-50 p-4">
+                    {receiptHistoryDetail.receipt_image_data_url ? (
+                      <a
+                        href={receiptHistoryDetail.receipt_image_data_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group relative block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40"
+                        title="Open receipt in new tab"
+                      >
+                        <img
+                          src={receiptHistoryDetail.receipt_image_data_url}
+                          alt="Receipt"
+                          className="mx-auto block h-auto w-full max-w-full"
+                        />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/55 via-black/20 to-transparent px-3 py-3 opacity-0 transition-opacity group-hover:opacity-100">
+                          <span className="text-xs font-bold text-white drop-shadow-sm">Click to view</span>
+                        </div>
+                      </a>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-gray-200 p-10 text-center text-sm text-brand-muted">
+                        No receipt image.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                  <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+                    <div className="text-sm font-black text-brand-text">Expenses created</div>
+                    <div className="text-xs text-brand-muted">
+                      {(() => {
+                        const key = String(receiptHistoryDetail.receipt_image_data_url || '');
+                        const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
+                        return `${rows.length} item(s)`;
+                      })()}
+                    </div>
+                  </div>
+                  <div className="custom-scrollbar max-h-[60vh] overflow-auto">
+                    {(() => {
+                      const key = String(receiptHistoryDetail.receipt_image_data_url || '');
+                      const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
+                      if (!rows.length) {
+                        return (
+                          <div className="p-5 text-sm text-brand-muted">
+                            No matching expenses found for this receipt in the current list.
+                          </div>
+                        );
+                      }
+                      return (
+                        <table className="min-w-full text-sm">
+                          <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted">
+                            <tr>
+                              <th className="bg-gray-50 px-4 py-3 text-left">Name</th>
+                              <th className="bg-gray-50 px-4 py-3 text-right">Qty</th>
+                              <th className="bg-gray-50 px-4 py-3 text-left">Unit</th>
+                              <th className="bg-gray-50 px-4 py-3 text-right">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((r) => (
+                              <tr key={String(r.id)} className="border-t border-gray-100">
+                                <td className="px-4 py-3 font-semibold text-brand-text">
+                                  {String(r.expDesc || r.expName || '').trim() || '—'}
+                                </td>
+                                <td className="px-4 py-3 text-right tabular-nums">{formatQty(expenseLineQty(r), r.unit || 'pcs')}</td>
+                                <td className="px-4 py-3 text-brand-muted">{getUnitLabel(r.unit || 'pcs')}</td>
+                                <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(r.expAmount || 0))}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-brand-muted">No data.</div>
+          )}
         </div>
       </Modal>
 
