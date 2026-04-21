@@ -198,12 +198,13 @@ class InventoryModel {
 		const unitVal = unit && String(unit).trim() ? String(unit).trim().toLowerCase() : 'pcs';
 		const safeUnit = validUnits.includes(unitVal) ? unitVal : 'pcs';
 		try {
+			// Load expense by ID only — INNER JOINs to master_categories/operation_category could drop rows
+			// (e.g. category moved, join quirks) even though the expense exists and appears in the UI list.
 			const [exp] = await pool.execute(
 				`SELECT e.BRANCH_ID, e.EXP_DESC, e.EXP_AMOUNT, e.MASTER_CAT_ID, e.INGREDIENT_ID, e.ENCODED_BY, e.ENCODED_DT
 				 FROM expenses e
-				 INNER JOIN master_categories mc ON mc.IDNo = e.MASTER_CAT_ID
-				 INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID
-				 WHERE e.IDNo = ? LIMIT 1`,
+				 WHERE e.IDNo = ? AND e.ACTIVE = 1
+				 LIMIT 1`,
 				[expenseId]
 			);
 			if (!exp.length) return false;

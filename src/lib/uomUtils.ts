@@ -26,10 +26,17 @@ function normalizeUnit(unit: string): string {
   return String(unit || 'pcs').toLowerCase().trim();
 }
 
-/** Display label for unit — matches backend VALID_UNITS (lowercase) */
+/** Human-readable unit label (volume uses L / mL to avoid ambiguous lowercase "l"). */
+const UNIT_DISPLAY: Record<string, string> = {
+  l: 'L',
+  ml: 'mL',
+};
+
+/** Display label for unit — storage/normalization stays lowercase; UI shows L and mL. */
 export function getUnitLabel(unit: string): string {
   const u = normalizeUnit(unit);
-  return u || 'pcs';
+  if (!u) return 'pcs';
+  return UNIT_DISPLAY[u] ?? u;
 }
 
 export function isDecimalUnit(unit: string): boolean {
@@ -62,3 +69,16 @@ export function formatQty(value: number | null | undefined, unit: string): strin
 
 /** Valid unit values for backend validation (lowercase) */
 export const VALID_UNITS = [...WHOLE_NUMBER_UNITS, ...DECIMAL_UNITS];
+
+/**
+ * Map a stored/API unit string to the canonical option value in {@link UOM_OPTIONS} (for Select2 value match).
+ */
+export function canonicalUomValue(raw: string | null | undefined): string {
+  const s = String(raw ?? 'pcs').trim();
+  if (!s) return 'pcs';
+  const lower = s.toLowerCase();
+  const aliases: Record<string, (typeof UOM_OPTIONS)[number]> = { l: 'L', ml: 'mL' };
+  if (aliases[lower]) return aliases[lower];
+  const found = UOM_OPTIONS.find((u) => u.toLowerCase() === lower);
+  return found ?? s;
+}
