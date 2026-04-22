@@ -527,6 +527,7 @@
 			"employee": "Employee",
 			"customer": "Customer",
 			"type": "Type",
+			"discount": "Discount",
 			"total": "Total"
 		}
 	},

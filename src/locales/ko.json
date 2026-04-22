@@ -485,6 +485,7 @@
 			"employee": "직원",
 			"customer": "고객",
 			"type": "유형",
+			"discount": "할인",
 			"total": "합계"
 		}
 	},

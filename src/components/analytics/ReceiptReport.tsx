@@ -29,10 +29,9 @@ type ReceiptReportRow = {
   id: string;
   receiptNumber: string;
   date: string;
-  employee: string;
-  customer: string;
   type: string;
   total: number;
+  discount: number;
 };
 
 type ReceiptLineItem = {
@@ -50,6 +49,7 @@ type ReceiptDetail = {
   serviceType: string;
   paymentMethod: string;
   transactionNo: string;
+  discount: number;
   items: ReceiptLineItem[];
 };
 
@@ -106,10 +106,9 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
             id: String(row.id),
             receiptNumber: row.receiptNumber,
             date: row.date,
-            employee: row.employee,
-            customer: row.customer,
             type: row.type,
             total: row.total,
+            discount: Number(row.discount ?? 0),
           }))
         );
       } catch (err) {
@@ -133,7 +132,6 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     return byType.filter(
       (row) =>
         row.receiptNumber.toLowerCase().includes(keyword) ||
-        row.employee.toLowerCase().includes(keyword) ||
         row.type.toLowerCase().includes(keyword)
     );
   }, [rows, searchTerm, activeFilter]);
@@ -204,26 +202,19 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
       cellClassName: bodyTextClass,
     },
     {
-      header: t('receipt_report.columns.employee'),
-      accessorKey: 'employee',
-      className: 'min-w-[140px]',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
-    },
-    {
-      header: t('receipt_report.columns.customer'),
-      accessorKey: 'customer',
-      className: 'min-w-[130px]',
-      headerClassName: headerTextClass,
-      cellClassName: bodyTextClass,
-    },
-    {
       header: t('receipt_report.columns.type'),
       accessorKey: 'type',
       className: 'min-w-[110px]',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} font-medium`,
       render: (item) => (item.type.toLowerCase() === 'refund' ? t('receipt_report.type_refund') : t('receipt_report.type_sale')),
+    },
+    {
+      header: t('receipt_report.columns.discount'),
+      className: 'min-w-[130px] text-right',
+      headerClassName: headerTextClass,
+      cellClassName: `${bodyTextClass} text-right`,
+      render: (item) => money(item.discount),
     },
     {
       header: t('receipt_report.columns.total'),
@@ -258,9 +249,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     const headers = [
       t('receipt_report.columns.receipt_number'),
       t('receipt_report.columns.date'),
-      t('receipt_report.columns.employee'),
-      t('receipt_report.columns.customer'),
       t('receipt_report.columns.type'),
+      t('receipt_report.columns.discount'),
       t('receipt_report.columns.total'),
     ];
 
@@ -275,9 +265,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
       return [
         row.receiptNumber,
         row.date,
-        row.employee,
-        row.customer,
         typeLabel,
+        row.discount.toString(),
         row.total.toString(),
       ];
     });
@@ -308,9 +297,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     const headers = [
       t('receipt_report.columns.receipt_number'),
       t('receipt_report.columns.date'),
-      t('receipt_report.columns.employee'),
-      t('receipt_report.columns.customer'),
       t('receipt_report.columns.type'),
+      t('receipt_report.columns.discount'),
       t('receipt_report.columns.total'),
     ];
 
@@ -319,9 +307,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
       return [
         row.receiptNumber,
         row.date,
-        row.employee,
-        row.customer,
         typeLabel,
+        money(row.discount),
         money(row.total),
       ];
     });
@@ -539,6 +526,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
               serviceType: detail.serviceType,
               paymentMethod: detail.paymentMethod,
               transactionNo: detail.transactionNo,
+              discount: Math.max(0, Number((order as any)?.DISCOUNT_AMOUNT ?? 0)),
               items: itemsForSlip.length ? itemsForSlip : fallbackItems,
             });
           } catch (error) {
@@ -631,6 +619,12 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                         <span>{t('receipt_report.columns.total')}</span>
                         <span>{money(selectedReceipt.total)}</span>
                       </div>
+                      {activeDetail && activeDetail.discount > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span>{t('receipt_report.columns.discount')}</span>
+                          <span>-{money(activeDetail.discount)}</span>
+                        </div>
+                      )}
                       {activeDetail && (
                         <div className="flex items-center justify-between text-sm">
                           <span>{activeDetail.paymentMethod}</span>

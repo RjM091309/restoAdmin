@@ -485,6 +485,7 @@
 			"employee": "员工",
 			"customer": "客户",
 			"type": "类型",
+			"discount": "折扣",
 			"total": "合计"
 		}
 	},
