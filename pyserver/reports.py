@@ -135,10 +135,56 @@ def menu_report(
             {branch_filter}
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
             HAVING salesQty > 0
+
+            UNION ALL
+
+            SELECT
+                -9998 AS id,
+                'Room Charge' AS goods,
+                'Charges' AS category,
+                COUNT(DISTINCT o.IDNo) AS salesQty,
+                COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+              AND COALESCE(rt.ROOM_CHARGE, 0) > 0
+            {date_filter}
+            {branch_filter}
+            HAVING salesQty > 0
+
+            UNION ALL
+
+            SELECT
+                -9999 AS id,
+                'Service Charge' AS goods,
+                'Charges' AS category,
+                COUNT(DISTINCT o.IDNo) AS salesQty,
+                COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+              AND COALESCE(rt.ROOM_CHARGE, 0) = 0
+            {date_filter}
+            {branch_filter}
+            HAVING salesQty > 0
+
             ORDER BY totalSales DESC
         """
 
-        cur.execute(query, params)
+        # date_filter / branch_filter are repeated in ALL union branches above,
+        # so we must repeat the params for each occurrence.
+        exec_params = params + params + params
+        cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
         conn.close()
