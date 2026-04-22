@@ -65,6 +65,12 @@ type Category = {
 const ITEMS_PER_PAGE = 50;
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'];
 
+const distinctSeriesColor = (idx: number): string => {
+  // Golden-angle palette: visually distinct even for many rows.
+  const hue = (idx * 137.508) % 360;
+  return `hsl(${hue} 78% 48%)`;
+};
+
 const DEFAULT_EXTRACTION_CATEGORIES = ['Food Supplies', 'Utilities', 'FRUITS', 'Others'];
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -103,6 +109,18 @@ const formatCurrency = (value: number) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(safe);
+};
+
+const formatPercent = (value: number, digits = 1) => {
+  const safe = Number.isFinite(value) ? value : 0;
+  return `${safe.toFixed(digits)}%`;
+};
+
+const percentOf = (value: number, denom: number): number => {
+  const v = Number(value) || 0;
+  const d = Number(denom) || 0;
+  if (!Number.isFinite(v) || !Number.isFinite(d) || d <= 0) return 0;
+  return (v / d) * 100;
 };
 
 const formatYmdForLabel = (ymd: string) => {
@@ -1138,6 +1156,22 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     selectedOperationId,
   ]);
 
+  // When a sub category is selected, we show two % badges:
+  // - main category share vs grand total
+  // - sub category share vs main category
+  const totalForSelectedMainCategory = useMemo(() => {
+    if (!selectedOperationId) return 0;
+    const opMasterIds = new Set(
+      masterCategories
+        .filter((cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId)
+        .map((cat) => cat.id),
+    );
+    return expensesInAnalyticsRange.reduce(
+      (sum, row) => (row.masterCatId != null && opMasterIds.has(row.masterCatId) ? sum + row.expAmount : sum),
+      0,
+    );
+  }, [expensesInAnalyticsRange, masterCategories, selectedOperationId]);
+
   const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
 
   /** Live preview of saved line total (inventory: Qty × unit price), whole pesos — matches table Total. */
@@ -1199,6 +1233,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             </span>
           );
         },
+        className: 'text-right',
+        headerClassName: 'text-right',
+        cellClassName: 'text-right',
+      },
+      {
+        header: '%',
+        render: (row) => (
+          <span className="tabular-nums text-brand-muted">
+            {formatPercent(percentOf(Number(row.expAmount || 0) || 0, totalForView), 1)}
+          </span>
+        ),
         className: 'text-right',
         headerClassName: 'text-right',
         cellClassName: 'text-right',
@@ -1347,7 +1392,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         },
       },
     ],
-    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId],
+    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId, totalForView],
   );
 
   const handleSaveQty = async (row: ExpenseRecord) => {
@@ -2008,9 +2053,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     {formatCurrency(grandTotalDisplayed)}
                   </div>
                 )}
-                <div className="text-xs text-brand-muted mt-1">
-                  {analyticsGrandOk ? 'Matches dashboard (analytics API)' : 'All main categories (local sum)'}
-                </div>
                 <div className="text-[11px] text-brand-muted mt-1">
                   {dateRangeLabel}
                 </div>
@@ -2022,29 +2064,41 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-6 py-5 flex-1">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            <div className="flex items-start gap-4 flex-wrap">
+              <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-black tracking-wide text-brand-muted uppercase">Selected Total</div>
                 <div className="text-2xl font-black tracking-tight text-brand-text mt-1">
                   {formatCurrency(totalForView)}
                 </div>
-                <div className="text-xs text-brand-muted mt-1">
-                  {selectedCategory ? (
-                    <>
-                      Sub Category: <span className="font-bold text-brand-text">{selectedCategory.name}</span>
-                    </>
-                  ) : selectedOperation ? (
-                    <>
-                      Main Category: <span className="font-bold text-brand-text">{selectedOperation.name}</span>
-                    </>
-                  ) : (
-                    'Select a Main Category or Sub Category'
-                  )}
+                <div className="text-[11px] text-brand-muted mt-1">
+                  {formatPercent(percentOf(totalForView, grandTotalDisplayed), 1)} of Grand Total
                 </div>
               </div>
-              <div className="h-11 w-11 rounded-2xl bg-brand-orange/10 border border-brand-orange/10 flex items-center justify-center">
-                <div className="h-5 w-5 rounded-full bg-brand-orange/70" />
-              </div>
+
+              {(selectedOperation || selectedCategory) && (
+                <div className="ml-auto w-full sm:w-[320px] max-w-full text-[11px] text-brand-text font-semibold space-y-1 pt-5 leading-tight">
+                  {selectedOperation ? (
+                    <div className="flex items-center gap-3 w-full">
+                      <span className="truncate flex-1 min-w-0">
+                        {selectedOperation.name}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-brand-muted font-black w-14 text-right">
+                        {formatPercent(percentOf(totalForSelectedMainCategory, grandTotalDisplayed), 1)}
+                      </span>
+                    </div>
+                  ) : null}
+                  {selectedCategory ? (
+                    <div className="flex items-center gap-3 w-full">
+                      <span className="truncate flex-1 min-w-0">
+                        {selectedCategory.name}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-brand-muted font-black w-14 text-right">
+                        {formatPercent(percentOf(totalForView, totalForSelectedMainCategory), 1)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2092,11 +2146,19 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                   {(() => {
                     const maxVal = Math.max(...expenseBreakdown.rows.map((r) => Number(r.value) || 0), 1);
                     return (
-                      <ul className="space-y-2.5">
+                      <ul className="space-y-2.5 pr-2">
                         {expenseBreakdown.rows.map((row, idx) => {
                           const value = Number(row.value) || 0;
-                          const pct = Math.max(0, Math.min(100, (value / maxVal) * 100));
-                          const color = PIE_COLORS[idx % PIE_COLORS.length];
+                          // Use a compressed scale so extreme outliers don't make all other bars look tiny.
+                          // sqrt keeps ordering but reduces the visual gap vs linear scaling.
+                          const pctLinear = value / maxVal;
+                          const pctScaled = Math.sqrt(Math.max(0, pctLinear));
+                          const pct = Math.max(0, Math.min(100, pctScaled * 100));
+                          // Reduce overall bar length for nicer composition.
+                          const pctDisplay = pct * 0.5;
+                          // Use a highly distinct palette so each legend color feels unique.
+                          // (We keep PIE_COLORS for other screens, but breakdown rows use HSL.)
+                          const color = distinctSeriesColor(idx);
                           const isOthers = row.name === 'Others';
                           const canClickOthers = Boolean(selectedCategory) && isOthers && expenseBreakdown.othersKeys.size > 0;
                           const canClickMainCategory =
@@ -2136,7 +2198,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                             <li
                               key={`${row.name}-${idx}`}
                               className="grid items-center gap-3"
-                              style={{ gridTemplateColumns: 'minmax(260px, 1.7fr) minmax(420px, 4.2fr) minmax(160px, 1fr)' }}
+                              // Responsive 3-col layout:
+                              // - label grows but can't collapse too small
+                              // - bar track flexes with screen
+                              // - amount stays readable and doesn't get pushed off-screen
+                              style={{ gridTemplateColumns: 'minmax(200px, 1.2fr) minmax(220px, 2.2fr) minmax(140px, 0.9fr)' }}
                             >
                               <button
                                 type="button"
@@ -2162,10 +2228,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                 type="button"
                                 onClick={handleBreakdownRowClick}
                                 disabled={!isRowClickable}
-                                className={cn(
-                                  'w-full',
-                                  isRowClickable ? 'cursor-pointer' : 'cursor-default',
-                                )}
+                                className={cn('w-full min-w-0', isRowClickable ? 'cursor-pointer' : 'cursor-default')}
                                 aria-label={
                                   canClickOthers
                                     ? 'Filter table items by Others group'
@@ -2178,15 +2241,24 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                   <motion.div
                                     className="h-full rounded-full"
                                     initial={{ width: 0 }}
-                                    animate={{ width: `${pct}%` }}
+                                    animate={{ width: `${pctDisplay}%` }}
                                     transition={{ duration: 0.5, ease: 'easeOut' }}
                                     style={{ backgroundColor: color }}
                                   />
                                 </div>
                               </button>
 
-                              <div className="text-right text-xs font-bold text-slate-500 tabular-nums">
-                                {formatCurrency(value)}
+                              <div className="text-right text-xs font-bold tabular-nums whitespace-nowrap min-w-0">
+                                <span className="text-slate-900">{formatCurrency(value)}</span>
+                                <span className="ml-2 text-[11px] font-extrabold" style={{ color }}>
+                                  ({formatPercent(
+                                    percentOf(
+                                      value,
+                                      selectedCategory || selectedOperation ? totalForView : grandTotalDisplayed,
+                                    ),
+                                    1,
+                                  )})
+                                </span>
                               </div>
                             </li>
                           );
@@ -2207,7 +2279,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Main Category</div>
-              <div className="text-xs text-brand-muted mt-1">Main Category first, then Sub Category.</div>
+            
             </div>
             {canCreate('expenses') && (
               <button
@@ -2279,7 +2351,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black tracking-wide text-brand-text uppercase">Sub Category</div>
-              <div className="text-xs text-brand-muted mt-1">Select a Sub Category to show its items.</div>
+              
             </div>
             {canCreate('expenses') && (
               <button
@@ -2405,19 +2477,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           <div className="px-6 py-5 border-b border-gray-100">
             <div className="flex items-end justify-between gap-4">
               <div>
-                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Table Items</div>
-                <div className="text-xs text-brand-muted mt-1">
-                  {selectedCategory ? (
-                    <>
-                      Showing selected date range items for <span className="font-bold text-brand-text">{selectedCategory.name}</span> plus reusable item templates.
-                    </>
-                  ) : (
-                    'Select a Sub Category to display items.'
-                  )}
-                </div>
-                <div className="text-[11px] text-brand-muted mt-1">
-                  Range: {dateRangeLabel}
-                </div>
+                <div className="text-sm font-black tracking-wide text-brand-text uppercase">Item List</div>
               </div>
               {selectedCategoryId && (
                 <div className="flex items-center gap-3">
