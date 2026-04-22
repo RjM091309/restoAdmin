@@ -555,8 +555,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       const weekend = d ? weekendStyleForDay(d.getDay()) : null;
       const labelStyle: React.CSSProperties = weekend ? { color: weekend.fill, fontWeight: 800 } : { fontWeight: 800 };
 
-      const sorted = [...payload].sort((a, b) => -Number((a?.value ?? 0) as any) + Number((b?.value ?? 0) as any));
-      const rowLabel = (dataKey: string) => (dataKey === 'income' ? t('dashboard.income') : t('dashboard.expense'));
+      const rawForKey = (dataKey: string): number => {
+        if (!point) return 0;
+        if (dataKey === 'income' || dataKey === 'incomePlot') return Number(point.income || 0);
+        if (dataKey === 'expense' || dataKey === 'expensePlot') return Number(point.expense || 0);
+        return 0;
+      };
+      const rowLabel = (dataKey: string) =>
+        dataKey === 'income' || dataKey === 'incomePlot' ? t('dashboard.income') : t('dashboard.expense');
+      const sorted = [...payload].sort((a, b) => rawForKey(String(b?.dataKey)) - rawForKey(String(a?.dataKey)));
 
       return (
         <div
@@ -585,7 +592,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
               >
                 <span style={{ width: 8, height: 8, borderRadius: 9999, background: it?.color || '#64748b', display: 'inline-block' }} />
                 <span style={{ fontSize: 12, color: '#475569', minWidth: 70 }}>{rowLabel(String(it?.dataKey))}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{formatCurrency(Number(it?.value ?? 0))}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                  {formatCurrency(rawForKey(String(it?.dataKey)))}
+                </span>
               </div>
             ))}
           </div>
@@ -594,6 +603,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     };
     return Content;
   }, [navigateToBreakdown, t]);
+
+  const revenueChartData = React.useMemo(() => {
+    const base = dashboardData?.revenueData ?? [];
+    const plot = (v: number) => Math.sqrt(Math.max(0, Number(v) || 0));
+    return base.map((p) => ({
+      ...p,
+      incomePlot: plot(p.income),
+      expensePlot: plot(p.expense),
+    }));
+  }, [dashboardData?.revenueData]);
 
   const OrdersTooltipContent = React.useMemo(() => {
     const Content = (props: any) => {
@@ -1152,7 +1171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                     </div>
                   ) : (
                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <ComposedChart data={dashboardData.revenueData} margin={{ top: 8, right: 6, bottom: 6, left: 6 }}>
+                    <ComposedChart data={revenueChartData} margin={{ top: 8, right: 6, bottom: 6, left: 6 }}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
@@ -1188,7 +1207,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       />
                       <Area
                         type="monotone"
-                        dataKey="income"
+                        dataKey="incomePlot"
                         name={t('dashboard.income')}
                         fill="url(#incomeGradient)"
                         stroke="#4f46e5"
@@ -1212,7 +1231,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       />
                       <Area
                         type="monotone"
-                        dataKey="expense"
+                        dataKey="expensePlot"
                         name={t('dashboard.expense')}
                         fill="url(#expenseGradient)"
                         stroke="#0f172a"

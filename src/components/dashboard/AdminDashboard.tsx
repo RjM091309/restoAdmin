@@ -115,6 +115,8 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
+const TREND_Y_AXIS_MIN_ABS = 800_000;
+
 const WEEKDAY_ABBR_TO_JS_DAY: Record<string, number> = {
   Sun: 0,
   Mon: 1,
@@ -186,6 +188,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('monthly');
+
+  const trendYAxisDomain = useMemo(() => {
+    const maxSales = monthlyData.reduce((m, d) => Math.max(m, Number(d.totalSales) || 0), 0);
+    const maxExpenses = monthlyData.reduce((m, d) => Math.max(m, Number(d.totalExpenses) || 0), 0);
+    const maxAbs = Math.max(TREND_Y_AXIS_MIN_ABS, maxSales, maxExpenses);
+    return [-maxAbs, maxAbs] as [number, number];
+  }, [monthlyData]);
+
+  const trendYAxisTicks = useMemo(() => {
+    const [minV, maxV] = trendYAxisDomain;
+    return [minV, 0, maxV];
+  }, [trendYAxisDomain]);
+
   const [trendLoading, setTrendLoading] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
   const [compareBranchIds, setCompareBranchIds] = useState<number[]>([]);
@@ -1331,6 +1346,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       tickFormatter={(value) => `₱${Math.round(Math.abs(value / 1000))}k`} 
                       axisLine={false}
                       tickLine={false}
+                      domain={trendYAxisDomain}
+                      ticks={trendYAxisTicks}
                     />
                     <Tooltip 
                       content={TrendTooltipContent}
