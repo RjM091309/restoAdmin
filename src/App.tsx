@@ -386,9 +386,40 @@ export default function App() {
     const params = new URLSearchParams(location.search);
     const branchIdInUrl = params.get('branchId');
     if (branchIdInUrl) return;
-    if (!user?.branch_id) return;
+    const savedId = (() => {
+      try {
+        return (localStorage.getItem('lastSelectedBranchId') || '').trim();
+      } catch {
+        return '';
+      }
+    })();
+    const savedName = (() => {
+      try {
+        return (localStorage.getItem('lastSelectedBranchName') || '').trim();
+      } catch {
+        return '';
+      }
+    })();
 
-    const next: Branch = { id: String(user.branch_id), name: `Branch ${String(user.branch_id)}` };
+    // Managers must always stay within their assigned branch.
+    // Admins can restore last selected branch (savedId) on refresh.
+    const isManager = Number(user?.permissions) === 3;
+    const isAdmin = Number(user?.permissions) === 1;
+    const preferredId = isAdmin
+      ? 'all'
+      : isManager
+        ? (user?.branch_id ? String(user.branch_id) : '')
+        : (savedId || (user?.branch_id ? String(user.branch_id) : ''));
+    if (!preferredId) return;
+
+    const userBranchName = (user as any)?.branch_name ? String((user as any).branch_name) : '';
+
+    const next: Branch = {
+      id: preferredId,
+      // If we have a real branch label from previous selection, keep it stable on refresh.
+      // Otherwise fall back to a placeholder until Header fetches the branch list and replaces it.
+      name: isAdmin ? 'All Branches' : (userBranchName || savedName || `Branch ${preferredId}`),
+    };
     setSelectedBranch(next);
 
     params.set('branchId', String(next.id));
@@ -396,6 +427,35 @@ export default function App() {
     const search = params.toString();
     navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
   }, [isLoggedIn, user?.branch_id, location.pathname, location.search, navigate]);
+
+  // Guard: if a manager lands on a URL with a different branchId, force it back to their own.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const isManager = Number(user?.permissions) === 3;
+    const userBranchId = user?.branch_id ? String(user.branch_id) : '';
+    if (!isManager || !userBranchId) return;
+
+    const params = new URLSearchParams(location.search);
+    const branchIdInUrl = (params.get('branchId') || '').trim();
+    if (!branchIdInUrl) return;
+    if (String(branchIdInUrl) === userBranchId) return;
+
+    // Clear any persisted "last selected branch" so it can't override later loads.
+    try {
+      localStorage.removeItem('lastSelectedBranchId');
+      localStorage.removeItem('lastSelectedBranchName');
+    } catch {
+      // ignore
+    }
+
+    const userBranchName = (user as any)?.branch_name ? String((user as any).branch_name) : '';
+    const next: Branch = { id: userBranchId, name: userBranchName || `Branch ${userBranchId}` };
+    setSelectedBranch(next);
+    params.set('branchId', userBranchId);
+    params.set('branchName', next.name);
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
+  }, [isLoggedIn, user?.permissions, user?.branch_id, location.pathname, location.search, navigate]);
 
   // Fetch sidebar permissions for selected branch (so sidebar shows only allowed items per branch)
   useEffect(() => {

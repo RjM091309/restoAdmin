@@ -263,12 +263,20 @@ export const Header: React.FC<HeaderProps> = ({
     const url = new URL(window.location.href);
     url.searchParams.set('branchId', String(branch.id));
     url.searchParams.set('branchName', branch.name);
+    try {
+      localStorage.setItem('lastSelectedBranchId', String(branch.id));
+      localStorage.setItem('lastSelectedBranchName', String(branch.name || ''));
+    } catch {
+      // ignore storage failures (private mode, quota, etc.)
+    }
     if (opts?.newTab) {
       window.open(url.toString(), '_blank', 'noopener,noreferrer');
     } else {
-      // Keep branch selection stable on refresh by persisting it in the URL.
-      // We navigate in the same tab so all screens immediately use the new branch_id.
-      window.location.assign(url.toString());
+      // Keep branch selection stable on refresh by persisting it in the URL,
+      // but avoid a full page reload (admin complained about redirect on select).
+      // React Router listens to popstate; dispatch one after updating the URL.
+      window.history.pushState({}, '', url.toString());
+      window.dispatchEvent(new PopStateEvent('popstate'));
     }
   };
 
@@ -449,10 +457,15 @@ export const Header: React.FC<HeaderProps> = ({
                         <button
                           key={branch.id}
                           onClick={(e) => {
-                            // Ctrl/Cmd click opens in a new tab; normal click switches branch in-place.
-                            const newTab = (e as any)?.metaKey || (e as any)?.ctrlKey;
-                            onBranchChange(branch);
-                            navigateToBranch(branch, { newTab: Boolean(newTab) });
+                            // Admin prefers opening each branch in a new tab (branch-to-branch comparison).
+                            // Non-admin switches branch in-place; Ctrl/Cmd click still opens a new tab.
+                            const hotkeyNewTab = (e as any)?.metaKey || (e as any)?.ctrlKey;
+                            const shouldOpenNewTab = Boolean(isAdmin || hotkeyNewTab);
+
+                            if (!shouldOpenNewTab) {
+                              onBranchChange(branch);
+                            }
+                            navigateToBranch(branch, { newTab: shouldOpenNewTab });
                             setBranchDropdownOpen(false);
                           }}
                           className={clsx(

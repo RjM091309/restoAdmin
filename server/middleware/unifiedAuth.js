@@ -29,6 +29,8 @@ const authenticate = (req, res, next) => {
 				username: decoded.username,
 				permissions: decoded.permissions,
 				branch_id: decoded.branch_id || null,
+				branch_name: decoded.branch_name || null,
+				branch_code: decoded.branch_code || null,
 				firstname: decoded.firstname || null,
 				lastname: decoded.lastname || null,
 				auth_method: 'jwt'
@@ -42,6 +44,8 @@ const authenticate = (req, res, next) => {
 			req.session.username = decoded.username;
 			req.session.permissions = decoded.permissions;
 			req.session.branch_id = decoded.branch_id || null;
+			req.session.branch_name = decoded.branch_name || null;
+			req.session.branch_code = decoded.branch_code || null;
 			req.session.firstname = decoded.firstname || null;
 			req.session.lastname = decoded.lastname || null;
 			
@@ -85,6 +89,8 @@ const optionalAuthenticate = (req, res, next) => {
 				username: decoded.username,
 				permissions: decoded.permissions,
 				branch_id: decoded.branch_id || null,
+				branch_name: decoded.branch_name || null,
+				branch_code: decoded.branch_code || null,
 				firstname: decoded.firstname || null,
 				lastname: decoded.lastname || null,
 				auth_method: 'jwt'
@@ -94,6 +100,8 @@ const optionalAuthenticate = (req, res, next) => {
 			req.session.username = decoded.username;
 			req.session.permissions = decoded.permissions;
 			req.session.branch_id = decoded.branch_id || null;
+			req.session.branch_name = decoded.branch_name || null;
+			req.session.branch_code = decoded.branch_code || null;
 			req.session.firstname = decoded.firstname || null;
 			req.session.lastname = decoded.lastname || null;
 			return next();

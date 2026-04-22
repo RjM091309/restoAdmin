@@ -7,6 +7,8 @@ type User = {
     lastname: string;
     permissions: number;
     branch_id: string | null;
+    branch_name?: string | null;
+    branch_code?: string | null;
     avatar?: string;
 };
 
@@ -40,6 +42,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsLoggedIn(true);
         localStorage.setItem('user', JSON.stringify(userData));
         localStorage.setItem('token', token);
+        // Prevent branch selection leaking across accounts (admin -> manager, etc.)
+        // Branch context should come from the logged-in user/session, not a previous user.
+        localStorage.removeItem('lastSelectedBranchId');
+        localStorage.removeItem('lastSelectedBranchName');
     };
 
     const logout = () => {
@@ -47,6 +53,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsLoggedIn(false);
         localStorage.removeItem('user');
         localStorage.removeItem('token');
+        localStorage.removeItem('lastSelectedBranchId');
+        localStorage.removeItem('lastSelectedBranchName');
 
         if (typeof window !== 'undefined') {
             // Fully reload app on logout so that

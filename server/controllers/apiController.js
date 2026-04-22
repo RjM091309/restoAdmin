@@ -95,13 +95,25 @@ class ApiController {
 						branches = [];
 					}
 
+					// Resolve branch metadata for per-branch users so the frontend can display the real name immediately.
+					let branchMeta = null;
+					try {
+						if (user.BRANCH_ID != null && user.BRANCH_ID !== '') {
+							branchMeta = await BranchModel.getById(user.BRANCH_ID);
+						}
+					} catch (_) {
+						branchMeta = null;
+					}
+
 					const tokenPayload = {
 						user_id: user.IDNo,
 						username: user.USERNAME,
 						permissions: user.PERMISSIONS,
 						firstname: user.FIRSTNAME,
 						lastname: user.LASTNAME,
-						branch_id: user.BRANCH_ID || null
+						branch_id: user.BRANCH_ID || null,
+						branch_name: branchMeta?.BRANCH_NAME || null,
+						branch_code: branchMeta?.BRANCH_CODE || null,
 					};
 					const tokens = generateTokenPair(tokenPayload);
 
@@ -114,6 +126,8 @@ class ApiController {
 							lastname: user.LASTNAME,
 							permissions: user.PERMISSIONS,
 							branch_id: user.BRANCH_ID || null,
+							branch_name: branchMeta?.BRANCH_NAME || null,
+							branch_code: branchMeta?.BRANCH_CODE || null,
 							role: userRole,
 							table_id: user.TABLE_ID || null,
 							branches: branches
