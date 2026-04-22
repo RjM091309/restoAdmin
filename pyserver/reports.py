@@ -114,6 +114,13 @@ def menu_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
 
+        # Subqueries use different billing aliases (b2 for amount, bq for qty).
+        # Generate filters per-alias so SQL always references the correct table.
+        date_filter_b2 = date_filter.replace("b.", "b2.") if date_filter else ""
+        branch_filter_b2 = branch_filter.replace("b.", "b2.") if branch_filter else ""
+        date_filter_bq = date_filter.replace("b.", "bq.") if date_filter else ""
+        branch_filter_bq = branch_filter.replace("b.", "bq.") if branch_filter else ""
+
         query = f"""
             SELECT
                 m.IDNo AS id,
@@ -133,6 +140,10 @@ def menu_report(
             WHERE 1=1
             {date_filter}
             {branch_filter}
+              -- Prevent duplicate "Room Charge" when we also inject a synthetic row below.
+              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
+              -- Also fold any legacy "ROOM CHARGE" category sales into the synthetic Room Charge row.
+              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
             HAVING salesQty > 0
 
@@ -142,8 +153,38 @@ def menu_report(
                 -9998 AS id,
                 'Room Charge' AS goods,
                 'Charges' AS category,
-                COUNT(DISTINCT o.IDNo) AS salesQty,
-                COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
+                (
+                  COUNT(DISTINCT o.IDNo)
+                  +
+                  COALESCE((
+                    SELECT SUM(oiq.QTY)
+                    FROM orders oq
+                    INNER JOIN billing bq ON bq.ORDER_ID = oq.IDNo AND bq.STATUS IN (1, 2)
+                    INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
+                    INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
+                    LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
+                    WHERE UPPER(TRIM(COALESCE(cq.CAT_NAME, ''))) = 'ROOM CHARGE'
+                      AND UPPER(TRIM(mq.MENU_NAME)) <> 'ROOM CHARGE'
+                      {date_filter_bq}
+                      {branch_filter_bq}
+                  ), 0)
+                ) AS salesQty,
+                (
+                  COALESCE(SUM(o.SERVICE_CHARGE), 0)
+                  +
+                  COALESCE((
+                    SELECT SUM(oi2.LINE_TOTAL)
+                    FROM orders o2
+                    INNER JOIN billing b2 ON b2.ORDER_ID = o2.IDNo AND b2.STATUS IN (1, 2)
+                    INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
+                    INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
+                    LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
+                    WHERE UPPER(TRIM(COALESCE(c2.CAT_NAME, ''))) = 'ROOM CHARGE'
+                      AND UPPER(TRIM(m2.MENU_NAME)) <> 'ROOM CHARGE'
+                      {date_filter_b2}
+                      {branch_filter_b2}
+                  ), 0)
+                ) AS totalSales,
                 0 AS refundQty,
                 0 AS refundAmount,
                 0 AS discounts,
@@ -181,9 +222,14 @@ def menu_report(
             ORDER BY totalSales DESC
         """
 
-        # date_filter / branch_filter are repeated in ALL union branches above,
-        # so we must repeat the params for each occurrence.
-        exec_params = params + params + params
+        # date_filter / branch_filter are repeated across UNION branches and subqueries.
+        # Occurrences:
+        # - base menu aggregation (b)
+        # - Room Charge row (b)
+        # - Room Charge amount subquery (b2)
+        # - Room Charge qty subquery (bq, uses the same param list order as b2 filters)
+        # - Service Charge row (b)
+        exec_params = params + params + params + params + params
         cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
@@ -258,6 +304,13 @@ def category_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
 
+        # Subqueries use different billing aliases (b2 for amount, bq for qty).
+        # Generate filters per-alias so SQL always references the correct table.
+        date_filter_b2 = date_filter.replace("b.", "b2.") if date_filter else ""
+        branch_filter_b2 = branch_filter.replace("b.", "b2.") if branch_filter else ""
+        date_filter_bq = date_filter.replace("b.", "bq.") if date_filter else ""
+        branch_filter_bq = branch_filter.replace("b.", "bq.") if branch_filter else ""
+
         query = f"""
             SELECT
                 COALESCE(c.IDNo, 0) AS id,
@@ -276,12 +329,69 @@ def category_report(
             WHERE 1=1
             {date_filter}
             {branch_filter}
+              -- Prevent the synthetic Room Charge row from double-counting.
+              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
+              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
             GROUP BY c.IDNo, c.CAT_NAME
+            HAVING salesQty > 0
+
+            UNION ALL
+
+            -- Synthetic Room Charge row: qty matches menu-report (COUNT distinct orders on room-charge tables),
+            -- amount matches category-report logic (service_charge + legacy ROOM CHARGE category items).
+            SELECT
+                -9998 AS id,
+                'Room Charge' AS category,
+                (
+                  COUNT(DISTINCT o.IDNo)
+                  +
+                  COALESCE((
+                    SELECT SUM(oiq.QTY)
+                    FROM orders oq
+                    INNER JOIN billing bq ON bq.ORDER_ID = oq.IDNo AND bq.STATUS IN (1, 2)
+                    INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
+                    INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
+                    LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
+                    WHERE UPPER(TRIM(COALESCE(cq.CAT_NAME, ''))) = 'ROOM CHARGE'
+                      AND UPPER(TRIM(mq.MENU_NAME)) <> 'ROOM CHARGE'
+                    {date_filter_bq}
+                    {branch_filter_bq}
+                  ), 0)
+                ) AS salesQty,
+                (
+                  COALESCE(SUM(o.SERVICE_CHARGE), 0)
+                  +
+                  COALESCE((
+                    SELECT SUM(oi2.LINE_TOTAL)
+                    FROM orders o2
+                    INNER JOIN billing b2 ON b2.ORDER_ID = o2.IDNo AND b2.STATUS IN (1, 2)
+                    INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
+                    INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
+                    LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
+                    WHERE UPPER(TRIM(COALESCE(c2.CAT_NAME, ''))) = 'ROOM CHARGE'
+                      AND UPPER(TRIM(m2.MENU_NAME)) <> 'ROOM CHARGE'
+                    {date_filter_b2}
+                    {branch_filter_b2}
+                  ), 0)
+                ) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+              AND COALESCE(rt.ROOM_CHARGE, 0) > 0
+            {date_filter}
+            {branch_filter}
             HAVING salesQty > 0
             ORDER BY totalSales DESC
         """
 
-        cur.execute(query, params)
+        # Params are reused across: base + synthetic row + qty subquery + amount subquery.
+        exec_params = params + params + params + params
+        cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
         conn.close()
