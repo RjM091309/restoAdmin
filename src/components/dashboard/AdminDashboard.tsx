@@ -262,16 +262,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
         const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
 
-        const normalized: MonthlyData[] = rows.map((r) => ({
+        const weeklyHasCalendarDates =
+          trendPeriod === 'weekly' && rows.length > 0 && rows.every((r) => r.sale_date);
+
+        let rowsForChart = rows;
+        if (weeklyHasCalendarDates) {
+          const wStart = String(rows[0].sale_date).slice(0, 10);
+          const wEnd = String(rows[rows.length - 1].sale_date).slice(0, 10);
+          try {
+            const recon = await fetchCashReconciliationAggregates({
+              start: wStart,
+              end: wEnd,
+              ...(activeBranchId ? { branchId: String(activeBranchId) } : {}),
+            });
+            const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
+            rowsForChart = rows.map((r) => {
+              const key = String(r.sale_date).slice(0, 10);
+              const extra = Number(byDate[key] ?? 0) || 0;
+              return {
+                ...r,
+                totalSales: Number(r.totalSales || 0) + extra,
+              };
+            });
+          } catch {
+            rowsForChart = rows;
+          }
+        }
+
+        const normalized: MonthlyData[] = rowsForChart.map((r) => ({
           name: r.name,
           totalSales: Number(r.totalSales || 0),
           totalExpenses: Number(r.totalExpenses || 0),
+          ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
         }));
 
-        // Weekly UX requirement:
-        // Always show the anchor day as the last (rightmost) bar.
-        // Anchor day = selected range end date (fallback: start date, else real today).
-        // Example: if anchor is Thu, order should be Fri Sat Sun Mon Tue Wed <anchor>.
+        // Weekly (calendar mode): one bar per real day — already ordered; label last day "Today" when applicable.
+        if (trendPeriod === 'weekly' && normalized.length > 0 && normalized.every((d) => d.date)) {
+          const lastKey = normalized[normalized.length - 1].date!;
+          const anchor = new Date(`${lastKey}T12:00:00`);
+          const now = new Date();
+          const isAnchorToday =
+            anchor.getFullYear() === now.getFullYear() &&
+            anchor.getMonth() === now.getMonth() &&
+            anchor.getDate() === now.getDate();
+          if (isAnchorToday) {
+            const copy = [...normalized];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], name: 'Today' };
+            setMonthlyData(copy);
+            return;
+          }
+          setMonthlyData(normalized);
+          return;
+        }
+
+        // Legacy weekly (weekday buckets from older API): rotate so anchor day is last.
         if (trendPeriod === 'weekly' && normalized.length === 7) {
           const anchor =
             (compareDateRange.end ? new Date(compareDateRange.end) : null) ??

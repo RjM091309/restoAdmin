@@ -133,6 +133,8 @@ export type ApiPerformanceTrendRow = {
   name: string;
   totalSales: number;
   totalExpenses: number;
+  /** Present when period=weekly (calendar bars); yyyy-mm-dd */
+  sale_date?: string | null;
 };
 
 export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {

@@ -679,7 +679,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           0,
         );
         const totalSalesFromBranch = branchItem ? Number(branchItem.total_sales || 0) : 0;
-        const totalSales = (totalSalesFromDaily || totalSalesFromBranch) + reconPeriodTotal;
 
         // Primary source for expenses is the summary endpoint, but the Python
         // service can occasionally return 0 during warm-up or transient DB issues.
@@ -690,7 +689,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           0,
         );
         const totalExpenses = totalExpensesFromSummary || totalExpensesFromDaily;
-        const totalProfit = totalSales - totalExpenses;
 
         // Primary source for total orders is branch-sales (already aggregated by branch),
         // but when that endpoint returns empty data we fall back to summing daily-orders.
@@ -776,6 +774,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         if (revenueData.length > 0 && !aggregateExpenseOnlyFallback) {
           revenueData = fillRevenueDataGaps(revenueData, start, end, expenseByDate, reconByDate);
         }
+
+        // Total sales on the cards must match the sum of chart points (POS + recon per day after gap-fill).
+        const totalSalesFromSeries = revenueData.reduce((s, p) => s + Number(p.income || 0), 0);
+        const totalSales =
+          revenueData.length > 0 && !aggregateExpenseOnlyFallback
+            ? totalSalesFromSeries
+            : (totalSalesFromDaily || totalSalesFromBranch) + reconPeriodTotal;
+        const totalProfit = totalSales - totalExpenses;
 
         const last7Days = dailyOrders.slice(-7);
         const ordersOverview = last7Days.map((item) => ({

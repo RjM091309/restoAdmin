@@ -235,6 +235,8 @@ class PerformanceTrendRow(BaseModel):
     name: str
     totalSales: float
     totalExpenses: float
+    # Set for weekly=true calendar mode (yyyy-mm-dd) so the chart matches daily-sales per day.
+    sale_date: Optional[str] = None
 
 
 def _safe_parse_yyyy_mm_dd(value: Optional[str]) -> Optional[date]:
@@ -1144,11 +1146,13 @@ def performance_trend(
 ) -> dict:
     """
     Unified performance trend for admin dashboard chart:
-    - weekly: Mon..Sun (bucket by weekday)
-    - monthly: 1..31 (bucket by day-of-month)
-    - yearly: Jan..Dec (bucket by month)
+    - weekly: up to 7 calendar days ending on end_date (PH billing day), each bar = that day only
+      (same basis as daily-sales). If the selected range is shorter than 7 days, returns fewer bars.
+    - monthly: 1..31 (bucket by day-of-month, PH billing day)
+    - yearly: Jan..Dec (bucket by month, PH billing day). Date args are ignored: always
+      the full calendar year of the end date (or start, or current year) so all 12 months show.
 
-    Returns rows with name, totalSales (gross, aligned with daily-sales), totalExpenses.
+    totalSales = paid + discount per daily-sales (discount bucketed by same PH day as billing).
     """
     try:
         effective_start = _safe_parse_yyyy_mm_dd(start_date)
@@ -1162,6 +1166,15 @@ def performance_trend(
         if effective_start and effective_end and effective_start > effective_end:
             effective_start, effective_end = effective_end, effective_start
 
+        # Yearly: ignore the day-range from the header — show all months of that year (same as user expectation for "yearly")
+        if period == "yearly":
+            ref = effective_end or effective_start
+            if ref is None:
+                ref = datetime.now().date()
+            y = ref.year
+            effective_start = date(y, 1, 1)
+            effective_end = date(y, 12, 31)
+
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
 
@@ -1169,22 +1182,111 @@ def performance_trend(
             CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
             DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
         )"""
-        orders_local_dt = """COALESCE(
-            CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
-            DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
-        )"""
 
+        # Weekly: true calendar days (last up-to-7 days in range) — matches Sales Analytics / daily-sales, not weekday rollups.
         if period == "weekly":
-            sales_bucket = f"WEEKDAY({billing_local_dt})"  # 0=Mon .. 6=Sun
-            discount_bucket = f"WEEKDAY({orders_local_dt})"
-            expense_bucket = f"WEEKDAY(DATE({_EXPENSE_LOCAL_DT_SQL}))"
-        elif period == "monthly":
+            window_end = effective_end
+            window_start = max(effective_start, window_end - timedelta(days=6))
+            w_start_s = window_start.strftime("%Y-%m-%d")
+            w_end_s = window_end.strftime("%Y-%m-%d")
+
+            sales_where_w = ["b.STATUS IN (1, 2)", f"DATE({billing_local_dt}) BETWEEN %s AND %s"]
+            sales_params_w: List[object] = [w_start_s, w_end_s]
+            if branch_id:
+                sales_where_w.append("b.BRANCH_ID = %s")
+                sales_params_w.append(branch_id)
+            paid_sql = f"""
+                SELECT DATE_FORMAT(DATE({billing_local_dt}), '%Y-%m-%d') AS sale_date,
+                       COALESCE(SUM(b.AMOUNT_PAID), 0) AS paid_total
+                FROM billing b
+                WHERE {" AND ".join(sales_where_w)}
+                GROUP BY DATE({billing_local_dt})
+            """
+            cur.execute(paid_sql, sales_params_w)
+            paid_rows = cur.fetchall() or []
+
+            disc_where_w = [f"DATE({billing_local_dt}) BETWEEN %s AND %s"]
+            disc_params_w: List[object] = [w_start_s, w_end_s]
+            if branch_id:
+                disc_where_w.append("o.BRANCH_ID = %s")
+                disc_params_w.append(branch_id)
+            disc_sql = f"""
+                SELECT DATE_FORMAT(DATE({billing_local_dt}), '%Y-%m-%d') AS sale_date,
+                       COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount_total
+                FROM orders o
+                INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+                WHERE {" AND ".join(disc_where_w)}
+                GROUP BY DATE({billing_local_dt})
+            """
+            cur.execute(disc_sql, disc_params_w)
+            disc_rows_w = cur.fetchall() or []
+
+            exp_where_w = ["e.ACTIVE = 1", "oc.ACTIVE = 1", f"DATE({_EXPENSE_LOCAL_DT_SQL}) BETWEEN %s AND %s"]
+            exp_params_w: List[object] = [w_start_s, w_end_s]
+            if branch_id:
+                exp_where_w.append("e.BRANCH_ID = %s")
+                exp_params_w.append(branch_id)
+            exp_sql = f"""
+                SELECT DATE_FORMAT(DATE({_EXPENSE_LOCAL_DT_SQL}), '%Y-%m-%d') AS exp_date,
+                       COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
+                FROM expenses e
+                LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+                INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+                WHERE {" AND ".join(exp_where_w)}
+                GROUP BY DATE({_EXPENSE_LOCAL_DT_SQL})
+            """
+            cur.execute(exp_sql, exp_params_w)
+            exp_rows_w = cur.fetchall() or []
+
+            cur.close()
+            conn.close()
+
+            paid_map: Dict[str, float] = {}
+            for r in paid_rows:
+                k = str(r.get("sale_date") or "")
+                if not k:
+                    continue
+                paid_map[k] = float(r.get("paid_total") or 0.0)
+            disc_map_w: Dict[str, float] = {}
+            for r in disc_rows_w:
+                k = str(r.get("sale_date") or "")
+                if not k:
+                    continue
+                disc_map_w[k] = float(r.get("discount_total") or 0.0)
+            exp_map_w: Dict[str, float] = {}
+            for r in exp_rows_w:
+                k = str(r.get("exp_date") or "")
+                if not k:
+                    continue
+                exp_map_w[k] = float(r.get("total_expense") or 0.0)
+
+            wd_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            rows_weekly: List[PerformanceTrendRow] = []
+            cur_d = window_start
+            while cur_d <= window_end:
+                key = cur_d.strftime("%Y-%m-%d")
+                paid = float(paid_map.get(key, 0.0) or 0.0)
+                disc = float(disc_map_w.get(key, 0.0) or 0.0)
+                expv = float(exp_map_w.get(key, 0.0) or 0.0)
+                rows_weekly.append(
+                    PerformanceTrendRow(
+                        name=wd_labels[cur_d.weekday()],
+                        totalSales=paid + disc,
+                        totalExpenses=expv,
+                        sale_date=key,
+                    )
+                )
+                cur_d = cur_d + timedelta(days=1)
+
+            return {"success": True, "data": {"data": [r.model_dump(exclude_none=True) for r in rows_weekly]}}
+
+        if period == "monthly":
             sales_bucket = f"DAY({billing_local_dt})"  # 1..31
-            discount_bucket = f"DAY({orders_local_dt})"
+            discount_bucket = f"DAY({billing_local_dt})"
             expense_bucket = f"DAY(DATE({_EXPENSE_LOCAL_DT_SQL}))"
         else:
             sales_bucket = f"MONTH({billing_local_dt})"  # 1..12
-            discount_bucket = f"MONTH({orders_local_dt})"
+            discount_bucket = f"MONTH({billing_local_dt})"
             expense_bucket = f"MONTH(DATE({_EXPENSE_LOCAL_DT_SQL}))"
 
         # Sales (paid) by bucket
@@ -1208,11 +1310,11 @@ def performance_trend(
         cur.execute(sales_query, sales_params)
         sales_rows = cur.fetchall()
 
-        # Discounts by bucket (aligned with daily-sales)
+        # Discounts by bucket (aligned with daily-sales: filter + group by billing PH day, not order.ENCODED_DT)
         disc_where = ["1=1"]
         disc_params: List[object] = []
         if effective_start and effective_end:
-            disc_where.append(f"DATE({orders_local_dt}) BETWEEN %s AND %s")
+            disc_where.append(f"DATE({billing_local_dt}) BETWEEN %s AND %s")
             disc_params.extend([effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")])
         if branch_id:
             disc_where.append("o.BRANCH_ID = %s")
@@ -1290,13 +1392,11 @@ def performance_trend(
             continue
         exp_map[k] = float(r.get("total_expense") or 0.0)
 
-    if period == "weekly":
-        labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        keys = list(range(0, 7))
-    elif period == "monthly":
+    if period == "monthly":
         keys = list(range(1, 32))
         labels = [str(k) for k in keys]
     else:
+        # yearly (weekly returns earlier from the endpoint)
         keys = list(range(1, 13))
         labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
