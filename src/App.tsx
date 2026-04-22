@@ -318,7 +318,7 @@ const LoginView = () => {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { isLoggedIn, login, logout } = useUser();
+  const { isLoggedIn, login, logout, user } = useUser();
   const parseBranchFromSearch = (search: string): Branch | null => {
     const params = new URLSearchParams(search);
     const branchId = params.get('branchId');
@@ -377,6 +377,25 @@ export default function App() {
       return resolved;
     });
   }, [location.search]);
+
+  // Ensure we have a stable selectedBranch on hard refresh.
+  // Without this, the app can briefly load reports without branch_id (showing mixed branches)
+  // until Header finishes fetching branch list and calls onBranchChange.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const params = new URLSearchParams(location.search);
+    const branchIdInUrl = params.get('branchId');
+    if (branchIdInUrl) return;
+    if (!user?.branch_id) return;
+
+    const next: Branch = { id: String(user.branch_id), name: `Branch ${String(user.branch_id)}` };
+    setSelectedBranch(next);
+
+    params.set('branchId', String(next.id));
+    params.set('branchName', next.name);
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
+  }, [isLoggedIn, user?.branch_id, location.pathname, location.search, navigate]);
 
   // Fetch sidebar permissions for selected branch (so sidebar shows only allowed items per branch)
   useEffect(() => {

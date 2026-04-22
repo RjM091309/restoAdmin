@@ -259,11 +259,17 @@ export const Header: React.FC<HeaderProps> = ({
     activeTab === 'Category' ||
     activeTab === 'Payment type' ||
     activeTab === 'Receipt';
-  const openBranchInNewTab = (branch: Branch) => {
+  const navigateToBranch = (branch: Branch, opts?: { newTab?: boolean }) => {
     const url = new URL(window.location.href);
     url.searchParams.set('branchId', String(branch.id));
     url.searchParams.set('branchName', branch.name);
-    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+    if (opts?.newTab) {
+      window.open(url.toString(), '_blank', 'noopener,noreferrer');
+    } else {
+      // Keep branch selection stable on refresh by persisting it in the URL.
+      // We navigate in the same tab so all screens immediately use the new branch_id.
+      window.location.assign(url.toString());
+    }
   };
 
   // Prevent showing duplicated breadcrumbs like "User Management / User Management"
@@ -442,8 +448,11 @@ export const Header: React.FC<HeaderProps> = ({
                       {branches.map((branch) => (
                         <button
                           key={branch.id}
-                          onClick={() => {
-                            openBranchInNewTab(branch);
+                          onClick={(e) => {
+                            // Ctrl/Cmd click opens in a new tab; normal click switches branch in-place.
+                            const newTab = (e as any)?.metaKey || (e as any)?.ctrlKey;
+                            onBranchChange(branch);
+                            navigateToBranch(branch, { newTab: Boolean(newTab) });
                             setBranchDropdownOpen(false);
                           }}
                           className={clsx(
