@@ -92,6 +92,7 @@ export type ApiReceiptReportRow = {
   customer: string;
   type: string;
   total: number;
+  discount: number;
 };
 
 export type ApiReceiptDetailItem = {

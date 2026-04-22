@@ -484,6 +484,7 @@
 			"employee": "従業員",
 			"customer": "顧客",
 			"type": "種別",
+			"discount": "割引",
 			"total": "合計"
 		}
 	},
