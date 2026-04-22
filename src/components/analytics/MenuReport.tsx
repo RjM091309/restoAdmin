@@ -66,11 +66,7 @@ type MenuReportRow = {
   category: string;
   salesQty: number;
   totalSales: number;
-  refundQty: number;
-  refundAmount: number;
-  discounts: number;
   netSales: number;
-  unitCost: number;
   totalRevenue: number;
 };
 
@@ -128,11 +124,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
             category: row.category,
             salesQty: row.salesQty,
             totalSales: row.totalSales,
-            refundQty: row.refundQty,
-            refundAmount: row.refundAmount,
-            discounts: row.discounts,
             netSales: row.netSales,
-            unitCost: row.unitCost,
             totalRevenue: row.totalRevenue,
           }))
         );
@@ -208,29 +200,9 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       className: 'min-w-[130px] text-right',
     },
     {
-      header: t('menu_report.columns.refund_quantity'),
-      render: (item) => item.refundQty.toLocaleString(),
-      className: 'min-w-[130px] text-right',
-    },
-    {
-      header: t('menu_report.columns.refund_amount'),
-      render: (item) => money(item.refundAmount),
-      className: 'min-w-[130px] text-right',
-    },
-    {
-      header: t('menu_report.columns.discounts'),
-      render: (item) => money(item.discounts),
-      className: 'min-w-[120px] text-right',
-    },
-    {
       header: t('menu_report.columns.net_sales'),
       render: (item) => money(item.netSales),
       className: 'min-w-[120px] text-right',
-    },
-    {
-      header: t('menu_report.columns.unit_cost'),
-      render: (item) => money(item.unitCost),
-      className: 'min-w-[110px] text-right',
     },
     {
       header: t('menu_report.columns.total_revenue'),
@@ -246,11 +218,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       t('menu_report.columns.category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
-      t('menu_report.columns.refund_quantity'),
-      t('menu_report.columns.refund_amount'),
-      t('menu_report.columns.discounts'),
       t('menu_report.columns.net_sales'),
-      t('menu_report.columns.unit_cost'),
       t('menu_report.columns.total_revenue'),
     ];
 
@@ -265,11 +233,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       row.category,
       row.salesQty.toString(),
       row.totalSales.toString(),
-      row.refundQty.toString(),
-      row.refundAmount.toString(),
-      row.discounts.toString(),
       row.netSales.toString(),
-      row.unitCost.toString(),
       row.totalRevenue.toString(),
     ]);
 
@@ -301,11 +265,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       t('menu_report.columns.category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
-      t('menu_report.columns.refund_quantity'),
-      t('menu_report.columns.refund_amount'),
-      t('menu_report.columns.discounts'),
       t('menu_report.columns.net_sales'),
-      t('menu_report.columns.unit_cost'),
       t('menu_report.columns.total_revenue'),
     ];
 
@@ -314,11 +274,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       row.category,
       row.salesQty.toLocaleString(),
       money(row.totalSales),
-      row.refundQty.toLocaleString(),
-      money(row.refundAmount),
-      money(row.discounts),
       money(row.netSales),
-      money(row.unitCost),
       money(row.totalRevenue),
     ]);
 
