@@ -193,6 +193,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptSegments, setReceiptSegments] = useState<string[]>([]);
     const [receiptStitching, setReceiptStitching] = useState(false);
     const RECEIPT_MAX_PAGES = 8;
+    const RECEIPT_DRAFT_KEY = 'orders_receipt_scan_draft_v1';
+    const receiptDraftHydratedRef = useRef(false);
+    const ORDERS_DEBUG_RUNTIME_KEY = 'orders_debug_last_runtime_id_v1';
 
     const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
     const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
@@ -209,6 +212,51 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailAdding, setDetailAdding] = useState(false);
 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
+
+    useEffect(() => {
+        if (!(import.meta as any)?.env?.DEV) return;
+        const w = window as unknown as {
+            __ordersDebugRuntimeId?: string;
+            __ordersDebugMountCount?: number;
+        };
+        const previousRuntimeId = (() => {
+            try {
+                return sessionStorage.getItem(ORDERS_DEBUG_RUNTIME_KEY) || '';
+            } catch {
+                return '';
+            }
+        })();
+        const existingRuntimeId = String(w.__ordersDebugRuntimeId || '').trim();
+        const isSamePageRemount = !!existingRuntimeId;
+        const runtimeId =
+            existingRuntimeId ||
+            `orders-runtime-${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2, 8)}`;
+        w.__ordersDebugRuntimeId = runtimeId;
+        w.__ordersDebugMountCount = Number(w.__ordersDebugMountCount || 0) + 1;
+        const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+        const navType = navEntry?.type || 'unknown';
+        const likelyFullReload = !isSamePageRemount && !!previousRuntimeId && previousRuntimeId !== runtimeId;
+        const marker = {
+            runtimeId,
+            mountCountInRuntime: w.__ordersDebugMountCount,
+            navType,
+            likelyFullReload,
+            branchId,
+            path: window.location.pathname + window.location.search,
+            at: new Date().toISOString(),
+        };
+        try {
+            sessionStorage.setItem(ORDERS_DEBUG_RUNTIME_KEY, runtimeId);
+        } catch {
+            // ignore
+        }
+        console.info('[Orders Debug Marker]', marker);
+        if (likelyFullReload) {
+            toast.message('Orders debug: detected likely full reload (check console).');
+        }
+    }, [branchId]);
 
     // ==================== Helper ====================
     const orderTypeLabel = (v: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY') => {
@@ -978,18 +1026,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     };
 
     const openReceiptOrder = () => {
-        setReceiptOrderNo(generateOrderNo());
-        setReceiptOrderType('DINE_IN');
-        setReceiptOrderTableId('');
-        setReceiptOrderBranchId('');
-        setReceiptImage(null);
-        setReceiptSegments([]);
-        setReceiptStitching(false);
-        setReceiptError(null);
-        setReceiptRows([]);
-        setReceiptExtractResult(null);
-        setReceiptMetaById({});
-        setReceiptMapOpenByOrderId({});
+        // If an unfinished scan draft exists, keep it so user can continue after app/tab restart.
+        const hasDraftWork = receiptSegments.length > 0 || !!receiptImage || receiptRows.length > 0;
+        if (!hasDraftWork) {
+            setReceiptOrderNo(generateOrderNo());
+            setReceiptOrderType('DINE_IN');
+            setReceiptOrderTableId('');
+            setReceiptOrderBranchId('');
+            setReceiptImage(null);
+            setReceiptSegments([]);
+            setReceiptStitching(false);
+            setReceiptError(null);
+            setReceiptRows([]);
+            setReceiptExtractResult(null);
+            setReceiptMetaById({});
+            setReceiptMapOpenByOrderId({});
+        }
         // Default: present date only (YYYY-MM-DD), time will be current timestamp.
         // Preserve user's previously selected date across multiple receipt orders.
         if (!receiptOrderDate) {
@@ -1012,6 +1064,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const closeReceiptOrder = () => {
         if (receiptSubmitting || receiptExtracting) return;
         setReceiptOrderOpen(false);
+        try {
+            sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
+        } catch {
+            // ignore
+        }
     };
 
     const runReceiptExtractionOnImage = async (compressedDataUrl: string) => {
@@ -1072,12 +1129,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         });
 
     const compressReceiptFileToJpegDataUrl = async (file: File): Promise<string> => {
-        // Prefer bitmap decoding so EXIF orientation is respected (especially for camera captures).
+        // Keep memory usage low on tablet camera captures to avoid browser tab reload/crash.
         try {
-            const blobUrl = URL.createObjectURL(file);
+            const bmp: ImageBitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
             try {
-                const blob = await fetch(blobUrl).then((r) => r.blob());
-                const bmp: ImageBitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
                 const w = bmp.width;
                 const h = bmp.height;
                 const MAX_W = 1600;
@@ -1105,7 +1160,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     return await compressReceiptImage(dataUrl);
                 }
             } finally {
-                URL.revokeObjectURL(blobUrl);
+                bmp.close();
             }
         } catch {
             const dataUrl = await fileToDataUrl(file);
@@ -1128,6 +1183,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         const targetW = Math.max(...images.map((i) => i.naturalWidth));
         const rowHeights = images.map((img) => Math.max(1, Math.round((img.naturalHeight * targetW) / img.naturalWidth)));
         const totalH = rowHeights.reduce((a, b) => a + b, 0);
+        const MAX_CANVAS_PIXELS = 16_000_000;
+        if (targetW * totalH > MAX_CANVAS_PIXELS) {
+            throw new Error('Receipt image is too large to process on this device. Please capture shorter pages.');
+        }
         const canvas = document.createElement('canvas');
         canvas.width = targetW;
         canvas.height = totalH;
@@ -1188,7 +1247,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptExtractResult(null);
         setReceiptImage(null);
         try {
-            const newSegs = await Promise.all(toProcess.map((f) => compressReceiptFileToJpegDataUrl(f)));
+            const newSegs: string[] = [];
+            for (const file of toProcess) {
+                // Process one image at a time to avoid peak memory spikes on low-RAM tablets.
+                const seg = await compressReceiptFileToJpegDataUrl(file);
+                newSegs.push(seg);
+            }
             setReceiptSegments((prev) => [...prev, ...newSegs]);
         } catch (e) {
             toast.error(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
@@ -1217,12 +1281,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     stitched = await stitchImagesVertically(receiptSegments);
                 }
             }
-            let compressed = stitched;
-            try {
-                compressed = await compressReceiptImage(stitched);
-            } catch {
-                /* keep stitched */
-            }
+            // Segments are already compressed during capture; avoid extra recompress pass
+            // to reduce memory spikes on low-RAM tablets.
+            const compressed = stitched;
             setReceiptSegments([]);
             setReceiptImage(compressed);
             await runReceiptExtractionOnImage(compressed);
@@ -1319,6 +1380,94 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptHistoryLoading(false);
         }
     }, [branchId, isAllBranches, t]);
+
+    useEffect(() => {
+        if (receiptDraftHydratedRef.current) return;
+        receiptDraftHydratedRef.current = true;
+        try {
+            const raw = sessionStorage.getItem(RECEIPT_DRAFT_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw) as {
+                savedAt?: number;
+                receiptOrderOpen?: boolean;
+                receiptOrderNo?: string;
+                receiptOrderType?: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY';
+                receiptOrderTableId?: string;
+                receiptOrderBranchId?: string;
+                receiptOrderDate?: string;
+                receiptImage?: string | null;
+                receiptSegments?: string[];
+                receiptRows?: typeof receiptRows;
+                receiptExtractResult?: ReceiptOrderExtractionResult | null;
+                receiptMetaById?: typeof receiptMetaById;
+                receiptMapOpenByOrderId?: typeof receiptMapOpenByOrderId;
+            };
+            const ageMs = Date.now() - Number(parsed.savedAt || 0);
+            if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 45 * 60 * 1000) {
+                sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
+                return;
+            }
+            if (!parsed.receiptOrderOpen) return;
+            setReceiptOrderNo(String(parsed.receiptOrderNo || generateOrderNo()));
+            setReceiptOrderType(parsed.receiptOrderType || 'DINE_IN');
+            setReceiptOrderTableId(String(parsed.receiptOrderTableId || ''));
+            setReceiptOrderBranchId(String(parsed.receiptOrderBranchId || ''));
+            setReceiptOrderDate(String(parsed.receiptOrderDate || ''));
+            setReceiptImage(parsed.receiptImage ?? null);
+            setReceiptSegments(Array.isArray(parsed.receiptSegments) ? parsed.receiptSegments : []);
+            setReceiptRows(Array.isArray(parsed.receiptRows) ? parsed.receiptRows : []);
+            setReceiptExtractResult(parsed.receiptExtractResult ?? null);
+            setReceiptMetaById(parsed.receiptMetaById && typeof parsed.receiptMetaById === 'object' ? parsed.receiptMetaById : {});
+            setReceiptMapOpenByOrderId(
+                parsed.receiptMapOpenByOrderId && typeof parsed.receiptMapOpenByOrderId === 'object'
+                    ? parsed.receiptMapOpenByOrderId
+                    : {}
+            );
+            setReceiptOrderOpen(true);
+            toast.message('Restored previous receipt scan draft.');
+        } catch {
+            // ignore draft restore errors
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!receiptOrderOpen) return;
+        if (receiptSubmitting) return;
+        const payload = {
+            savedAt: Date.now(),
+            receiptOrderOpen,
+            receiptOrderNo,
+            receiptOrderType,
+            receiptOrderTableId,
+            receiptOrderBranchId,
+            receiptOrderDate,
+            receiptImage,
+            receiptSegments,
+            receiptRows,
+            receiptExtractResult,
+            receiptMetaById,
+            receiptMapOpenByOrderId,
+        };
+        try {
+            sessionStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(payload));
+        } catch {
+            // If storage is full or unavailable, skip draft save.
+        }
+    }, [
+        receiptOrderOpen,
+        receiptSubmitting,
+        receiptOrderNo,
+        receiptOrderType,
+        receiptOrderTableId,
+        receiptOrderBranchId,
+        receiptOrderDate,
+        receiptImage,
+        receiptSegments,
+        receiptRows,
+        receiptExtractResult,
+        receiptMetaById,
+        receiptMapOpenByOrderId,
+    ]);
 
     const openReceiptHistoryPanel = () => {
         setReceiptHistoryOpen(true);
@@ -1506,6 +1655,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptRows([]);
             setReceiptExtractResult(null);
             setReceiptMetaById({});
+            try {
+                sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
+            } catch {
+                // ignore
+            }
             await loadOrders();
             toast.success(
                 createdOrderNos.length > 1
