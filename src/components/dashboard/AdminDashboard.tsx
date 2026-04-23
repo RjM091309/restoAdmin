@@ -43,6 +43,9 @@ type SummaryData = {
   totalExpenses: number;
 };
 
+const SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v2';
+const LEGACY_SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v1';
+
 const SummaryCard = ({ title, value, icon: Icon, color }: { title: string, value: string, icon: React.ElementType, color: string }) => (
   <div className="relative w-full group cursor-default">
     <div className="relative flex items-center py-2">
@@ -223,7 +226,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [branchRevenueDistribution, setBranchRevenueDistribution] = useState<{ name: string; value: number }[]>([]);
   const [topProductsData, setTopProductsData] = useState<{ name: string; sales: number }[]>([]);
   const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>([]);
-  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(0);
+  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<Record<number, Record<string, number>>>({});
 
@@ -232,6 +235,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
   /** Recon sum for all branches in compare range (used when daily-sales is unscoped) */
   const [comparePeriodReconAll, setComparePeriodReconAll] = useState(0);
+  const summaryCacheKey = useMemo(() => {
+    const currentRange = getCurrentMonthRange();
+    const start = compareDateRange.start || currentRange.start;
+    const end = compareDateRange.end || currentRange.end;
+    const branchScope = activeBranchId ? String(activeBranchId) : 'all';
+    return `${SUMMARY_CACHE_PREFIX}:${branchScope}:${start}:${end}`;
+  }, [activeBranchId, compareDateRange.start, compareDateRange.end]);
+
+  // Cleanup legacy cache keys from older summary logic versions.
+  useEffect(() => {
+    try {
+      const keysToDelete: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(LEGACY_SUMMARY_CACHE_PREFIX)) {
+          keysToDelete.push(key);
+        }
+      }
+      keysToDelete.forEach((key) => localStorage.removeItem(key));
+    } catch {
+      // Ignore storage access errors.
+    }
+  }, []);
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
@@ -643,6 +669,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   // Recompute summary cards (total revenue, sales, expenses)
   useEffect(() => {
+    const buildFromPerformance = () => {
+      if (!performanceData.length) return null;
+      const totalSales = performanceData.reduce((s, b) => s + Number(b.totalSales || 0), 0);
+      const totalExpensesFromPerf = performanceData.reduce((s, b) => s + Number(b.totalExpenses || 0), 0);
+      const totalExpenses = expenseSummaryTotal ?? totalExpensesFromPerf;
+      return {
+        totalSales,
+        totalExpenses,
+        totalRevenue: totalSales - totalExpenses,
+      } satisfies SummaryData;
+    };
+
     // If a specific branch is focused, mirror that branch card exactly (per-branch view).
     if (activeBranchId && (branchCardsData.length > 0 || performanceData.length > 0)) {
       const source = branchCardsData.length > 0 ? branchCardsData : performanceData;
@@ -661,6 +699,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       return;
     }
 
+    // While analytics calls are still in-flight, don't compute an expense-only snapshot.
+    // Show stable fallback from branch performance (or keep last summary) to avoid 0-sales flash.
+    if (!activeBranchId && analyticsLoading && branchCardsData.length === 0) {
+      const perfFallback = buildFromPerformance();
+      if (perfFallback) {
+        setSummaryData(perfFallback);
+      }
+      return;
+    }
+
     // Aggregated (no focused branch): match branch cards when available (net + recon per branch).
     if (!activeBranchId && branchCardsData.length > 0) {
       const totalSales = branchCardsData.reduce((s, b) => s + b.totalSales, 0);
@@ -674,8 +722,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
 
     // Fallback: daily net + period recon (all branches)
-    if ((!dailySalesForCards || dailySalesForCards.length === 0) && expenseSummaryTotal == null) {
-      setSummaryData(null);
+    // If daily-sales isn't ready/available, prefer performance totals over rendering 0 sales.
+    if (!dailySalesForCards || dailySalesForCards.length === 0) {
+      const perfFallback = buildFromPerformance();
+      if (perfFallback) {
+        setSummaryData(perfFallback);
+      } else if (expenseSummaryTotal == null) {
+        setSummaryData(null);
+      }
       return;
     }
 
@@ -691,11 +745,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     });
   }, [
     activeBranchId,
+    analyticsLoading,
     branchCardsData,
     performanceData,
     dailySalesForCards,
     expenseSummaryTotal,
     comparePeriodReconAll,
+  ]);
+
+  // Instant first paint: use last known-good summary for same branch/date scope.
+  useEffect(() => {
+    if (summaryData) return;
+    try {
+      const raw = localStorage.getItem(summaryCacheKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<SummaryData> | null;
+      if (!parsed) return;
+      const totalSales = Number(parsed.totalSales);
+      const totalExpenses = Number(parsed.totalExpenses);
+      const totalRevenue = Number(parsed.totalRevenue);
+      if (![totalSales, totalExpenses, totalRevenue].every(Number.isFinite)) return;
+      setSummaryData({ totalSales, totalExpenses, totalRevenue });
+    } catch {
+      // Ignore cache parse issues.
+    }
+  }, [summaryCacheKey, summaryData]);
+
+  // Persist latest computed summary for fast subsequent loads.
+  useEffect(() => {
+    if (!summaryData) return;
+    // Persist only when summary comes from authoritative sources.
+    // Do not cache temporary fallback values from legacy/perf-only snapshots.
+    const hasAuthoritativeSource = Boolean(
+      (activeBranchId && (branchCardsData.length > 0 || performanceData.length > 0)) ||
+      (!activeBranchId && (branchCardsData.length > 0 || dailySalesForCards.length > 0))
+    );
+    if (!hasAuthoritativeSource) return;
+    try {
+      localStorage.setItem(summaryCacheKey, JSON.stringify(summaryData));
+    } catch {
+      // Ignore storage quota / privacy mode errors.
+    }
+  }, [
+    activeBranchId,
+    branchCardsData.length,
+    dailySalesForCards.length,
+    performanceData.length,
+    summaryCacheKey,
+    summaryData,
   ]);
 
   const formatCurrency = (value: number) => {
@@ -1267,28 +1364,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           className="grid grid-cols-1 lg:grid-cols-4 gap-8 pt-6"
         >
           <div className="lg:col-span-3 space-y-8">
-            {summaryData && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
-              <SummaryCard 
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 pt-4">
+              <SummaryCard
                 title={t('admin_dashboard.total_sales')}
-                value={`₱${Math.trunc(summaryData.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                value={
+                  summaryData
+                    ? `₱${Math.trunc(summaryData.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : '...'
+                }
                 icon={TrendingUp}
                 color="bg-[rgb(139,92,246)]"
               />
-              <SummaryCard 
+              <SummaryCard
                 title={t('admin_dashboard.total_expenses')}
-                value={`₱${Math.trunc(summaryData.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                value={
+                  summaryData
+                    ? `₱${Math.trunc(summaryData.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : '...'
+                }
                 icon={TrendingDown}
                 color="bg-[rgb(245,158,11)]"
               />
-              <SummaryCard 
+              <SummaryCard
                 title="Total Profit"
-                value={`₱${Math.trunc(summaryData.totalRevenue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                value={
+                  summaryData
+                    ? `₱${Math.trunc(summaryData.totalRevenue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                    : '...'
+                }
                 icon={DollarSign}
                 color="bg-green-500"
               />
-              </div>
-            )}
+            </div>
             
             <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">

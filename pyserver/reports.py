@@ -11,10 +11,25 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics-reports"])
 
 
 def _norm_text_sql(col: str) -> str:
-    """UPPER+TRIM after stripping common NBSP variants in `col` (e.g. c.CAT_NAME, m.MENU_NAME)."""
-    return (
-        f"UPPER(TRIM(REPLACE(REPLACE(COALESCE({col}, ''), CHAR(160), ' '), UNHEX('C2A0'), ' ')))"
+    """
+    UPPER+TRIM after stripping NBSP variants in `col`.
+    Important: some legacy rows contain raw byte 0xA0 (invalid in utf8mb4).
+    We first treat the value as BINARY and replace NBSP bytes before converting to utf8mb4.
+    """
+    cleaned = (
+        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
     )
+    return f"UPPER(TRIM(CONVERT({cleaned} USING utf8mb4)))"
+
+def _safe_text_sql(col: str) -> str:
+    """
+    Returns a display-safe SQL expression for text columns that may contain NBSP bytes.
+    Strips NBSP variants, trims, and returns NULL when result is empty.
+    """
+    cleaned = (
+        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
+    )
+    return f"NULLIF(TRIM(CONVERT({cleaned} USING utf8mb4)), '')"
 
 def _norm_text_py(value: object) -> str:
     """Python-side normalization matching `_norm_text_sql` intent (NBSP → space, trim, upper, collapse spaces)."""
@@ -146,8 +161,8 @@ def menu_report(
         query = f"""
             SELECT
                 m.IDNo AS id,
-                m.MENU_NAME AS goods,
-                COALESCE(c.CAT_NAME, 'Uncategorized') AS category,
+                COALESCE({_safe_text_sql('m.MENU_NAME')}, '') AS goods,
+                COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
                 COALESCE(SUM(oi.QTY), 0) AS salesQty,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
                 0 AS refundQty,
@@ -336,7 +351,7 @@ def category_report(
         query = f"""
             SELECT
                 COALESCE(c.IDNo, 0) AS id,
-                COALESCE(c.CAT_NAME, 'Uncategorized') AS category,
+                COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
                 COALESCE(SUM(oi.QTY), 0) AS salesQty,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
                 0 AS refundQty,
@@ -483,14 +498,14 @@ def category_menu_breakdown(
 
             date_filter = ""
             branch_filter = ""
-            params: List[object] = []
+            room_params: List[object] = []
 
             if start_date and end_date:
                 date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-                params.extend([start_date, end_date])
+                room_params.extend([start_date, end_date])
             if branch_id:
                 branch_filter = "AND b.BRANCH_ID = %s"
-                params.append(branch_id)
+                room_params.append(branch_id)
 
             print(
                 "[PyServer] /category-menu-breakdown room-charge params:",
@@ -502,7 +517,7 @@ def category_menu_breakdown(
                 branch_id,
             )
 
-            items: List[CategoryMenuBreakdownRow] = []
+            room_items: List[CategoryMenuBreakdownRow] = []
             table_label_norms: set[str] = set()
 
             q_tables_detail = f"""
@@ -524,7 +539,7 @@ def category_menu_breakdown(
                    AND COALESCE(SUM(o.SERVICE_CHARGE), 0) <> 0
                 ORDER BY totalService DESC, tbl_label ASC
             """
-            cur.execute(q_tables_detail, tuple(params))
+            cur.execute(q_tables_detail, tuple(room_params))
             for trow in cur.fetchall():
                 tbl_id = int(trow.get("tbl_id") or 0)
                 label = str(trow.get("tbl_label") or "").strip() or f"#{tbl_id}"
@@ -546,7 +561,7 @@ def category_menu_breakdown(
                 qty_effective = (total_service / rate) if rate > 0 else oc
                 qty_display = round(qty_effective, 2) if qty_effective > 0 else 0.0
                 menu_label = clean
-                items.append(
+                room_items.append(
                     CategoryMenuBreakdownRow(
                         id=ROOM_CHARGE_TABLE_DETAIL_BASE - tbl_id,
                         menuName=menu_label,
@@ -576,14 +591,14 @@ def category_menu_breakdown(
                 HAVING salesQty > 0
                 ORDER BY netSales DESC, menuName ASC
             """
-            cur.execute(q_menus, tuple(params))
+            cur.execute(q_menus, tuple(room_params))
             for row in cur.fetchall():
                 menu_name = str(row.get("menuName") or "")
                 # Avoid redundant "ROOM 10 / ON AIR 2 ..." lines when we already show the per-table rows.
                 if _norm_text_py(menu_name) in table_label_norms:
                     continue
                 sq_raw = float(row.get("salesQty") or 0)
-                items.append(
+                room_items.append(
                     CategoryMenuBreakdownRow(
                         id=int(row.get("id") or 0),
                         menuName=menu_name,
@@ -593,7 +608,7 @@ def category_menu_breakdown(
                     )
                 )
 
-            return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+            return {"success": True, "data": {"data": [item.model_dump() for item in room_items]}}
         except Exception as exc:
             print("[PyServer] category-menu-breakdown room-charge failed:", getattr(exc, "message", str(exc)))
             return {
@@ -619,21 +634,21 @@ def category_menu_breakdown(
 
         date_filter = ""
         branch_filter = ""
-        params: List[object] = []
+        main_params: List[object] = []
 
         if start_date and end_date:
             date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            main_params.extend([start_date, end_date])
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
-            params.append(branch_id)
+            main_params.append(branch_id)
 
         if category_id == 0:
             category_clause = "AND c.IDNo IS NULL"
-            exec_params = list(params)
+            exec_params = list(main_params)
         else:
             category_clause = "AND c.IDNo = %s"
-            exec_params = list(params) + [category_id]
+            exec_params = list(main_params) + [category_id]
 
         query = f"""
             SELECT
@@ -1024,6 +1039,7 @@ def expense_summary(
             "error": getattr(exc, "message", str(exc)),
         }
 
-    summary = ExpenseSummary(total_expense=float(row.get("total_expense") or 0.0))
+    safe_row = row or {}
+    summary = ExpenseSummary(total_expense=float(safe_row.get("total_expense") or 0.0))
     return {"success": True, "data": summary.model_dump()}
 

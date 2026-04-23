@@ -58,6 +58,38 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
+function ChartContainer({
+  className = '',
+  minHeight = 200,
+  render,
+}: {
+  className?: string;
+  minHeight?: number;
+  render: (size: { width: number; height: number }) => React.ReactNode;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [size, setSize] = React.useState({ width: 0, height: 0 });
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setSize({ width: w, height: h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} style={{ minHeight }}>
+      {size.width > 0 && size.height > 0 ? render(size) : null}
+    </div>
+  );
+}
+
 const toYYYYMMDD = (d: Date): string =>
   d.getFullYear() +
   '-' +
@@ -1170,8 +1202,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       No data
                     </div>
                   ) : (
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <ComposedChart data={revenueChartData} margin={{ top: 8, right: 6, bottom: 6, left: 6 }}>
+                  <ChartContainer
+                    className="w-full h-full min-h-[256px]"
+                    minHeight={256}
+                    render={({ width, height }) => (
+                      <ComposedChart width={width} height={height} data={revenueChartData} margin={{ top: 8, right: 6, bottom: 6, left: 6 }}>
                       <defs>
                         <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.35} />
@@ -1253,8 +1288,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                           />
                         )}
                       />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                      </ComposedChart>
+                    )}
+                  />
                   )}
                 </div>
               </div>
@@ -1273,8 +1309,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       No data
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                      <PieChart>
+                    <ChartContainer
+                      className="w-full h-full min-h-[192px]"
+                      minHeight={192}
+                      render={({ width, height }) => (
+                        <PieChart width={width} height={height}>
                         <Tooltip
                           content={({ active, payload }) => (
                             <PieTooltip
@@ -1316,8 +1355,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         },
                         null
                       )}
-                      </PieChart>
-                    </ResponsiveContainer>
+                        </PieChart>
+                      )}
+                    />
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-y-3 mt-4">
@@ -1345,8 +1385,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       No data
                     </div>
                   ) : (
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <BarChart data={dashboardData.ordersOverview}>
+                  <ChartContainer
+                    className="w-full h-full min-h-[256px]"
+                    minHeight={256}
+                    render={({ width, height }) => (
+                    <BarChart width={width} height={height} data={dashboardData.ordersOverview}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                       <XAxis
                         dataKey="name"
@@ -1369,7 +1412,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         activeBar={<Rectangle fill="#4f46e5" />}
                       />
                     </BarChart>
-                  </ResponsiveContainer>
+                    )}
+                  />
                   )}
                 </div>
               </div>

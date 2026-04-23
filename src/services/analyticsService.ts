@@ -1,13 +1,30 @@
-// Frontend analytics talk directly to the Python service.
-// In production we require an explicit base URL via VITE_ANALYTICS_BASE_URL.
+// Analytics can be served either by the Python service (preferred when configured)
+// or by the Node backend (fallback) for environments where PyServer isn't reachable.
 const ENV_BASE_URL = (import.meta as any).env?.VITE_ANALYTICS_BASE_URL as string | undefined;
 
 const getAnalyticsBaseUrl = () => {
-  if (!ENV_BASE_URL) {
-    throw new Error('VITE_ANALYTICS_BASE_URL is not configured');
-  }
-  return ENV_BASE_URL;
+  // If VITE_ANALYTICS_BASE_URL is missing, use same-origin Node backend.
+  // This prevents "no data" screens when PyServer isn't deployed.
+  return (ENV_BASE_URL || '').trim();
 };
+
+const getAuthHeaders = (): Record<string, string> => {
+  try {
+    const token = (localStorage.getItem('token') || '').trim();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+};
+
+const isSameOriginUrl = (url: string) => url.startsWith('/') && !url.startsWith('//');
+
+async function fetchJson(url: string): Promise<{ res: Response; json: any }> {
+  const headers = isSameOriginUrl(url) ? getAuthHeaders() : {};
+  const res = await fetch(url, { headers });
+  const json = await res.json().catch(() => null);
+  return { res, json };
+}
 
 export type ApiBranchSalesItem = {
   branch_id: number;
@@ -210,13 +227,30 @@ export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTo
 
 export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDailySalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/daily-sales?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics daily-sales failed with status ${res.status}`);
-  }
-  const json = await res.json();
+  // PyServer path when configured, otherwise fall back to Node revenue report.
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/daily-sales?${params.toString()}`
+    : `/api/reports/revenue?period=daily&${params.toString()}`;
+
+  const { res, json } = await fetchJson(url);
+  if (!res.ok) throw new Error(`Analytics daily-sales failed with status ${res.status}`);
   if (json.success && json.data?.data) {
+    // PyServer returns { data: { data: [...] } }
     return json.data.data as ApiDailySalesItem[];
+  }
+  // Node revenue returns { data: { data: [{ date, revenue, ...}] } }
+  if (json.success && Array.isArray(json.data?.data)) {
+    return (json.data.data as any[]).map((row) => {
+      const total = Number(row?.revenue ?? row?.total_sales ?? 0) || 0;
+      return {
+        sale_date: String(row?.date ?? row?.sale_date ?? ''),
+        total_sales: total,
+        refund: 0,
+        discount: 0,
+        net_sales: total,
+        gross_profit: total,
+      } satisfies ApiDailySalesItem;
+    });
   }
   return [];
 }
@@ -249,11 +283,11 @@ export async function fetchDailyExpensesApi(params: URLSearchParams): Promise<Ap
 
 export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMenuReportRow[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/menu-report?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics menu-report failed with status ${res.status}`);
-  }
-  const json = await res.json();
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/menu-report?${params.toString()}`
+    : `/api/reports/goods-sales?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
+  if (!res.ok) throw new Error(`Analytics menu-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiMenuReportRow[];
   }
@@ -262,11 +296,11 @@ export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMe
 
 export async function fetchCategoryReportApi(params: URLSearchParams): Promise<ApiCategoryReportRow[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/category-report?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics category-report failed with status ${res.status}`);
-  }
-  const json = await res.json();
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/category-report?${params.toString()}`
+    : `/api/reports/sales-category?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
+  if (!res.ok) throw new Error(`Analytics category-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiCategoryReportRow[];
   }

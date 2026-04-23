@@ -139,10 +139,10 @@ class AuditLogModel {
 			params.push(filters.end_date);
 		}
 
-		query += ` ORDER BY al.CREATED_DT DESC LIMIT ? OFFSET ?`;
-		const limit = filters.limit || 100;
-		const offset = filters.offset || 0;
-		params.push(limit, offset);
+		// Some MySQL/MariaDB builds reject bound parameters for LIMIT/OFFSET in prepared statements.
+		const safeLimit = Math.min(Math.max(1, Number(filters.limit) || 100), 500);
+		const safeOffset = Math.max(0, Number(filters.offset) || 0);
+		query += ` ORDER BY al.CREATED_DT DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`;
 
 		// Use text protocol to avoid server-side prepared statement paging edge-cases.
 		const [rows] = await pool.query(query, params);
