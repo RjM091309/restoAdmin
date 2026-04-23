@@ -115,7 +115,29 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
-const TREND_Y_AXIS_MIN_ABS = 800_000;
+/** Diverging bar chart: sales (positive) vs expenses (negative) — Y scale matches dashboard spec. */
+const TREND_Y_DOMAIN_MAX = 1_000_000;
+const TREND_Y_DOMAIN_MIN = -1_500_000;
+const TREND_Y_AXIS_DOMAIN: [number, number] = [TREND_Y_DOMAIN_MIN, TREND_Y_DOMAIN_MAX];
+const TREND_Y_AXIS_TICKS: number[] = [
+  TREND_Y_DOMAIN_MIN,
+  -1_000_000,
+  -500_000,
+  0,
+  500_000,
+  TREND_Y_DOMAIN_MAX,
+];
+
+const formatTrendYAxisTick = (value: number): string => {
+  const v = Math.abs(value);
+  if (v === 0) return '₱0k';
+  if (v >= 1_000_000) {
+    const m = v / 1_000_000;
+    return Number.isInteger(m) ? `₱${m}M` : `₱${m.toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (v >= 1_000) return `₱${Math.round(v / 1_000)}k`;
+  return `₱${v}`;
+};
 
 const WEEKDAY_ABBR_TO_JS_DAY: Record<string, number> = {
   Sun: 0,
@@ -188,18 +210,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('monthly');
-
-  const trendYAxisDomain = useMemo(() => {
-    const maxSales = monthlyData.reduce((m, d) => Math.max(m, Number(d.totalSales) || 0), 0);
-    const maxExpenses = monthlyData.reduce((m, d) => Math.max(m, Number(d.totalExpenses) || 0), 0);
-    const maxAbs = Math.max(TREND_Y_AXIS_MIN_ABS, maxSales, maxExpenses);
-    return [-maxAbs, maxAbs] as [number, number];
-  }, [monthlyData]);
-
-  const trendYAxisTicks = useMemo(() => {
-    const [minV, maxV] = trendYAxisDomain;
-    return [minV, 0, maxV];
-  }, [trendYAxisDomain]);
 
   const [trendLoading, setTrendLoading] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
@@ -1343,11 +1353,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     />
                     <YAxis 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
-                      tickFormatter={(value) => `₱${Math.round(Math.abs(value / 1000))}k`} 
+                      tickFormatter={formatTrendYAxisTick}
                       axisLine={false}
                       tickLine={false}
-                      domain={trendYAxisDomain}
-                      ticks={trendYAxisTicks}
+                      width={52}
+                      domain={TREND_Y_AXIS_DOMAIN}
+                      ticks={TREND_Y_AXIS_TICKS}
                     />
                     <Tooltip 
                       content={TrendTooltipContent}
