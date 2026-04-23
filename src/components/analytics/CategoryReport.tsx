@@ -28,9 +28,9 @@ type CategoryReportProps = {
 type CategoryReportRow = {
   id: string;
   category: string;
+  branch: string;
   salesQty: number;
   totalSales: number;
-  totalRevenue: number;
 };
 
 export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, dateRange }) => {
@@ -73,9 +73,9 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
           apiRows.map((row) => ({
             id: String(row.id),
             category: row.category,
+            branch: row.branch || selectedBranch?.name || 'All Branches',
             salesQty: row.salesQty,
             totalSales: row.totalSales,
-            totalRevenue: row.totalRevenue,
           }))
         );
       } catch (err) {
@@ -138,7 +138,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return rows;
-    return rows.filter((row) => row.category.toLowerCase().includes(keyword));
+    return rows.filter((row) => row.category.toLowerCase().includes(keyword) || row.branch.toLowerCase().includes(keyword));
   }, [rows, searchTerm]);
 
   const breakdownNetSalesTotal = useMemo(() => {
@@ -173,6 +173,11 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       header: t('category_report.columns.category'),
       accessorKey: 'category',
       className: 'min-w-[200px] border-r border-gray-200',
+    },
+    {
+      header: 'Branch',
+      accessorKey: 'branch',
+      className: 'min-w-[190px]',
     },
     {
       header: t('category_report.columns.sales_quantity'),
@@ -212,6 +217,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const handleExportCsv = () => {
     const headers = [
       t('category_report.columns.category'),
+      'Branch',
       t('category_report.columns.sales_quantity'),
       t('category_report.columns.total_sales'),
     ];
@@ -224,6 +230,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
 
     const rowsForCsv = filteredRows.map((row) => [
       row.category,
+      row.branch,
       row.salesQty.toString(),
       row.totalSales.toString(),
     ]);
@@ -253,12 +260,14 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
 
     const headers = [
       t('category_report.columns.category'),
+      'Branch',
       t('category_report.columns.sales_quantity'),
       t('category_report.columns.total_sales'),
     ];
 
     const body = filteredRows.map((row) => [
       row.category,
+      row.branch,
       row.salesQty.toLocaleString(),
       money(row.totalSales),
     ]);

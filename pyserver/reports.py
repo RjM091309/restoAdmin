@@ -43,6 +43,7 @@ class MenuReportRow(BaseModel):
     id: int
     goods: str
     category: str
+    branch: str
     salesQty: int
     totalSales: float
     refundQty: int
@@ -56,6 +57,7 @@ class MenuReportRow(BaseModel):
 class CategoryReportRow(BaseModel):
     id: int
     category: str
+    branch: str
     salesQty: int
     totalSales: float
     refundQty: int
@@ -163,6 +165,17 @@ def menu_report(
                 m.IDNo AS id,
                 COALESCE({_safe_text_sql('m.MENU_NAME')}, '') AS goods,
                 COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
                 COALESCE(SUM(oi.QTY), 0) AS salesQty,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
                 0 AS refundQty,
@@ -174,6 +187,7 @@ def menu_report(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE 1=1
             {date_filter}
             {branch_filter}
@@ -190,6 +204,17 @@ def menu_report(
                 -9998 AS id,
                 'Room Charge' AS goods,
                 'Charges' AS category,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
                 (
                   COUNT(DISTINCT o.IDNo)
                   +
@@ -229,6 +254,7 @@ def menu_report(
             FROM orders o
             INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
               AND COALESCE(rt.ROOM_CHARGE, 0) > 0
             {date_filter}
@@ -241,6 +267,17 @@ def menu_report(
                 -9999 AS id,
                 'Service Charge' AS goods,
                 'Charges' AS category,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
                 COUNT(DISTINCT o.IDNo) AS salesQty,
                 COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
                 0 AS refundQty,
@@ -250,6 +287,7 @@ def menu_report(
             FROM orders o
             INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
               AND COALESCE(rt.ROOM_CHARGE, 0) = 0
             {date_filter}
@@ -293,6 +331,7 @@ def menu_report(
                 id=int(row.get("id") or 0),
                 goods=str(row.get("goods") or ""),
                 category=str(row.get("category") or "Uncategorized"),
+                branch=str(row.get("branch") or "Unknown Branch"),
                 salesQty=int(row.get("salesQty") or 0),
                 totalSales=total_sales,
                 refundQty=int(row.get("refundQty") or 0),
@@ -352,6 +391,17 @@ def category_report(
             SELECT
                 COALESCE(c.IDNo, 0) AS id,
                 COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
                 COALESCE(SUM(oi.QTY), 0) AS salesQty,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
                 0 AS refundQty,
@@ -363,6 +413,7 @@ def category_report(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE 1=1
             {date_filter}
             {branch_filter}
@@ -379,6 +430,17 @@ def category_report(
             SELECT
                 -9998 AS id,
                 'Room Charge' AS category,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
                 (
                   COUNT(DISTINCT o.IDNo)
                   +
@@ -418,6 +480,7 @@ def category_report(
             FROM orders o
             INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
               AND COALESCE(rt.ROOM_CHARGE, 0) > 0
             {date_filter}
@@ -453,6 +516,7 @@ def category_report(
             CategoryReportRow(
                 id=int(row.get("id") or 0),
                 category=str(row.get("category") or "Uncategorized"),
+                branch=str(row.get("branch") or "Unknown Branch"),
                 salesQty=int(row.get("salesQty") or 0),
                 totalSales=total_sales,
                 refundQty=int(row.get("refundQty") or 0),

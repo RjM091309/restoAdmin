@@ -211,6 +211,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     },
     {
       header: t('receipt_report.columns.discount'),
+      accessorKey: 'discount',
+      sortable: true,
       className: 'min-w-[130px] text-right',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} text-right`,
@@ -218,6 +220,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     },
     {
       header: t('receipt_report.columns.total'),
+      accessorKey: 'total',
+      sortable: true,
       className: 'min-w-[130px] text-right',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} text-right`,
@@ -225,6 +229,8 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
     },
     {
       header: 'Receipt',
+      accessorKey: 'receiptNumber',
+      sortable: true,
       className: 'w-[90px] text-right',
       headerClassName: headerTextClass,
       cellClassName: `${bodyTextClass} text-right`,

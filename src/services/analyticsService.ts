@@ -68,6 +68,7 @@ export type ApiMenuReportRow = {
   id: number;
   goods: string;
   category: string;
+  branch: string;
   salesQty: number;
   totalSales: number;
   refundQty: number;
@@ -81,6 +82,7 @@ export type ApiMenuReportRow = {
 export type ApiCategoryReportRow = {
   id: number;
   category: string;
+  branch: string;
   salesQty: number;
   totalSales: number;
   refundQty: number;
@@ -285,7 +287,7 @@ export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMe
   const baseUrl = getAnalyticsBaseUrl();
   const url = baseUrl
     ? `${baseUrl}/api/analytics/menu-report?${params.toString()}`
-    : `/api/reports/goods-sales?${params.toString()}`;
+    : `/api/analytics/menu-report?${params.toString()}`;
   const { res, json } = await fetchJson(url);
   if (!res.ok) throw new Error(`Analytics menu-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
@@ -298,7 +300,7 @@ export async function fetchCategoryReportApi(params: URLSearchParams): Promise<A
   const baseUrl = getAnalyticsBaseUrl();
   const url = baseUrl
     ? `${baseUrl}/api/analytics/category-report?${params.toString()}`
-    : `/api/reports/sales-category?${params.toString()}`;
+    : `/api/analytics/category-report?${params.toString()}`;
   const { res, json } = await fetchJson(url);
   if (!res.ok) throw new Error(`Analytics category-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
