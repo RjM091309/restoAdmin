@@ -201,18 +201,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       render: (item) => money(item.totalSales),
       className: 'min-w-[130px] text-right',
     },
-    {
-      header: t('menu_report.columns.net_sales'),
-      accessorKey: 'netSales',
-      render: (item) => money(item.netSales),
-      className: 'min-w-[120px] text-right',
-    },
-    {
-      header: t('menu_report.columns.total_revenue'),
-      accessorKey: 'totalRevenue',
-      render: (item) => money(item.totalRevenue),
-      className: 'min-w-[140px] text-right',
-    },
   ];
 
   // --- Export Functions (CSV + PDF) ---
@@ -222,8 +210,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       t('menu_report.columns.category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
-      t('menu_report.columns.net_sales'),
-      t('menu_report.columns.total_revenue'),
     ];
 
     const escapeCell = (value: string) => {
@@ -237,8 +223,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       row.category,
       row.salesQty.toString(),
       row.totalSales.toString(),
-      row.netSales.toString(),
-      row.totalRevenue.toString(),
     ]);
 
     const csv = [
@@ -269,8 +253,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       t('menu_report.columns.category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
-      t('menu_report.columns.net_sales'),
-      t('menu_report.columns.total_revenue'),
     ];
 
     const body = filteredRows.map((row) => [
@@ -278,8 +260,6 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       row.category,
       row.salesQty.toLocaleString(),
       money(row.totalSales),
-      money(row.netSales),
-      money(row.totalRevenue),
     ]);
 
     autoTable(doc, {

@@ -187,12 +187,6 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       className: 'min-w-[130px] text-right',
     },
     {
-      header: t('category_report.columns.total_revenue'),
-      accessorKey: 'totalRevenue',
-      render: (item) => money(item.totalRevenue),
-      className: 'min-w-[140px] text-right',
-    },
-    {
       header: t('category_report.columns.action'),
       sortable: false,
       className: 'w-[88px] text-center',
@@ -220,7 +214,6 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       t('category_report.columns.category'),
       t('category_report.columns.sales_quantity'),
       t('category_report.columns.total_sales'),
-      t('category_report.columns.total_revenue'),
     ];
 
     const escapeCell = (value: string) => {
@@ -233,7 +226,6 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       row.category,
       row.salesQty.toString(),
       row.totalSales.toString(),
-      row.totalRevenue.toString(),
     ]);
 
     const csv = [
@@ -263,14 +255,12 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       t('category_report.columns.category'),
       t('category_report.columns.sales_quantity'),
       t('category_report.columns.total_sales'),
-      t('category_report.columns.total_revenue'),
     ];
 
     const body = filteredRows.map((row) => [
       row.category,
       row.salesQty.toLocaleString(),
       money(row.totalSales),
-      money(row.totalRevenue),
     ]);
 
     autoTable(doc, {

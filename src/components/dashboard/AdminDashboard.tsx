@@ -207,6 +207,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const { user } = useUser();
   const isAdmin = user?.permissions === 1;
   const hasLoggedBranchBreakdownPyRef = useRef(false);
+  const analyticsReqIdRef = useRef(0);
+  const trendReqIdRef = useRef(0);
+  const expenseReqIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
   const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>([]);
@@ -261,12 +264,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   // Sync selectedBranch prop to internal state
   useEffect(() => {
-    if (selectedBranch && selectedBranch.id !== 'all') {
-      setActiveBranchId(Number(selectedBranch.id));
-    } else {
-      setActiveBranchId(null);
-    }
-  }, [selectedBranch]);
+    const next =
+      selectedBranch && selectedBranch.id !== 'all' ? Number(selectedBranch.id) : null;
+    setActiveBranchId((prev) => (prev === next ? prev : next));
+  }, [selectedBranch?.id]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -292,11 +293,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     };
 
     fetchData();
-  }, [activeBranchId]);
+  }, []);
 
   // Load performance trend chart from Python analytics (weekly/monthly/yearly)
   useEffect(() => {
     const loadTrend = async () => {
+      const reqId = ++trendReqIdRef.current;
       setTrendLoading(true);
       try {
         const currentRange = getCurrentMonthRange();
@@ -312,6 +314,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         }
 
         const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
+        if (reqId !== trendReqIdRef.current) return;
 
         const weeklyHasCalendarDates =
           trendPeriod === 'weekly' && rows.length > 0 && rows.every((r) => r.sale_date);
@@ -326,6 +329,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               end: wEnd,
               ...(activeBranchId ? { branchId: String(activeBranchId) } : {}),
             });
+            if (reqId !== trendReqIdRef.current) return;
             const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
             rowsForChart = rows.map((r) => {
               const key = String(r.sale_date).slice(0, 10);
@@ -359,10 +363,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           if (isAnchorToday) {
             const copy = [...normalized];
             copy[copy.length - 1] = { ...copy[copy.length - 1], name: 'Today' };
-            setMonthlyData(copy);
+            if (reqId === trendReqIdRef.current) setMonthlyData(copy);
             return;
           }
-          setMonthlyData(normalized);
+          if (reqId === trendReqIdRef.current) setMonthlyData(normalized);
           return;
         }
 
@@ -398,16 +402,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           });
 
           withDates[withDates.length - 1] = { ...withDates[withDates.length - 1], name: anchorName };
-          setMonthlyData(withDates);
+          if (reqId === trendReqIdRef.current) setMonthlyData(withDates);
           return;
         }
 
-        setMonthlyData(normalized);
+        if (reqId === trendReqIdRef.current) setMonthlyData(normalized);
       } catch (error) {
         console.error('[AdminDashboard] Failed to load performance trend:', error);
-        setMonthlyData([]);
+        if (trendReqIdRef.current) setMonthlyData([]);
       } finally {
-        setTrendLoading(false);
+        if (trendReqIdRef.current) setTrendLoading(false);
       }
     };
 
@@ -427,6 +431,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   // Load analytics data (branch revenue distribution + top-selling products + daily sales for cards)
   useEffect(() => {
     const loadAnalytics = async () => {
+      const reqId = ++analyticsReqIdRef.current;
       setAnalyticsLoading(true);
       try {
         const currentRange = getCurrentMonthRange();
@@ -470,6 +475,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             return fetchExpenseCategoryBreakdownApi(breakdownParams);
           })(),
         ]);
+        if (reqId !== analyticsReqIdRef.current) return;
 
         if (expenseBreakdown && expenseBreakdown.length > 0) {
           const map: Record<number, Record<string, number>> = {};
@@ -549,6 +555,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               }
             }),
           );
+          if (reqId !== analyticsReqIdRef.current) return;
 
           setBranchCardsData(cards);
 
@@ -585,18 +592,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
         try {
           const allRecon = await fetchCashReconciliationAggregates({ start, end });
-          setComparePeriodReconAll(Number(allRecon.total) || 0);
+          if (reqId === analyticsReqIdRef.current) setComparePeriodReconAll(Number(allRecon.total) || 0);
         } catch {
-          setComparePeriodReconAll(0);
+          if (reqId === analyticsReqIdRef.current) setComparePeriodReconAll(0);
         }
       } catch (error) {
+        if (reqId !== analyticsReqIdRef.current) return;
         console.error('Failed to load dashboard analytics data:', error);
         setBranchRevenueDistribution([]);
         setTopProductsData([]);
         setDailySalesForCards([]);
         setComparePeriodReconAll(0);
       } finally {
-        setAnalyticsLoading(false);
+        if (reqId === analyticsReqIdRef.current) setAnalyticsLoading(false);
       }
     };
 
@@ -606,6 +614,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   // Load expense summary from Python analytics (expense-summary)
   useEffect(() => {
     const loadExpensesFromPython = async () => {
+      const reqId = ++expenseReqIdRef.current;
       try {
         const params = new URLSearchParams();
         if (activeBranchId && Number.isFinite(activeBranchId)) {
@@ -616,11 +625,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         if (compareDateRange.end) params.set('end_date', compareDateRange.end);
 
         const summary: ApiExpenseSummary = await fetchExpenseSummaryApi(params);
-        setExpenseSummaryTotal(summary.total_expense);
+        if (reqId === expenseReqIdRef.current) setExpenseSummaryTotal(summary.total_expense);
       } catch (error) {
         // eslint-disable-next-line no-console
         console.error('Error loading expense summary from Python analytics:', error);
-        setExpenseSummaryTotal(null);
+        if (reqId === expenseReqIdRef.current) setExpenseSummaryTotal(null);
       }
     };
 
@@ -669,21 +678,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   // Recompute summary cards (total revenue, sales, expenses)
   useEffect(() => {
-    const buildFromPerformance = () => {
-      if (!performanceData.length) return null;
-      const totalSales = performanceData.reduce((s, b) => s + Number(b.totalSales || 0), 0);
-      const totalExpensesFromPerf = performanceData.reduce((s, b) => s + Number(b.totalExpenses || 0), 0);
-      const totalExpenses = expenseSummaryTotal ?? totalExpensesFromPerf;
-      return {
-        totalSales,
-        totalExpenses,
-        totalRevenue: totalSales - totalExpenses,
-      } satisfies SummaryData;
-    };
-
     // If a specific branch is focused, mirror that branch card exactly (per-branch view).
-    if (activeBranchId && (branchCardsData.length > 0 || performanceData.length > 0)) {
-      const source = branchCardsData.length > 0 ? branchCardsData : performanceData;
+    if (activeBranchId && branchCardsData.length > 0) {
+      const source = branchCardsData;
       const branch = source.find((b) => b.id === activeBranchId);
       if (!branch) {
         return;
@@ -699,13 +696,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       return;
     }
 
-    // While analytics calls are still in-flight, don't compute an expense-only snapshot.
-    // Show stable fallback from branch performance (or keep last summary) to avoid 0-sales flash.
-    if (!activeBranchId && analyticsLoading && branchCardsData.length === 0) {
-      const perfFallback = buildFromPerformance();
-      if (perfFallback) {
-        setSummaryData(perfFallback);
-      }
+    // While analytics calls are in-flight, keep the previous summary (or cache) to avoid flashing mismatched values.
+    if (analyticsLoading) {
       return;
     }
 
@@ -721,28 +713,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       return;
     }
 
-    // Fallback: daily net + period recon (all branches)
-    // If daily-sales isn't ready/available, prefer performance totals over rendering 0 sales.
-    if (!dailySalesForCards || dailySalesForCards.length === 0) {
-      const perfFallback = buildFromPerformance();
-      if (perfFallback) {
-        setSummaryData(perfFallback);
-      } else if (expenseSummaryTotal == null) {
-        setSummaryData(null);
-      }
+    // Fallback: daily gross + period recon (all branches)
+    if (dailySalesForCards && dailySalesForCards.length > 0) {
+      const grossFromDaily = sumDailyTotalSales(dailySalesForCards || []);
+      const totalSales = grossFromDaily + (comparePeriodReconAll || 0);
+      const totalExpenses = expenseSummaryTotal ?? 0;
+      const totalRevenue = totalSales - totalExpenses;
+
+      setSummaryData({
+        totalRevenue,
+        totalSales,
+        totalExpenses,
+      });
       return;
     }
 
-    const grossFromDaily = sumDailyTotalSales(dailySalesForCards || []);
-    const totalSales = grossFromDaily + (comparePeriodReconAll || 0);
-    const totalExpenses = expenseSummaryTotal ?? 0;
-    const totalRevenue = totalSales - totalExpenses;
+    // Last-resort fallback (only when analytics is not loading and returned nothing): use legacy performance totals.
+    if (performanceData.length > 0) {
+      const totalSales = performanceData.reduce((s, b) => s + Number(b.totalSales || 0), 0);
+      const totalExpensesFromPerf = performanceData.reduce((s, b) => s + Number(b.totalExpenses || 0), 0);
+      const totalExpenses = expenseSummaryTotal ?? totalExpensesFromPerf;
+      setSummaryData({
+        totalRevenue: totalSales - totalExpenses,
+        totalSales,
+        totalExpenses,
+      });
+      return;
+    }
 
-    setSummaryData({
-      totalRevenue,
-      totalSales,
-      totalExpenses,
-    });
+    if (expenseSummaryTotal == null) setSummaryData(null);
   }, [
     activeBranchId,
     analyticsLoading,
@@ -1612,7 +1611,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 </p>
               </div>
             )}
-            {(branchCardsData.length > 0 ? branchCardsData : performanceData)
+            {(() => {
+              const hasAnalytics = branchCardsData.length > 0;
+              const canUseLegacy = !analyticsLoading && !hasAnalytics && performanceData.length > 0;
+              const list = hasAnalytics ? branchCardsData : canUseLegacy ? performanceData : [];
+
+              if (list.length === 0 && (analyticsLoading || loading)) {
+                return (
+                  <div className="space-y-3">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-56 rounded-2xl" />
+                    ))}
+                  </div>
+                );
+              }
+
+              return list
               .slice()
               .sort((a, b) => {
                 const aExpenses = getEffectiveBranchTotalExpenses(a);
@@ -1651,7 +1665,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     />
                   );
                 })()
-              ))}
+              ));
+            })()}
           </div>
         </motion.div>
         )}
