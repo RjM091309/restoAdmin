@@ -32,10 +32,12 @@ import { CashReconciliationModal } from './CashReconciliationModal';
 function ChartContainer({
   className = '',
   minHeight = 200,
+  style,
   render,
 }: {
   className?: string;
   minHeight?: number;
+  style?: React.CSSProperties;
   render: (size: { width: number; height: number }) => React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -54,7 +56,7 @@ function ChartContainer({
     return () => ro.disconnect();
   }, []);
   return (
-    <div ref={ref} className={className} style={{ minHeight }}>
+    <div ref={ref} className={className} style={{ minHeight, ...style }}>
       {size.width > 0 && size.height > 0 ? render(size) : null}
     </div>
   );
@@ -636,6 +638,37 @@ const metricConfig = {
     }));
   }, [branchSalesData]);
 
+  const branchChartHeight = useMemo(() => {
+    // Keep bars readable and ensure all branches are visible.
+    // Uses a row height budget that comfortably fits barSize + category gaps.
+    const rows = branchChartData.length;
+    const rowHeight = 42;
+    return Math.max(192, rows * rowHeight);
+  }, [branchChartData.length]);
+
+  const branchXAxisTicks = useMemo(() => {
+    const million = 1_000_000;
+    const max = Math.max(0, ...branchChartData.map((d) => Number(d.sales) || 0));
+    if (max <= 0) return [0];
+
+    const maxM = Math.max(1, Math.ceil(max / million));
+    const ticks: number[] = [0];
+
+    // Prefer readable "odd million" ticks: 1M, 3M, 5M ... then ensure max is included.
+    for (let m = 1; m <= maxM; m += 2) ticks.push(m * million);
+
+    const maxTick = maxM * million;
+    if (ticks[ticks.length - 1] !== maxTick) ticks.push(maxTick);
+    return ticks;
+  }, [branchChartData]);
+
+  const formatBranchAxisTick = useCallback((v: number) => {
+    const million = 1_000_000;
+    const n = Number(v) || 0;
+    if (n === 0) return '₱0';
+    return `₱${Math.round(n / million)}M`;
+  }, []);
+
   // --- Export Functions (CSV + PDF) ---
   const handleExportCsv = useCallback(() => {
     const headers = [
@@ -882,23 +915,47 @@ const metricConfig = {
             ) : (
               <>
                 {/* Horizontal bar chart */}
-                <ChartContainer
-                  className="w-full min-w-0 h-48 min-h-[192px] mb-4"
-                  minHeight={192}
-                  render={({ width, height }) => (
-                    <BarChart width={width} height={height} data={branchChartData} layout="vertical" barCategoryGap="20%">
-                      <CartesianGrid stroke="#e5e7eb" horizontal={false} />
-                      <XAxis type="number" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
-                      <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }} axisLine={false} tickLine={false} />
-                      <Tooltip cursor={false} content={<LoyverseTooltip />} />
-                      <Bar dataKey="sales" barSize={22} radius={[0, 6, 6, 0]}>
-                        {branchChartData.map((_entry, index) => (
-                          <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  )}
-                />
+                <div className="w-full min-w-0 max-h-[320px] overflow-y-auto mb-4">
+                  <ChartContainer
+                    className="w-full min-w-0"
+                    minHeight={192}
+                    style={{ height: branchChartHeight }}
+                    render={({ width, height }) => (
+                      <BarChart
+                        width={width}
+                        height={height}
+                        data={branchChartData}
+                        layout="vertical"
+                        barCategoryGap={10}
+                      >
+                        <CartesianGrid stroke="#e5e7eb" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          tick={{ fill: '#64748b', fontSize: 11 }}
+                          ticks={branchXAxisTicks}
+                          tickFormatter={(v) => formatBranchAxisTick(Number(v))}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={130}
+                          interval={0}
+                          tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip cursor={false} content={<LoyverseTooltip />} />
+                        <Bar dataKey="sales" barSize={22} radius={[0, 6, 6, 0]}>
+                          {branchChartData.map((_entry, index) => (
+                            <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    )}
+                  />
+                </div>
                 {/* Data table */}
                 <div className="overflow-x-auto rounded-xl border border-gray-100">
                   <table className="w-full text-sm">

@@ -143,18 +143,63 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
-/** Diverging bar chart: sales (positive) vs expenses (negative) — Y scale matches dashboard spec. */
-const TREND_Y_DOMAIN_MAX = 1_000_000;
-const TREND_Y_DOMAIN_MIN = -1_500_000;
-const TREND_Y_AXIS_DOMAIN: [number, number] = [TREND_Y_DOMAIN_MIN, TREND_Y_DOMAIN_MAX];
-const TREND_Y_AXIS_TICKS: number[] = [
-  TREND_Y_DOMAIN_MIN,
-  -1_000_000,
-  -500_000,
-  0,
-  500_000,
-  TREND_Y_DOMAIN_MAX,
-];
+/** Diverging bar chart: sales (positive) vs expenses (negative). */
+const clampFiniteNonNegative = (n: unknown): number => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return v < 0 ? 0 : v;
+};
+
+/**
+ * Dual-scale diverging bars:
+ * - Sales (positive) uses its own max scale
+ * - Expenses (negative) uses its own max scale
+ * This keeps both series visually comparable even when magnitudes differ a lot.
+ * Note: With dual-scale, heights are "relative to each side's max" (not directly comparable across sides).
+ */
+
+const niceStep = (max: number, targetSteps: number): number => {
+  const m = Number(max);
+  if (!(m > 0) || !Number.isFinite(m)) return 1;
+  const rough = m / Math.max(1, targetSteps);
+  const pow10 = Math.pow(10, Math.floor(Math.log10(rough)));
+  const r = rough / pow10;
+  const mult = r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10;
+  return mult * pow10;
+};
+
+const buildNiceMax = (maxAbs: number) => {
+  // Keep a minimum scale so the axis doesn't collapse at tiny ranges.
+  const minMax = 10_000;
+  const effectiveMax = Math.max(Number.isFinite(maxAbs) ? maxAbs : 0, minMax);
+  const step = niceStep(effectiveMax, 4);
+  return Math.ceil(effectiveMax / step) * step;
+};
+
+const percentile = (values: number[], p: number): number => {
+  const clean = values.filter((v) => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+  if (clean.length === 0) return 0;
+  if (p <= 0) return clean[0]!;
+  if (p >= 1) return clean[clean.length - 1]!;
+  const idx = (clean.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return clean[lo]!;
+  const w = idx - lo;
+  return clean[lo]! * (1 - w) + clean[hi]! * w;
+};
+
+const pickPowerForSkew = (values: number[], fallback: number): number => {
+  // Smaller power => stronger compression of spikes.
+  const max = values.reduce((m, v) => Math.max(m, Number.isFinite(v) ? v : 0), 0);
+  const p75 = percentile(values, 0.75);
+  const denom = p75 > 0 ? p75 : percentile(values, 0.5);
+  const ratio = denom > 0 ? max / denom : 1;
+  if (ratio >= 10) return 0.32;
+  if (ratio >= 6) return 0.38;
+  if (ratio >= 3) return 0.45;
+  return fallback;
+};
 
 const formatTrendYAxisTick = (value: number): string => {
   const v = Math.abs(value);
@@ -1217,7 +1262,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       if (!active || !payload || payload.length === 0) return null;
 
       const labelRaw = normalizeTickLabel(label);
-      const dataPoint = payload?.[0]?.payload as MonthlyData | undefined;
+      const dataPoint = payload?.[0]?.payload as (MonthlyData & {
+        rawTotalSales?: number;
+        rawTotalExpenses?: number;
+      }) | undefined;
 
       const parseIso = (iso: string): Date | null => {
         if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
@@ -1298,7 +1346,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             {sorted.map((item: any, idx: number) => {
               const color = item?.color || '#64748b';
               const name = getName(String(item?.dataKey ?? item?.name ?? ''));
-              const valueText = formatMoney(item?.value);
+              // Show the real amount (axis ticks are also rendered as real amounts).
+              const dataKey = String(item?.dataKey ?? item?.name ?? '');
+              const raw =
+                dataKey === 'totalSales'
+                  ? Number(dataPoint?.rawTotalSales ?? 0)
+                  : dataKey === 'negativeExpenses'
+                    ? Number(dataPoint?.rawTotalExpenses ?? 0)
+                    : Number(item?.value ?? 0);
+              const valueText = formatMoney(raw);
               return (
                 <div key={`${item?.dataKey ?? item?.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 9999, background: color, display: 'inline-block' }} />
@@ -1314,6 +1370,75 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
     return Content;
   }, [t, trendAnchorDate, trendFallbackYear, trendPeriod, trendRangeEnd, trendRangeStart]);
+
+  const trendChartScale = useMemo(() => {
+    const salesValues = monthlyData.map((d) => clampFiniteNonNegative(d.totalSales));
+    const expenseValues = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
+    const salesMax = salesValues.reduce((m, v) => Math.max(m, v), 0);
+    const expensesMax = expenseValues.reduce((m, v) => Math.max(m, v), 0);
+    // Dynamic per-view max so selected branch doesn't look "bunot".
+    // Each side gets its own "nice" max, and bars are normalized to that max.
+    const baseSalesAxisMax = buildNiceMax(salesMax);
+    const baseExpensesAxisMax = buildNiceMax(expensesMax);
+
+    // Baseline ticks requested for the default Overall + Monthly view:
+    // - Sales: 400k / 800k / 1M
+    // - Expenses: 800k / 1M / 1.5M
+    //
+    // IMPORTANT: When a branch is selected, keep the scale fully dynamic so the bars
+    // don't look "maliit/bunot" due to a large fixed baseline.
+    const isMonthly = trendPeriod === 'monthly';
+    const isOverallMonthly = !activeBranchId && isMonthly;
+
+    // Sales baseline stays only for Overall+Monthly.
+    const salesAxisMax = isOverallMonthly ? Math.max(baseSalesAxisMax, 1_000_000) : baseSalesAxisMax;
+
+    // Expenses baseline ONLY for Overall+Monthly.
+    // If we force ₱1.5M for a small branch, expenses bars become "bunot".
+    const expensesAxisMax = isOverallMonthly ? Math.max(baseExpensesAxisMax, 1_500_000) : baseExpensesAxisMax;
+
+    // Keep the same "level style" as requested, but dynamic relative to the current max.
+    const salesFracs = [0.4, 0.8, 1];
+    const expenseFracs = isOverallMonthly ? [0.5333333333, 0.6666666667, 1] : [0.4, 0.8, 1];
+
+    // Power scaling per-side to handle branches with big spike days (e.g. Blue Moon expenses).
+    // Axis labels remain real amounts via inverse in tickFormatter.
+    const posPower = pickPowerForSkew(salesValues, 0.55);
+    const negPower = pickPowerForSkew(expenseValues, 0.5);
+    const posScaleFrac = (f: number) => Math.pow(Math.abs(f), posPower);
+    const negScaleFrac = (f: number) => Math.pow(Math.abs(f), negPower);
+
+    const posTicksScaled = salesFracs.map((f) => posScaleFrac(f));
+    const negTicksScaled = expenseFracs.slice().reverse().map((f) => -negScaleFrac(f));
+    const ticksScaled = [...negTicksScaled, 0, ...posTicksScaled];
+    return {
+      salesAxisMax,
+      expensesAxisMax,
+      ticksScaled,
+      domainScaled: [-1.08, 1.08] as [number, number],
+      posPower,
+      negPower,
+    };
+  }, [activeBranchId, monthlyData, trendPeriod]);
+
+  const trendChartData = useMemo(() => {
+    const posDen = trendChartScale.salesAxisMax || 1;
+    const negDen = trendChartScale.expensesAxisMax || 1;
+    const posPower = trendChartScale.posPower || 1;
+    const negPower = trendChartScale.negPower || 1;
+    return monthlyData.map((d) => {
+      const rawSales = clampFiniteNonNegative(d.totalSales);
+      const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
+      return {
+        ...d,
+        // Plot normalized values in [-1..1] (dual-scale), keep raw values for tooltip.
+        totalSales: Math.pow(rawSales / posDen, posPower),
+        negativeExpenses: -Math.pow(rawExpenses / negDen, negPower),
+        rawTotalSales: rawSales,
+        rawTotalExpenses: rawExpenses,
+      };
+    });
+  }, [monthlyData, trendChartScale.expensesAxisMax, trendChartScale.salesAxisMax]);
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
@@ -1506,7 +1631,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={384}>
                   <BarChart
                     key={`${activeBranchId || 'all'}-${trendPeriod}`}
-                    data={monthlyData.map(d => ({ ...d, negativeExpenses: -d.totalExpenses }))}
+                    data={trendChartData}
                     margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
                     stackOffset="sign"
                   >
@@ -1520,12 +1645,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     />
                     <YAxis 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
-                      tickFormatter={formatTrendYAxisTick}
+                      tickFormatter={(scaled) => {
+                        const s = Number(scaled);
+                        if (!Number.isFinite(s) || s === 0) return formatTrendYAxisTick(0);
+                        const posPower = trendChartScale.posPower || 1;
+                        const negPower = trendChartScale.negPower || 1;
+                        const inv = (p: number) => (p > 0 ? 1 / p : 1);
+                        const magnitude = s > 0 ? Math.pow(Math.abs(s), inv(posPower)) : Math.pow(Math.abs(s), inv(negPower));
+                        const amount = s > 0 ? magnitude * trendChartScale.salesAxisMax : -magnitude * trendChartScale.expensesAxisMax;
+                        return formatTrendYAxisTick(amount);
+                      }}
                       axisLine={false}
                       tickLine={false}
                       width={52}
-                      domain={TREND_Y_AXIS_DOMAIN}
-                      ticks={TREND_Y_AXIS_TICKS}
+                      domain={trendChartScale.domainScaled}
+                      ticks={trendChartScale.ticksScaled}
                     />
                     <Tooltip 
                       content={TrendTooltipContent}
