@@ -84,6 +84,13 @@ export type ApiCategoryMenuBreakdownRow = {
   netSales: number;
 };
 
+/** Per-table room charge rows use id below this (PyServer ROOM_CHARGE_TABLE_DETAIL_BASE - tableId). */
+export const ROOM_CHARGE_TABLE_DETAIL_ID_THRESHOLD = -8_000_000_000;
+
+export function isRoomChargeTableDetailId(id: number): boolean {
+  return Number.isFinite(id) && id < ROOM_CHARGE_TABLE_DETAIL_ID_THRESHOLD;
+}
+
 export type ApiPaymentReportRow = {
   id: number;
   paymentMethod: string;
@@ -275,10 +282,18 @@ export async function fetchCategoryMenuBreakdownApi(
     throw new Error(`Analytics category-menu-breakdown failed with status ${res.status}`);
   }
   const json = await res.json();
-  if (json.success && json.data?.data) {
-    return json.data.data as ApiCategoryMenuBreakdownRow[];
+  if (!json.success) {
+    throw new Error(
+      (typeof json.message === 'string' && json.message) ||
+        (typeof json.error === 'string' && json.error) ||
+        'Analytics category-menu-breakdown returned an error'
+    );
   }
-  return [];
+  const rows = json.data?.data;
+  if (!Array.isArray(rows)) {
+    throw new Error('Analytics category-menu-breakdown returned an invalid payload');
+  }
+  return rows as ApiCategoryMenuBreakdownRow[];
 }
 
 export async function fetchPaymentReportApi(params: URLSearchParams): Promise<ApiPaymentReportRow[]> {

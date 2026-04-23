@@ -10,6 +10,20 @@ from main import get_connection
 router = APIRouter(prefix="/api/analytics", tags=["analytics-reports"])
 
 
+def _norm_text_sql(col: str) -> str:
+    """UPPER+TRIM after stripping common NBSP variants in `col` (e.g. c.CAT_NAME, m.MENU_NAME)."""
+    return (
+        f"UPPER(TRIM(REPLACE(REPLACE(COALESCE({col}, ''), CHAR(160), ' '), UNHEX('C2A0'), ' ')))"
+    )
+
+def _norm_text_py(value: object) -> str:
+    """Python-side normalization matching `_norm_text_sql` intent (NBSP → space, trim, upper, collapse spaces)."""
+    s = str(value or "")
+    s = s.replace("\u00a0", " ").replace("\xa0", " ")
+    s = " ".join(s.strip().split())
+    return s.upper()
+
+
 class MenuReportRow(BaseModel):
     id: int
     goods: str
@@ -40,7 +54,7 @@ class CategoryReportRow(BaseModel):
 class CategoryMenuBreakdownRow(BaseModel):
     id: int
     menuName: str
-    salesQty: int
+    salesQty: float
     unitPrice: float  # menu.MENU_PRICE (catalog)
     netSales: float  # sum order_items.LINE_TOTAL
 
@@ -149,9 +163,9 @@ def menu_report(
             {date_filter}
             {branch_filter}
               -- Prevent duplicate "Room Charge" when we also inject a synthetic row below.
-              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
+              AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
               -- Also fold any legacy "ROOM CHARGE" category sales into the synthetic Room Charge row.
-              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
+              AND {_norm_text_sql('c.CAT_NAME')} <> 'ROOM CHARGE'
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
             HAVING salesQty > 0
 
@@ -171,8 +185,8 @@ def menu_report(
                     INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
                     INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
                     LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
-                    WHERE UPPER(TRIM(COALESCE(cq.CAT_NAME, ''))) = 'ROOM CHARGE'
-                      AND UPPER(TRIM(mq.MENU_NAME)) <> 'ROOM CHARGE'
+                    WHERE {_norm_text_sql('cq.CAT_NAME')} = 'ROOM CHARGE'
+                      AND {_norm_text_sql('mq.MENU_NAME')} <> 'ROOM CHARGE'
                       {date_filter_bq}
                       {branch_filter_bq}
                   ), 0)
@@ -187,8 +201,8 @@ def menu_report(
                     INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
                     INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
                     LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
-                    WHERE UPPER(TRIM(COALESCE(c2.CAT_NAME, ''))) = 'ROOM CHARGE'
-                      AND UPPER(TRIM(m2.MENU_NAME)) <> 'ROOM CHARGE'
+                    WHERE {_norm_text_sql('c2.CAT_NAME')} = 'ROOM CHARGE'
+                      AND {_norm_text_sql('m2.MENU_NAME')} <> 'ROOM CHARGE'
                       {date_filter_b2}
                       {branch_filter_b2}
                   ), 0)
@@ -338,8 +352,8 @@ def category_report(
             {date_filter}
             {branch_filter}
               -- Prevent the synthetic Room Charge row from double-counting.
-              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
-              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
+              AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
+              AND {_norm_text_sql('c.CAT_NAME')} <> 'ROOM CHARGE'
             GROUP BY c.IDNo, c.CAT_NAME
             HAVING salesQty > 0
 
@@ -360,8 +374,8 @@ def category_report(
                     INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
                     INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
                     LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
-                    WHERE UPPER(TRIM(COALESCE(cq.CAT_NAME, ''))) = 'ROOM CHARGE'
-                      AND UPPER(TRIM(mq.MENU_NAME)) <> 'ROOM CHARGE'
+                    WHERE {_norm_text_sql('cq.CAT_NAME')} = 'ROOM CHARGE'
+                      AND {_norm_text_sql('mq.MENU_NAME')} <> 'ROOM CHARGE'
                     {date_filter_bq}
                     {branch_filter_bq}
                   ), 0)
@@ -376,8 +390,8 @@ def category_report(
                     INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
                     INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
                     LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
-                    WHERE UPPER(TRIM(COALESCE(c2.CAT_NAME, ''))) = 'ROOM CHARGE'
-                      AND UPPER(TRIM(m2.MENU_NAME)) <> 'ROOM CHARGE'
+                    WHERE {_norm_text_sql('c2.CAT_NAME')} = 'ROOM CHARGE'
+                      AND {_norm_text_sql('m2.MENU_NAME')} <> 'ROOM CHARGE'
                     {date_filter_b2}
                     {branch_filter_b2}
                   ), 0)
@@ -438,6 +452,10 @@ def category_report(
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
 
 
+# Per-table room charge breakdown rows: id = ROOM_CHARGE_TABLE_DETAIL_BASE - restaurant_tables.IDNo
+ROOM_CHARGE_TABLE_DETAIL_BASE = -9_000_000_000
+
+
 @router.get("/category-menu-breakdown")
 def category_menu_breakdown(
     category_id: int,
@@ -448,10 +466,152 @@ def category_menu_breakdown(
     """
     Per menu item within a single category: name, qty, catalog unit price (menu.MENU_PRICE), sum of line amounts.
     Uses the same scope as category-report (billing date/branch, status 1/2) minus Room Charge exclusion rules.
-    Synthetic report rows (e.g. Room Charge id -9998) have no per-menu expansion here.
+    Synthetic Room Charge (category_id -9998) returns: per-table lines for table-based room charges
+    (orders.SERVICE_CHARGE grouped by restaurant_tables with ROOM_CHARGE > 0), then per-menu lines for
+    items in category name ROOM CHARGE (excluding a literal menu named ROOM CHARGE), matching category-report.
+    Synthetic Service Charge (-9999) still has no expansion.
     """
-    if category_id in (-9998, -9999):
+    if category_id == -9999:
         return {"success": True, "data": {"data": []}}
+
+    if category_id == -9998:
+        conn = None
+        cur = None
+        try:
+            conn = get_connection()
+            cur = conn.cursor(dictionary=True)
+
+            date_filter = ""
+            branch_filter = ""
+            params: List[object] = []
+
+            if start_date and end_date:
+                date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
+                params.extend([start_date, end_date])
+            if branch_id:
+                branch_filter = "AND b.BRANCH_ID = %s"
+                params.append(branch_id)
+
+            print(
+                "[PyServer] /category-menu-breakdown room-charge params:",
+                "start_date=",
+                start_date,
+                "end_date=",
+                end_date,
+                "branch_id=",
+                branch_id,
+            )
+
+            items: List[CategoryMenuBreakdownRow] = []
+            table_label_norms: set[str] = set()
+
+            q_tables_detail = f"""
+                SELECT
+                    rt.IDNo AS tbl_id,
+                    COALESCE(NULLIF(TRIM(rt.TABLE_NUMBER), ''), CONCAT('#', rt.IDNo)) AS tbl_label,
+                    COALESCE(rt.ROOM_CHARGE, 0) AS room_rate,
+                    COUNT(DISTINCT o.IDNo) AS salesQty,
+                    COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalService
+                FROM orders o
+                INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+                INNER JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+                WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+                  AND COALESCE(rt.ROOM_CHARGE, 0) > 0
+                {date_filter}
+                {branch_filter}
+                GROUP BY rt.IDNo, rt.TABLE_NUMBER, rt.ROOM_CHARGE
+                HAVING COUNT(DISTINCT o.IDNo) > 0
+                   AND COALESCE(SUM(o.SERVICE_CHARGE), 0) <> 0
+                ORDER BY totalService DESC, tbl_label ASC
+            """
+            cur.execute(q_tables_detail, tuple(params))
+            for trow in cur.fetchall():
+                tbl_id = int(trow.get("tbl_id") or 0)
+                label = str(trow.get("tbl_label") or "").strip() or f"#{tbl_id}"
+                # Defensive cleanup: older UI labels may have been saved like "Table ROOM 10 — room charge".
+                clean = " ".join(label.replace("\u2014", "-").strip().split())
+                if clean.lower().startswith("table "):
+                    clean = clean[6:].strip()
+                for suffix in ("- room charge", "— room charge"):
+                    if clean.lower().endswith(suffix):
+                        clean = clean[: -len(suffix)].strip()
+                        break
+                clean = " ".join(clean.strip().split())
+                if not clean:
+                    clean = label
+                table_label_norms.add(_norm_text_py(clean))
+                rate = float(trow.get("room_rate") or 0)
+                oc = float(trow.get("salesQty") or 0)
+                total_service = float(trow.get("totalService") or 0)
+                qty_effective = (total_service / rate) if rate > 0 else oc
+                qty_display = round(qty_effective, 2) if qty_effective > 0 else 0.0
+                menu_label = clean
+                items.append(
+                    CategoryMenuBreakdownRow(
+                        id=ROOM_CHARGE_TABLE_DETAIL_BASE - tbl_id,
+                        menuName=menu_label,
+                        salesQty=qty_display,
+                        unitPrice=rate,
+                        netSales=total_service,
+                    )
+                )
+
+            q_menus = f"""
+                SELECT
+                    m.IDNo AS id,
+                    m.MENU_NAME AS menuName,
+                    COALESCE(SUM(oi.QTY), 0) AS salesQty,
+                    COALESCE(MAX(m.MENU_PRICE), 0) AS unitPrice,
+                    COALESCE(SUM(oi.LINE_TOTAL), 0) AS netSales
+                FROM orders o
+                INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+                INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+                INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+                LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+                WHERE {_norm_text_sql('c.CAT_NAME')} = 'ROOM CHARGE'
+                  AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
+                {date_filter}
+                {branch_filter}
+                GROUP BY m.IDNo, m.MENU_NAME
+                HAVING salesQty > 0
+                ORDER BY netSales DESC, menuName ASC
+            """
+            cur.execute(q_menus, tuple(params))
+            for row in cur.fetchall():
+                menu_name = str(row.get("menuName") or "")
+                # Avoid redundant "ROOM 10 / ON AIR 2 ..." lines when we already show the per-table rows.
+                if _norm_text_py(menu_name) in table_label_norms:
+                    continue
+                sq_raw = float(row.get("salesQty") or 0)
+                items.append(
+                    CategoryMenuBreakdownRow(
+                        id=int(row.get("id") or 0),
+                        menuName=menu_name,
+                        salesQty=sq_raw,
+                        unitPrice=float(row.get("unitPrice") or 0.0),
+                        netSales=float(row.get("netSales") or 0.0),
+                    )
+                )
+
+            return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+        except Exception as exc:
+            print("[PyServer] category-menu-breakdown room-charge failed:", getattr(exc, "message", str(exc)))
+            return {
+                "success": False,
+                "message": "Failed to fetch room charge breakdown",
+                "error": getattr(exc, "message", str(exc)),
+            }
+        finally:
+            try:
+                if cur is not None:
+                    cur.close()
+            except Exception:
+                pass
+            try:
+                if conn is not None and getattr(conn, "is_connected", lambda: False)():
+                    conn.close()
+            except Exception:
+                pass
 
     try:
         conn = get_connection()
@@ -490,8 +650,8 @@ def category_menu_breakdown(
             WHERE 1=1
             {date_filter}
             {branch_filter}
-              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
-              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
+              AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
+              AND {_norm_text_sql('c.CAT_NAME')} <> 'ROOM CHARGE'
             {category_clause}
             GROUP BY m.IDNo, m.MENU_NAME
             HAVING salesQty > 0
@@ -528,7 +688,7 @@ def category_menu_breakdown(
             CategoryMenuBreakdownRow(
                 id=int(row.get("id") or 0),
                 menuName=str(row.get("menuName") or ""),
-                salesQty=int(row.get("salesQty") or 0),
+                salesQty=float(row.get("salesQty") or 0.0),
                 unitPrice=float(row.get("unitPrice") or 0.0),
                 netSales=float(row.get("netSales") or 0.0),
             )

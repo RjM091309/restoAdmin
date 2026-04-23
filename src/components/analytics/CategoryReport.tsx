@@ -12,6 +12,7 @@ import { Skeleton } from '../ui/Skeleton';
 import {
   fetchCategoryReportApi,
   fetchCategoryMenuBreakdownApi,
+  isRoomChargeTableDetailId,
   type ApiCategoryReportRow,
   type ApiCategoryMenuBreakdownRow,
 } from '../../services/analyticsService';
@@ -48,6 +49,13 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const money = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
     return `${t('common.currency_symbol')}${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  const qtyText = (value: number) => {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '0';
+    const isInt = Math.abs(n - Math.round(n)) < 1e-9;
+    return isInt ? Math.round(n).toLocaleString() : (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
   };
 
   useEffect(() => {
@@ -89,7 +97,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       return;
     }
     const cid = Number(viewRow.id);
-    if (cid === -9998 || cid === -9999) {
+    if (cid === -9999) {
       setBreakdownRows([]);
       setBreakdownLoading(false);
       setBreakdownError(false);
@@ -357,7 +365,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       >
         {viewRow && (
           <div className="text-sm text-brand-text flex min-h-0 flex-col">
-            {[-9998, -9999].includes(Number(viewRow.id)) ? (
+            {Number(viewRow.id) === -9999 ? (
               <div className="rounded-2xl border border-amber-100 bg-amber-50/60 px-4 py-3.5 text-amber-900/90 text-sm leading-relaxed">
                 {t('category_report.breakdown_synthetic')}
               </div>
@@ -369,7 +377,9 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
                       <LayoutList size={16} strokeWidth={2.25} aria-hidden />
                     </span>
                     <h4 className="text-sm font-bold text-brand-text tracking-tight truncate">
-                      {t('category_report.breakdown_heading')}
+                      {Number(viewRow.id) === -9998
+                        ? t('category_report.breakdown_room_charge_heading')
+                        : t('category_report.breakdown_heading')}
                     </h4>
                   </div>
                   {!breakdownLoading && !breakdownError && breakdownRows.length > 0 ? (
@@ -380,6 +390,11 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
                 </div>
 
                 <div className="p-3 sm:p-4 min-h-0 flex flex-col">
+                  {Number(viewRow.id) === -9998 ? (
+                    <p className="mb-3 text-xs leading-relaxed text-brand-muted px-0.5">
+                      {t('category_report.breakdown_room_charge_hint')}
+                    </p>
+                  ) : null}
                   {breakdownLoading ? (
                     <div className="flex flex-col items-center justify-center gap-3 py-16 rounded-xl border border-dashed border-slate-200 bg-white/50">
                       <Loader2 className="h-8 w-8 animate-spin text-indigo-500" aria-hidden />
@@ -468,7 +483,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
                           <tbody className="divide-y divide-slate-100">
                             {sortedBreakdownRows.map((row, index) => (
                               <tr
-                                key={row.id}
+                                key={isRoomChargeTableDetailId(row.id) ? `rc-tbl-${row.id}` : row.id}
                                 className={cn(
                                   'transition-colors duration-150 hover:bg-indigo-50/40',
                                   index % 2 === 1 ? 'bg-slate-50/35' : 'bg-white'
@@ -478,7 +493,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
                                   {row.menuName}
                                 </td>
                                 <td className="px-3 py-3 text-right tabular-nums text-slate-700">
-                                  {Number(row.salesQty || 0).toLocaleString()}
+                                  {qtyText(Number(row.salesQty || 0))}
                                 </td>
                                 <td className="px-3 py-3 text-right tabular-nums text-slate-600">
                                   {money(row.unitPrice ?? 0)}
