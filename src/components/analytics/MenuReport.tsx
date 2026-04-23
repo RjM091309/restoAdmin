@@ -191,21 +191,25 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     },
     {
       header: t('menu_report.columns.sales_quantity'),
+      accessorKey: 'salesQty',
       render: (item) => item.salesQty.toLocaleString(),
       className: 'min-w-[130px] text-right',
     },
     {
       header: t('menu_report.columns.total_sales'),
+      accessorKey: 'totalSales',
       render: (item) => money(item.totalSales),
       className: 'min-w-[130px] text-right',
     },
     {
       header: t('menu_report.columns.net_sales'),
+      accessorKey: 'netSales',
       render: (item) => money(item.netSales),
       className: 'min-w-[120px] text-right',
     },
     {
       header: t('menu_report.columns.total_revenue'),
+      accessorKey: 'totalRevenue',
       render: (item) => money(item.totalRevenue),
       className: 'min-w-[140px] text-right',
     },
