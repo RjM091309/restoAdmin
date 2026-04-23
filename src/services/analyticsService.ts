@@ -74,6 +74,16 @@ export type ApiCategoryReportRow = {
   totalRevenue: number;
 };
 
+/** Per-menu lines for one category (see PyServer /category-menu-breakdown). */
+export type ApiCategoryMenuBreakdownRow = {
+  id: number;
+  menuName: string;
+  salesQty: number;
+  /** menu.MENU_PRICE from DB */
+  unitPrice: number;
+  netSales: number;
+};
+
 export type ApiPaymentReportRow = {
   id: number;
   paymentMethod: string;
@@ -252,6 +262,21 @@ export async function fetchCategoryReportApi(params: URLSearchParams): Promise<A
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiCategoryReportRow[];
+  }
+  return [];
+}
+
+export async function fetchCategoryMenuBreakdownApi(
+  params: URLSearchParams
+): Promise<ApiCategoryMenuBreakdownRow[]> {
+  const baseUrl = getAnalyticsBaseUrl();
+  const res = await fetch(`${baseUrl}/api/analytics/category-menu-breakdown?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Analytics category-menu-breakdown failed with status ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiCategoryMenuBreakdownRow[];
   }
   return [];
 }

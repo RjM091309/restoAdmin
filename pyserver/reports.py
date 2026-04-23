@@ -37,6 +37,14 @@ class CategoryReportRow(BaseModel):
     totalRevenue: float
 
 
+class CategoryMenuBreakdownRow(BaseModel):
+    id: int
+    menuName: str
+    salesQty: int
+    unitPrice: float  # menu.MENU_PRICE (catalog)
+    netSales: float  # sum order_items.LINE_TOTAL
+
+
 class PaymentReportRow(BaseModel):
     id: int
     paymentMethod: str
@@ -424,6 +432,105 @@ def category_report(
                 netSales=net_sales,
                 unitCost=unit_cost,
                 totalRevenue=total_revenue,
+            )
+        )
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+@router.get("/category-menu-breakdown")
+def category_menu_breakdown(
+    category_id: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Per menu item within a single category: name, qty, catalog unit price (menu.MENU_PRICE), sum of line amounts.
+    Uses the same scope as category-report (billing date/branch, status 1/2) minus Room Charge exclusion rules.
+    Synthetic report rows (e.g. Room Charge id -9998) have no per-menu expansion here.
+    """
+    if category_id in (-9998, -9999):
+        return {"success": True, "data": {"data": []}}
+
+    try:
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        date_filter = ""
+        branch_filter = ""
+        params: List[object] = []
+
+        if start_date and end_date:
+            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        if branch_id:
+            branch_filter = "AND b.BRANCH_ID = %s"
+            params.append(branch_id)
+
+        if category_id == 0:
+            category_clause = "AND c.IDNo IS NULL"
+            exec_params = list(params)
+        else:
+            category_clause = "AND c.IDNo = %s"
+            exec_params = list(params) + [category_id]
+
+        query = f"""
+            SELECT
+                m.IDNo AS id,
+                m.MENU_NAME AS menuName,
+                COALESCE(SUM(oi.QTY), 0) AS salesQty,
+                COALESCE(MAX(m.MENU_PRICE), 0) AS unitPrice,
+                COALESCE(SUM(oi.LINE_TOTAL), 0) AS netSales
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+            INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+            LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            WHERE 1=1
+            {date_filter}
+            {branch_filter}
+              AND UPPER(TRIM(m.MENU_NAME)) <> 'ROOM CHARGE'
+              AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
+            {category_clause}
+            GROUP BY m.IDNo, m.MENU_NAME
+            HAVING salesQty > 0
+            ORDER BY netSales DESC, menuName ASC
+        """
+
+        print(
+            "[PyServer] /category-menu-breakdown params:",
+            "category_id=",
+            category_id,
+            "start_date=",
+            start_date,
+            "end_date=",
+            end_date,
+            "branch_id=",
+            branch_id,
+        )
+
+        cur.execute(query, exec_params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] category-menu-breakdown query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch category menu breakdown",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    items: List[CategoryMenuBreakdownRow] = []
+    for row in rows:
+        items.append(
+            CategoryMenuBreakdownRow(
+                id=int(row.get("id") or 0),
+                menuName=str(row.get("menuName") or ""),
+                salesQty=int(row.get("salesQty") or 0),
+                unitPrice=float(row.get("unitPrice") or 0.0),
+                netSales=float(row.get("netSales") or 0.0),
             )
         )
 

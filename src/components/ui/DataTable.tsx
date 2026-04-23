@@ -10,6 +10,7 @@ export interface ColumnDef<T> {
   className?: string;
   headerClassName?: string;
   cellClassName?: string;
+  sortable?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -24,6 +25,7 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [perPageOpen, setPerPageOpen] = useState(false);
+  const [sort, setSort] = useState<{ key: keyof T; dir: 'asc' | 'desc' } | null>(null);
 
   // When the table data changes (filter/search/refresh), always show the first page.
   // This prevents "new row not visible" issues when the user is currently on page 2+.
@@ -31,11 +33,37 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
     setCurrentPage(1);
   }, [data.length, itemsPerPage]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sort?.key, sort?.dir]);
+
+  const sortedData = useMemo(() => {
+    if (!sort) return data;
+    const { key, dir } = sort;
+    const factor = dir === 'asc' ? 1 : -1;
+    const copy = data.slice();
+    copy.sort((a, b) => {
+      const av = (a as any)?.[key];
+      const bv = (b as any)?.[key];
+
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return (av - bv) * factor;
+      }
+
+      return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    });
+    return copy;
+  }, [data, sort]);
+
   // Pagination logic
-  const totalPages = Math.ceil(data.length / itemsPerPage);
+  const totalPages = Math.ceil(sortedData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const currentData = data.slice(startIndex, endIndex);
+  const currentData = sortedData.slice(startIndex, endIndex);
 
   // Build compact page list with ellipsis when there are many pages
   type PageItem =
@@ -99,20 +127,55 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
         <table className="w-full text-left">
           <thead>
             <tr className="bg-white border-b border-gray-100">
-              {columns.map((col, i) => (
-                <th
-                  key={col.header}
-                  className={cn(
-                    "px-6 py-4 text-[13px] font-medium whitespace-nowrap",
-                    i === 0 ? "bg-violet-50 text-brand-text uppercase tracking-wider" : "text-brand-muted uppercase tracking-wider",
-                    col.className,
-                    col.headerClassName,
-                    i === 0 && "border-r-[3px] border-white"
-                  )}
-                >
-                  {col.header}
-                </th>
-              ))}
+              {columns.map((col, i) => {
+                const canSort = !!col.accessorKey && col.sortable !== false;
+                const isActive = canSort && sort?.key === col.accessorKey;
+                const dir = isActive ? sort?.dir : null;
+
+                return (
+                  <th
+                    key={col.header}
+                    className={cn(
+                      "px-6 py-4 text-[13px] font-medium whitespace-nowrap",
+                      i === 0 ? "bg-violet-50 text-brand-text uppercase tracking-wider" : "text-brand-muted uppercase tracking-wider",
+                      col.className,
+                      col.headerClassName,
+                      i === 0 && "border-r-[3px] border-white"
+                    )}
+                  >
+                    {canSort ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSort((prev) => {
+                            if (!col.accessorKey) return prev;
+                            if (!prev || prev.key !== col.accessorKey) return { key: col.accessorKey, dir: 'asc' };
+                            return { key: col.accessorKey, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+                          });
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-lg -mx-2 px-2 py-1 transition-colors",
+                          i === 0 ? "hover:bg-violet-100" : "hover:bg-gray-50"
+                        )}
+                      >
+                        <span>{col.header}</span>
+                        <span
+                          className={cn(
+                            "text-brand-muted transition-transform",
+                            dir === 'desc' ? "rotate-180" : "",
+                            isActive ? "opacity-100" : "opacity-40"
+                          )}
+                          aria-hidden
+                        >
+                          <ChevronDown size={14} />
+                        </span>
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -204,15 +267,15 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
         <div className="flex items-center gap-2 text-sm">
           <span className="text-brand-muted mr-4">
             {t('datatable.showing_info', {
-              from: data.length > 0 ? startIndex + 1 : 0,
-              to: Math.min(endIndex, data.length),
-              total: data.length
+              from: sortedData.length > 0 ? startIndex + 1 : 0,
+              to: Math.min(endIndex, sortedData.length),
+              total: sortedData.length
             })}
           </span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1 || data.length === 0}
+              disabled={currentPage === 1 || sortedData.length === 0}
               className="p-1.5 rounded-lg text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
             >
               <ChevronLeft size={18} />
@@ -246,7 +309,7 @@ export function DataTable<T>({ data, columns, keyExtractor, onRowClick }: DataTa
 
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages || data.length === 0}
+              disabled={currentPage === totalPages || sortedData.length === 0}
               className="p-1.5 rounded-lg text-brand-muted hover:bg-gray-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
             >
               <ChevronRight size={18} />
