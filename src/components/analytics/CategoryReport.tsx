@@ -142,8 +142,12 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   }, [rows, searchTerm]);
 
   const breakdownNetSalesTotal = useMemo(() => {
-    return breakdownRows.reduce((sum, row) => sum + Number(row.netSales || 0), 0);
-  }, [breakdownRows]);
+    const sumVisibleRows = breakdownRows.reduce((sum, row) => sum + Number(row.netSales || 0), 0);
+    // Room Charge breakdown intentionally hides some legacy "per-table" menu lines to avoid duplicates.
+    // Use the main table total for Room Charge so the modal always matches the category row.
+    if (viewRow && Number(viewRow.id) === -9998) return Number(viewRow.totalSales || 0);
+    return sumVisibleRows;
+  }, [breakdownRows, viewRow]);
 
   const sortedBreakdownRows = useMemo(() => {
     if (!breakdownSort) return breakdownRows;
