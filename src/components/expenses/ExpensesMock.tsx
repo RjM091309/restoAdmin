@@ -2069,37 +2069,31 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                 </div>
               </div>
 
-              {(selectedOperation || selectedCategory) && (
-                <div className="ml-auto w-full sm:w-[340px] max-w-full text-[11px] text-brand-text font-semibold space-y-1 pt-5 leading-tight">
-                  {selectedOperation ? (
-                    <div className="flex items-start justify-between gap-3 w-full">
+              {selectedOperation && (
+                <div className="ml-auto min-w-0 max-w-full text-[11px] text-brand-text font-semibold space-y-1 pt-5 leading-tight text-right">
+                  {selectedCategory ? (
+                    <span
+                      className="inline tabular-nums text-brand-muted font-black whitespace-nowrap"
+                      title={`${formatPercent(percentOf(totalForView, totalForSelectedMainCategory), 1)} of ${selectedOperation.name}`}
+                    >
+                      {formatPercent(percentOf(totalForView, totalForSelectedMainCategory), 1)}{' '}
+                      <span className="font-semibold">of</span>{' '}
+                      <span className="font-semibold">{selectedOperation.name}</span>
+                    </span>
+                  ) : (
+                    <div className="inline-flex max-w-full flex-wrap items-baseline justify-end gap-x-2 gap-y-1 text-right">
                       <span
-                        className="min-w-0 flex-1 truncate md:truncate-none md:whitespace-normal md:break-words lg:truncate lg:whitespace-nowrap"
+                        className="min-w-0 text-left truncate md:truncate-none md:whitespace-normal md:break-words lg:truncate lg:whitespace-nowrap lg:max-w-[12rem] xl:max-w-[16rem]"
                         title={selectedOperation.name}
                       >
                         {selectedOperation.name}
                       </span>
-                      <span className="shrink-0 tabular-nums text-brand-muted font-black text-right whitespace-nowrap">
+                      <span className="shrink-0 tabular-nums text-brand-muted font-black whitespace-nowrap">
                         {formatPercent(percentOf(totalForSelectedMainCategory, grandTotalDisplayed), 1)}{' '}
                         <span className="font-semibold">of Grand Total Expenses</span>
                       </span>
                     </div>
-                  ) : null}
-                  {selectedCategory ? (
-                    <div className="flex items-start justify-between gap-3 w-full">
-                      <span
-                        className="min-w-0 flex-1 truncate md:truncate-none md:whitespace-normal md:break-words lg:truncate lg:whitespace-nowrap"
-                        title={selectedCategory.name}
-                      >
-                        {selectedCategory.name}
-                      </span>
-                      <span className="shrink-0 tabular-nums text-brand-muted font-black text-right whitespace-nowrap">
-                        {formatPercent(percentOf(totalForView, totalForSelectedMainCategory), 1)}{' '}
-                        <span className="font-semibold">of</span>{' '}
-                        <span className="font-semibold">{selectedOperation?.name ?? 'main'}</span>
-                      </span>
-                    </div>
-                  ) : null}
+                  )}
                 </div>
               )}
             </div>
