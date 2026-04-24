@@ -3,15 +3,16 @@ import { useTranslation } from 'react-i18next';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingUp, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
+import { Modal } from '../ui/Modal';
 import {
   fetchBranchSalesApi,
-  fetchLeastSellingApi,
+  fetchMenuReportApi,
   fetchDailySalesApi,
   type ApiBranchSalesItem,
-  type ApiLeastSellingItem,
+  type ApiMenuReportRow,
   type ApiDailySalesItem,
 } from '../../services/analyticsService';
 import {
@@ -196,6 +197,39 @@ const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
 
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
+const colorWithAlpha = (color: string, alpha: number) => {
+  const a = Math.min(1, Math.max(0, alpha));
+  const c = (color || '').trim();
+  if (!c) return c;
+
+  // #RRGGBB
+  if (c.startsWith('#') && c.length === 7) {
+    const r = parseInt(c.slice(1, 3), 16);
+    const g = parseInt(c.slice(3, 5), 16);
+    const b = parseInt(c.slice(5, 7), 16);
+    if ([r, g, b].some((n) => Number.isNaN(n))) return c;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  // #RGB
+  if (c.startsWith('#') && c.length === 4) {
+    const r = parseInt(c[1] + c[1], 16);
+    const g = parseInt(c[2] + c[2], 16);
+    const b = parseInt(c[3] + c[3], 16);
+    if ([r, g, b].some((n) => Number.isNaN(n))) return c;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  // rgb(r,g,b)
+  const rgb = c.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i);
+  if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${a})`;
+
+  // rgba(r,g,b,x)
+  const rgba = c.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\s*\)$/i);
+  if (rgba) return `rgba(${rgba[1]}, ${rgba[2]}, ${rgba[3]}, ${a})`;
+
+  return c;
+};
+
 
 
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
@@ -205,15 +239,20 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [chartType, setChartType] = useState<ChartType>('bar chart');
   const [viewMode, setViewMode] = useState<ViewMode>('glance');
   const [tablePage, setTablePage] = useState(0);
+  const profitDriversRef = useRef<HTMLDivElement | null>(null);
 
   // API data state for the two new cards
   const [branchSalesData, setBranchSalesData] = useState<ApiBranchSalesItem[]>([]);
   const [branchSalesLoading, setBranchSalesLoading] = useState(false);
   const [branchSalesError, setBranchSalesError] = useState<string | null>(null);
 
-  const [leastSellingData, setLeastSellingData] = useState<ApiLeastSellingItem[]>([]);
-  const [leastSellingLoading, setLeastSellingLoading] = useState(false);
-  const [leastSellingError, setLeastSellingError] = useState<string | null>(null);
+  const [profitDriversData, setProfitDriversData] = useState<
+    Array<{ row: ApiMenuReportRow; profit: number; branchId: number | null; branchName: string }>
+  >([]);
+  const [profitDriversLoading, setProfitDriversLoading] = useState(false);
+  const [profitDriversError, setProfitDriversError] = useState<string | null>(null);
+  const [profitDriversBranchId, setProfitDriversBranchId] = useState<number | null>(null);
+  const [profitDriversModalOpen, setProfitDriversModalOpen] = useState(false);
 
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
   const [dailySalesPrevious, setDailySalesPrevious] = useState<ApiDailySalesItem[]>([]);
@@ -382,30 +421,143 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     }
   }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, previousRange, t]);
 
-  // Fetch least selling items (uses real data; shows empty state when none)
-  const fetchLeastSelling = useCallback(async () => {
-    setLeastSellingLoading(true);
-    setLeastSellingError(null);
+  const getProfitValue = useCallback((row: ApiMenuReportRow) => {
+    const rawProfit = Number((row as any).totalRevenue ?? 0);
+    if (Number.isFinite(rawProfit) && rawProfit !== 0) return rawProfit;
+
+    const revenue = Number((row as any).netSales ?? (row as any).totalSales ?? 0);
+    const cost = Number((row as any).unitCost ?? 0);
+    const derived = revenue - cost;
+    return Number.isFinite(derived) ? derived : 0;
+  }, []);
+
+  // When the global filter is a specific branch, don't keep a separate "per-branch drivers" override.
+  useEffect(() => {
+    if (!isAllBranch) setProfitDriversBranchId(null);
+  }, [isAllBranch]);
+
+  const profitDriversEffectiveBranchId = useMemo(() => {
+    if (profitDriversBranchId != null) return String(profitDriversBranchId);
+    if (!isAllBranch && selectedBranch?.id) return String(selectedBranch.id);
+    return null;
+  }, [profitDriversBranchId, isAllBranch, selectedBranch?.id]);
+
+  useEffect(() => {
+    setProfitDriversModalOpen(false);
+  }, [profitDriversEffectiveBranchId, dateRange.start, dateRange.end]);
+
+  const profitDriversBranchLabel = useMemo(() => {
+    if (profitDriversBranchId != null) {
+      const match = branchSalesData.find((b) => b.branch_id === profitDriversBranchId);
+      return match?.branch_name || `${t('sales_analytics.branch')} #${profitDriversBranchId}`;
+    }
+    if (!isAllBranch && selectedBranch) return selectedBranch.name;
+    return t('sales_analytics.all_branches');
+  }, [profitDriversBranchId, branchSalesData, isAllBranch, selectedBranch, t]);
+
+  const handleSelectDriversBranch = useCallback((branchId: number) => {
+    setProfitDriversBranchId(branchId);
+    // Give React a tick to render the updated card before scrolling.
+    setTimeout(() => profitDriversRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 0);
+  }, []);
+
+  // Fetch top profit drivers (computed from menu-report for accurate profit totals)
+  const fetchProfitDrivers = useCallback(async () => {
+    setProfitDriversLoading(true);
+    setProfitDriversError(null);
     try {
       const params = new URLSearchParams();
       if (dateRange.start) params.set('start_date', dateRange.start);
       if (dateRange.end) params.set('end_date', dateRange.end);
-      if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
-      params.set('limit', '5');
 
-      const apiData = await fetchLeastSellingApi(params);
-      setLeastSellingData(apiData);
+      // If a branch is selected (either global filter or clicked branch), fetch only that branch.
+      if (profitDriversEffectiveBranchId) {
+        params.set('branch_id', profitDriversEffectiveBranchId);
+        const apiRows = await fetchMenuReportApi(params);
+        const branchName =
+          profitDriversBranchId != null
+            ? (branchSalesData.find((b) => b.branch_id === profitDriversBranchId)?.branch_name || profitDriversBranchLabel)
+            : (!isAllBranch && selectedBranch ? selectedBranch.name : profitDriversBranchLabel);
+
+        const top = [...apiRows]
+          .map((row) => ({ row, profit: getProfitValue(row) }))
+          .filter((x) => x.profit > 0)
+          .sort((a, b) => b.profit - a.profit)
+          .slice(0, 20)
+          .map((x) => ({
+            row: x.row,
+            profit: x.profit,
+            branchId: Number(profitDriversEffectiveBranchId),
+            branchName,
+          }));
+
+        setProfitDriversData(top);
+        return;
+      }
+
+      // All branches view: compute per-branch drivers so each item has a real branch owner label.
+      // Uses existing branch list from branch-sales endpoint.
+      const branches = branchSalesData.map((b) => ({ id: b.branch_id, name: b.branch_name }));
+      if (branches.length === 0) {
+        setProfitDriversData([]);
+        return;
+      }
+
+      const perBranchRows = await Promise.all(
+        branches.map(async (b) => {
+          const p = new URLSearchParams(params);
+          p.set('branch_id', String(b.id));
+          const rows = await fetchMenuReportApi(p);
+          return { branchId: b.id, branchName: b.name, rows };
+        })
+      );
+
+      const combined = perBranchRows
+        .flatMap(({ branchId, branchName, rows }) =>
+          rows.map((row) => ({
+            row,
+            profit: getProfitValue(row),
+            branchId,
+            branchName,
+          }))
+        )
+        .filter((x) => x.profit > 0)
+        .sort((a, b) => b.profit - a.profit)
+        .slice(0, 20);
+
+      setProfitDriversData(combined);
     } catch (err) {
       console.error(err);
-      setLeastSellingError(t('sales_analytics.network_error'));
-      setLeastSellingData([]);
+      setProfitDriversError(t('sales_analytics.network_error'));
+      setProfitDriversData([]);
     } finally {
-      setLeastSellingLoading(false);
+      setProfitDriversLoading(false);
     }
-  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, t]);
+  }, [
+    dateRange.start,
+    dateRange.end,
+    getProfitValue,
+    profitDriversEffectiveBranchId,
+    profitDriversBranchId,
+    profitDriversBranchLabel,
+    branchSalesData,
+    isAllBranch,
+    selectedBranch,
+    t,
+  ]);
+
+  // UI rule:
+  // - When header dropdown is "All branches": show Top 7 (even if user clicked a branch row in the table).
+  // - When header dropdown is a specific branch: show Top 5.
+  const topProfitDriversLimit = isAllBranch ? 7 : 5;
+  const topProfitDrivers = useMemo(
+    () => profitDriversData.slice(0, topProfitDriversLimit),
+    [profitDriversData, topProfitDriversLimit]
+  );
+  const modalProfitDrivers = useMemo(() => profitDriversData.slice(0, 20), [profitDriversData]);
 
   useEffect(() => { fetchBranchSales(); }, [fetchBranchSales]);
-  useEffect(() => { fetchLeastSelling(); }, [fetchLeastSelling]);
+  useEffect(() => { fetchProfitDrivers(); }, [fetchProfitDrivers]);
   useEffect(() => { fetchDailySales(); }, [fetchDailySales]);
 
   const loadReconAggregates = useCallback(async () => {
@@ -636,6 +788,14 @@ const metricConfig = {
       name: b.branch_name,
       sales: b.total_sales,
     }));
+  }, [branchSalesData]);
+
+  const branchColorById = useMemo(() => {
+    const map = new Map<number, string>();
+    branchSalesData.forEach((b, i) => {
+      map.set(b.branch_id, BRANCH_BAR_COLORS[i % BRANCH_BAR_COLORS.length]);
+    });
+    return map;
   }, [branchSalesData]);
 
   const branchChartHeight = useMemo(() => {
@@ -947,7 +1107,17 @@ const metricConfig = {
                           tickLine={false}
                         />
                         <Tooltip cursor={false} content={<LoyverseTooltip />} />
-                        <Bar dataKey="sales" barSize={22} radius={[0, 6, 6, 0]}>
+                        <Bar
+                          dataKey="sales"
+                          barSize={22}
+                          radius={[0, 6, 6, 0]}
+                          onClick={(_data, index) => {
+                            const i = typeof index === 'number' ? index : -1;
+                            const b = branchSalesData[i];
+                            if (!b) return;
+                            handleSelectDriversBranch(b.branch_id);
+                          }}
+                        >
                           {branchChartData.map((_entry, index) => (
                             <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />
                           ))}
@@ -969,12 +1139,17 @@ const metricConfig = {
                     </thead>
                     <tbody>
                       {branchSalesData.map((b, i) => (
-                        <tr key={b.branch_id} className={`border-b border-gray-50 last:border-b-0 ${i % 2 === 0 ? '' : 'bg-gray-50/40'}`}>
+                        <tr
+                          key={b.branch_id}
+                          onClick={() => handleSelectDriversBranch(b.branch_id)}
+                          className={`border-b border-gray-50 last:border-b-0 cursor-pointer hover:bg-violet-50/40 ${
+                            profitDriversBranchId === b.branch_id ? 'bg-violet-50/50' : i % 2 === 0 ? '' : 'bg-gray-50/40'
+                          }`}
+                        >
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-2">
                               <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: BRANCH_BAR_COLORS[i % BRANCH_BAR_COLORS.length] }} />
                               <span className="font-medium text-brand-text truncate max-w-[120px]">{b.branch_name}</span>
-                              <span className="text-[10px] text-brand-muted font-medium">{b.branch_code}</span>
                             </div>
                           </td>
                           <td className="px-3 py-2.5 text-right font-semibold text-brand-text">{money(b.total_sales)}</td>
@@ -990,45 +1165,72 @@ const metricConfig = {
           </div>
         </div>
 
-        {/* Card 2: Top 5 Least Selling Products */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+        {/* Card 2: Top Profit Drivers */}
+        <div ref={profitDriversRef} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-600">
-                <TrendingDown size={18} />
+                <TrendingUp size={18} />
               </span>
               <div className="flex flex-col">
-                <h4 className="text-base font-semibold text-slate-900">{t('sales_analytics.top_least_selling_products')}</h4>
+                <h4 className="text-base font-semibold text-slate-900">{t('sales_analytics.top_revenue_items')}</h4>
                 <p className="text-[11px] font-medium text-slate-500">
-                  {t('sales_analytics.low_sales')}
+                  {t('sales_analytics.high_revenue')} · {profitDriversBranchLabel}
                 </p>
               </div>
             </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] bg-violet-50 text-violet-700 border border-violet-100">
-              {t('sales_analytics.insight')}
-            </span>
+            <div className="flex items-center gap-2">
+              {profitDriversData.length > topProfitDriversLimit ? (
+                <button
+                  type="button"
+                  onClick={() => setProfitDriversModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-semibold bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                >
+                  {t('sales_analytics.view_more')}
+                </button>
+              ) : null}
+              {profitDriversBranchId != null && isAllBranch ? (
+                <button
+                  type="button"
+                  onClick={() => setProfitDriversBranchId(null)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-semibold border"
+                  title="Clear branch filter"
+                  style={(() => {
+                    const branchColor = branchColorById.get(profitDriversBranchId) || CHART_THEME_COLOR;
+                    return {
+                      backgroundColor: colorWithAlpha(branchColor, 0.12),
+                      borderColor: colorWithAlpha(branchColor, 0.35),
+                      color: branchColor,
+                    };
+                  })()}
+                >
+                  <span>{profitDriversBranchLabel}</span>
+                  <span className="opacity-80">×</span>
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="flex-1 px-5 py-4">
-            {leastSellingLoading ? (
+            {profitDriversLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
-            ) : leastSellingError ? (
+            ) : profitDriversError ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <AlertCircle size={32} className="text-red-400 mb-2" />
-                <p className="text-sm text-red-500 font-medium">{leastSellingError}</p>
-                <button onClick={fetchLeastSelling} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
+                <p className="text-sm text-red-500 font-medium">{profitDriversError}</p>
+                <button onClick={fetchProfitDrivers} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
               </div>
-            ) : leastSellingData.length === 0 ? (
+            ) : profitDriversData.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
-                <TrendingDown size={36} className="text-gray-300 mb-2" />
+                <TrendingUp size={36} className="text-gray-300 mb-2" />
                 <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_data_available')}</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {leastSellingData.map((item, idx) => (
+                {topProfitDrivers.map((item, idx) => (
                   <div
-                    key={item.IDNo}
+                    key={`${item.row.id}-${item.branchId ?? 'all'}-${idx}`}
                     className="flex items-center justify-between p-3.5 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:shadow-sm hover:border-violet-100 transition-all"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1036,36 +1238,98 @@ const metricConfig = {
                         {idx + 1}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{item.MENU_NAME}</p>
+                        <p className="text-sm font-semibold text-slate-900 truncate">{item.row.goods}</p>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                          <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium">
-                            {item.category}
-                          </span>
-                          <span className="text-[11px] text-slate-400">·</span>
-                          <span className="text-[11px] text-slate-500 font-medium">
-                            {money(item.MENU_PRICE)}/{t('sales_analytics.unit')}
-                          </span>
+                          {profitDriversEffectiveBranchId ? null : (
+                            <span
+                              className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full font-semibold border"
+                              style={(() => {
+                                const branchColor =
+                                  (item.branchId != null ? branchColorById.get(item.branchId) : undefined) ||
+                                  CHART_THEME_COLOR;
+                                return {
+                                  backgroundColor: colorWithAlpha(branchColor, 0.12),
+                                  borderColor: colorWithAlpha(branchColor, 0.35),
+                                  color: branchColor,
+                                };
+                              })()}
+                            >
+                              {item.branchName}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <span className="text-sm font-semibold text-slate-900">
-                        {item.total_quantity} {t('sales_analytics.sold')}
-                      </span>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        {money(item.total_revenue)} {t('sales_analytics.revenue')}
-                      </p>
+                      <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
+                      <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                      </div>
                     </div>
                   </div>
                 ))}
-                <p className="text-[10px] text-slate-500 text-center pt-1 font-medium">
-                  {t('sales_analytics.least_selling_hint')}
-                </p>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={profitDriversModalOpen}
+        onClose={() => setProfitDriversModalOpen(false)}
+        title={`${t('sales_analytics.top_revenue_items')} · ${profitDriversBranchLabel}`}
+        maxWidth="3xl"
+        bodyClassName="px-5 py-5"
+      >
+        {modalProfitDrivers.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-500">
+            {t('sales_analytics.no_data_available')}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {modalProfitDrivers.map((item, idx) => (
+              <div
+                key={`modal-${item.row.id}-${item.branchId ?? 'all'}-${idx}`}
+                className="flex items-center justify-between p-3 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-violet-100 text-violet-700">
+                    {idx + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{item.row.goods}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {profitDriversEffectiveBranchId ? null : (
+                        <span
+                          className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-semibold border"
+                          style={(() => {
+                            const branchColor =
+                              (item.branchId != null ? branchColorById.get(item.branchId) : undefined) ||
+                              CHART_THEME_COLOR;
+                            return {
+                              backgroundColor: colorWithAlpha(branchColor, 0.12),
+                              borderColor: colorWithAlpha(branchColor, 0.35),
+                              color: branchColor,
+                            };
+                          })()}
+                        >
+                          {item.branchName}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
+                  <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                    {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
