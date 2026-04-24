@@ -1626,7 +1626,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 if (firstOrderId != null) {
                     const first = await saveReceiptScanHistory({
                         branch_id: String(resolvedBranch),
-                        source: 'resto_admin',
                         order_id: firstOrderId,
                         encoded_dt: encodedDt,
                         receipt_grand_total: receiptExtractResult?.receipt_grand_total ?? null,
@@ -1637,7 +1636,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 for (const oid of createdOrderIds.slice(1)) {
                     await saveReceiptScanHistory({
                         branch_id: String(resolvedBranch),
-                        source: 'resto_admin',
                         order_id: oid,
                         encoded_dt: encodedDt,
                         receipt_grand_total: receiptExtractResult?.receipt_grand_total ?? null,
