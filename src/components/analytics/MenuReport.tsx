@@ -63,14 +63,11 @@ type MenuReportProps = {
 type MenuReportRow = {
   id: string;
   goods: string;
-  category: string;
+  branch: string;
   salesQty: number;
   totalSales: number;
   netSales: number;
-  totalRevenue: number;
 };
-
-const MOCK_MENU_REPORT_BASE: Omit<MenuReportRow, 'id'>[] = [];
 
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
@@ -121,11 +118,10 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
           apiRows.map((row) => ({
             id: String(row.id),
             goods: row.goods,
-            category: row.category,
+            branch: row.branch || selectedBranch?.name || 'All Branches',
             salesQty: row.salesQty,
             totalSales: row.totalSales,
             netSales: row.netSales,
-            totalRevenue: row.totalRevenue,
           }))
         );
       } catch (err) {
@@ -174,7 +170,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return rows;
     return rows.filter((row) =>
-      row.goods.toLowerCase().includes(keyword) || row.category.toLowerCase().includes(keyword)
+      row.goods.toLowerCase().includes(keyword) || row.branch.toLowerCase().includes(keyword)
     );
   }, [rows, searchTerm]);
 
@@ -185,8 +181,8 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       className: 'min-w-[180px] border-r border-gray-200',
     },
     {
-      header: t('menu_report.columns.category'),
-      accessorKey: 'category',
+      header: 'Branch',
+      accessorKey: 'branch',
       className: 'min-w-[170px]',
     },
     {
@@ -207,7 +203,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const handleExportCsv = () => {
     const headers = [
       t('menu_report.columns.goods'),
-      t('menu_report.columns.category'),
+      'Branch',
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
     ];
@@ -220,7 +216,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
     const rowsForCsv = filteredRows.map((row) => [
       row.goods,
-      row.category,
+      row.branch,
       row.salesQty.toString(),
       row.totalSales.toString(),
     ]);
@@ -250,14 +246,14 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
     const headers = [
       t('menu_report.columns.goods'),
-      t('menu_report.columns.category'),
+      'Branch',
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
     ];
 
     const body = filteredRows.map((row) => [
       row.goods,
-      row.category,
+      row.branch,
       row.salesQty.toLocaleString(),
       money(row.totalSales),
     ]);

@@ -26,6 +26,31 @@ import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
 import { useUser } from '../../context/UserContext';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+const REVENUE_DISTRIBUTION_COLORS = [
+  '#3b82f6',
+  '#f97316',
+  '#22c55e',
+  '#ef4444',
+  '#8b5cf6',
+  '#a16207',
+  '#ec4899',
+  '#6b7280',
+  '#84cc16',
+  '#0f766e',
+  '#14b8a6',
+  '#f59e0b',
+  '#4f46e5',
+  '#be123c',
+  '#64748b',
+];
+const TOP_PRODUCTS_BAR_PALETTES = [
+  ['#4338ca', '#4f46e5', '#6366f1', '#7c83ff', '#5b6df6'], // default
+  ['#1d4ed8', '#2563eb', '#3b82f6', '#2f6df0', '#1e56db'],
+  ['#047857', '#059669', '#10b981', '#0f9f74', '#0b8a64'],
+  ['#b45309', '#d97706', '#f59e0b', '#e78a12', '#c46e0a'],
+  ['#b91c1c', '#dc2626', '#ef4444', '#d63d3d', '#c62828'],
+  ['#6d28d9', '#7c3aed', '#8b5cf6', '#7a4de8', '#6f33de'],
+];
 import { motion, AnimatePresence } from 'framer-motion';
 
 type AdminDashboardProps = {
@@ -228,6 +253,23 @@ const weekendStyleForDay = (jsDay: number): { fill: string; marker: string } | n
 
 const weekdayAbbrFromJsDay = (jsDay: number): string => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][jsDay] ?? '';
 
+const formatTopProductName = (value: string): string => {
+  const normalized = String(value ?? '')
+    .replace(/[\u3131-\uD79D]+/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[\r\n\u2028\u2029]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length <= 22) return normalized;
+  return `${normalized.slice(0, 22).trimEnd()}...`;
+};
+
+const getTopProductsPalette = (branchId: number | null): string[] => {
+  if (!branchId || !Number.isFinite(branchId)) return TOP_PRODUCTS_BAR_PALETTES[0];
+  const paletteIndex = (Math.abs(branchId) % (TOP_PRODUCTS_BAR_PALETTES.length - 1)) + 1;
+  return TOP_PRODUCTS_BAR_PALETTES[paletteIndex];
+};
+
 const getCurrentMonthRange = (): DateRange => {
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -283,6 +325,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
   /** Recon sum for all branches in compare range (used when daily-sales is unscoped) */
   const [comparePeriodReconAll, setComparePeriodReconAll] = useState(0);
+  const totalRevenueDistribution = useMemo(
+    () => branchRevenueDistribution.reduce((sum, item) => sum + Number(item.value || 0), 0),
+    [branchRevenueDistribution],
+  );
+  const topProductsPalette = useMemo(() => getTopProductsPalette(activeBranchId), [activeBranchId]);
+  const topProductsChartData = useMemo(
+    () =>
+      topProductsData.map((item, index) => ({
+        ...item,
+        rank: index + 1,
+        cleanName: formatTopProductName(item.name),
+        barColor: topProductsPalette[index % topProductsPalette.length],
+      })),
+    [topProductsData, topProductsPalette],
+  );
+  const topProductMaxSales = useMemo(
+    () => Math.max(...topProductsChartData.map((item) => Number(item.sales) || 0), 1),
+    [topProductsChartData],
+  );
   const summaryCacheKey = useMemo(() => {
     const currentRange = getCurrentMonthRange();
     const start = compareDateRange.start || currentRange.start;
@@ -1647,33 +1708,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       {t('admin_dashboard.no_revenue_data')}
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
-                      <PieChart>
-                        <Pie
-                          data={branchRevenueDistribution}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          paddingAngle={5}
-                          dataKey="value"
-                        >
-                          {branchRevenueDistribution.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value) => `₱${Number(value).toLocaleString()}`}
-                          contentStyle={{
-                            borderRadius: '12px',
-                            border: 'none',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                          }}
-                        />
-                        <Legend iconType="circle" layout="horizontal" verticalAlign="bottom" align="center" />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <div className="h-full flex items-center gap-4">
+                      <div className="w-1/2 space-y-3 max-h-full overflow-y-auto pr-2">
+                        {branchRevenueDistribution.map((entry, index) => {
+                          const percentage = totalRevenueDistribution > 0
+                            ? (Number(entry.value || 0) / totalRevenueDistribution) * 100
+                            : 0;
+
+                          return (
+                            <div key={`${entry.name}-${index}`} className="flex items-center gap-2 text-sm text-slate-700">
+                              <span
+                                className="inline-block h-3 w-3 rounded-full shrink-0"
+                                style={{ backgroundColor: REVENUE_DISTRIBUTION_COLORS[index % REVENUE_DISTRIBUTION_COLORS.length] }}
+                              />
+                              <span className="font-medium text-slate-600 shrink-0">{percentage.toFixed(1)}%</span>
+                              <span className="truncate" title={entry.name}>{entry.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="w-1/2 h-full min-h-[240px]">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
+                          <PieChart>
+                            <Pie
+                              data={branchRevenueDistribution}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={62}
+                              outerRadius={90}
+                              fill="#8884d8"
+                              paddingAngle={3}
+                              dataKey="value"
+                              stroke="none"
+                            >
+                              {branchRevenueDistribution.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={REVENUE_DISTRIBUTION_COLORS[index % REVENUE_DISTRIBUTION_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(value) => `₱${Number(value).toLocaleString()}`}
+                              contentStyle={{
+                                borderRadius: '12px',
+                                border: 'none',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                              }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1691,37 +1775,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       {t('admin_dashboard.no_products_data')}
                     </div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
-                      <BarChart
-                        layout="vertical"
-                        data={topProductsData}
-                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                      >
-                        <XAxis type="number" hide />
-                        <YAxis 
-                          dataKey="name" 
-                          type="category" 
-                          tick={{ fontSize: 12, fill: '#64748b' }} 
-                          width={120}
-                          axisLine={false}
-                          tickLine={false}
-                        />
-                        <Tooltip 
-                          formatter={(value) => [`${value} ${t('admin_dashboard.units_sold')}`, t('admin_dashboard.sales')]}
-                          cursor={{ fill: 'transparent' }}
-                          contentStyle={{
-                            borderRadius: '12px',
-                            border: 'none',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                          }}
-                        />
-                        <Bar dataKey="sales" fill="#8884d8" radius={[0, 6, 6, 0]} barSize={32}>
-                          {topProductsData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className="h-full flex flex-col">
+                      <div className="grid grid-cols-[41%_47%_12%] items-center gap-2 px-1 pb-2">
+                        <div />
+                        <div />
+                        <div className="text-right text-xs font-semibold uppercase tracking-wide text-slate-500">qty sold</div>
+                      </div>
+                      <div className="flex-1 flex flex-col justify-evenly">
+                        {topProductsChartData.map((entry) => (
+                          <div key={`product-row-${entry.rank}`} className="grid grid-cols-[41%_47%_12%] items-center gap-2">
+                            <div className="flex items-center gap-2 text-[15px] text-slate-700 min-w-0">
+                              <span className="w-5 shrink-0 text-right text-slate-500 font-medium">{entry.rank}.</span>
+                              <span className="truncate" title={entry.name}>{entry.cleanName}</span>
+                            </div>
+                            <div className="w-full h-6 flex items-center">
+                              <div
+                                className="h-6 rounded-[8px] transition-all duration-300"
+                                style={{
+                                  width: `${(Math.max(Number(entry.sales) || 0, 0) / topProductMaxSales) * 100}%`,
+                                  backgroundColor: entry.barColor,
+                                }}
+                              />
+                            </div>
+                            <div className="text-right text-sm font-semibold text-slate-700 tabular-nums">
+                              {Number(entry.sales).toLocaleString()}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
