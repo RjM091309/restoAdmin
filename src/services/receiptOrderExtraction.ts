@@ -78,11 +78,38 @@ function cleanTableNoFromReceipt(input: string): string {
     return s.replace(/\s+/g, ' ').trim();
 }
 
-function formatOrderNoWithDate(base: Date): string {
+function parseLocalYmd(ymd: string | undefined): { y: number; m: number; d: number } | null {
+    const s = String(ymd ?? '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const [y, m, d] = s.split('-').map((x) => Number(x));
+    if (!Number.isFinite(y) || m < 1 || m > 12 || d < 1 || d > 31) return null;
+    return { y, m, d };
+}
+
+/** ORD-YYYYMMDD-HHMMSS: date from user-selected order day (or today); time from scan moment (staggered per block). Ignores receipt-printed numbers so old years (e.g. 2014) never appear. */
+function buildSystemOrderNumbers(count: number, orderDateYmd: string | undefined): string[] {
     const pad2 = (n: number) => String(n).padStart(2, '0');
-    return `ORD-${base.getFullYear()}${pad2(base.getMonth() + 1)}${pad2(base.getDate())}-${pad2(base.getHours())}${pad2(
-        base.getMinutes()
-    )}${pad2(base.getSeconds())}`;
+    const parsed = parseLocalYmd(orderDateYmd);
+    const now = new Date();
+    const y = parsed?.y ?? now.getFullYear();
+    const mo = parsed?.m ?? now.getMonth() + 1;
+    const d = parsed?.d ?? now.getDate();
+    const out: string[] = [];
+    const used = new Set<string>();
+    let offset = 0;
+    for (let i = 0; i < count; i++) {
+        let t = new Date(now.getTime() + offset * 1000);
+        let no = `ORD-${y}${pad2(mo)}${pad2(d)}-${pad2(t.getHours())}${pad2(t.getMinutes())}${pad2(t.getSeconds())}`;
+        while (used.has(no)) {
+            offset += 1;
+            t = new Date(now.getTime() + offset * 1000);
+            no = `ORD-${y}${pad2(mo)}${pad2(d)}-${pad2(t.getHours())}${pad2(t.getMinutes())}${pad2(t.getSeconds())}`;
+        }
+        used.add(no);
+        out.push(no);
+        offset += 1;
+    }
+    return out;
 }
 
 function normalizeOrderType(input: string): 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY' {
@@ -101,9 +128,15 @@ function normalizeOrderType(input: string): 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY' 
  * Extract sold line items from a customer / POS receipt image (orders flow).
  * Returns grouped `orders` plus flattened `items` for mapping UI.
  */
+export type ExtractOrderLinesFromReceiptOptions = {
+    /** YYYY-MM-DD from the order form; drives the date segment of ORD-YYYYMMDD-HHMMSS. */
+    orderDateYmd?: string;
+};
+
 export async function extractOrderLinesFromReceiptImage(
     imageDataUrl: string,
-    apiKey: string
+    apiKey: string,
+    options?: ExtractOrderLinesFromReceiptOptions
 ): Promise<ReceiptOrderExtractionResult> {
     const ai = new GoogleGenAI({ apiKey });
     const base64Data = imageDataUrl.split(',')[1];
@@ -260,10 +293,9 @@ Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column
         throw new Error('Invalid extraction result: no line items.');
     }
 
+    const systemOrderNos = buildSystemOrderNumbers(normalizedOrders.length, options?.orderDateYmd);
     const renumbered = normalizedOrders.map((o, idx) => {
-        const now = new Date();
-        const base = new Date(now.getTime() + idx * 1000);
-        const orderNo = o.order_no && o.order_no.trim() ? o.order_no.trim() : formatOrderNoWithDate(base);
+        const orderNo = systemOrderNos[idx]!;
         const sumLines = o.items.reduce((s, x) => s + x.line_price, 0);
         return {
             order_id: idx + 1,
