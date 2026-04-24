@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useCallback, useMemo } from 'react';
 
 type User = {
     user_id: string;
@@ -21,6 +21,7 @@ type UserContextType = {
     user: User | null;
     isLoggedIn: boolean;
     login: (userData: User, token: string) => void;
+    syncSessionUser: (userData: User) => void;
     logout: () => void;
     updateUser: (updates: Partial<User>) => Promise<UpdateResult>;
 };
@@ -37,7 +38,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return !!localStorage.getItem('token');
     });
 
-    const login = (userData: User, token: string) => {
+    const login = useCallback((userData: User, token: string) => {
         setUser(userData);
         setIsLoggedIn(true);
         localStorage.setItem('user', JSON.stringify(userData));
@@ -46,9 +47,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Branch context should come from the logged-in user/session, not a previous user.
         localStorage.removeItem('lastSelectedBranchId');
         localStorage.removeItem('lastSelectedBranchName');
-    };
+    }, []);
 
-    const logout = () => {
+    const syncSessionUser = useCallback((userData: User) => {
+        setUser(userData);
+        setIsLoggedIn(true);
+        localStorage.setItem('user', JSON.stringify(userData));
+    }, []);
+
+    const logout = useCallback(() => {
         setUser(null);
         setIsLoggedIn(false);
         localStorage.removeItem('user');
@@ -59,11 +66,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (typeof window !== 'undefined') {
             // Fully reload app on logout so that
             // any branch filters or URL state are reset.
-            window.location.replace('/');
+            window.location.replace('/login');
         }
-    };
+    }, []);
 
-    const updateUser = async (updates: Partial<User>): Promise<UpdateResult> => {
+    const updateUser = useCallback(async (updates: Partial<User>): Promise<UpdateResult> => {
         if (!user) return { success: false, message: 'No user logged in' };
 
         const token = localStorage.getItem('token');
@@ -104,10 +111,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error('Error updating profile:', error);
             return { success: false, message: 'Network error. Please try again.' };
         }
-    };
+    }, [user]);
+
+    const contextValue = useMemo(
+        () => ({ user, isLoggedIn, login, syncSessionUser, logout, updateUser }),
+        [user, isLoggedIn, login, syncSessionUser, logout, updateUser]
+    );
 
     return (
-        <UserContext.Provider value={{ user, isLoggedIn, login, logout, updateUser }}>
+        <UserContext.Provider value={contextValue}>
             {children}
         </UserContext.Provider>
     );

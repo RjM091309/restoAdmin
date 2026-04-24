@@ -187,7 +187,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
 
   if (!isLoggedIn) {
-    return <Navigate to="/" state={{ from: location }} replace />;
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   return <>{children}</>;
@@ -318,7 +318,7 @@ const LoginView = () => {
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { isLoggedIn, login, logout, user } = useUser();
+  const { isLoggedIn, syncSessionUser, logout, user } = useUser();
   const parseBranchFromSearch = (search: string): Branch | null => {
     const params = new URLSearchParams(search);
     const branchId = params.get('branchId');
@@ -343,8 +343,8 @@ export default function App() {
           });
           const result = await response.json();
           if (result.success && result.data) {
-            // User is still logged in, result.data is the user object
-            // Just refresh local state if needed
+            // Keep in-memory user/session state in sync after hard refresh.
+            syncSessionUser(result.data);
           } else {
             // Token invalid or expired
             logout();
@@ -355,7 +355,7 @@ export default function App() {
       }
     };
     checkSession();
-  }, [logout]);
+  }, [logout, syncSessionUser]);
 
   // Panel States
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -426,7 +426,7 @@ export default function App() {
     params.set('branchName', next.name);
     const search = params.toString();
     navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
-  }, [isLoggedIn, user?.branch_id, location.pathname, location.search, navigate]);
+  }, [isLoggedIn, user?.permissions, user?.branch_id, location.pathname, location.search, navigate]);
 
   // Guard: if a manager lands on a URL with a different branchId, force it back to their own.
   useEffect(() => {
@@ -583,7 +583,7 @@ export default function App() {
     }
   };
 
-  const isLoginPage = location.pathname === '/' || location.pathname === '/login';
+  const isLoginPage = location.pathname === '/login';
 
   useEffect(() => {
     const appScroller = document.querySelector('[data-app-scroll-container]') as HTMLElement | null;
@@ -595,16 +595,13 @@ export default function App() {
   }, [location.pathname, location.search]);
 
   if (isLoginPage) {
-    if (isLoggedIn && location.pathname === '/') {
-      return <Navigate to="/dashboard" replace />;
+    if (isLoggedIn) {
+      return <Navigate to={`/dashboard${location.search || ''}`} replace />;
     }
     return (
       <>
         <Toaster position="top-right" richColors />
-        <Routes location={location} key={location.pathname}>
-          <Route path="/" element={<LoginView />} />
-          <Route path="/login" element={<Navigate to="/" replace />} />
-        </Routes>
+        <LoginView />
       </>
     );
   }
@@ -636,7 +633,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-8 pt-0 custom-scrollbar" data-app-scroll-container>
             <AnimatePresence mode="wait">
               <Routes location={location} key={location.pathname}>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<Navigate to={`/dashboard${location.search || ''}`} replace />} />
 
                 <Route path="/dashboard" element={
                   <motion.div
