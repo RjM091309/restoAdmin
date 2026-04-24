@@ -1221,10 +1221,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <div>
                 <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.category')}</label>
                 <Select2
-                    options={[
-                        { value: '', label: t('menu_page.modal.uncategorized') },
-                        ...leafCategoriesForItemForm.map((c) => ({ value: c.id, label: c.name })),
-                    ]}
+                    options={leafCategoriesForItemForm.map((c) => ({ value: c.id, label: c.name }))}
                     value={formCategory || ''}
                     onChange={(v) => setFormCategory(v ? String(v) : '')}
                     placeholder={t('menu_page.modal.select_category')}
