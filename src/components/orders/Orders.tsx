@@ -20,7 +20,6 @@ import {
     ChevronLeft,
     ChevronRight,
     ScanLine,
-    Camera,
     Upload,
     RefreshCw,
     History,
@@ -189,7 +188,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     >([]);
     const [receiptSubmitting, setReceiptSubmitting] = useState(false);
     const receiptFileInputRef = useRef<HTMLInputElement>(null);
-    const receiptCameraInputRef = useRef<HTMLInputElement>(null);
     const [receiptSegments, setReceiptSegments] = useState<string[]>([]);
     const [receiptStitching, setReceiptStitching] = useState(false);
     const RECEIPT_MAX_PAGES = 8;
@@ -1080,7 +1078,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptError(null);
         try {
             const key = await fetchReceiptScannerGeminiKey();
-            const result = await extractOrderLinesFromReceiptImage(compressedDataUrl, key);
+            const result = await extractOrderLinesFromReceiptImage(compressedDataUrl, key, {
+                orderDateYmd: receiptOrderDate?.trim() || undefined,
+            });
             setReceiptExtractResult(result);
             const metaMap: Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string }> = {};
             (result.orders || []).forEach((o) => {
@@ -2738,12 +2738,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </button>
                             <button
                                 type="button"
-                                onClick={() => receiptCameraInputRef.current?.click()}
+                                onClick={() => receiptFileInputRef.current?.click()}
                                 disabled={receiptExtracting || receiptStitching || receiptSegments.length >= RECEIPT_MAX_PAGES}
                                 className="px-6 py-2.5 rounded-xl font-bold text-brand-text bg-white border border-gray-200 hover:bg-gray-50 transition-all disabled:opacity-50 flex items-center gap-2"
                                 title={receiptSegments.length >= RECEIPT_MAX_PAGES ? 'Max pages reached' : 'Add page'}
                             >
-                                <Camera size={16} />
+                                <Upload size={16} />
                                 Add page
                             </button>
                         </div>
@@ -2812,17 +2812,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         type="file"
                         accept="image/*"
                         multiple
-                        className="hidden"
-                        onChange={(e) => {
-                            void appendReceiptSegmentsFromFiles(Array.from(e.target.files || []));
-                            e.target.value = '';
-                        }}
-                    />
-                    <input
-                        ref={receiptCameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
                         className="hidden"
                         onChange={(e) => {
                             void appendReceiptSegmentsFromFiles(Array.from(e.target.files || []));
@@ -2933,15 +2922,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             >
                                                 <Upload size={16} />
                                                 {t('orders.receipt_choose_file')}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                disabled={isAllBranches && !receiptOrderBranchId}
-                                                onClick={() => receiptCameraInputRef.current?.click()}
-                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold hover:bg-gray-50 disabled:opacity-50"
-                                            >
-                                                <Camera size={16} />
-                                                {t('orders.receipt_take_photo')}
                                             </button>
                                             {(receiptImage || receiptSegments.length > 0) && (
                                                 <button
