@@ -1339,7 +1339,7 @@
 		"amount_due_label": "Amount Due",
 		"balance": "Balance",
 		"payment_method_label": "Payment Method",
-		"amount_paid_label": "Amount Paid (Bayad Ngayon)",
+		"amount_paid_label": "Amount Paid",
 		"payment_reference": "Payment Reference (Optional)",
 		"payment_reference_placeholder": "OR number / Transaction ID",
 		"input_amount_placeholder": "Input amount to pay...",
