@@ -109,14 +109,21 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         }
         let cancelled = false;
         const token = localStorage.getItem('token');
-        fetch(`/branch/${selectedBranch.id}`, {
+        // NOTE: Backend `GET /branch/:id` is admin-only. For non-admin, derive
+        // MENU_CATEGORY_LEVEL from the allowed `GET /branch` list.
+        fetch('/branch', {
             headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         })
-            .then((r) => r.json())
+            .then(async (r) => {
+                if (!r.ok) throw new Error(`Failed to load branches (${r.status})`);
+                return r.json();
+            })
             .then((json) => {
                 if (cancelled) return;
-                const b = json?.data ?? json;
-                setBranchCategoryLevel(Number(b?.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1);
+                const list = json?.data ?? json;
+                const rows: any[] = Array.isArray(list) ? list : [];
+                const match = rows.find((b) => String(b?.IDNo) === String(selectedBranch.id));
+                setBranchCategoryLevel(Number(match?.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1);
             })
             .catch(() => {
                 if (!cancelled) setBranchCategoryLevel(1);
