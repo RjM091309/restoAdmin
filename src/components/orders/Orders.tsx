@@ -47,6 +47,7 @@ import {
     type CreateOrderItemPayload,
 } from '../../services/orderService';
 import { getMenus, type MenuRecord } from '../../services/menuService';
+import { toUserFriendlyError } from '../../utils/userFriendlyErrors';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey } from '../../services/receiptScannerService';
 import { extractOrderLinesFromReceiptImage, type ReceiptOrderExtractionResult } from '../../services/receiptOrderExtraction';
 import { ReceiptOrderBlockCard } from './ReceiptOrderBlockCard';
@@ -87,6 +88,31 @@ type NewOrderItem = {
     unitPrice: number;
     qty: number;
 };
+
+/** Upload receipt in admin → resto_admin; ReceiptLens app → receiptlens. Exclude other SOURCE values (e.g. expenses). */
+function normalizeReceiptScanHistorySource(raw: string | null | undefined): string {
+    return String(raw ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_');
+}
+
+function isOrdersReceiptScanHistorySource(raw: string | null | undefined): boolean {
+    const s = normalizeReceiptScanHistorySource(raw);
+    return s === 'resto_admin' || s === 'receiptlens';
+}
+
+function receiptScanHistoryRowSource(row: ReceiptScanHistoryListRow): string {
+    const r = row as unknown as Record<string, string | undefined>;
+    return String(r.SOURCE ?? r.source ?? '');
+}
+
+function formatReceiptScanHistorySourceLabel(raw: string): string {
+    const s = normalizeReceiptScanHistorySource(raw);
+    if (s === 'receiptlens') return 'ReceiptLens';
+    if (s === 'resto_admin') return 'resto_admin';
+    return raw?.trim() || '—';
+}
 
 export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => {
     const { t } = useTranslation();
@@ -346,8 +372,41 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [branchId]);
 
     // ==================== Filtering ====================
+    /** Used when formatting full order timestamps (date + time) and parsing naive MySQL datetimes as Manila wall time. */
     const MANILA_TIMEZONE = 'Asia/Manila';
     const MANILA_UTC_OFFSET_HOURS = 8; // Asia/Manila is UTC+8 (no DST)
+
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const getManilaTodayYmd = () => {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: MANILA_TIMEZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour12: false,
+        }).formatToParts(new Date());
+        const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+        return `${get('year')}-${pad2(get('month'))}-${pad2(get('day'))}`;
+    };
+    const getManilaNowHms = () => {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: MANILA_TIMEZONE,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+        }).formatToParts(new Date());
+        const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+        return { hour: get('hour'), minute: get('minute'), second: get('second') };
+    };
+    /** Picker supplies the calendar date; time is current wall clock in Asia/Manila (PH timestamp). */
+    const encodedDtPickerDateManilaNow = (pickerYmd: string | null | undefined) => {
+        const today = getManilaTodayYmd();
+        const ymd = pickerYmd && String(pickerYmd).trim() ? String(pickerYmd).trim() : today;
+        const [yy, mm, dd] = ymd.split('-').map((x) => Number(x));
+        const { hour, minute, second } = getManilaNowHms();
+        return `${yy}-${pad2(mm)}-${pad2(dd)} ${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
+    };
 
     const parseManilaLocalDateTimeToUtcMs = (value: string): number | null => {
         // Supports:
@@ -1040,7 +1099,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptMetaById({});
             setReceiptMapOpenByOrderId({});
         }
-        // Default: present date only (YYYY-MM-DD), time will be current timestamp.
+        // Default: today in Manila (YYYY-MM-DD). Submit uses that date + current PH (Manila) wall time.
         // Preserve user's previously selected date across multiple receipt orders.
         if (!receiptOrderDate) {
             const now = new Date();
@@ -1112,7 +1171,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             });
             setReceiptRows(rows);
         } catch (e) {
-            setReceiptError(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
+            setReceiptError(toUserFriendlyError(e));
             setReceiptRows([]);
             setReceiptExtractResult(null);
         } finally {
@@ -1255,7 +1314,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             }
             setReceiptSegments((prev) => [...prev, ...newSegs]);
         } catch (e) {
-            toast.error(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
+            toast.error(toUserFriendlyError(e));
         }
     };
 
@@ -1288,7 +1347,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptImage(compressed);
             await runReceiptExtractionOnImage(compressed);
         } catch (e) {
-            setReceiptError(e instanceof Error ? e.message : t('orders.receipt_extract_failed'));
+            setReceiptError(toUserFriendlyError(e));
             setReceiptRows([]);
             setReceiptExtractResult(null);
         } finally {
@@ -1371,7 +1430,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptHistoryLoading(true);
         try {
             const bid = isAllBranches ? 'all' : branchId;
-            const rows = await fetchReceiptScanHistoryList(bid, 250);
+            const rows = await fetchReceiptScanHistoryList(bid, 500, {
+                sources: ['resto_admin', 'receiptlens'],
+            });
             setReceiptHistoryRows(Array.isArray(rows) ? rows : []);
         } catch (e) {
             toast.error(e instanceof Error ? e.message : t('orders.failed_to_load'));
@@ -1489,14 +1550,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
     };
 
+    // Same calendar range as the orders table (header date picker) so May/June rows do not appear when July is selected.
     const filteredReceiptHistory = useMemo(() => {
         return receiptHistoryRows.filter((r) => {
-            if (!dateRange.start || !dateRange.end) return true;
-            const ymd = String(r.ENCODED_DT ?? '').match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
-            if (!ymd) return true;
-            return ymd >= dateRange.start && ymd <= dateRange.end;
+            if (!isOrdersReceiptScanHistorySource(receiptScanHistoryRowSource(r))) return false;
+            return isWithinDateRange(r.ENCODED_DT);
         });
-    }, [receiptHistoryRows, dateRange.start, dateRange.end]);
+    }, [receiptHistoryRows, isWithinDateRange]);
 
     const submitReceiptOrder = async () => {
         if (isAllBranches && !receiptOrderBranchId) {
@@ -1515,36 +1575,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         const resolvedBranch = isAllBranches ? receiptOrderBranchId : branchId;
         setReceiptSubmitting(true);
         try {
-            const now = new Date();
-            const pad2 = (n: number) => String(n).padStart(2, '0');
-            // Use Asia/Manila time consistently so ENCODED_DT matches backend timestamps.
-            const getManilaParts = (d: Date) => {
-                const parts = new Intl.DateTimeFormat('en-US', {
-                    timeZone: 'Asia/Manila',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false,
-                }).formatToParts(d);
-                const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-                return {
-                    year: get('year'),
-                    month: get('month'),
-                    day: get('day'),
-                    hour: get('hour'),
-                    minute: get('minute'),
-                    second: get('second'),
-                };
-            };
-            const manilaNow = getManilaParts(now);
-            const todayStr = `${manilaNow.year}-${pad2(manilaNow.month)}-${pad2(manilaNow.day)}`;
-            const selectedDate = (receiptOrderDate && receiptOrderDate.trim()) ? receiptOrderDate : todayStr;
-            const [yy, mm, dd] = selectedDate.split('-').map((x) => Number(x));
-            const timePart = `${pad2(manilaNow.hour)}:${pad2(manilaNow.minute)}:${pad2(manilaNow.second)}`;
-            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
+            const encodedDt = encodedDtPickerDateManilaNow(receiptOrderDate);
 
             // Fresh menu list — avoids empty/stale state if user saves before useEffect finishes loading menus.
             const menuList = await getMenus(resolvedBranch).then((m) =>
@@ -1830,40 +1861,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
         setManualOrderSubmitting(true);
         try {
-            const now = new Date();
-            const pad2 = (n: number) => String(n).padStart(2, '0');
-
-            // Use Asia/Manila time consistently so ENCODED_DT matches backend timestamps (EDITED_DT).
-            const getManilaParts = (d: Date) => {
-                const parts = new Intl.DateTimeFormat('en-US', {
-                    timeZone: 'Asia/Manila',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false,
-                }).formatToParts(d);
-                const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
-                return {
-                    year: get('year'),
-                    month: get('month'),
-                    day: get('day'),
-                    hour: get('hour'),
-                    minute: get('minute'),
-                    second: get('second'),
-                };
-            };
-
-            const manilaNow = getManilaParts(now);
-            const todayStr = `${manilaNow.year}-${pad2(manilaNow.month)}-${pad2(manilaNow.day)}`;
-            const selectedDate = (manualOrderDate && manualOrderDate.trim()) ? manualOrderDate : todayStr;
-            const [yy, mm, dd] = selectedDate.split('-').map((x) => Number(x));
-
-            // Date comes from the picker; time-of-day comes from current time in Asia/Manila.
-            const timePart = `${pad2(manilaNow.hour)}:${pad2(manilaNow.minute)}:${pad2(manilaNow.second)}`;
-            const encodedDt = `${yy}-${pad2(mm)}-${pad2(dd)} ${timePart}`;
+            const encodedDt = encodedDtPickerDateManilaNow(manualOrderDate);
 
             const items = manualOrderItems.map((it) => ({ menu_id: Number(it.menuId), qty: Number(it.qty), unit_price: Number(it.unitPrice), line_total: Number(it.qty) * Number(it.unitPrice), status: ORDER_STATUS.PENDING }));
             // Backend always adds table ROOM_CHARGE once.
@@ -2303,7 +2301,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         <Loader2 size={32} className="animate-spin text-brand-primary" />
                     </div>
                 ) : filteredReceiptHistory.length === 0 ? (
-                    <p className="text-center text-brand-muted py-8">{t('orders.receipt_history_empty')}</p>
+                    <p className="text-center text-brand-muted py-8">
+                        {receiptHistoryRows.length > 0
+                            ? t('orders.receipt_history_empty_range')
+                            : t('orders.receipt_history_empty')}
+                    </p>
                 ) : (
                     <div className="overflow-x-auto rounded-xl border border-gray-200">
                         <table className="w-full text-sm">
@@ -2326,7 +2328,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         {isAllBranches ? (
                                             <td className="px-3 py-2">{r.BRANCH_NAME ?? r.BRANCH_ID}</td>
                                         ) : null}
-                                        <td className="px-3 py-2 font-mono text-xs">{r.SOURCE}</td>
+                                        <td className="px-3 py-2 font-mono text-xs">
+                                            {formatReceiptScanHistorySourceLabel(receiptScanHistoryRowSource(r))}
+                                        </td>
                                         <td className="px-3 py-2 font-mono">{r.ORDER_NO ?? '—'}</td>
                                         <td className="px-3 py-2 text-right tabular-nums">
                                             {r.ORDER_GRAND_TOTAL != null
@@ -2390,7 +2394,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </div>
                             <div className="min-w-0">
                                 <span className="text-brand-muted">{t('orders.receipt_history_source')}</span>
-                                <div className="font-mono truncate">{receiptHistoryDetail.SOURCE}</div>
+                                <div className="font-mono truncate">
+                                    {formatReceiptScanHistorySourceLabel(
+                                        receiptScanHistoryRowSource(receiptHistoryDetail)
+                                    )}
+                                </div>
                             </div>
                             <div className="min-w-0">
                                 <span className="text-brand-muted">{t('orders.order_no')}</span>

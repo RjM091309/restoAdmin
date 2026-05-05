@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 import { type ColumnDef } from '../ui/DataTable';
 import { cn } from '../../lib/utils';
+import { toUserFriendlyError } from '../../utils/userFriendlyErrors';
 import { type Branch } from '../partials/Header';
 import { toast } from 'sonner';
 import { getOperationCategories, createOperationCategory, updateOperationCategory, deleteOperationCategory } from '../../services/operationCategoryService';
@@ -19,13 +20,6 @@ import { uploadExpenseReceipt } from '../../services/uploadService';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey, stitchReceiptImages } from '../../services/receiptScannerService';
 import { extractExpenseItemsFromReceiptImage, type ReceiptExpenseExtractionResult } from '../../services/receiptExpenseExtraction';
 import { syncIngredientsFromExpenses } from '../../services/ingredientService';
-import {
-  fetchReceiptScanHistoryById,
-  fetchReceiptScanHistoryList,
-  saveReceiptScanHistory,
-  type ReceiptScanHistoryDetail,
-  type ReceiptScanHistoryListRow,
-} from '../../services/receiptScanHistoryService';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine, History, Eye } from 'lucide-react';
@@ -115,6 +109,53 @@ const formatPercent = (value: number, digits = 1) => {
   const safe = Number.isFinite(value) ? value : 0;
   return `${safe.toFixed(digits)}%`;
 };
+
+/** One row per uploaded receipt (lines live in `expenses`, not `receipt_scan_history`). */
+type ExpenseReceiptHistoryRow = {
+  receiptImagePath: string;
+  ENCODED_DT: string;
+  SOURCE: string;
+  RECEIPT_GRAND_TOTAL: number;
+};
+
+function expenseRecordsToReceiptHistoryRows(records: ExpenseRecord[]): ExpenseReceiptHistoryRow[] {
+  const map = new Map<string, ExpenseRecord[]>();
+  for (const e of records) {
+    const p = String(e.receiptImagePath || '').trim();
+    if (!p) continue;
+    const g = map.get(p);
+    if (g) g.push(e);
+    else map.set(p, [e]);
+  }
+  const out: ExpenseReceiptHistoryRow[] = [];
+  for (const [path, group] of map.entries()) {
+    const encodedList = group
+      .map((g) => String(g.encodedDt || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    const ENCODED_DT = encodedList.length ? encodedList[encodedList.length - 1] : '';
+    const RECEIPT_GRAND_TOTAL = group.reduce((s, g) => s + Number(g.expAmount || 0), 0);
+    const SOURCE = group[0]?.expSource ?? 'Resto_Admin';
+    out.push({ receiptImagePath: path, ENCODED_DT, SOURCE, RECEIPT_GRAND_TOTAL });
+  }
+  out.sort((a, b) => String(b.ENCODED_DT).localeCompare(String(a.ENCODED_DT)));
+  return out;
+}
+
+function receiptPathToDisplayUrl(path: string): string | null {
+  const p = String(path || '').trim();
+  if (!p) return null;
+  if (/^https?:\/\//i.test(p)) return p;
+  return `${window.location.origin}${p.startsWith('/') ? '' : '/'}${p}`;
+}
+
+/** Normalize EXP_SOURCE for filter (Resto_Admin → resto_admin, ReceiptLens → receiptlens). */
+function normExpenseReceiptSource(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+}
 
 const percentOf = (value: number, denom: number): number => {
   const v = Number(value) || 0;
@@ -279,13 +320,19 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [receiptPreviewLightboxOpen, setReceiptPreviewLightboxOpen] = useState(false);
   const [receiptSaveConfirmOpen, setReceiptSaveConfirmOpen] = useState(false);
   const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
-  const [receiptHistoryRows, setReceiptHistoryRows] = useState<ReceiptScanHistoryListRow[]>([]);
+  const [receiptHistoryRows, setReceiptHistoryRows] = useState<ExpenseReceiptHistoryRow[]>([]);
   const [receiptHistoryLoading, setReceiptHistoryLoading] = useState(false);
   const [receiptHistoryError, setReceiptHistoryError] = useState<string | null>(null);
   const [receiptHistoryPageSize, setReceiptHistoryPageSize] = useState<number>(20);
+  const [receiptHistorySourceFilter, setReceiptHistorySourceFilter] = useState<
+    'all' | 'resto_admin' | 'receiptlens'
+  >('all');
   const [receiptHistoryDetailOpen, setReceiptHistoryDetailOpen] = useState(false);
   const [receiptHistoryDetailLoading, setReceiptHistoryDetailLoading] = useState(false);
-  const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<ReceiptScanHistoryDetail | null>(null);
+  const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<{
+    receiptImagePath: string;
+    receiptImageDisplayUrl: string | null;
+  } | null>(null);
 
   const [operationForm, setOperationForm] = useState<{ name: string; description: string; state: number }>({
     name: '',
@@ -592,7 +639,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       const jpeg = await compressReceiptImage(raw).catch(() => raw);
       setReceiptSegments((prev) => [...prev, jpeg].slice(0, 8));
     } catch (e) {
-      setReceiptFileError(e instanceof Error ? e.message : 'Failed to read receipt');
+      setReceiptFileError(toUserFriendlyError(e));
     }
   }, []);
 
@@ -620,13 +667,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         });
         setReceiptExtractResult(extracted);
       } catch (e) {
-        setReceiptFileError(e instanceof Error ? e.message : 'Failed to extract receipt items');
+        setReceiptFileError(toUserFriendlyError(e));
         setReceiptExtractResult(null);
       } finally {
         setReceiptExtractLoading(false);
       }
     } catch (e) {
-      setReceiptFileError(e instanceof Error ? e.message : 'Failed to scan receipt');
+      setReceiptFileError(toUserFriendlyError(e));
       setReceiptScannedImage(null);
       setReceiptPreviewDataUrl(null);
     } finally {
@@ -650,10 +697,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setReceiptHistoryError(null);
     void (async () => {
       try {
-        const rows = await fetchReceiptScanHistoryList(String(branchId), receiptHistoryPageSize);
-        if (!cancelled) setReceiptHistoryRows(rows);
+        const list = await getExpenses(String(branchId));
+        const scoped = list.filter((e) => String(e.branchId) === String(branchId));
+        if (!cancelled) setReceiptHistoryRows(expenseRecordsToReceiptHistoryRows(scoped));
       } catch (e) {
-        if (!cancelled) setReceiptHistoryError(e instanceof Error ? e.message : 'Failed to load history');
+        if (!cancelled) setReceiptHistoryError(toUserFriendlyError(e));
       } finally {
         if (!cancelled) setReceiptHistoryLoading(false);
       }
@@ -661,21 +709,15 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     return () => {
       cancelled = true;
     };
-  }, [receiptHistoryOpen, branchId, receiptHistoryPageSize]);
+  }, [receiptHistoryOpen, branchId]);
 
-  const openReceiptHistoryDetail = useCallback(async (id: number) => {
+  const openReceiptHistoryDetail = useCallback((receiptImagePath: string) => {
     setReceiptHistoryDetailOpen(true);
-    setReceiptHistoryDetailLoading(true);
-    setReceiptHistoryDetail(null);
-    try {
-      const d = await fetchReceiptScanHistoryById(id);
-      setReceiptHistoryDetail(d);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load receipt');
-      setReceiptHistoryDetailOpen(false);
-    } finally {
-      setReceiptHistoryDetailLoading(false);
-    }
+    setReceiptHistoryDetailLoading(false);
+    setReceiptHistoryDetail({
+      receiptImagePath,
+      receiptImageDisplayUrl: receiptPathToDisplayUrl(receiptImagePath),
+    });
   }, []);
 
   const sendExtractedReceiptToExpenses = useCallback(async () => {
@@ -754,20 +796,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           ? `${receiptEncodedDateYmd} 12:00:00`
           : null;
 
-      try {
-        // Audit trail: save scan record so it appears in "Receipt History"
-        await saveReceiptScanHistory({
-          branch_id: branchId,
-          source: 'expenses',
-          order_id: null,
-          encoded_dt: encodedDt,
-          receipt_grand_total: Number(receiptExtractResult.receipt_grand_total || 0),
-          receipt_image_path: receiptPath ?? null,
-        });
-      } catch {
-        // Non-fatal
-      }
-
       await Promise.all(
         receiptExtractResult.items.map(async (item) => {
           const categoryType = String(item.category || '').trim() || 'Others';
@@ -808,7 +836,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       setIsReceiptModalOpen(false);
       setExpenseAnalyticsRefreshKey((k) => k + 1);
     } catch (e) {
-      setReceiptFileError(e instanceof Error ? e.message : 'Failed to save receipt items to expenses');
+      setReceiptFileError(toUserFriendlyError(e));
     } finally {
       setReceiptSendLoading(false);
     }
@@ -841,13 +869,17 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const receiptHistoryRowsInRange = useMemo(() => {
     const { start, end } = effectiveDateRange;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return receiptHistoryRows;
-    return (receiptHistoryRows || []).filter((r) => {
+    let inRange = (receiptHistoryRows || []).filter((r) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return true;
       const ymd = String(r.ENCODED_DT || '').slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false;
       return ymd >= start && ymd <= end;
     });
-  }, [effectiveDateRange, receiptHistoryRows]);
+    if (receiptHistorySourceFilter !== 'all') {
+      inRange = inRange.filter((r) => normExpenseReceiptSource(r.SOURCE) === receiptHistorySourceFilter);
+    }
+    return inRange.slice(0, Math.max(1, receiptHistoryPageSize));
+  }, [effectiveDateRange, receiptHistoryRows, receiptHistoryPageSize, receiptHistorySourceFilter]);
 
   const refreshExpenseAnalyticsFromServer = useCallback(() => {
     setExpenseAnalyticsRefreshKey((k) => k + 1);
@@ -3314,9 +3346,23 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           ) : null}
 
           <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
               <div className="text-sm font-black text-brand-text">Scanned receipts</div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="text-[11px] font-black uppercase tracking-wide text-brand-muted">
+                  Source
+                </label>
+                <select
+                  value={receiptHistorySourceFilter}
+                  onChange={(e) =>
+                    setReceiptHistorySourceFilter(e.target.value as 'all' | 'resto_admin' | 'receiptlens')
+                  }
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-brand-text"
+                >
+                  <option value="all">All</option>
+                  <option value="resto_admin">Resto Admin</option>
+                  <option value="receiptlens">ReceiptLens</option>
+                </select>
                 <label className="text-[11px] font-black uppercase tracking-wide text-brand-muted">
                   Page length
                 </label>
@@ -3355,7 +3401,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     </tr>
                   ) : receiptHistoryRowsInRange.length ? (
                     receiptHistoryRowsInRange.map((r) => (
-                      <tr key={r.IDNo} className="border-t border-gray-100 hover:bg-gray-50/60 transition-colors">
+                      <tr
+                        key={r.receiptImagePath}
+                        className="border-t border-gray-100 hover:bg-gray-50/60 transition-colors"
+                      >
                         <td className="px-4 py-3 font-semibold text-brand-text">
                           {String(r.ENCODED_DT || '').slice(0, 10)}
                         </td>
@@ -3366,7 +3415,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                         <td className="px-4 py-3 text-right">
                           <button
                             type="button"
-                            onClick={() => void openReceiptHistoryDetail(Number(r.IDNo))}
+                            onClick={() => openReceiptHistoryDetail(r.receiptImagePath)}
                             className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold hover:bg-gray-50"
                           >
                             <Eye size={14} />
@@ -3391,14 +3440,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
       <Modal
         isOpen={receiptHistoryDetailOpen}
-        onClose={() => setReceiptHistoryDetailOpen(false)}
+        onClose={() => {
+          setReceiptHistoryDetailOpen(false);
+          setReceiptHistoryDetail(null);
+        }}
         title="Receipt Detail"
         maxWidth="5xl"
         footer={
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => setReceiptHistoryDetailOpen(false)}
+              onClick={() => {
+                setReceiptHistoryDetailOpen(false);
+                setReceiptHistoryDetail(null);
+              }}
               className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50"
             >
               Close
@@ -3415,16 +3470,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                 <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm flex flex-col min-h-0 lg:h-[60vh]">
                   <div className="border-b border-gray-100 px-5 py-4 text-sm font-black text-brand-text shrink-0">Receipt</div>
                   <div className="custom-scrollbar flex-1 min-h-0 overflow-auto bg-slate-50 p-4">
-                    {receiptHistoryDetail.receipt_image_data_url ? (
+                    {receiptHistoryDetail.receiptImageDisplayUrl ? (
                       <a
-                        href={receiptHistoryDetail.receipt_image_data_url}
+                        href={receiptHistoryDetail.receiptImageDisplayUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="group relative block overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/40"
                         title="Open receipt in new tab"
                       >
                         <img
-                          src={receiptHistoryDetail.receipt_image_data_url}
+                          src={receiptHistoryDetail.receiptImageDisplayUrl}
                           alt="Receipt"
                           className="mx-auto block h-auto w-full max-w-full"
                         />
@@ -3445,7 +3500,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     <div className="text-sm font-black text-brand-text">Expenses created</div>
                     <div className="text-xs text-brand-muted">
                       {(() => {
-                        const key = String(receiptHistoryDetail.receipt_image_data_url || '');
+                        const key = String(receiptHistoryDetail.receiptImagePath || '');
                         const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
                         return `${rows.length} item(s)`;
                       })()}
@@ -3453,7 +3508,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                   </div>
                   <div className="flex-1 min-h-0">
                   {(() => {
-                    const key = String(receiptHistoryDetail.receipt_image_data_url || '');
+                    const key = String(receiptHistoryDetail.receiptImagePath || '');
                     const rows = expenses.filter((e) => String(e.receiptImagePath || '') === key);
                     if (!rows.length) {
                       return (

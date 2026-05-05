@@ -129,7 +129,13 @@ class ReceiptScanHistoryController {
 
 			const limit = parseInt(req.query.limit, 10) || 100;
 			const offset = parseInt(req.query.offset, 10) || 0;
-			const rows = await ReceiptScanHistoryModel.list(branchId, limit, offset);
+			const sourcesRaw = req.query.sources ?? req.query.SOURCES ?? '';
+			const sources = String(sourcesRaw)
+				.split(',')
+				.map((s) => String(s).trim().toLowerCase().replace(/\s+/g, '_'))
+				.filter(Boolean);
+			const listOptions = sources.length ? { sources } : {};
+			const rows = await ReceiptScanHistoryModel.list(branchId, limit, offset, listOptions);
 			return ApiResponse.success(res, rows, 'Receipt scan history');
 		} catch (error) {
 			console.error('receiptScanHistory list:', error);
@@ -339,6 +345,66 @@ class ReceiptScanHistoryController {
 		} catch (error) {
 			console.error('receiptScanHistory create:', error);
 			return ApiResponse.error(res, 'Failed to save receipt scan', 500, error.message);
+		}
+	}
+
+	/** Link a pending scan row (ORDER_ID null) to a created order — used by ReceiptLens after extraction + send. */
+	static async patchOrder(req, res) {
+		try {
+			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
+			const userId = req.session?.user_id || req.user?.user_id || null;
+
+			const idRaw = req.params?.id;
+			const id =
+				idRaw != null && String(idRaw).trim() !== '' && /^\d+$/.test(String(idRaw).trim())
+					? Number(idRaw)
+					: NaN;
+			if (!Number.isFinite(id)) {
+				return ApiResponse.badRequest(res, 'Invalid id');
+			}
+
+			const row = await ReceiptScanHistoryModel.getBranchAndImageById(id);
+			if (!row) {
+				return ApiResponse.notFound(res, 'Receipt scan record');
+			}
+
+			const branchId = String(row.BRANCH_ID);
+			if (!isAdmin && userId) {
+				const branches = await UserBranchModel.getBranchesByUserId(userId);
+				const allowed = Array.isArray(branches) && branches.some((b) => String(b?.IDNo) === branchId);
+				if (!allowed) {
+					return ApiResponse.forbidden(res, 'Not allowed for this branch');
+				}
+			}
+
+			const orderIdRaw = req.body?.order_id ?? req.body?.ORDER_ID ?? null;
+			const order_id =
+				orderIdRaw != null && String(orderIdRaw).trim() !== '' && /^\d+$/.test(String(orderIdRaw).trim())
+					? Number(orderIdRaw)
+					: null;
+			if (!order_id) {
+				return ApiResponse.badRequest(res, 'order_id is required');
+			}
+
+			const encodedDtRaw = req.body?.ENCODED_DT ?? req.body?.encoded_dt ?? null;
+			const encoded_dt_patch =
+				encodedDtRaw != null && String(encodedDtRaw).trim() !== ''
+					? String(encodedDtRaw).trim().slice(0, 19)
+					: null;
+
+			const ok = await ReceiptScanHistoryModel.updateOrderId(id, order_id, encoded_dt_patch);
+			if (!ok) {
+				return ApiResponse.error(res, 'Failed to update receipt scan', 500, 'No rows updated');
+			}
+
+			return ApiResponse.success(
+				res,
+				{ id, receipt_image_path: row.RECEIPT_IMAGE },
+				'Updated'
+			);
+		} catch (error) {
+			console.error('receiptScanHistory patchOrder:', error);
+			return ApiResponse.error(res, 'Failed to update receipt scan', 500, error.message);
 		}
 	}
 }

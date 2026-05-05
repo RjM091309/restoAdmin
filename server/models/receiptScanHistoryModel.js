@@ -58,13 +58,40 @@ class ReceiptScanHistoryModel {
 		return res.insertId;
 	}
 
+	/** Minimal row for PATCH permission + returning stored image path after linking ORDER_ID. */
+	static async getBranchAndImageById(id) {
+		const [rows] = await pool.execute(
+			`SELECT IDNo, BRANCH_ID, RECEIPT_IMAGE FROM receipt_scan_history WHERE IDNo = ? LIMIT 1`,
+			[id]
+		);
+		return rows[0] || null;
+	}
+
+	static async updateOrderId(id, orderId, encodedDt = null) {
+		const enc =
+			encodedDt != null && String(encodedDt).trim() !== '' ? String(encodedDt).trim().slice(0, 19) : null;
+		if (enc) {
+			const [res] = await pool.execute(
+				`UPDATE receipt_scan_history SET ORDER_ID = ?, ENCODED_DT = ? WHERE IDNo = ?`,
+				[orderId, enc, id]
+			);
+			return res.affectedRows > 0;
+		}
+		const [res] = await pool.execute(`UPDATE receipt_scan_history SET ORDER_ID = ? WHERE IDNo = ?`, [
+			orderId,
+			id,
+		]);
+		return res.affectedRows > 0;
+	}
+
 	/**
 	 * List rows without image blob (for tables).
 	 * @param {number|string|null} branchId - null = all branches
 	 * @param {number} limit
 	 * @param {number} offset
+	 * @param {{ sources?: string[] }} [options] - optional normalized SOURCE values (e.g. resto_admin, receiptlens)
 	 */
-	static async list(branchId, limit = 100, offset = 0) {
+	static async list(branchId, limit = 100, offset = 0, options = {}) {
 		let sql = `
 			SELECT
 				h.IDNo,
@@ -91,6 +118,15 @@ class ReceiptScanHistoryModel {
 		if (branchId != null && String(branchId).trim() !== '' && String(branchId) !== 'all') {
 			sql += ` AND h.BRANCH_ID = ?`;
 			params.push(branchId);
+		}
+		const rawSources = Array.isArray(options.sources) ? options.sources : [];
+		const sources = rawSources
+			.map((s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '_'))
+			.filter(Boolean);
+		if (sources.length) {
+			const placeholders = sources.map(() => '?').join(',');
+			sql += ` AND LOWER(REPLACE(TRIM(COALESCE(h.SOURCE, '')), ' ', '_')) IN (${placeholders})`;
+			params.push(...sources);
 		}
 		// Some MySQL/MariaDB builds reject bound parameters for LIMIT/OFFSET in prepared statements.
 		// Inline clamped integers instead (branchId remains parameterized).

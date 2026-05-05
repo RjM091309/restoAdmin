@@ -67,9 +67,14 @@ export type ReceiptScanHistoryDetail = ReceiptScanHistoryListRow & {
     }>;
 };
 
-export async function fetchReceiptScanHistoryList(branchId: string, limit = 100): Promise<ReceiptScanHistoryListRow[]> {
+export async function fetchReceiptScanHistoryList(
+    branchId: string,
+    limit = 100,
+    options?: { sources?: string[] }
+): Promise<ReceiptScanHistoryListRow[]> {
     const params: Record<string, string> = { limit: String(limit) };
     if (branchId && branchId !== 'all') params.branch_id = branchId;
+    if (options?.sources?.length) params.sources = options.sources.join(',');
     const res = await fetch(buildUrl('/receipt-scan-history', params), {
         credentials: 'include',
         headers: authHeaders(),
