@@ -113,6 +113,8 @@ class ReceiptScanHistoryModel {
 			LEFT JOIN user_info ui ON ui.IDNo = h.ENCODED_BY
 			LEFT JOIN orders o ON o.IDNo = h.ORDER_ID
 			WHERE 1 = 1
+				-- Exclude scan history entries linked to cancelled orders (STATUS = -2).
+				AND (h.ORDER_ID IS NULL OR COALESCE(o.STATUS, 0) <> -2)
 		`;
 		const params = [];
 		if (branchId != null && String(branchId).trim() !== '' && String(branchId) !== 'all') {
