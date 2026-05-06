@@ -128,6 +128,24 @@ function formatPesoUpToTwoDecimals(amount: number): string {
     return Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function isDineInOrderType(orderType: string | null | undefined): boolean {
+    const t = String(orderType ?? '').trim().toUpperCase();
+    if (!t) return true; // default
+    return t === 'DINE_IN' || t === 'DINE IN';
+}
+
+function looksLikeReceiptServiceChargeLine(text: string): boolean {
+    const s = String(text ?? '').trim().toLowerCase();
+    if (!s) return false;
+    if (s.includes('service charge')) return true;
+    if (s.includes('svc charge')) return true;
+    if (s.includes('svc chg')) return true;
+    if (s.includes('s/c')) return true;
+    // Keep "sc" detection strict to avoid false positives like "scan".
+    if (/\bsc\b/.test(s)) return true;
+    return false;
+}
+
 export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => {
     const { t } = useTranslation();
     const { user } = useUser();
@@ -1023,7 +1041,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         !!newOrderTableId && Object.prototype.hasOwnProperty.call(branchTablesRoomChargeById, newOrderTableId)
             ? Number(branchTablesRoomChargeById[newOrderTableId])
             : 0;
-    const newOrderEesomeServiceCharge = isEesomeBranchId(branchId)
+    const newOrderEesomeServiceCharge = isEesomeBranchId(branchId) && isDineInOrderType(newOrderType)
         ? eesomeTenPercentServiceCharge(newOrderSubtotal)
         : 0;
     const newOrderEstimatedGrandTotal = Number(
@@ -1406,6 +1424,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const receiptTableSelectOptions = isAllBranches ? receiptBranchTables : branchTables;
 
+    const receiptDetectedHasServiceCharge = useMemo(() => {
+        const extractedItems = receiptExtractResult?.items;
+        if (Array.isArray(extractedItems) && extractedItems.length) {
+            for (const it of extractedItems) {
+                if (looksLikeReceiptServiceChargeLine((it as any)?.item_name)) return true;
+            }
+        }
+        for (const r of receiptRows) {
+            if (looksLikeReceiptServiceChargeLine(r.extractedName)) return true;
+        }
+        return false;
+    }, [receiptExtractResult?.items, receiptRows]);
+
     const receiptPreviewSubtotal = useMemo(() => {
         return receiptRows.reduce((sum, row) => {
             if (!row.menuId) return sum;
@@ -1428,9 +1459,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const receiptPreviewServiceCharge = useMemo(() => {
         if (!isEesomeBranchId(effectiveReceiptBranchId)) return 0;
+        if (receiptDetectedHasServiceCharge) return 0;
         return Number(
             receiptRowsByOrder
-                .reduce((sum, [, blockRows]) => {
+                .reduce((sum, [orderId, blockRows]) => {
+                    const ot = receiptMetaById[orderId]?.orderType ?? receiptOrderType;
+                    if (!isDineInOrderType(ot)) return sum;
                     const blockSubtotal = blockRows.reduce((s, row) => {
                         if (!row.menuId) return s;
                         const menu = receiptOrderMenus.find((m) => m.id === row.menuId);
@@ -1441,7 +1475,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 }, 0)
                 .toFixed(2)
         );
-    }, [effectiveReceiptBranchId, receiptOrderMenus, receiptRowsByOrder]);
+    }, [effectiveReceiptBranchId, receiptDetectedHasServiceCharge, receiptMetaById, receiptOrderMenus, receiptOrderType, receiptRowsByOrder]);
 
     const receiptPreviewTotalDue = useMemo(() => {
         return Number((receiptPreviewSubtotal + receiptPreviewServiceCharge).toFixed(2));
@@ -1457,22 +1491,29 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const receiptPreviewServiceChargeReceipt = useMemo(() => {
         if (!isEesomeBranchId(effectiveReceiptBranchId)) return 0;
+        if (receiptDetectedHasServiceCharge) return 0;
         if (receiptExtractResult?.orders?.length) {
             return Number(
                 receiptExtractResult.orders
-                    .reduce((sum, o) => sum + eesomeTenPercentServiceCharge(Number(o.order_total_amount || 0)), 0)
+                    .reduce((sum, o) => {
+                        const ot = receiptMetaById[o.order_id]?.orderType ?? receiptOrderType;
+                        if (!isDineInOrderType(ot)) return sum;
+                        return sum + eesomeTenPercentServiceCharge(Number(o.order_total_amount || 0));
+                    }, 0)
                     .toFixed(2)
             );
         }
         return Number(
             receiptRowsByOrder
-                .reduce((sum, [, blockRows]) => {
+                .reduce((sum, [orderId, blockRows]) => {
+                    const ot = receiptMetaById[orderId]?.orderType ?? receiptOrderType;
+                    if (!isDineInOrderType(ot)) return sum;
                     const blockTotal = blockRows.reduce((s, r) => s + Number(r.receiptLineTotal || 0), 0);
                     return sum + eesomeTenPercentServiceCharge(blockTotal);
                 }, 0)
                 .toFixed(2)
         );
-    }, [effectiveReceiptBranchId, receiptExtractResult?.orders, receiptRowsByOrder]);
+    }, [effectiveReceiptBranchId, receiptDetectedHasServiceCharge, receiptExtractResult?.orders, receiptMetaById, receiptOrderType, receiptRowsByOrder]);
 
     const receiptPreviewTotalDueReceipt = useMemo(() => {
         return Number((receiptPreviewReceiptTotal + receiptPreviewServiceChargeReceipt).toFixed(2));
@@ -1670,7 +1711,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 const meta = receiptMetaById[orderId];
                 const orderNo = meta?.orderNo && meta.orderNo.trim() ? meta.orderNo.trim() : generateOrderNo();
                 const orderType = meta?.orderType ?? receiptOrderType;
-                const serviceCharge = isEesomeBranchId(resolvedBranch)
+                const shouldAutoAddServiceCharge =
+                    isEesomeBranchId(resolvedBranch) &&
+                    isDineInOrderType(orderType) &&
+                    !receiptDetectedHasServiceCharge;
+                const serviceCharge = shouldAutoAddServiceCharge
                     ? eesomeTenPercentServiceCharge(subtotal)
                     : 0;
 
@@ -1810,7 +1855,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             ...manualOrderItems,
         ]
         : manualOrderItems;
-    const manualEesomeServiceCharge = isEesomeBranchId(effectiveManualBranchId)
+    const manualEesomeServiceCharge = isEesomeBranchId(effectiveManualBranchId) && isDineInOrderType(manualOrderType)
         ? eesomeTenPercentServiceCharge(manualOrderSubtotal)
         : 0;
     const manualGrandTotalBase =
@@ -3129,7 +3174,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             return raw;
                                         }
                                     })();
-                                    const shouldAddServiceCharge = isEesomeBranchId(effectiveReceiptBranchId);
+                                    const shouldAddServiceCharge =
+                                        isEesomeBranchId(effectiveReceiptBranchId) &&
+                                        isDineInOrderType(meta.orderType) &&
+                                        !receiptDetectedHasServiceCharge;
                                     const blockServiceChargePreview = shouldAddServiceCharge
                                         ? eesomeTenPercentServiceCharge(blockTotal)
                                         : 0;
