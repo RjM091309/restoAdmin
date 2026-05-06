@@ -61,9 +61,6 @@ const toYYYYMMDD = (d: Date): string =>
   '-' +
   String(d.getDate()).padStart(2, '0');
 
-const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
-const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   breadcrumbs = [],
@@ -364,10 +361,6 @@ export const Header: React.FC<HeaderProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                const prevMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
-                                const s = startOfMonth(prevMonth);
-                                const e = endOfMonth(prevMonth);
-                                handleDateRangeChange([s, e], { closeOnComplete: false });
                                 decreaseMonth();
                               }}
                               disabled={prevMonthButtonDisabled}
@@ -375,7 +368,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 'p-2 rounded-lg transition-colors',
                                 prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
                               )}
-                              aria-label="Previous month (auto-select last month range)"
+                              aria-label="Previous month"
                             >
                               <ArrowLeft size={18} className="text-brand-muted" />
                             </button>
@@ -385,10 +378,6 @@ export const Header: React.FC<HeaderProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-                                const s = startOfMonth(nextMonth);
-                                const e = endOfMonth(nextMonth);
-                                handleDateRangeChange([s, e], { closeOnComplete: false });
                                 increaseMonth();
                               }}
                               disabled={nextMonthButtonDisabled}

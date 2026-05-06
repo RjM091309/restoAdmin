@@ -114,6 +114,20 @@ function formatReceiptScanHistorySourceLabel(raw: string): string {
     return raw?.trim() || '—';
 }
 
+const EESOME_BRANCH_ID = '10';
+
+function eesomeTenPercentServiceCharge(subtotal: number): number {
+    return Number(((Number(subtotal) || 0) * 0.1).toFixed(2));
+}
+
+function isEesomeBranchId(branchId: string | number | null | undefined): boolean {
+    return String(branchId ?? '').trim() === EESOME_BRANCH_ID;
+}
+
+function formatPesoUpToTwoDecimals(amount: number): string {
+    return Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => {
     const { t } = useTranslation();
     const { user } = useUser();
@@ -159,6 +173,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [newOrderType, setNewOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [newOrderTableId, setNewOrderTableId] = useState<string>('');
     const [branchTables, setBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [branchTablesRoomChargeById, setBranchTablesRoomChargeById] = useState<Record<string, number>>({});
     const [newOrderItems, setNewOrderItems] = useState<NewOrderItem[]>([]);
     const [newOrderSelectedMenuId, setNewOrderSelectedMenuId] = useState<string>('');
     const [newOrderQty, setNewOrderQty] = useState<number>(1);
@@ -355,13 +370,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                         value: String(t.IDNo),
                         label: `Table ${t.TABLE_NUMBER}`,
                     }));
+                const roomChargeById: Record<string, number> = {};
+                for (const t of (Array.isArray(raw) ? raw : [])) {
+                    if (t?.STATUS !== 1) continue;
+                    const id = String(t?.IDNo);
+                    if (!id) continue;
+                    const rcRaw = t?.ROOM_CHARGE;
+                    const rc =
+                        rcRaw != null && rcRaw !== '' && !Number.isNaN(Number(rcRaw)) ? Number(rcRaw) : 0;
+                    roomChargeById[id] = rc;
+                }
                 if (!cancelled) {
                     setBranchTables(mapped);
+                    setBranchTablesRoomChargeById(roomChargeById);
                 }
             } catch (e) {
                 if (!cancelled) {
                     console.error('Failed to load tables for new order', e);
                     setBranchTables([]);
+                    setBranchTablesRoomChargeById({});
                 }
             }
         };
@@ -992,6 +1019,16 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [newOrderOpen, branchId]);
 
     const newOrderSubtotal = newOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
+    const newOrderTableRoomCharge =
+        !!newOrderTableId && Object.prototype.hasOwnProperty.call(branchTablesRoomChargeById, newOrderTableId)
+            ? Number(branchTablesRoomChargeById[newOrderTableId])
+            : 0;
+    const newOrderEesomeServiceCharge = isEesomeBranchId(branchId)
+        ? eesomeTenPercentServiceCharge(newOrderSubtotal)
+        : 0;
+    const newOrderEstimatedGrandTotal = Number(
+        (newOrderSubtotal + newOrderEesomeServiceCharge + (Number.isFinite(newOrderTableRoomCharge) ? newOrderTableRoomCharge : 0)).toFixed(2)
+    );
 
     const addNewOrderItem = () => {
         if (!newOrderSelectedMenuId) {
@@ -1053,7 +1090,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 TABLE_ID: newOrderTableId ? Number(newOrderTableId) : null,
                 ORDER_TYPE: newOrderType, order_type: newOrderType,
                 STATUS: ORDER_STATUS.PENDING, SUBTOTAL: newOrderSubtotal,
-                TAX_AMOUNT: 0, SERVICE_CHARGE: 0, DISCOUNT_AMOUNT: 0, GRAND_TOTAL: newOrderSubtotal,
+                TAX_AMOUNT: 0,
+                SERVICE_CHARGE: newOrderEesomeServiceCharge,
+                DISCOUNT_AMOUNT: 0,
+                GRAND_TOTAL: Number((newOrderSubtotal + newOrderEesomeServiceCharge).toFixed(2)),
                 ORDER_ITEMS: items, items,
             });
             setNewOrderOpen(false);
@@ -1387,20 +1427,24 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [receiptRows]);
 
     const receiptPreviewServiceCharge = useMemo(() => {
-        if (String(effectiveReceiptBranchId ?? '') !== '10') return 0;
-        return receiptRowsByOrder.reduce((sum, [, blockRows]) => {
-            const blockSubtotal = blockRows.reduce((s, row) => {
-                if (!row.menuId) return s;
-                const menu = receiptOrderMenus.find((m) => m.id === row.menuId);
-                if (!menu) return s;
-                return s + Number(row.qty) * Number(menu.price || 0);
-            }, 0);
-            return sum + Math.round(blockSubtotal * 0.1);
-        }, 0);
+        if (!isEesomeBranchId(effectiveReceiptBranchId)) return 0;
+        return Number(
+            receiptRowsByOrder
+                .reduce((sum, [, blockRows]) => {
+                    const blockSubtotal = blockRows.reduce((s, row) => {
+                        if (!row.menuId) return s;
+                        const menu = receiptOrderMenus.find((m) => m.id === row.menuId);
+                        if (!menu) return s;
+                        return s + Number(row.qty) * Number(menu.price || 0);
+                    }, 0);
+                    return sum + eesomeTenPercentServiceCharge(blockSubtotal);
+                }, 0)
+                .toFixed(2)
+        );
     }, [effectiveReceiptBranchId, receiptOrderMenus, receiptRowsByOrder]);
 
     const receiptPreviewTotalDue = useMemo(() => {
-        return receiptPreviewSubtotal + receiptPreviewServiceCharge;
+        return Number((receiptPreviewSubtotal + receiptPreviewServiceCharge).toFixed(2));
     }, [receiptPreviewSubtotal, receiptPreviewServiceCharge]);
 
     // Receipt-based totals (same as tablet UI): computed from extracted receipt line totals.
@@ -1412,18 +1456,26 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [receiptExtractResult?.orders, receiptRowsByOrder]);
 
     const receiptPreviewServiceChargeReceipt = useMemo(() => {
-        if (String(effectiveReceiptBranchId ?? '') !== '10') return 0;
+        if (!isEesomeBranchId(effectiveReceiptBranchId)) return 0;
         if (receiptExtractResult?.orders?.length) {
-            return receiptExtractResult.orders.reduce((sum, o) => sum + Math.round(Number(o.order_total_amount || 0) * 0.1), 0);
+            return Number(
+                receiptExtractResult.orders
+                    .reduce((sum, o) => sum + eesomeTenPercentServiceCharge(Number(o.order_total_amount || 0)), 0)
+                    .toFixed(2)
+            );
         }
-        return receiptRowsByOrder.reduce((sum, [, blockRows]) => {
-            const blockTotal = blockRows.reduce((s, r) => s + Number(r.receiptLineTotal || 0), 0);
-            return sum + Math.round(blockTotal * 0.1);
-        }, 0);
+        return Number(
+            receiptRowsByOrder
+                .reduce((sum, [, blockRows]) => {
+                    const blockTotal = blockRows.reduce((s, r) => s + Number(r.receiptLineTotal || 0), 0);
+                    return sum + eesomeTenPercentServiceCharge(blockTotal);
+                }, 0)
+                .toFixed(2)
+        );
     }, [effectiveReceiptBranchId, receiptExtractResult?.orders, receiptRowsByOrder]);
 
     const receiptPreviewTotalDueReceipt = useMemo(() => {
-        return receiptPreviewReceiptTotal + receiptPreviewServiceChargeReceipt;
+        return Number((receiptPreviewReceiptTotal + receiptPreviewServiceChargeReceipt).toFixed(2));
     }, [receiptPreviewReceiptTotal, receiptPreviewServiceChargeReceipt]);
 
     const loadReceiptHistory = useCallback(async () => {
@@ -1591,7 +1643,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
             const createdOrderIds: number[] = [];
             const createdOrderNos: string[] = [];
-            const shouldAddServiceCharge = String(resolvedBranch) === '10';
 
             for (const [orderId, blockRows] of [...byOrder.entries()].sort((a, b) => a[0] - b[0])) {
                 const merged = new Map<string, NewOrderItem>();
@@ -1619,7 +1670,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 const meta = receiptMetaById[orderId];
                 const orderNo = meta?.orderNo && meta.orderNo.trim() ? meta.orderNo.trim() : generateOrderNo();
                 const orderType = meta?.orderType ?? receiptOrderType;
-                const serviceCharge = shouldAddServiceCharge ? Math.round(subtotal * 0.1) : 0;
+                const serviceCharge = isEesomeBranchId(resolvedBranch)
+                    ? eesomeTenPercentServiceCharge(subtotal)
+                    : 0;
 
                 const created = await createManualSettledOrder({
                     ORDER_NO: orderNo,
@@ -1635,7 +1688,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     TAX_AMOUNT: 0,
                     SERVICE_CHARGE: serviceCharge,
                     DISCOUNT_AMOUNT: 0,
-                    // prevent server-side double add, consistent with ReceiptLens flow
                     GRAND_TOTAL: subtotal,
                     ORDER_ITEMS: items,
                     items,
@@ -1758,7 +1810,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             ...manualOrderItems,
         ]
         : manualOrderItems;
-    const manualGrandTotalBase = manualOrderSubtotal + (hasManualRoomChargeRow ? manualRoomChargeQty * manualRoomCharge : 0);
+    const manualEesomeServiceCharge = isEesomeBranchId(effectiveManualBranchId)
+        ? eesomeTenPercentServiceCharge(manualOrderSubtotal)
+        : 0;
+    const manualGrandTotalBase =
+        manualOrderSubtotal +
+        (hasManualRoomChargeRow ? manualRoomChargeQty * manualRoomCharge : 0) +
+        manualEesomeServiceCharge;
     const manualDiscountNumber = (() => {
         const n = parseFloat(String(manualDiscountAmount ?? '').trim());
         return Number.isFinite(n) ? n : 0;
@@ -1879,7 +1937,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 STATUS: ORDER_STATUS.SETTLED,
                 SUBTOTAL: manualOrderSubtotal,
                 TAX_AMOUNT: 0,
-                SERVICE_CHARGE: roomChargeAdditionalService,
+                SERVICE_CHARGE: roomChargeAdditionalService + manualEesomeServiceCharge,
                 DISCOUNT_AMOUNT: manualDiscountApplied,
                 GRAND_TOTAL: manualGrandTotal,
                 ORDER_ITEMS: items, items,
@@ -2093,7 +2151,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         {
             header: t('orders.grand_total'),
             render: (order) => (
-                <span className="text-sm font-bold text-brand-text">₱{Number(order.GRAND_TOTAL).toLocaleString(undefined, { minimumFractionDigits: 0 })}</span>
+                <span className="text-sm font-bold text-brand-text tabular-nums">
+                    ₱{formatPesoUpToTwoDecimals(Number(order.GRAND_TOTAL))}
+                </span>
             ),
         },
         {
@@ -2528,7 +2588,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                             Subtotal
                                                                         </span>
                                                                         <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
-                                                                            {Number(o.SUBTOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            {formatPesoUpToTwoDecimals(Number(o.SUBTOTAL || 0))}
                                                                         </span>
                                                                     </div>
                                                                     <div className="flex items-center justify-between gap-3">
@@ -2536,7 +2596,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                             Service charge
                                                                         </span>
                                                                         <span className="font-extrabold tabular-nums w-[92px] text-right text-slate-800">
-                                                                            {Number(o.SERVICE_CHARGE || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            {formatPesoUpToTwoDecimals(Number(o.SERVICE_CHARGE || 0))}
                                                                         </span>
                                                                     </div>
                                                                     <div className="pt-2 mt-1 border-t border-gray-200/80 flex items-center justify-between gap-3">
@@ -2544,7 +2604,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                             Total
                                                                         </span>
                                                                         <span className="font-black tabular-nums w-[92px] text-right text-violet-700 text-base">
-                                                                            ₱{Number(o.GRAND_TOTAL || (Number(o.SUBTOTAL || 0) + Number(o.SERVICE_CHARGE || 0))).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                            ₱
+                                                                            {formatPesoUpToTwoDecimals(
+                                                                                Number(o.GRAND_TOTAL || (Number(o.SUBTOTAL || 0) + Number(o.SERVICE_CHARGE || 0)))
+                                                                            )}
                                                                         </span>
                                                                     </div>
                                                                 </div>
@@ -2700,16 +2763,53 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         <tfoot className="bg-gray-50">
                                             <tr>
                                                 <td
+                                                    className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-brand-muted"
+                                                    colSpan={3}
+                                                >
+                                                    Subtotal
+                                                </td>
+                                                <td className="px-4 py-2 text-right font-bold tabular-nums">
+                                                    ₱{formatPesoUpToTwoDecimals(newOrderSubtotal)}
+                                                </td>
+                                                <td></td>
+                                            </tr>
+                                            {isEesomeBranchId(branchId) && newOrderEesomeServiceCharge > 0 ? (
+                                                <tr>
+                                                    <td
+                                                        className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-brand-muted"
+                                                        colSpan={3}
+                                                    >
+                                                        Service charge (10%)
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right font-bold tabular-nums">
+                                                        ₱{formatPesoUpToTwoDecimals(newOrderEesomeServiceCharge)}
+                                                    </td>
+                                                    <td></td>
+                                                </tr>
+                                            ) : null}
+                                            {Number.isFinite(newOrderTableRoomCharge) && newOrderTableRoomCharge > 0 ? (
+                                                <tr>
+                                                    <td
+                                                        className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-brand-muted"
+                                                        colSpan={3}
+                                                    >
+                                                        {t('table.room_charge')}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right font-bold tabular-nums">
+                                                        ₱{formatPesoUpToTwoDecimals(newOrderTableRoomCharge)}
+                                                    </td>
+                                                    <td></td>
+                                                </tr>
+                                            ) : null}
+                                            <tr>
+                                                <td
                                                     className="px-4 py-2 text-right font-bold text-brand-text"
                                                     colSpan={3}
                                                 >
                                                     {t('orders.grand_total')}
                                                 </td>
-                                                <td className="px-4 py-2 text-right font-extrabold text-brand-primary">
-                                                    ₱
-                                                    {newOrderSubtotal.toLocaleString(undefined, {
-                                                        minimumFractionDigits: 0,
-                                                    })}
+                                                <td className="px-4 py-2 text-right font-extrabold text-brand-primary tabular-nums">
+                                                    ₱{formatPesoUpToTwoDecimals(newOrderEstimatedGrandTotal)}
                                                 </td>
                                                 <td></td>
                                             </tr>
@@ -3029,7 +3129,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             return raw;
                                         }
                                     })();
-                                    const shouldAddServiceCharge = String(effectiveReceiptBranchId ?? '') === '10';
+                                    const shouldAddServiceCharge = isEesomeBranchId(effectiveReceiptBranchId);
+                                    const blockServiceChargePreview = shouldAddServiceCharge
+                                        ? eesomeTenPercentServiceCharge(blockTotal)
+                                        : 0;
                                     return (
                                         <React.Fragment key={`receipt-order-${orderId}`}>
                                             <ReceiptOrderBlockCard
@@ -3119,11 +3222,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                     <>
                                                                         <div className="flex items-center justify-between text-[13px] font-semibold text-slate-900">
                                                                             <span className="tracking-[0.12em] uppercase text-[11px] text-gray-500">SERVICE CHARGE (10%)</span>
-                                                                            <span className="tabular-nums">₱{Math.round(blockTotal * 0.1).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                            <span className="tabular-nums">₱{formatPesoUpToTwoDecimals(blockServiceChargePreview)}</span>
                                                                         </div>
                                                                         <div className="flex items-center justify-between text-[13px] font-semibold text-slate-900">
                                                                             <span className="tracking-[0.12em] uppercase text-[11px] text-gray-500">TOTAL DUE</span>
-                                                                            <span className="tabular-nums">₱{(blockTotal + Math.round(blockTotal * 0.1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                                                            <span className="tabular-nums">
+                                                                                ₱{formatPesoUpToTwoDecimals(blockTotal + blockServiceChargePreview)}
+                                                                            </span>
                                                                         </div>
                                                                     </>
                                                                 ) : null}
@@ -3195,21 +3300,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <span className="font-bold text-brand-text">
-                                        {String(effectiveReceiptBranchId ?? '') === '10' ? 'Total due (receipt)' : 'Grand Total (receipt)'}
+                                        {isEesomeBranchId(effectiveReceiptBranchId) ? 'Total due (receipt)' : 'Grand Total (receipt)'}
                                     </span>
                                     <span className="font-extrabold text-violet-600 tabular-nums">
                                         ₱
-                                        {(String(effectiveReceiptBranchId ?? '') === '10'
-                                            ? receiptPreviewTotalDueReceipt
-                                            : receiptPreviewReceiptTotal
-                                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        {formatPesoUpToTwoDecimals(
+                                            isEesomeBranchId(effectiveReceiptBranchId)
+                                                ? receiptPreviewTotalDueReceipt
+                                                : receiptPreviewReceiptTotal
+                                        )}
                                     </span>
                                 </div>
-                                {String(effectiveReceiptBranchId ?? '') === '10' ? (
+                                {isEesomeBranchId(effectiveReceiptBranchId) ? (
                                     <div className="mt-2 text-xs text-brand-muted flex flex-wrap items-center justify-between gap-2">
                                         <span>
-                                            Items ₱{receiptPreviewReceiptTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })} + SC ₱
-                                            {receiptPreviewServiceChargeReceipt.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            Items ₱{formatPesoUpToTwoDecimals(receiptPreviewReceiptTotal)} + SC ₱
+                                            {formatPesoUpToTwoDecimals(receiptPreviewServiceChargeReceipt)}
                                         </span>
                                         <span className="font-mono">
                                             {receiptRowsByOrder.length} order{receiptRowsByOrder.length === 1 ? '' : 's'}
@@ -3554,6 +3660,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             </tbody>
                                             {manualDisplayOrderItems.length > 0 && (
                                                 <tfoot className="bg-gray-50">
+                                                    {isEesomeBranchId(effectiveManualBranchId) && manualEesomeServiceCharge > 0 ? (
+                                                        <tr>
+                                                            <td
+                                                                className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-brand-muted"
+                                                                colSpan={3}
+                                                            >
+                                                                Service charge (10%)
+                                                            </td>
+                                                            <td className="px-4 py-2 text-right font-bold tabular-nums">
+                                                                ₱{formatPesoUpToTwoDecimals(manualEesomeServiceCharge)}
+                                                            </td>
+                                                            <td></td>
+                                                        </tr>
+                                                    ) : null}
                                                     <tr>
                                                         <td
                                                             className="px-4 py-2 text-right font-bold text-brand-text"
@@ -3561,11 +3681,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         >
                                                             {t('orders.grand_total')}
                                                         </td>
-                                                        <td className="px-4 py-2 text-right font-extrabold text-emerald-700">
-                                                            ₱
-                                                            {manualGrandTotalPreview.toLocaleString(undefined, {
-                                                                minimumFractionDigits: 0,
-                                                            })}
+                                                        <td className="px-4 py-2 text-right font-extrabold text-emerald-700 tabular-nums">
+                                                            ₱{formatPesoUpToTwoDecimals(manualGrandTotalPreview)}
                                                         </td>
                                                         <td></td>
                                                     </tr>
@@ -3616,11 +3733,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest">
                                     {t('orders.grand_total')}
                                 </p>
-                                <p className="text-2xl font-extrabold text-brand-primary mt-0.5">
-                                    ₱
-                                    {Number(detailOrder.GRAND_TOTAL).toLocaleString(undefined, {
-                                        minimumFractionDigits: 0,
-                                    })}
+                                <p className="text-2xl font-extrabold text-brand-primary mt-0.5 tabular-nums">
+                                    ₱{formatPesoUpToTwoDecimals(Number(detailOrder.GRAND_TOTAL))}
                                 </p>
                             </div>
                         </div>
@@ -3657,8 +3771,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 : (t('orders.service_charge') ?? 'Service charge')}
                                                         </td>
                                                         <td className="px-4 py-2 text-right">{detailRoomChargeQtyForRow}</td>
-                                                        <td className="px-4 py-2 text-right">₱{Number(detailRoomChargeUnitForRow).toLocaleString()}</td>
-                                                        <td className="px-4 py-2 text-right font-bold">₱{Number(detailServiceCharge).toLocaleString()}</td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">
+                                                            ₱{formatPesoUpToTwoDecimals(Number(detailRoomChargeUnitForRow))}
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right font-bold tabular-nums">
+                                                            ₱{formatPesoUpToTwoDecimals(Number(detailServiceCharge))}
+                                                        </td>
                                                         {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                                                             <td className="px-4 py-2 text-right"></td>
                                                         )}
