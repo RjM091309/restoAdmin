@@ -34,6 +34,12 @@ router.get("/receiptscanner/gemini-key", optionalJWT, ApiController.getReceiptSc
 // POST - Stitch multiple receipt images into one long strip
 // URL: /api/receiptscanner/stitch
 router.post("/receiptscanner/stitch", optionalJWT, ApiController.stitchReceiptImages);
+// POST - Analyze receipt image (Vertex AI Gemini)
+// URL: /api/receiptscanner/analyze
+// Body: { base64: "data:image/jpeg;base64,..." } OR { base64: "<raw base64>" }
+router.post("/receiptscanner/analyze", optionalJWT, ApiController.analyzeReceipt);
+// POST - Orders flow: grouped order blocks + line items (Vertex AI)
+router.post("/receiptscanner/analyze-orders", optionalJWT, ApiController.analyzeReceiptOrders);
 
 // ============================================
 // PROTECTED ROUTES (JWT authentication required)

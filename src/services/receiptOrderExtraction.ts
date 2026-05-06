@@ -1,7 +1,9 @@
-import { GoogleGenAI, Type } from '@google/genai';
-
-/** Google deprecates older Flash IDs for new keys; use current GA model (see ai.google.dev/gemini-api/docs/models). */
-const RECEIPT_EXTRACTION_MODEL = 'gemini-2.5-flash';
+const authHeaders = (): Record<string, string> => {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+};
 
 export type ReceiptOrderItemNormalized = {
     item_name: string;
@@ -135,12 +137,12 @@ export type ExtractOrderLinesFromReceiptOptions = {
 
 export async function extractOrderLinesFromReceiptImage(
     imageDataUrl: string,
-    apiKey: string,
+    /** Kept for backwards compatibility; server-side analyzer does not need this. */
+    apiKey?: string,
     options?: ExtractOrderLinesFromReceiptOptions
 ): Promise<ReceiptOrderExtractionResult> {
-    const ai = new GoogleGenAI({ apiKey });
-    const base64Data = imageDataUrl.split(',')[1];
-    if (!base64Data) throw new Error('Invalid image data');
+    const base64 = String(imageDataUrl ?? '').trim();
+    if (!base64) throw new Error('Invalid image data');
 
     const prompt = `You extract restaurant or retail POS receipts into JSON for order entry.
 
@@ -174,71 +176,30 @@ Global rules:
 - math_match: true if extracted_items_sum equals receipt_grand_total within 2 (rounding).
 
 Extract only from merchandise line rows (typically between ITEM/QTY/PRICE column headers and the block's subtotal/total lines).`;
-
-    const response = await ai.models.generateContent({
-        model: RECEIPT_EXTRACTION_MODEL,
-        contents: [
-            {
-                parts: [
-                    { text: prompt },
-                    {
-                        inlineData: {
-                            mimeType: 'image/jpeg',
-                            data: base64Data,
-                        },
-                    },
-                ],
-            },
-        ],
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    orders: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                order_id: { type: Type.NUMBER },
-                                order_no: { type: Type.STRING },
-                                order_type: { type: Type.STRING },
-                                table_no: { type: Type.STRING },
-                                order_total_amount: { type: Type.NUMBER },
-                                items: {
-                                    type: Type.ARRAY,
-                                    items: {
-                                        type: Type.OBJECT,
-                                        properties: {
-                                            item_name: { type: Type.STRING },
-                                            quantity: { type: Type.NUMBER },
-                                            menu_selection: { type: Type.STRING },
-                                            line_price: { type: Type.NUMBER },
-                                        },
-                                        required: ['item_name', 'quantity', 'menu_selection', 'line_price'],
-                                    },
-                                },
-                            },
-                            required: ['order_id', 'order_no', 'order_type', 'table_no', 'items', 'order_total_amount'],
-                        },
-                    },
-                    receipt_grand_total: { type: Type.NUMBER },
-                    extracted_items_sum: { type: Type.NUMBER },
-                    math_match: { type: Type.BOOLEAN },
-                },
-                required: ['orders', 'receipt_grand_total', 'extracted_items_sum', 'math_match'],
-            },
+    // Use backend Vertex AI analyzer (prevents Gemini 429 client-side).
+    const res = await fetch(`${window.location.origin}/data-api/api/receiptscanner/analyze-orders`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
         },
+        body: JSON.stringify({
+            base64,
+            // prompt is generated server-side today; keep here for possible future extension
+            prompt,
+            orderDateYmd: options?.orderDateYmd,
+        }),
     });
-
-    const text = response.text;
-    if (!text) throw new Error('No data extracted from receipt.');
-    const parsed = JSON.parse(text) as {
-        orders?: unknown;
-        receipt_grand_total?: number;
-        extracted_items_sum?: number;
-        math_match?: boolean;
+    const json = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        data?: { orders?: unknown; receipt_grand_total?: number; extracted_items_sum?: number; math_match?: boolean };
+        error?: string;
     };
+    if (!res.ok || !json.success || !json.data) {
+        throw new Error(json.error || 'Failed to analyze receipt for orders');
+    }
+    const parsed = json.data;
 
     if (!Array.isArray(parsed.orders) || parsed.orders.length === 0) {
         throw new Error('Invalid extraction result: no orders.');

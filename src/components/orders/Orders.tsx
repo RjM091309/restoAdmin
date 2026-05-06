@@ -1194,8 +1194,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setReceiptExtracting(true);
         setReceiptError(null);
         try {
-            const key = await fetchReceiptScannerGeminiKey();
-            const result = await extractOrderLinesFromReceiptImage(compressedDataUrl, key, {
+            const result = await extractOrderLinesFromReceiptImage(compressedDataUrl, undefined, {
                 orderDateYmd: receiptOrderDate?.trim() || undefined,
             });
             setReceiptExtractResult(result);

@@ -659,10 +659,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       setReceiptPreviewDataUrl(compressed);
       setReceiptExtractLoading(true);
       try {
-        const apiKey = await fetchReceiptScannerGeminiKey();
         const extracted = await extractExpenseItemsFromReceiptImage({
           imageDataUrl: compressed,
-          apiKey,
+          apiKey: undefined,
           categories: extractionCategoryTypes,
         });
         setReceiptExtractResult(extracted);

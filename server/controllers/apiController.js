@@ -22,6 +22,7 @@ const socketService = require('../utils/socketService');
 const TranslationService = require('../utils/translationService');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils');
 const { stitchReceiptDataUrls } = require('../services/receiptStitchService');
+const { analyzeReceipt, extractOrderLinesFromReceipt } = require('../services/orderReceiptHelpers');
 const pool = require('../config/db');
 
 class ApiController {
@@ -227,6 +228,65 @@ class ApiController {
 			return res.status(500).json({
 				success: false,
 				error: error?.message || 'Failed to stitch receipt images'
+			});
+		}
+	}
+
+	static async analyzeReceipt(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const base64 = req.body?.base64 ?? req.body?.image ?? req.body?.imageBase64 ?? '';
+			if (!base64) {
+				return res.status(400).json({
+					success: false,
+					error: 'base64 is required'
+				});
+			}
+
+			const categories = req.body?.categories;
+			const data = await analyzeReceipt(base64, categories);
+			return res.json({
+				success: true,
+				data
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] POST /api/receiptscanner/analyze - Error:`, error);
+			const msg = error?.message || 'Failed to analyze receipt';
+			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
+			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
+			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : 500;
+			return res.status(status).json({
+				success: false,
+				error: msg
+			});
+		}
+	}
+
+	static async analyzeReceiptOrders(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const base64 = req.body?.base64 ?? req.body?.image ?? req.body?.imageBase64 ?? '';
+			if (!base64) {
+				return res.status(400).json({
+					success: false,
+					error: 'base64 is required'
+				});
+			}
+
+			const data = await extractOrderLinesFromReceipt(base64);
+			return res.json({
+				success: true,
+				data
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] POST /api/receiptscanner/analyze-orders - Error:`, error);
+			const msg = error?.message || 'Failed to analyze receipt for orders';
+			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
+			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
+			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : 500;
+			return res.status(status).json({
+				success: false,
+				error: msg
 			});
 		}
 	}
