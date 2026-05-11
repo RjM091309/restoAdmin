@@ -46,7 +46,13 @@ export async function extractExpenseItemsFromReceiptImage(params: {
     error?: string;
   };
   if (!res.ok || !json.success || !json.data) {
-    throw new Error(json.error || 'Failed to analyze receipt');
+    const serverMsg = (json.error || '').trim() || 'Failed to analyze receipt';
+    if (res.status === 422) {
+      throw new Error(
+        `${serverMsg} Very long receipts can exceed the scanner output limit—try scanning the receipt in two or more shorter sections (split the image or capture top and bottom separately), then add the items together.`
+      );
+    }
+    throw new Error(serverMsg);
   }
   return json.data;
 }

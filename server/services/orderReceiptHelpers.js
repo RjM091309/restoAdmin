@@ -12,6 +12,13 @@ const SERVICE_ACCOUNT_KEY_PATH = path.resolve(__dirname, '..', '..', 'core-api-4
 
 const ORDER_NO_PATTERN = /^ORD-\d{8}-\d{6}$/;
 
+/** Long expense receipts need a high ceiling so JSON is not cut mid-array (env override). */
+function expenseMaxOutputTokens() {
+  const n = Number.parseInt(String(process.env.RECEIPT_EXPENSE_MAX_OUTPUT_TOKENS ?? '8192'), 10);
+  if (Number.isFinite(n) && n >= 2048) return Math.min(n, 32768);
+  return 8192;
+}
+
 /** @param {string} input raw base64 or data URL */
 function parseImageInput(input) {
   const s = String(input ?? '').trim();
@@ -28,6 +35,65 @@ function extractJsonObject(text) {
   const last = s.lastIndexOf('}');
   if (first < 0 || last <= first) return null;
   return s.slice(first, last + 1);
+}
+
+/** Strip ```json / ``` fences the model sometimes adds despite JSON mode. */
+function stripMarkdownCodeFences(text) {
+  let s = String(text ?? '').trim();
+  s = s.replace(/^\s*```(?:json|JSON)?\s*\r?\n?/i, '');
+  s = s.replace(/\r?\n?\s*```\s*$/i, '');
+  return s.trim();
+}
+
+/** First ```json ... ``` block anywhere in the text (non-greedy), if present. */
+function extractFencedJson(text) {
+  const m = String(text ?? '').match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (!m?.[1]) return null;
+  const inner = m[1].trim();
+  return inner || null;
+}
+
+/**
+ * Parse model text as JSON: trim, strip fences, prefer substring from first "{" to last "}".
+ * @returns {{ ok: true, value: unknown } | { ok: false, error: string }}
+ */
+function parseModelJsonResponse(rawText) {
+  const raw = String(rawText ?? '').trim();
+  let s = extractFencedJson(raw) || stripMarkdownCodeFences(raw);
+  if (!s) s = raw;
+  if (!s) {
+    return { ok: false, error: 'Empty model response' };
+  }
+  const objectSlice = extractJsonObject(s) || s;
+  try {
+    return { ok: true, value: JSON.parse(objectSlice) };
+  } catch (e1) {
+    if (objectSlice !== s) {
+      try {
+        return { ok: true, value: JSON.parse(s) };
+      } catch (e2) {
+        return {
+          ok: false,
+          error: `Invalid JSON: ${e1?.message || e2?.message || 'parse failed'}`,
+        };
+      }
+    }
+    return { ok: false, error: `Invalid JSON: ${e1?.message || 'parse failed'}` };
+  }
+}
+
+/**
+ * @param {{ ok: false, error: string }} parseResult
+ * @param {string} [rawText]
+ * @param {string} [extraHint]
+ */
+function throwInvalidModelJson(parseResult, rawText = '', extraHint = '') {
+  const base = parseResult.error || 'Model returned invalid JSON';
+  const msg = [base, extraHint].filter(Boolean).join(' ').trim();
+  const e = new Error(msg);
+  e.code = 'RECEIPT_MODEL_JSON_PARSE';
+  e.rawModelText = typeof rawText === 'string' ? rawText : '';
+  throw e;
 }
 
 function isVertexNotFound(err) {
@@ -53,9 +119,10 @@ function wrapVertexClientError(err) {
  * @param {{ mimeType: string, data: string }} image
  * @param {string} prompt
  * @param {{ maxOutputTokens?: number }} [opts]
+ * @returns {Promise<{ text: string, finishReason: string }>}
  */
 async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
-  const maxOutputTokens = opts.maxOutputTokens ?? 2048;
+  const maxOutputTokens = opts.maxOutputTokens ?? 4096;
   if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
   }
@@ -74,7 +141,11 @@ async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
       try {
         const model = vertex.getGenerativeModel({
           model: modelId,
-          generationConfig: { temperature: 0.2, maxOutputTokens },
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens,
+            responseMimeType: 'application/json',
+          },
         });
 
         const resp = await model.generateContent({
@@ -89,14 +160,16 @@ async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
           ],
         });
 
+        const candidate = resp?.response?.candidates?.[0];
+        const finishReason = String(candidate?.finishReason ?? '');
         const text =
-          resp?.response?.candidates?.[0]?.content?.parts
+          candidate?.content?.parts
             ?.map((p) => p?.text)
             .filter(Boolean)
             .join('\n') ?? '';
 
         if (!text) throw new Error('No text response from Vertex model');
-        return text;
+        return { text, finishReason };
       } catch (e) {
         lastErr = e;
         if (isVertexNotFound(e)) continue;
@@ -128,7 +201,13 @@ async function analyzeReceipt(base64, categories) {
   try {
     const safeCats = Array.isArray(categories) ? categories.map((c) => String(c).trim()).filter(Boolean) : [];
     const catList = safeCats.length ? safeCats.join(', ') : 'Others';
-    const prompt = `Extract this receipt into STRICT JSON only (no markdown, no backticks).
+    const prompt = `Extract items from the receipt. Output ONLY valid raw JSON.
+Do not include markdown tags, comments, or explanations.
+Ensure all strings are properly escaped, especially if they contain special characters or currency symbols like ₱.
+If a value is uncertain, provide a best guess based on the visual data but maintain JSON structure.
+The receipt may be long. Ensure the JSON is complete and all brackets are closed.
+Do not include any text before or after the JSON object.
+If an item name has special characters or quotes, escape them properly for JSON strings.
 
 JSON schema:
 {
@@ -141,12 +220,18 @@ Rules:
 - If qty is missing, use 1.
 - "unit": use short code like PCS, KG, G, ML, L, BOX, PACK, CAN, BTL. If unknown, use PCS.
 - "category" MUST be exactly one of: ${catList}
-- Numbers must be plain decimals (no currency symbols).
-- Output ONLY valid JSON.`;
+- Numbers must be plain decimals (no currency symbols in numeric fields; put currency only inside string fields like "name" if needed).`;
 
-    const text = await vertexGenerateTextFromImage(image, prompt, { maxOutputTokens: 2048 });
-    const jsonText = extractJsonObject(text) ?? text;
-    const parsed = JSON.parse(jsonText);
+    const { text, finishReason } = await vertexGenerateTextFromImage(image, prompt, {
+      maxOutputTokens: expenseMaxOutputTokens(),
+    });
+    const parsedResult = parseModelJsonResponse(text);
+    const truncated = String(finishReason || '').toUpperCase() === 'MAX_TOKENS';
+    const truncationHint = truncated
+      ? 'The model output may have been cut off (output limit). Try a shorter receipt image or scan in sections.'
+      : '';
+    if (!parsedResult.ok) throwInvalidModelJson(parsedResult, text, truncationHint);
+    const parsed = parsedResult.value;
 
     const items = Array.isArray(parsed?.items)
       ? parsed.items
@@ -343,7 +428,15 @@ async function extractOrderLinesFromReceipt(base64) {
   const image = parseImageInput(base64);
   if (!image.data) throw new Error('Invalid image data');
 
-  const prompt = `You extract restaurant or retail POS receipts into JSON for order entry.
+  const prompt = `Extract items from the receipt. Output ONLY valid raw JSON.
+Do not include markdown tags, comments, or explanations.
+Ensure all strings are properly escaped, especially if they contain special characters or currency symbols like ₱.
+If a value is uncertain, provide a best guess based on the visual data but maintain JSON structure.
+The receipt may be long. Ensure the JSON is complete and all brackets are closed.
+Do not include any text before or after the JSON object.
+If an item name has special characters or quotes, escape them properly for JSON strings.
+
+You extract restaurant or retail POS receipts into JSON for order entry.
 
 The image may be one long stitched receipt (multiple photos). Read top to bottom completely.
 
@@ -397,10 +490,14 @@ Output ONLY strict JSON (no markdown) with this shape:
 }`;
 
   try {
-    const text = await vertexGenerateTextFromImage(image, prompt, { maxOutputTokens: 8192 });
-    const jsonText = extractJsonObject(text) ?? text;
-    const parsed = JSON.parse(jsonText);
-    return normalizeOrderExtractionFromParsed(parsed);
+    const { text, finishReason } = await vertexGenerateTextFromImage(image, prompt, { maxOutputTokens: 8192 });
+    const parsedResult = parseModelJsonResponse(text);
+    const truncated = String(finishReason || '').toUpperCase() === 'MAX_TOKENS';
+    const truncationHint = truncated
+      ? 'The model output may have been cut off (output limit). Try a shorter receipt image or scan in sections.'
+      : '';
+    if (!parsedResult.ok) throwInvalidModelJson(parsedResult, text, truncationHint);
+    return normalizeOrderExtractionFromParsed(parsedResult.value);
   } catch (err) {
     wrapVertexClientError(err);
   }

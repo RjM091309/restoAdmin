@@ -251,10 +251,18 @@ class ApiController {
 			});
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] POST /api/receiptscanner/analyze - Error:`, error);
+			if (error?.code === 'RECEIPT_MODEL_JSON_PARSE' && typeof error?.rawModelText === 'string') {
+				const raw = error.rawModelText;
+				console.error(
+					`[${timestamp}] [receiptscanner] JSON parse failed; raw model text length=${raw.length}. First/last 500 chars for debugging:`
+				);
+				console.error(raw.length <= 1000 ? raw : `${raw.slice(0, 500)}\n…\n${raw.slice(-500)}`);
+			}
 			const msg = error?.message || 'Failed to analyze receipt';
 			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
 			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
-			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : 500;
+			const isModelJsonParse = error?.code === 'RECEIPT_MODEL_JSON_PARSE';
+			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : isModelJsonParse ? 422 : 500;
 			return res.status(status).json({
 				success: false,
 				error: msg
@@ -280,10 +288,18 @@ class ApiController {
 			});
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] POST /api/receiptscanner/analyze-orders - Error:`, error);
+			if (error?.code === 'RECEIPT_MODEL_JSON_PARSE' && typeof error?.rawModelText === 'string') {
+				const raw = error.rawModelText;
+				console.error(
+					`[${timestamp}] [receiptscanner] JSON parse failed; raw model text length=${raw.length}. First/last 500 chars for debugging:`
+				);
+				console.error(raw.length <= 1000 ? raw : `${raw.slice(0, 500)}\n…\n${raw.slice(-500)}`);
+			}
 			const msg = error?.message || 'Failed to analyze receipt for orders';
 			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
 			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
-			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : 500;
+			const isModelJsonParse = error?.code === 'RECEIPT_MODEL_JSON_PARSE';
+			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : isModelJsonParse ? 422 : 500;
 			return res.status(status).json({
 				success: false,
 				error: msg
