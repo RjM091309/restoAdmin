@@ -261,7 +261,11 @@ class ApiController {
 			const msg = error?.message || 'Failed to analyze receipt';
 			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
 			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
-			const isModelJsonParse = error?.code === 'RECEIPT_MODEL_JSON_PARSE';
+			const isModelJsonParse =
+				error?.code === 'RECEIPT_MODEL_JSON_PARSE' ||
+				/invalid json|after array element in json|expected[\s\S]{0,120}array element|json at position|unexpected token|unterminated string/i.test(
+					String(msg)
+				);
 			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : isModelJsonParse ? 422 : 500;
 			return res.status(status).json({
 				success: false,
@@ -298,7 +302,11 @@ class ApiController {
 			const msg = error?.message || 'Failed to analyze receipt for orders';
 			const isVertexAuthBilling = error?.code === 'VERTEX_AUTH_BILLING' || /Vertex AI request failed/i.test(String(msg));
 			const isVertexModelNotFound = error?.code === 'VERTEX_MODEL_NOT_FOUND';
-			const isModelJsonParse = error?.code === 'RECEIPT_MODEL_JSON_PARSE';
+			const isModelJsonParse =
+				error?.code === 'RECEIPT_MODEL_JSON_PARSE' ||
+				/invalid json|after array element in json|expected[\s\S]{0,120}array element|json at position|unexpected token|unterminated string/i.test(
+					String(msg)
+				);
 			const status = isVertexAuthBilling ? 503 : isVertexModelNotFound ? 404 : isModelJsonParse ? 422 : 500;
 			return res.status(status).json({
 				success: false,

@@ -14,9 +14,55 @@ const ORDER_NO_PATTERN = /^ORD-\d{8}-\d{6}$/;
 
 /** Long expense receipts need a high ceiling so JSON is not cut mid-array (env override). */
 function expenseMaxOutputTokens() {
-  const n = Number.parseInt(String(process.env.RECEIPT_EXPENSE_MAX_OUTPUT_TOKENS ?? '8192'), 10);
+  const n = Number.parseInt(String(process.env.RECEIPT_EXPENSE_MAX_OUTPUT_TOKENS ?? '12288'), 10);
   if (Number.isFinite(n) && n >= 2048) return Math.min(n, 32768);
-  return 8192;
+  return 12288;
+}
+
+/** Vertex structured output for expense analyze — reduces invalid / half-escaped JSON from the model. */
+function buildExpenseReceiptResponseSchema(SchemaType) {
+  return {
+    type: SchemaType.OBJECT,
+    properties: {
+      items: {
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            qty: { type: SchemaType.NUMBER },
+            name: { type: SchemaType.STRING },
+            price: { type: SchemaType.NUMBER },
+            category: { type: SchemaType.STRING },
+            unit: { type: SchemaType.STRING },
+          },
+          required: ['qty', 'name', 'price', 'category', 'unit'],
+        },
+      },
+      receipt_grand_total: { type: SchemaType.NUMBER },
+    },
+    required: ['items', 'receipt_grand_total'],
+  };
+}
+
+/**
+ * Vertex SDK sometimes throws SyntaxError for bad JSON; map to RECEIPT_MODEL_JSON_PARSE so clients get 422.
+ * @param {unknown} err
+ */
+function normalizeReceiptModelJsonError(err) {
+  if (!err || typeof err !== 'object') return err;
+  if (err.code === 'RECEIPT_MODEL_JSON_PARSE') return err;
+  const msg = String(err.message ?? err ?? '');
+  const looksLikeJsonParse =
+    err instanceof SyntaxError ||
+    /invalid json|after array element in json|expected[\s\S]{0,120}array element|expected property name|unexpected token|bad control character|unterminated string/i.test(
+      msg
+    ) ||
+    /\bJSON\b.*\b(position|line)\b/i.test(msg);
+  if (!looksLikeJsonParse) return err;
+  const e = new Error(msg.startsWith('Invalid JSON') ? msg : `Invalid JSON: ${msg}`);
+  e.code = 'RECEIPT_MODEL_JSON_PARSE';
+  if (typeof err.rawModelText === 'string') e.rawModelText = err.rawModelText;
+  return e;
 }
 
 /** @param {string} input raw base64 or data URL */
@@ -35,6 +81,38 @@ function extractJsonObject(text) {
   const last = s.lastIndexOf('}');
   if (first < 0 || last <= first) return null;
   return s.slice(first, last + 1);
+}
+
+/** First complete `{ ... }` by brace depth (ignores `{`/`}` inside strings). Safer than first-{ to last-} when extra text or two objects are concatenated. */
+function extractBalancedJsonObject(text) {
+  const s = String(text ?? '');
+  const start = s.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (c === '\\') escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 /** Strip ```json / ``` fences the model sometimes adds despite JSON mode. */
@@ -64,7 +142,7 @@ function parseModelJsonResponse(rawText) {
   if (!s) {
     return { ok: false, error: 'Empty model response' };
   }
-  const objectSlice = extractJsonObject(s) || s;
+  const objectSlice = extractBalancedJsonObject(s) || extractJsonObject(s) || s;
   try {
     return { ok: true, value: JSON.parse(objectSlice) };
   } catch (e1) {
@@ -74,7 +152,7 @@ function parseModelJsonResponse(rawText) {
       } catch (e2) {
         return {
           ok: false,
-          error: `Invalid JSON: ${e1?.message || e2?.message || 'parse failed'}`,
+          error: `Invalid JSON: ${e2?.message || e1?.message || 'parse failed'}`,
         };
       }
     }
@@ -118,7 +196,7 @@ function wrapVertexClientError(err) {
 /**
  * @param {{ mimeType: string, data: string }} image
  * @param {string} prompt
- * @param {{ maxOutputTokens?: number }} [opts]
+ * @param {{ maxOutputTokens?: number, expenseStructuredJson?: boolean }} [opts]
  * @returns {Promise<{ text: string, finishReason: string }>}
  */
 async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
@@ -127,7 +205,7 @@ async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
     process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
   }
 
-  const { VertexAI } = await import('@google-cloud/vertexai');
+  const { VertexAI, SchemaType } = await import('@google-cloud/vertexai');
 
   const locationOrder =
     process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
@@ -139,13 +217,16 @@ async function vertexGenerateTextFromImage(image, prompt, opts = {}) {
     const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
     for (const modelId of MODEL_CANDIDATES) {
       try {
+        const generationConfig = {
+          temperature: opts.expenseStructuredJson ? 0 : 0.2,
+          maxOutputTokens,
+          responseMimeType: 'application/json',
+          ...(opts.expenseStructuredJson ? { responseSchema: buildExpenseReceiptResponseSchema(SchemaType) } : {}),
+        };
+
         const model = vertex.getGenerativeModel({
           model: modelId,
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens,
-            responseMimeType: 'application/json',
-          },
+          generationConfig,
         });
 
         const resp = await model.generateContent({
@@ -224,6 +305,7 @@ Rules:
 
     const { text, finishReason } = await vertexGenerateTextFromImage(image, prompt, {
       maxOutputTokens: expenseMaxOutputTokens(),
+      expenseStructuredJson: true,
     });
     const parsedResult = parseModelJsonResponse(text);
     const truncated = String(finishReason || '').toUpperCase() === 'MAX_TOKENS';
@@ -252,7 +334,7 @@ Rules:
 
     return { items, receipt_grand_total, extracted_items_sum, math_match };
   } catch (err) {
-    wrapVertexClientError(err);
+    wrapVertexClientError(normalizeReceiptModelJsonError(err));
   }
 }
 
@@ -499,7 +581,7 @@ Output ONLY strict JSON (no markdown) with this shape:
     if (!parsedResult.ok) throwInvalidModelJson(parsedResult, text, truncationHint);
     return normalizeOrderExtractionFromParsed(parsedResult.value);
   } catch (err) {
-    wrapVertexClientError(err);
+    wrapVertexClientError(normalizeReceiptModelJsonError(err));
   }
 }
 
