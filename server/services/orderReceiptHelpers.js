@@ -537,12 +537,13 @@ Each order object must have:
 - order_total_amount: sum of that block's line_price values (decimals only). Compute this yourself.
 
 Each line item must have:
-- item_name: text AS PRINTED in the item column (do not translate or rename)
+- item_name: text AS PRINTED in the item column (do not translate or rename). If a name is split across two lines on the receipt (e.g. "OLD - FASHI" then "ONED"), combine into one item_name (e.g. "OLD FASHIONED").
 - quantity: number (if not shown, use 1)
 - menu_selection: modifiers printed on the receipt for that line — size, set meal choice, add-ons, variant, or empty string "" if none
 - line_price: final extended price for that line only (number, no currency symbols)
 
 Global rules:
+- Include EVERY food, drink, and merchandise line in each order block. Do not skip or merge distinct items (e.g. if the receipt lists Margarita, Highball, and Old Fashioned, output three separate line items).
 - Include food, drinks, and packaged goods sold. Exclude store boilerplate, TIN, cashier-only lines, payment/change lines, and standalone tax-only lines unless they are a real product line.
 - Exclude service charges / tips / gratuity lines from items (e.g. "Service Charge", "SVC CHG", "Room charge", "Gratuity", "Tip"). These are NOT merchandise lines.
 - Numbers: decimals only; no "P", "Php", "₱", or letters in numeric fields.

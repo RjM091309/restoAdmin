@@ -51,7 +51,7 @@ import { toUserFriendlyError } from '../../utils/userFriendlyErrors';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey } from '../../services/receiptScannerService';
 import { extractOrderLinesFromReceiptImage, type ReceiptOrderExtractionResult } from '../../services/receiptOrderExtraction';
 import { ReceiptOrderBlockCard } from './ReceiptOrderBlockCard';
-import { bestMenuMatchForReceiptLine } from '../../services/receiptOrderMenuMatch';
+import { matchReceiptLineToMenu } from '../../services/receiptOrderMenuMatch';
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 import { useUser } from '../../context/UserContext';
@@ -982,6 +982,30 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return () => { cancelled = true; };
     }, [receiptOrderOpen, isAllBranches, receiptOrderBranchId, branchId]);
 
+    // Re-run automapping when menus load or multi-order extraction finishes (fixes wrong first-pass matches)
+    useEffect(() => {
+        if (!receiptOrderMenus.length || !receiptRows.length) return;
+        setReceiptRows((prev) => {
+            let changed = false;
+            const next = prev.map((row) => {
+                const qty = Number(row.qty) || 1;
+                const match = matchReceiptLineToMenu(
+                    row.extractedName,
+                    Number(row.receiptLineTotal) || 0,
+                    qty,
+                    receiptOrderMenus
+                );
+                const nextId = match ? match.id : null;
+                if (String(row.menuId ?? '') !== String(nextId ?? '')) {
+                    changed = true;
+                    return { ...row, menuId: nextId };
+                }
+                return row;
+            });
+            return changed ? next : prev;
+        });
+    }, [receiptOrderMenus, receiptExtractResult]);
+
     // Tables for receipt order modal
     useEffect(() => {
         if (!receiptOrderOpen) return;
@@ -1210,18 +1234,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setReceiptMetaById(metaMap);
             setReceiptMapOpenByOrderId({});
             const bid = isAllBranches ? receiptOrderBranchId : branchId;
-            const menus = await getMenus(bid).then((m) =>
-                (Array.isArray(m) ? m : []).filter((x) => x.active && (x.effectiveAvailable ?? x.isAvailable))
-            );
-            const rows = result.items.map((item, i) => {
-                const match = bestMenuMatchForReceiptLine(item.item_name, menus);
+            const menus =
+                receiptOrderMenus.length > 0
+                    ? receiptOrderMenus
+                    : await getMenus(bid).then((m) =>
+                          (Array.isArray(m) ? m : []).filter((x) => x.active && (x.effectiveAvailable ?? x.isAvailable))
+                      );
+            const rows = result.items
+                .filter((item) => !looksLikeReceiptServiceChargeLine(item.item_name))
+                .map((item, i) => {
                 const qty = Number(item.quantity);
+                const q = Number.isFinite(qty) && qty > 0 ? qty : 1;
+                const lineTotal = Number(item.line_price) || 0;
+                const match = matchReceiptLineToMenu(item.item_name, lineTotal, q, menus);
                 return {
                     id: `rec-${Date.now()}-${i}`,
                     extractedName: item.item_name,
                     menuSelection: item.menu_selection || '',
-                    qty: Number.isFinite(qty) && qty > 0 ? qty : 1,
-                    receiptLineTotal: Number(item.line_price) || 0,
+                    qty: q,
+                    receiptLineTotal: lineTotal,
                     menuId: match ? match.id : null,
                     orderId: Number(item.order_id) > 0 ? Math.floor(Number(item.order_id)) : 1,
                 };

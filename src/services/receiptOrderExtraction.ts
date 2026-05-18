@@ -163,12 +163,13 @@ Each order object must have:
 - order_total_amount: sum of that block's line_price values (decimals only). Compute this yourself.
 
 Each line item must have:
-- item_name: text AS PRINTED in the item column (do not translate or rename)
+- item_name: text AS PRINTED in the item column (do not translate or rename). If a name is split across two lines on the receipt, combine into one item_name.
 - quantity: number (if not shown, use 1)
 - menu_selection: modifiers printed on the receipt for that line — size, set meal choice, add-ons, variant, or empty string "" if none
 - line_price: final extended price for that line only (number, no currency symbols)
 
 Global rules:
+- Include EVERY food, drink, and merchandise line in each order block. Do not skip or merge distinct items.
 - Include food, drinks, and packaged goods sold. Exclude store boilerplate, TIN, cashier-only lines, payment/change lines, and standalone tax-only lines unless they are a real product line.
 - Numbers: decimals only; no "P", "Php", "₱", or letters in numeric fields.
 - receipt_grand_total: if the receipt shows one overall total, use it; if multiple separate transactions with separate totals, use the sum of those transaction totals (or sum of order_total_amount if that matches the print).
