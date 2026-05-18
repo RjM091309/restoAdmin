@@ -39,6 +39,7 @@ class UserBranchModel {
 				b.BRANCH_NAME,
 				b.ADDRESS,
 				b.PHONE,
+				b.BRANCH_LOGO,
 				b.MENU_CATEGORY_LEVEL,
 				b.ACTIVE
 			FROM user_info u

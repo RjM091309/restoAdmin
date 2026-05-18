@@ -290,6 +290,7 @@ export type UpdateMenuPayload = {
 function buildFormData(
     body: Record<string, string | number | boolean | null>,
     file?: File | null,
+    /** Must match server FIELDS.MENU_IMG — menu uploads only, not branch logos */
     fileFieldName: string = 'MENU_IMG'
 ): FormData {
     const form = new FormData();

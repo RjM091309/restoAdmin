@@ -8,6 +8,8 @@ import { clsx } from 'clsx';
 
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
+import { DEFAULT_ALL_BRANCHES_LOGO } from '../../utils/branchLogo';
+import { navigateToBranch } from '../../utils/branchNavigation';
 
 type DateRange = {
   start: string;
@@ -17,6 +19,8 @@ type DateRange = {
 export type Branch = {
   id: string | number;
   name: string;
+  /** Relative path e.g. /uploads/branches/foo.webp — null if none uploaded */
+  logo?: string | null;
   /** From branches.MENU_CATEGORY_LEVEL: 1 = single category list; 2 = main + subcategory */
   menuCategoryLevel?: 1 | 2;
 };
@@ -164,6 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
           const data = (json.data ?? json).map((b: any) => ({
             id: b.IDNo,
             name: b.BRANCH_LABEL || b.BRANCH_NAME,
+            logo: b.BRANCH_LOGO || null,
             menuCategoryLevel: Number(b.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1,
           }));
           const userBranchId = user?.branch_id ? String(user.branch_id) : '';
@@ -171,7 +176,10 @@ export const Header: React.FC<HeaderProps> = ({
           let branchOptions: Branch[] = [];
 
           if (isAdmin) {
-            branchOptions = [{ id: 'all', name: t('header.all_branches') }, ...data];
+            branchOptions = [
+              { id: 'all', name: t('header.all_branches'), logo: DEFAULT_ALL_BRANCHES_LOGO },
+              ...data,
+            ];
           } else if (isManager) {
             // Managers (permission = 3) should only see their specific branch
             branchOptions = userBranchId
@@ -193,6 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
             const urlBranch: Branch = fromList ?? {
               id: branchIdFromUrl,
               name: branchNameFromUrl?.replace(/\+/g, ' ') || (branchIdFromUrl === 'all' ? t('header.all_branches') : `Branch ${branchIdFromUrl}`),
+              logo: branchIdFromUrl === 'all' ? DEFAULT_ALL_BRANCHES_LOGO : null,
               menuCategoryLevel: 1,
             };
             const matches =
@@ -200,6 +209,8 @@ export const Header: React.FC<HeaderProps> = ({
               String(selectedBranch.id) === String(branchIdFromUrl);
             if (!matches) {
               onBranchChange(urlBranch);
+            } else if (fromList && selectedBranch.logo !== fromList.logo) {
+              onBranchChange(fromList);
             }
           } else if (!selectedBranch && branchOptions.length > 0) {
             // No branch in URL — set default by role
@@ -256,27 +267,6 @@ export const Header: React.FC<HeaderProps> = ({
     activeTab === 'Category' ||
     activeTab === 'Payment type' ||
     activeTab === 'Receipt';
-  const navigateToBranch = (branch: Branch, opts?: { newTab?: boolean }) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('branchId', String(branch.id));
-    url.searchParams.set('branchName', branch.name);
-    try {
-      localStorage.setItem('lastSelectedBranchId', String(branch.id));
-      localStorage.setItem('lastSelectedBranchName', String(branch.name || ''));
-    } catch {
-      // ignore storage failures (private mode, quota, etc.)
-    }
-    if (opts?.newTab) {
-      window.open(url.toString(), '_blank', 'noopener,noreferrer');
-    } else {
-      // Keep branch selection stable on refresh by persisting it in the URL,
-      // but avoid a full page reload (admin complained about redirect on select).
-      // React Router listens to popstate; dispatch one after updating the URL.
-      window.history.pushState({}, '', url.toString());
-      window.dispatchEvent(new PopStateEvent('popstate'));
-    }
-  };
-
   // Prevent showing duplicated breadcrumbs like "User Management / User Management"
   const cleanedBreadcrumbs = breadcrumbs.filter(
     (crumb, idx) => idx === 0 || crumb !== breadcrumbs[idx - 1]

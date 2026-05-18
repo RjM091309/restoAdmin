@@ -776,6 +776,8 @@
 		"enter_name": "输入分支名称",
 		"enter_address": "输入地址",
 		"enter_phone": "输入电话",
+		"logo": "标志",
+		"logo_hint": "可选。将保存为 WebP（最大 5MB）。",
 		"code_and_name_required": "分支代码和名称为必填项。",
 		"failed_to_load": "加载分支失败",
 		"admin_only": "仅管理员可管理分支。",

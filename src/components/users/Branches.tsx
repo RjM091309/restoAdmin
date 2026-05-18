@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Loader2, Plus, Edit2, Trash2, MapPin, Building2, Hash, Layers } from 'lucide-react';
+import { Search, Loader2, Plus, Edit2, Trash2, MapPin, Building2, Hash, Layers, ImageIcon } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { SidePanel } from '../ui/SidePanel';
@@ -16,17 +16,24 @@ interface BranchRow {
   name: string;
   address: string;
   phone: string;
+  logo: string | null;
   /** 1 = main category only; 2 = main + subcategory */
   categoryLevel: 1 | 2;
   status: 'Active' | 'Inactive';
 }
 
-const authHeaders = (): HeadersInit => {
+const authHeaders = (json = true): HeadersInit => {
   const token = localStorage.getItem('token');
   return {
-    'Content-Type': 'application/json',
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+};
+
+const resolveLogoUrl = (logoPath: string | null | undefined): string | null => {
+  if (!logoPath || logoPath === '—') return null;
+  if (logoPath.startsWith('http')) return logoPath;
+  return logoPath.startsWith('/') ? logoPath : `/${logoPath}`;
 };
 
 export const Branches: React.FC = () => {
@@ -52,6 +59,15 @@ export const Branches: React.FC = () => {
     phone: '',
     categoryLevel: 1 as 1 | 2,
   });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [existingLogo, setExistingLogo] = useState<string | null>(null);
+
+  const resetLogoState = () => {
+    setLogoFile(null);
+    setLogoPreview(null);
+    setExistingLogo(null);
+  };
 
   const fetchBranches = useCallback(async () => {
     setLoading(true);
@@ -69,6 +85,7 @@ export const Branches: React.FC = () => {
         name: b.BRANCH_NAME || '—',
         address: b.ADDRESS || '—',
         phone: b.PHONE || '—',
+        logo: b.BRANCH_LOGO || null,
         categoryLevel: Number(b.MENU_CATEGORY_LEVEL) === 2 ? 2 : 1,
         status: b.ACTIVE === 1 ? 'Active' : 'Inactive',
       }));
@@ -100,6 +117,7 @@ export const Branches: React.FC = () => {
   const handleOpenAddPanel = () => {
     setEditingBranch(null);
     setFormData({ code: '', name: '', address: '', phone: '', categoryLevel: 1 });
+    resetLogoState();
     setIsPanelOpen(true);
   };
 
@@ -112,7 +130,24 @@ export const Branches: React.FC = () => {
       phone: branch.phone === '—' ? '' : branch.phone,
       categoryLevel: branch.categoryLevel,
     });
+    setLogoFile(null);
+    setExistingLogo(branch.logo);
+    setLogoPreview(resolveLogoUrl(branch.logo));
     setIsPanelOpen(true);
+  };
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setLogoFile(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => setLogoPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } else if (existingLogo) {
+      setLogoPreview(resolveLogoUrl(existingLogo));
+    } else {
+      setLogoPreview(null);
+    }
   };
 
   const handleOpenDeleteModal = (branch: BranchRow) => {
@@ -128,19 +163,23 @@ export const Branches: React.FC = () => {
     }
     setIsSubmitting(true);
     try {
-      const body = {
-        BRANCH_CODE: formData.code.trim(),
-        BRANCH_NAME: formData.name.trim(),
-        ADDRESS: formData.address.trim() || undefined,
-        PHONE: formData.phone.trim() || undefined,
-        MENU_CATEGORY_LEVEL: formData.categoryLevel,
-      };
+      const form = new FormData();
+      form.append('BRANCH_CODE', formData.code.trim());
+      form.append('BRANCH_NAME', formData.name.trim());
+      if (formData.address.trim()) form.append('ADDRESS', formData.address.trim());
+      if (formData.phone.trim()) form.append('PHONE', formData.phone.trim());
+      form.append('MENU_CATEGORY_LEVEL', String(formData.categoryLevel));
+      if (logoFile) {
+        form.append('BRANCH_LOGO', logoFile);
+      } else if (editingBranch && existingLogo) {
+        form.append('BRANCH_LOGO', existingLogo);
+      }
       const url = editingBranch ? `/branch/${editingBranch.id}` : '/branch';
       const method = editingBranch ? 'PUT' : 'POST';
       const res = await fetch(url, {
         method,
-        headers: authHeaders(),
-        body: JSON.stringify(body),
+        headers: authHeaders(false),
+        body: form,
       });
       let data: { success?: boolean; error?: string; message?: string };
       try {
@@ -192,7 +231,21 @@ export const Branches: React.FC = () => {
     },
     {
       header: t('manage_branches.name'),
-      render: (b) => <span className="text-sm font-bold">{b.name}</span>,
+      render: (b) => (
+        <motion.div layout className="flex items-center gap-3">
+          <motion.div
+            layout
+            className="w-9 h-9 rounded-lg bg-gray-100 border border-gray-200 overflow-hidden shrink-0 flex items-center justify-center"
+          >
+            {b.logo ? (
+              <img src={resolveLogoUrl(b.logo) || ''} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <Building2 size={16} className="text-brand-muted" />
+            )}
+          </motion.div>
+          <span className="text-sm font-bold">{b.name}</span>
+        </motion.div>
+      ),
     },
     {
       header: t('manage_branches.menu_category_level_column'),
@@ -344,6 +397,7 @@ export const Branches: React.FC = () => {
           if (!isSubmitting) {
             setIsPanelOpen(false);
             setFormData({ code: '', name: '', address: '', phone: '', categoryLevel: 1 });
+            resetLogoState();
           }
         }}
         title={editingBranch ? t('manage_branches.edit_branch') : t('manage_branches.add_new_branch')}
@@ -432,6 +486,30 @@ export const Branches: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 autoComplete="off"
               />
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                {t('manage_branches.logo')}
+              </label>
+              <div className="flex items-center gap-4">
+                <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-200 shrink-0">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <ImageIcon size={24} className="text-brand-muted" />
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                    className="text-sm text-brand-muted file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-primary/10 file:text-brand-primary hover:file:bg-brand-primary/20 file:cursor-pointer cursor-pointer"
+                  />
+                  <p className="text-[10px] text-brand-muted mt-1">{t('manage_branches.logo_hint')}</p>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3" role="radiogroup" aria-labelledby="branch-menu-category-level-label">

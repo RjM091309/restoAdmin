@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, requireAdmin } = require('../middleware/unifiedAuth');
+const { branchUpload, convertBranchToWebp, FIELDS } = require('../middleware/upload');
 const BranchController = require('../controllers/branchController');
 
 // Branch management page route removed - use API endpoints instead
@@ -34,10 +35,10 @@ router.get('/user/:userId/branches', authenticate, requireAdmin, BranchControlle
 router.get('/:id', authenticate, requireAdmin, BranchController.getById);
 
 // Create branch (admin only)
-router.post('/', authenticate, requireAdmin, BranchController.create);
+router.post('/', authenticate, requireAdmin, branchUpload.single(FIELDS.BRANCH_LOGO), convertBranchToWebp, BranchController.create);
 
 // Update branch (admin only)
-router.put('/:id', authenticate, requireAdmin, BranchController.update);
+router.put('/:id', authenticate, requireAdmin, branchUpload.single(FIELDS.BRANCH_LOGO), convertBranchToWebp, BranchController.update);
 
 // Delete branch (soft delete)
 router.delete('/:id', authenticate, requireAdmin, BranchController.delete);

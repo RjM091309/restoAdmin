@@ -60,6 +60,20 @@ class BranchModel {
 				}
 			}
 
+			try {
+				await pool.execute(`
+					ALTER TABLE branches
+					ADD COLUMN BRANCH_LOGO VARCHAR(255) NULL DEFAULT NULL
+				`);
+			} catch (colErr) {
+				const code = String(colErr?.code || '');
+				const msg = String(colErr?.message || '');
+				const isDup = code === 'ER_DUP_FIELDNAME' || /Duplicate column name/i.test(msg);
+				if (!isDup) {
+					console.warn('[BranchModel] ensureSchema BRANCH_LOGO:', msg);
+				}
+			}
+
 			BranchModel._schemaReady = true;
 			BranchModel._schemaPromise = null;
 		})().catch((error) => {
@@ -74,7 +88,7 @@ class BranchModel {
 		await BranchModel.ensureSchema();
 		const [rows] = await pool.execute(
 			`
-			SELECT IDNo, BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE, ACTIVE, CREATED_DT, MENU_CATEGORY_LEVEL
+			SELECT IDNo, BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE, BRANCH_LOGO, ACTIVE, CREATED_DT, MENU_CATEGORY_LEVEL
 			FROM branches
 			WHERE ACTIVE = 1
 			ORDER BY BRANCH_NAME ASC, IDNo ASC
@@ -108,6 +122,9 @@ class BranchModel {
 		const address = data?.ADDRESS != null && String(data.ADDRESS).trim() !== '' ? String(data.ADDRESS).trim() : null;
 		const phone = data?.PHONE != null && String(data.PHONE).trim() !== '' ? String(data.PHONE).trim() : null;
 		const menuCategoryLevel = BranchModel._normalizeMenuCategoryLevel(data?.MENU_CATEGORY_LEVEL);
+		const logo = data?.BRANCH_LOGO != null && String(data.BRANCH_LOGO).trim() !== ''
+			? String(data.BRANCH_LOGO).trim()
+			: null;
 		const [result] = await pool.execute(
 			`
 			INSERT INTO branches (
@@ -115,12 +132,13 @@ class BranchModel {
 				BRANCH_NAME,
 				ADDRESS,
 				PHONE,
+				BRANCH_LOGO,
 				MENU_CATEGORY_LEVEL,
 				ACTIVE,
 				CREATED_DT
-			) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+			) VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
 			`,
-			[code, name, address, phone, menuCategoryLevel]
+			[code, name, address, phone, logo, menuCategoryLevel]
 		);
 		return result.insertId;
 	}
@@ -133,6 +151,23 @@ class BranchModel {
 	static async update(id, data) {
 		await BranchModel.ensureSchema();
 		const menuCategoryLevel = BranchModel._normalizeMenuCategoryLevel(data?.MENU_CATEGORY_LEVEL);
+		const hasLogo = Object.prototype.hasOwnProperty.call(data, 'BRANCH_LOGO');
+		const logo = hasLogo
+			? (data.BRANCH_LOGO != null && String(data.BRANCH_LOGO).trim() !== '' ? String(data.BRANCH_LOGO).trim() : null)
+			: undefined;
+		const params = [
+			data.BRANCH_CODE ? String(data.BRANCH_CODE).trim() : null,
+			String(data.BRANCH_NAME).trim(),
+			data.ADDRESS ? String(data.ADDRESS).trim() : null,
+			data.PHONE ? String(data.PHONE).trim() : null,
+			menuCategoryLevel,
+		];
+		let logoSql = '';
+		if (hasLogo) {
+			logoSql = ', BRANCH_LOGO = ?';
+			params.push(logo);
+		}
+		params.push(Number(id));
 		const [result] = await pool.execute(
 			`
 			UPDATE branches
@@ -141,17 +176,10 @@ class BranchModel {
 				BRANCH_NAME = ?,
 				ADDRESS = ?,
 				PHONE = ?,
-				MENU_CATEGORY_LEVEL = ?
+				MENU_CATEGORY_LEVEL = ?${logoSql}
 			WHERE IDNo = ? AND ACTIVE = 1
 			`,
-			[
-				data.BRANCH_CODE ? String(data.BRANCH_CODE).trim() : null,
-				String(data.BRANCH_NAME).trim(),
-				data.ADDRESS ? String(data.ADDRESS).trim() : null,
-				data.PHONE ? String(data.PHONE).trim() : null,
-				menuCategoryLevel,
-				Number(id),
-			]
+			params
 		);
 		return result.affectedRows > 0;
 	}

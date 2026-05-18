@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard,
@@ -19,6 +20,8 @@ import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
 import { type Branch } from './Header';
 import { SIDEBAR_FEATURES, type SidebarFeatureConfig } from '../../constants/sidebarFeatures';
+import { resolveBranchLogoUrl, resolveSidebarBranchLogo } from '../../utils/branchLogo';
+import { navigateToBranch } from '../../utils/branchNavigation';
 
 type SidebarProps = {
   activeTab: string;
@@ -100,6 +103,138 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   </div>
 );
 
+const HEADER_TITLE_MAX_PX = 18;
+const HEADER_TITLE_MIN_PX = 11;
+
+const ALL_BRANCHES_LOGO_GAP = 3;
+/** Use full available width so logos are as large as possible while all stay visible */
+const ALL_BRANCHES_LOGO_SIZE_FACTOR = 1;
+const ALL_BRANCHES_LOGO_MIN = 20;
+
+const AllBranchLogoButton: React.FC<{
+  branch: Branch;
+  logoSize: number;
+  children: React.ReactNode;
+}> = ({ branch, logoSize, children }) => (
+  <button
+    type="button"
+    title={branch.name}
+    aria-label={branch.name}
+    style={{ width: logoSize, height: logoSize }}
+    onClick={() => navigateToBranch(branch, { newTab: true })}
+    className={cn(
+      'shrink-0 rounded-full p-0 border-0 bg-transparent cursor-pointer',
+      'transition-transform hover:scale-105',
+      'hover:ring-2 hover:ring-brand-primary/25',
+      'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary',
+    )}
+  >
+    {children}
+  </button>
+);
+
+const AllBranchesLogoRow: React.FC<{ branches: Branch[] }> = ({ branches }) => {
+  const [failedIds, setFailedIds] = useState<Set<string>>(() => new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [logoSize, setLogoSize] = useState(32);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el || branches.length === 0) return;
+
+    const fit = () => {
+      const count = branches.length;
+      const available = el.clientWidth;
+      const gaps = ALL_BRANCHES_LOGO_GAP * Math.max(0, count - 1);
+      const fitted = Math.floor((available - gaps) / count);
+      const sized = Math.floor(fitted * ALL_BRANCHES_LOGO_SIZE_FACTOR);
+      setLogoSize(Math.max(ALL_BRANCHES_LOGO_MIN, sized));
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [branches.length]);
+
+  const iconSize = Math.max(10, Math.round(logoSize * 0.45));
+
+  return (
+    <div
+      ref={containerRef}
+      className="mt-3 flex w-full flex-nowrap items-center justify-center"
+      style={{ gap: ALL_BRANCHES_LOGO_GAP }}
+    >
+      {branches.map((branch) => {
+        const id = String(branch.id);
+        const url = resolveBranchLogoUrl(branch.logo);
+        if (!url || failedIds.has(id)) {
+          return (
+            <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
+              <span className="w-full h-full rounded-full bg-brand-primary/10 flex items-center justify-center">
+                <UtensilsCrossed size={iconSize} className="text-brand-primary" />
+              </span>
+            </AllBranchLogoButton>
+          );
+        }
+        return (
+          <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
+            <img
+              src={url}
+              alt={branch.name}
+              className="w-full h-full object-contain pointer-events-none"
+              onError={() =>
+                setFailedIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(id);
+                  return next;
+                })
+              }
+            />
+          </AllBranchLogoButton>
+        );
+      })}
+    </div>
+  );
+};
+
+const SidebarBranchTitle: React.FC<{ text: string }> = ({ text }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const title = titleRef.current;
+    if (!container || !title) return;
+
+    const fit = () => {
+      let size = HEADER_TITLE_MAX_PX;
+      title.style.fontSize = `${size}px`;
+      while (title.scrollWidth > container.clientWidth && size > HEADER_TITLE_MIN_PX) {
+        size -= 0.5;
+        title.style.fontSize = `${size}px`;
+      }
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <div ref={containerRef} className="min-w-0 w-full overflow-hidden">
+      <h1
+        ref={titleRef}
+        className="font-black text-brand-text leading-tight whitespace-nowrap"
+        title={text}
+      >
+        {text}
+      </h1>
+    </div>
+  );
+};
+
 const SubItem: React.FC<{ label: string; active?: boolean; onClick?: () => void }> = ({ label, active, onClick }) => (
   <button
     type="button"
@@ -133,6 +268,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   const { t } = useTranslation();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
   const [salesReportExpanded, setSalesReportExpanded] = useState(false);
+  const [branchLogoError, setBranchLogoError] = useState(false);
+  const [allBranchesForLogos, setAllBranchesForLogos] = useState<Branch[]>([]);
+  const sidebarLogoUrl = resolveSidebarBranchLogo(selectedBranch);
+  const isAllBranches =
+    !selectedBranch || String(selectedBranch.id) === 'all';
+  const headerTitle = !selectedBranch
+    ? '3CORE'
+    : isAllBranches
+      ? t('header.all_branches')
+      : selectedBranch.name;
+  const showHeaderLogo = Boolean(
+    !isAllBranches && sidebarLogoUrl && !branchLogoError,
+  );
   // When allowedFeatures is set (per-branch permissions), only show items in the list; otherwise show all for branch
   const hasFeature = (key: string) =>
     allowedFeatures == null ? true : allowedFeatures.includes(key);
@@ -152,6 +300,43 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   useEffect(() => {
     setSalesReportExpanded(isSalesReportActive);
   }, [isSalesReportActive]);
+
+  useEffect(() => {
+    setBranchLogoError(false);
+  }, [selectedBranch?.id, selectedBranch?.logo, sidebarLogoUrl]);
+
+  useEffect(() => {
+    if (!isAllBranches) {
+      setAllBranchesForLogos([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchBranches = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/branch', {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (!res.ok || cancelled) return;
+        const json = await res.json();
+        const data = (json.data ?? json).map((b: { IDNo: string | number; BRANCH_LABEL?: string; BRANCH_NAME?: string; BRANCH_LOGO?: string | null }) => ({
+          id: b.IDNo,
+          name: b.BRANCH_LABEL || b.BRANCH_NAME || '',
+          logo: b.BRANCH_LOGO || null,
+        })) as Branch[];
+        if (!cancelled) setAllBranchesForLogos(data);
+      } catch {
+        if (!cancelled) setAllBranchesForLogos([]);
+      }
+    };
+    fetchBranches();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAllBranches]);
 
   const handleUserMgmtToggle = () => {
     setUserMgmtExpanded((prev) => {
@@ -196,15 +381,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
 
   return (
     <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-      <div className="px-8 mb-10 flex items-center gap-3">
-        <div className="w-10 h-10 bg-brand-primary rounded-xl flex items-center justify-center shadow-lg shadow-brand-primary/20">
-          <UtensilsCrossed size={22} className="text-white" />
+      <motion.div
+        key={String(selectedBranch?.id ?? 'none')}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="px-6 mb-4 pb-4 border-b border-gray-100"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          {showHeaderLogo ? (
+            <img
+              src={sidebarLogoUrl!}
+              alt=""
+              className="w-16 h-16 shrink-0 object-contain"
+              onError={() => setBranchLogoError(true)}
+            />
+          ) : (
+            <div className="w-16 h-16 bg-brand-primary rounded-full flex items-center justify-center shadow-lg shadow-brand-primary/20 shrink-0">
+              <UtensilsCrossed size={28} className="text-white" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <SidebarBranchTitle text={headerTitle} />
+            <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1 leading-tight">
+              {t('sidebar.restaurant_pro')}
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-brand-text leading-none">3CORE</h1>
-          <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1">{t('sidebar.restaurant_pro')}</p>
-        </div>
-      </div>
+        {isAllBranches && allBranchesForLogos.length > 0 && (
+          <AllBranchesLogoRow branches={allBranchesForLogos} />
+        )}
+      </motion.div>
 
       <nav className="flex-1 space-y-0.5">
         {SIDEBAR_FEATURES.filter(isItemVisible).map((item) => {

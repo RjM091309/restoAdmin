@@ -4,6 +4,16 @@ const AuditLogModel = require('../models/auditLogModel');
 const UserModel = require('../models/userModel');
 const BranchSidebarPermissionModel = require('../models/branchSidebarPermissionModel');
 const ApiResponse = require('../utils/apiResponse');
+const { SUBDIRS, publicUrl, safeDeletePublicFile } = require('../utils/uploadPaths');
+
+function resolveBranchLogoPath(req) {
+	if (!req.file) return null;
+	return publicUrl(SUBDIRS.BRANCHES, req.file.filename);
+}
+
+async function deleteBranchLogoFile(logoPath) {
+	await safeDeletePublicFile(logoPath, SUBDIRS.BRANCHES);
+}
 
 class BranchController {
 
@@ -180,12 +190,14 @@ class BranchController {
 
 			const user_id = req.session?.user_id || req.user?.user_id;
 			const MENU_CATEGORY_LEVEL = body.MENU_CATEGORY_LEVEL ?? body.menu_category_level;
+			const BRANCH_LOGO = resolveBranchLogoPath(req);
 
 			const branchId = await BranchModel.create({
 				BRANCH_CODE,
 				BRANCH_NAME,
 				ADDRESS: ADDRESS || undefined,
 				PHONE: PHONE || undefined,
+				BRANCH_LOGO,
 				MENU_CATEGORY_LEVEL,
 			});
 
@@ -217,7 +229,8 @@ class BranchController {
 				return ApiResponse.badRequest(res, 'Invalid branch ID');
 			}
 
-			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE, MENU_CATEGORY_LEVEL, menu_category_level } = req.body;
+			const body = req.body || {};
+			const { BRANCH_CODE, BRANCH_NAME, ADDRESS, PHONE, MENU_CATEGORY_LEVEL, menu_category_level, BRANCH_LOGO } = body;
 			const categoryLevel = MENU_CATEGORY_LEVEL ?? menu_category_level;
 
 			if (!BRANCH_CODE || BRANCH_CODE.trim() === '') {
@@ -233,17 +246,36 @@ class BranchController {
 				return ApiResponse.error(res, 'Branch code already exists', 409);
 			}
 
+			const existingBranch = await BranchModel.getById(idNum);
+			if (!existingBranch) {
+				return ApiResponse.notFound(res, 'Branch');
+			}
+
 			const user_id = req.session?.user_id || req.user?.user_id;
-			const updated = await BranchModel.update(idNum, {
+			const updateData = {
 				BRANCH_CODE,
 				BRANCH_NAME,
 				ADDRESS,
 				PHONE,
 				MENU_CATEGORY_LEVEL: categoryLevel,
-			});
+			};
+
+			const uploadedLogo = resolveBranchLogoPath(req);
+			if (uploadedLogo) {
+				updateData.BRANCH_LOGO = uploadedLogo;
+			} else if (BRANCH_LOGO !== undefined) {
+				const keepExisting = BRANCH_LOGO != null && String(BRANCH_LOGO).trim() !== '';
+				updateData.BRANCH_LOGO = keepExisting ? String(BRANCH_LOGO).trim() : null;
+			}
+
+			const updated = await BranchModel.update(idNum, updateData);
 
 			if (!updated) {
 				return ApiResponse.notFound(res, 'Branch');
+			}
+
+			if (uploadedLogo && existingBranch.BRANCH_LOGO && existingBranch.BRANCH_LOGO !== uploadedLogo) {
+				await deleteBranchLogoFile(existingBranch.BRANCH_LOGO);
 			}
 
 			try {

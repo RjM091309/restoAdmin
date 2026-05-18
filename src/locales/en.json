@@ -817,6 +817,8 @@
 		"enter_name": "Enter branch name",
 		"enter_address": "Enter address",
 		"enter_phone": "Enter phone",
+		"logo": "Logo",
+		"logo_hint": "Optional. Saved as WebP (max 5MB).",
 		"code_and_name_required": "Branch code and name are required.",
 		"failed_to_load": "Failed to load branches",
 		"admin_only": "Only administrators can manage branches.",

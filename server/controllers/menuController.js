@@ -6,6 +6,7 @@
 // ============================================
 
 const MenuModel = require('../models/menuModel');
+const { SUBDIRS, publicUrl, safeDeletePublicFile } = require('../utils/uploadPaths');
 const TranslationService = require('../utils/translationService');
 const ApiResponse = require('../utils/apiResponse');
 
@@ -200,7 +201,7 @@ class MenuController {
 			// Handle file upload
 			let MENU_IMG = null;
 			if (req.file) {
-				MENU_IMG = `/uploads/menu/${req.file.filename}`;
+				MENU_IMG = publicUrl(SUBDIRS.MENU, req.file.filename);
 			}
 
 			const user_id = req.session.user_id || req.user?.user_id;
@@ -243,8 +244,11 @@ class MenuController {
 			// Handle file upload - if new file uploaded, use it; otherwise keep existing
 			let imagePath = MENU_IMG; // Default to existing image
 			if (req.file) {
-				imagePath = `/uploads/menu/${req.file.filename}`;
-				// TODO: Optionally delete old image file if exists
+				imagePath = publicUrl(SUBDIRS.MENU, req.file.filename);
+				const existingMenu = await MenuModel.getById(id);
+				if (existingMenu?.MENU_IMG && existingMenu.MENU_IMG !== imagePath) {
+					await safeDeletePublicFile(existingMenu.MENU_IMG, SUBDIRS.MENU);
+				}
 			}
 
 			const user_id = req.session.user_id;

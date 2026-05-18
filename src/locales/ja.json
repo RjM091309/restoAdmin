@@ -775,6 +775,8 @@
 		"enter_name": "支店名を入力",
 		"enter_address": "住所を入力",
 		"enter_phone": "電話を入力",
+		"logo": "ロゴ",
+		"logo_hint": "任意。WebP形式で保存されます（最大5MB）。",
 		"code_and_name_required": "支店コードと名前は必須です。",
 		"failed_to_load": "支店の読み込みに失敗しました",
 		"admin_only": "管理者のみ支店を管理できます。",

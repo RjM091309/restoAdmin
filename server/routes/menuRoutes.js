@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/unifiedAuth');
 const MenuController = require('../controllers/menuController');
-const { upload, convertToWebp } = require('../middleware/upload');
+const { menuUpload, convertMenuToWebp, FIELDS } = require('../middleware/upload');
 
 // ============================================
 // GET ROUTES
@@ -31,14 +31,14 @@ router.get("/categories", authenticate, MenuController.getCategories);
 // ============================================
 
 // POST - Create new menu (with file upload and WebP conversion)
-router.post("/menu", authenticate, upload.single('MENU_IMG'), convertToWebp, MenuController.create);
+router.post("/menu", authenticate, menuUpload.single(FIELDS.MENU_IMG), convertMenuToWebp, MenuController.create);
 
 // ============================================
 // PUT ROUTES
 // ============================================
 
 // PUT - Update menu (with optional file upload and WebP conversion)
-router.put("/menu/:id", authenticate, upload.single('MENU_IMG'), convertToWebp, MenuController.update);
+router.put("/menu/:id", authenticate, menuUpload.single(FIELDS.MENU_IMG), convertMenuToWebp, MenuController.update);
 
 // ============================================
 // DELETE ROUTES

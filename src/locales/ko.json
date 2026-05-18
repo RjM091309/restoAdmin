@@ -776,6 +776,8 @@
 		"enter_name": "지점 이름 입력",
 		"enter_address": "주소 입력",
 		"enter_phone": "전화 입력",
+		"logo": "로고",
+		"logo_hint": "선택 사항. WebP로 저장됩니다(최대 5MB).",
 		"code_and_name_required": "지점 코드와 이름은 필수입니다.",
 		"failed_to_load": "지점을 불러오지 못했습니다",
 		"admin_only": "관리자만 지점을 관리할 수 있습니다.",
