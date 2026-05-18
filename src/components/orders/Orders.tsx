@@ -125,7 +125,14 @@ function isEesomeBranchId(branchId: string | number | null | undefined): boolean
 }
 
 function formatPesoUpToTwoDecimals(amount: number): string {
-    return Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return '0';
+    const roundedCents = Math.round(n * 100);
+    const hasFractionalPeso = roundedCents % 100 !== 0;
+    return (roundedCents / 100).toLocaleString(undefined, {
+        minimumFractionDigits: hasFractionalPeso ? 2 : 0,
+        maximumFractionDigits: hasFractionalPeso ? 2 : 0,
+    });
 }
 
 function isDineInOrderType(orderType: string | null | undefined): boolean {
@@ -2469,13 +2476,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         <td className="px-3 py-2 font-mono">{r.ORDER_NO ?? '—'}</td>
                                         <td className="px-3 py-2 text-right tabular-nums">
                                             {r.ORDER_GRAND_TOTAL != null
-                                                ? `₱${Number(r.ORDER_GRAND_TOTAL).toLocaleString(undefined, {
-                                                      maximumFractionDigits: 0,
-                                                  })}`
+                                                ? `₱${formatPesoUpToTwoDecimals(Number(r.ORDER_GRAND_TOTAL))}`
                                                 : r.RECEIPT_GRAND_TOTAL != null
-                                                    ? `₱${Number(r.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
-                                                          maximumFractionDigits: 0,
-                                                      })}`
+                                                    ? `₱${formatPesoUpToTwoDecimals(Number(r.RECEIPT_GRAND_TOTAL))}`
                                                     : '—'}
                                         </td>
                                         <td className="px-3 py-2">
@@ -2545,13 +2548,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 <span className="text-brand-muted">Order total</span>
                                 <div className="tabular-nums font-semibold truncate">
                                     {receiptHistoryDetail.ORDER_GRAND_TOTAL != null
-                                        ? `₱${Number(receiptHistoryDetail.ORDER_GRAND_TOTAL).toLocaleString(undefined, {
-                                              maximumFractionDigits: 0,
-                                          })}`
+                                        ? `₱${formatPesoUpToTwoDecimals(Number(receiptHistoryDetail.ORDER_GRAND_TOTAL))}`
                                         : receiptHistoryDetail.RECEIPT_GRAND_TOTAL != null
-                                            ? `₱${Number(receiptHistoryDetail.RECEIPT_GRAND_TOTAL).toLocaleString(undefined, {
-                                                  maximumFractionDigits: 0,
-                                              })}`
+                                            ? `₱${formatPesoUpToTwoDecimals(Number(receiptHistoryDetail.RECEIPT_GRAND_TOTAL))}`
                                             : '—'}
                                 </div>
                             </div>
@@ -2645,7 +2644,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                                 {Number(it.QTY || 0)}
                                                                             </td>
                                                                             <td className="px-3 py-2 text-right tabular-nums font-bold">
-                                                                                {Number(it.LINE_TOTAL || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                                                {formatPesoUpToTwoDecimals(Number(it.LINE_TOTAL || 0))}
                                                                             </td>
                                                                         </tr>
                                                                     ))}
