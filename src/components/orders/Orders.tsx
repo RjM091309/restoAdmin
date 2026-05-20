@@ -51,7 +51,7 @@ import { toUserFriendlyError } from '../../utils/userFriendlyErrors';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey } from '../../services/receiptScannerService';
 import { extractOrderLinesFromReceiptImage, type ReceiptOrderExtractionResult } from '../../services/receiptOrderExtraction';
 import { ReceiptOrderBlockCard } from './ReceiptOrderBlockCard';
-import { matchReceiptLineToMenu } from '../../services/receiptOrderMenuMatch';
+import { isReceiptLineMappedToMenu, matchReceiptLineToMenu } from '../../services/receiptOrderMenuMatch';
 import { type Branch } from '../partials/Header';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
 import { useUser } from '../../context/UserContext';
@@ -1494,6 +1494,26 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
     }, [receiptRows]);
 
+    const receiptMenuIdSet = useMemo(
+        () => new Set(receiptOrderMenus.map((m) => String(m.id))),
+        [receiptOrderMenus]
+    );
+
+    const receiptUnmappedRows = useMemo(
+        () =>
+            receiptRows.filter((row) => {
+                if (!row.menuId || !receiptMenuIdSet.has(String(row.menuId))) return true;
+                return !isReceiptLineMappedToMenu(
+                    row.extractedName,
+                    Number(row.receiptLineTotal) || 0,
+                    Number(row.qty) || 1,
+                    row.menuId,
+                    receiptOrderMenus
+                );
+            }),
+        [receiptRows, receiptMenuIdSet, receiptOrderMenus]
+    );
+
     const receiptPreviewServiceCharge = useMemo(() => {
         if (!isEesomeBranchId(effectiveReceiptBranchId)) return 0;
         if (receiptDetectedHasServiceCharge) return 0;
@@ -1693,11 +1713,22 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             toast.error(t('orders.receipt_select_branch_first'));
             return;
         }
-        if (!receiptRows.some((r) => r.menuId)) {
+        if (receiptUnmappedRows.length > 0) {
+            const itemList = receiptUnmappedRows
+                .map((r) => `• ${r.extractedName || t('orders.receipt_unmapped_unknown_item')}`)
+                .join('\n');
+            setReceiptMapOpenByOrderId((prev) => {
+                const next = { ...prev };
+                for (const row of receiptUnmappedRows) {
+                    const oid = Number.isFinite(row.orderId) && row.orderId > 0 ? Math.floor(row.orderId) : 1;
+                    next[oid] = true;
+                }
+                return next;
+            });
             setSwal({
                 type: 'warning',
                 title: t('orders.receipt_no_menu_mapped_title'),
-                text: t('orders.receipt_no_menu_mapped_text'),
+                text: t('orders.receipt_no_menu_mapped_text', { items: itemList }),
                 onConfirm: () => setSwal(null),
             });
             return;
@@ -2940,7 +2971,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             <button
                                 type="button"
                                 onClick={submitReceiptOrder}
-                                disabled={receiptSubmitting || receiptExtracting || receiptOrderMenusLoading}
+                                disabled={
+                                    receiptSubmitting ||
+                                    receiptExtracting ||
+                                    receiptOrderMenusLoading ||
+                                    receiptUnmappedRows.length > 0
+                                }
+                                title={
+                                    receiptUnmappedRows.length > 0
+                                        ? t('orders.receipt_map_all_required')
+                                        : undefined
+                                }
                                 className="px-6 py-2.5 rounded-xl font-bold text-white bg-violet-600 shadow-lg shadow-violet-600/30 hover:bg-violet-700 transition-all disabled:opacity-50 flex items-center gap-2"
                             >
                                 {receiptSubmitting && <Loader2 size={16} className="animate-spin" />}
@@ -3167,6 +3208,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 )}
                             </div>
 
+                            {receiptUnmappedRows.length > 0 ? (
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                    {t('orders.receipt_unmapped_banner', { count: receiptUnmappedRows.length })}
+                                </div>
+                            ) : null}
+
                             <div className="space-y-6">
                                 {receiptRowsByOrder.map(([orderId, blockRows]) => {
                                     const blockMeta = receiptExtractResult?.orders.find((o) => o.order_id === orderId);
@@ -3257,6 +3304,16 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                 const unit = qty > 0 ? amt / qty : 0;
                                                                 const unitRounded = Math.round(unit * 100) / 100;
                                                                 const unitFrac = !Number.isInteger(unitRounded);
+                                                                const rowUnmapped =
+                                                                    !row.menuId ||
+                                                                    !receiptMenuIdSet.has(String(row.menuId)) ||
+                                                                    !isReceiptLineMappedToMenu(
+                                                                        row.extractedName,
+                                                                        Number(row.receiptLineTotal) || 0,
+                                                                        Number(row.qty) || 1,
+                                                                        row.menuId,
+                                                                        receiptOrderMenus
+                                                                    );
                                                                 return (
                                                                     <div key={row.id} className="pb-2 border-b border-dashed border-slate-200/80 last:border-b-0 last:pb-0">
                                                                         <div className="grid grid-cols-12 gap-2 items-start">
@@ -3268,6 +3325,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                                     <div className="text-[12px] text-slate-500 leading-snug break-words mt-1">
                                                                                         {row.menuSelection}
                                                                                     </div>
+                                                                                ) : null}
+                                                                                {rowUnmapped ? (
+                                                                                    <p className="text-[11px] font-semibold text-amber-700 mt-1">
+                                                                                        {t('orders.receipt_unmapped_item_hint')}
+                                                                                    </p>
                                                                                 ) : null}
                                                                             </div>
                                                                             <div className="col-span-2 text-right text-[13px] font-semibold tabular-nums text-slate-900">
@@ -3328,11 +3390,35 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
                                                 {receiptMapOpenByOrderId[orderId] ? (
                                                     <div className="mt-3 space-y-3">
-                                                        {blockRows.map((row) => (
-                                                            <div key={`map-${row.id}`} className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+                                                        {blockRows.map((row) => {
+                                                            const rowUnmapped =
+                                                                !row.menuId ||
+                                                                !receiptMenuIdSet.has(String(row.menuId)) ||
+                                                                !isReceiptLineMappedToMenu(
+                                                                    row.extractedName,
+                                                                    Number(row.receiptLineTotal) || 0,
+                                                                    Number(row.qty) || 1,
+                                                                    row.menuId,
+                                                                    receiptOrderMenus
+                                                                );
+                                                            return (
+                                                            <div
+                                                                key={`map-${row.id}`}
+                                                                className={cn(
+                                                                    'rounded-xl border p-4',
+                                                                    rowUnmapped
+                                                                        ? 'border-amber-300 bg-amber-50/50'
+                                                                        : 'border-gray-100 bg-gray-50/60'
+                                                                )}
+                                                            >
                                                                 <div className="text-sm font-semibold text-brand-text">{row.extractedName}</div>
                                                                 {row.menuSelection ? (
                                                                     <div className="text-xs text-brand-muted mt-1">{row.menuSelection}</div>
+                                                                ) : null}
+                                                                {rowUnmapped ? (
+                                                                    <p className="text-xs font-semibold text-amber-800 mt-2">
+                                                                        {t('orders.receipt_unmapped_item_hint')}
+                                                                    </p>
                                                                 ) : null}
                                                                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-[minmax(0,7rem)_1fr] gap-3 sm:items-end">
                                                                     <div className="space-y-1">
@@ -3365,7 +3451,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 ) : null}
                                             </ReceiptOrderBlockCard>

@@ -231,19 +231,36 @@ export function bestMenuMatchForReceiptLine(
     const variants = nameVariants(extractedName);
     let best: MenuRecord | null = null;
     let bestScore = 0;
+    let bestNameScore = 0;
     for (const m of menus) {
         if (!m.active || !(m.effectiveAvailable ?? m.isAvailable)) continue;
         for (const part of variants) {
-            const s = scoreMatch(part, m.name, Number(m.price) || 0, unitPrice);
-            if (s > bestScore) {
-                bestScore = s;
+            const nameScore = scoreMatch(part, m.name, Number(m.price) || 0);
+            const fullScore = scoreMatch(part, m.name, Number(m.price) || 0, unitPrice);
+            if (fullScore > bestScore) {
+                bestScore = fullScore;
+                bestNameScore = Math.max(bestNameScore, nameScore);
                 best = m;
             }
         }
     }
-    if (bestScore >= 50) return best;
-    if (bestScore >= 40 && unitPrice && unitPrice > 0) return best;
+    // Require name similarity — receipt price alone must not pick an unrelated menu row.
+    if (bestNameScore >= 80) return best;
+    if (bestNameScore >= 35 && unitPrice && unitPrice > 0 && bestScore >= 45) return best;
     return null;
+}
+
+/** True when menuId is the same match the auto-mapper would choose for this line. */
+export function isReceiptLineMappedToMenu(
+    extractedName: string,
+    lineTotal: number,
+    qty: number,
+    menuId: string | null,
+    menus: MenuRecord[]
+): boolean {
+    if (!menuId) return false;
+    const match = matchReceiptLineToMenu(extractedName, lineTotal, qty, menus);
+    return match != null && String(match.id) === String(menuId);
 }
 
 /** Re-score all receipt rows after menus load or when OCR names differ per batch */
