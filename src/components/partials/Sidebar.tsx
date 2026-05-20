@@ -20,7 +20,11 @@ import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
 import { type Branch } from './Header';
 import { SIDEBAR_FEATURES, type SidebarFeatureConfig } from '../../constants/sidebarFeatures';
-import { resolveBranchLogoUrl, resolveSidebarBranchLogo } from '../../utils/branchLogo';
+import {
+  prepareAllBranchesSidebarLogos,
+  resolveBranchLogoUrl,
+  resolveSidebarBranchLogo,
+} from '../../utils/branchLogo';
 import { navigateToBranch } from '../../utils/branchNavigation';
 
 type SidebarProps = {
@@ -106,10 +110,11 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
 const HEADER_TITLE_MAX_PX = 18;
 const HEADER_TITLE_MIN_PX = 11;
 
-const ALL_BRANCHES_LOGO_GAP = 3;
-/** Use full available width so logos are as large as possible while all stay visible */
+const ALL_BRANCHES_LOGO_COLS = 3;
+const ALL_BRANCHES_LOGO_GAP = 6;
 const ALL_BRANCHES_LOGO_SIZE_FACTOR = 1;
-const ALL_BRANCHES_LOGO_MIN = 20;
+const ALL_BRANCHES_LOGO_MIN = 28;
+const ALL_BRANCHES_LOGO_MAX = 56;
 
 const AllBranchLogoButton: React.FC<{
   branch: Branch;
@@ -136,36 +141,49 @@ const AllBranchLogoButton: React.FC<{
 const AllBranchesLogoRow: React.FC<{ branches: Branch[] }> = ({ branches }) => {
   const [failedIds, setFailedIds] = useState<Set<string>>(() => new Set());
   const containerRef = useRef<HTMLDivElement>(null);
-  const [logoSize, setLogoSize] = useState(32);
+  const [logoSize, setLogoSize] = useState(40);
+  const displayBranches = React.useMemo(
+    () => prepareAllBranchesSidebarLogos(branches),
+    [branches],
+  );
 
   useLayoutEffect(() => {
     const el = containerRef.current;
-    if (!el || branches.length === 0) return;
+    if (!el || displayBranches.length === 0) return;
 
     const fit = () => {
-      const count = branches.length;
       const available = el.clientWidth;
-      const gaps = ALL_BRANCHES_LOGO_GAP * Math.max(0, count - 1);
-      const fitted = Math.floor((available - gaps) / count);
+      const gaps = ALL_BRANCHES_LOGO_GAP * (ALL_BRANCHES_LOGO_COLS - 1);
+      const fitted = Math.floor((available - gaps) / ALL_BRANCHES_LOGO_COLS);
       const sized = Math.floor(fitted * ALL_BRANCHES_LOGO_SIZE_FACTOR);
-      setLogoSize(Math.max(ALL_BRANCHES_LOGO_MIN, sized));
+      setLogoSize(
+        Math.max(
+          ALL_BRANCHES_LOGO_MIN,
+          Math.min(ALL_BRANCHES_LOGO_MAX, sized),
+        ),
+      );
     };
 
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [branches.length]);
+  }, [displayBranches.length]);
 
-  const iconSize = Math.max(10, Math.round(logoSize * 0.45));
+  const iconSize = Math.max(12, Math.round(logoSize * 0.45));
+
+  if (displayBranches.length === 0) return null;
 
   return (
-    <div
+    <motion.div
       ref={containerRef}
-      className="mt-3 flex w-full flex-nowrap items-center justify-center"
-      style={{ gap: ALL_BRANCHES_LOGO_GAP }}
+      className="grid w-full grid-cols-3 justify-items-center"
+      style={{
+        columnGap: ALL_BRANCHES_LOGO_GAP,
+        rowGap: ALL_BRANCHES_LOGO_GAP,
+      }}
     >
-      {branches.map((branch) => {
+      {displayBranches.map((branch) => {
         const id = String(branch.id);
         const url = resolveBranchLogoUrl(branch.logo);
         if (!url || failedIds.has(id)) {
@@ -194,7 +212,7 @@ const AllBranchesLogoRow: React.FC<{ branches: Branch[] }> = ({ branches }) => {
           </AllBranchLogoButton>
         );
       })}
-    </div>
+    </motion.div>
   );
 };
 
@@ -327,7 +345,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
           name: b.BRANCH_LABEL || b.BRANCH_NAME || '',
           logo: b.BRANCH_LOGO || null,
         })) as Branch[];
-        if (!cancelled) setAllBranchesForLogos(data);
+        if (!cancelled) setAllBranchesForLogos(prepareAllBranchesSidebarLogos(data));
       } catch {
         if (!cancelled) setAllBranchesForLogos([]);
       }
@@ -380,15 +398,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   };
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col py-8 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+    <aside
+      className={cn(
+        'w-64 bg-white border-r border-gray-100 flex flex-col shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]',
+        isAllBranches ? 'pt-3 pb-8' : 'py-8',
+      )}
+    >
       <motion.div
         key={String(selectedBranch?.id ?? 'none')}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.2 }}
-        className="px-6 mb-4 pb-4 border-b border-gray-100"
+        className={cn(
+          'px-6 border-b border-gray-100',
+          isAllBranches ? 'mb-3 pb-3' : 'mb-4 pb-4',
+        )}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        {isAllBranches ? (
+          <>
+            {allBranchesForLogos.length > 0 && (
+              <AllBranchesLogoRow branches={allBranchesForLogos} />
+            )}
+            <motion.div
+              className={cn(
+                'min-w-0 w-full text-center',
+                allBranchesForLogos.length > 0 && 'mt-3',
+              )}
+            >
+              <SidebarBranchTitle text={headerTitle} />
+              <p className="text-[10px] font-bold text-brand-muted uppercase tracking-widest mt-1 leading-tight">
+                {t('sidebar.restaurant_pro')}
+              </p>
+            </motion.div>
+          </>
+        ) : (
+        <motion.div className="flex items-center gap-3 min-w-0">
           {showHeaderLogo ? (
             <img
               src={sidebarLogoUrl!}
@@ -407,9 +451,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               {t('sidebar.restaurant_pro')}
             </p>
           </div>
-        </div>
-        {isAllBranches && allBranchesForLogos.length > 0 && (
-          <AllBranchesLogoRow branches={allBranchesForLogos} />
+        </motion.div>
         )}
       </motion.div>
 
