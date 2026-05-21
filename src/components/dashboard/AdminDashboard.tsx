@@ -151,45 +151,12 @@ const clampFiniteNonNegative = (n: unknown): number => {
 };
 
 /**
- * Diverging bars: sales (up) and expenses (down) share tick layout but may use
- * different axis max values. The first expense grid line is 2× the minimum sales
- * at the start of the chart (days 1–7 for monthly).
+ * Diverging bars: sales (up) vs expenses (down).
+ * Y-axis labels use 1:2 — at the same tick, expense label = 2× sales label (e.g. ₱240k / ₱480k).
+ * Bar heights use the sales scale so equal peso amounts have equal visual length.
  */
-
 const TREND_AXIS_TICK_FRACS = [0.4, 0.8, 1] as const;
-const TREND_FIRST_TICK_FRAC = TREND_AXIS_TICK_FRACS[0];
-
-const parseTrendDayNumber = (name: unknown): number | null => {
-  const n = Number(String(name ?? '').trim());
-  return Number.isFinite(n) && n >= 1 && n <= 31 ? n : null;
-};
-
-/** Minimum positive sales at the left/start of the trend chart. */
-const getMinSalesAtGraphStart = (data: MonthlyData[], period: TrendPeriod): number => {
-  const positives: number[] = [];
-
-  if (period === 'monthly') {
-    for (const row of data) {
-      const day = parseTrendDayNumber(row.name);
-      if (day != null && day <= 7) {
-        const v = clampFiniteNonNegative(row.totalSales);
-        if (v > 0) positives.push(v);
-      }
-    }
-  } else {
-    const take = period === 'weekly' ? Math.max(1, Math.ceil(data.length / 2)) : Math.min(3, data.length);
-    for (const row of data.slice(0, take)) {
-      const v = clampFiniteNonNegative(row.totalSales);
-      if (v > 0) positives.push(v);
-    }
-  }
-
-  if (positives.length > 0) return Math.min(...positives);
-
-  const all = data.map((d) => clampFiniteNonNegative(d.totalSales)).filter((v) => v > 0);
-  if (all.length > 0) return Math.min(...all);
-  return 10_000;
-};
+const TREND_EXPENSE_TO_SALES_AXIS_RATIO = 2;
 
 const niceStep = (max: number, targetSteps: number): number => {
   const m = Number(max);
@@ -1384,14 +1351,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const expenseValues = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
     const salesMax = salesValues.reduce((m, v) => Math.max(m, v), 0);
     const expensesMax = expenseValues.reduce((m, v) => Math.max(m, v), 0);
-
-    const minSalesAtStart = getMinSalesAtGraphStart(monthlyData, trendPeriod);
-    // First expense tick (e.g. ₱240k) = 2 × minimum sales at graph start (e.g. ₱120k min).
-    const expenseStartAmount = 2 * minSalesAtStart;
-    const expenseAxisFromStart = expenseStartAmount / TREND_FIRST_TICK_FRAC;
-
-    const salesAxisMax = buildNiceMax(salesMax);
-    const expensesAxisMax = buildNiceMax(Math.max(expensesMax, expenseAxisFromStart));
+    const salesAxisMax = buildNiceMax(Math.max(salesMax, expensesMax));
+    const expensesAxisMax = salesAxisMax * TREND_EXPENSE_TO_SALES_AXIS_RATIO;
 
     const posTicksScaled = [...TREND_AXIS_TICK_FRACS];
     const negTicksScaled = TREND_AXIS_TICK_FRACS.slice().reverse().map((f) => -f);
@@ -1402,23 +1363,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       ticksScaled,
       domainScaled: [-1.08, 1.08] as [number, number],
     };
-  }, [monthlyData, trendPeriod]);
+  }, [monthlyData]);
 
   const trendChartData = useMemo(() => {
     const salesDen = trendChartScale.salesAxisMax || 1;
-    const expensesDen = trendChartScale.expensesAxisMax || 1;
     return monthlyData.map((d) => {
       const rawSales = clampFiniteNonNegative(d.totalSales);
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
       return {
         ...d,
         totalSales: rawSales / salesDen,
-        negativeExpenses: -(rawExpenses / expensesDen),
+        negativeExpenses: -(rawExpenses / salesDen),
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
     });
-  }, [monthlyData, trendChartScale.expensesAxisMax, trendChartScale.salesAxisMax]);
+  }, [monthlyData, trendChartScale.salesAxisMax]);
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
@@ -1628,8 +1588,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       tickFormatter={(scaled) => {
                         const s = Number(scaled);
                         if (!Number.isFinite(s) || s === 0) return formatTrendYAxisTick(0);
-                        const axisMax = s > 0 ? trendChartScale.salesAxisMax : trendChartScale.expensesAxisMax;
-                        return formatTrendYAxisTick(s * axisMax);
+                        const axisMax =
+                          s > 0 ? trendChartScale.salesAxisMax : trendChartScale.expensesAxisMax;
+                        return formatTrendYAxisTick(Math.abs(s) * axisMax);
                       }}
                       axisLine={false}
                       tickLine={false}
