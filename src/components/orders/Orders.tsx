@@ -1171,50 +1171,52 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
     };
 
-    const openReceiptOrder = () => {
-        // If an unfinished scan draft exists, keep it so user can continue after app/tab restart.
-        const hasDraftWork = receiptSegments.length > 0 || !!receiptImage || receiptRows.length > 0;
-        if (!hasDraftWork) {
-            setReceiptOrderNo(generateOrderNo());
-            setReceiptOrderType('DINE_IN');
-            setReceiptOrderTableId('');
-            setReceiptOrderBranchId('');
-            setReceiptImage(null);
-            setReceiptSegments([]);
-            setReceiptStitching(false);
-            setReceiptError(null);
-            setReceiptRows([]);
-            setReceiptExtractResult(null);
-            setReceiptMetaById({});
-            setReceiptMapOpenByOrderId({});
-        }
-        // Default: today in Manila (YYYY-MM-DD). Submit uses that date + current PH (Manila) wall time.
-        // Preserve user's previously selected date across multiple receipt orders.
-        if (!receiptOrderDate) {
-            const now = new Date();
-            const parts = new Intl.DateTimeFormat('en-US', {
-                timeZone: 'Asia/Manila',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-            }).formatToParts(now);
-            const get = (type: string) => String(parts.find((p) => p.type === type)?.value ?? '0');
-            const y = get('year');
-            const m = get('month');
-            const d = get('day');
-            setReceiptOrderDate(`${y}-${m}-${d}`);
-        }
-        setReceiptOrderOpen(true);
+    const receiptOrderDateTodayManila = () => {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Manila',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).formatToParts(now);
+        const get = (type: string) => String(parts.find((p) => p.type === type)?.value ?? '0');
+        return `${get('year')}-${get('month')}-${get('day')}`;
     };
 
-    const closeReceiptOrder = () => {
-        if (receiptSubmitting || receiptExtracting) return;
-        setReceiptOrderOpen(false);
+    const resetReceiptOrderForm = useCallback(() => {
+        setReceiptOrderNo(generateOrderNo());
+        setReceiptOrderType('DINE_IN');
+        setReceiptOrderTableId('');
+        setReceiptOrderBranchId('');
+        setReceiptOrderDate(receiptOrderDateTodayManila());
+        setReceiptImage(null);
+        setReceiptSegments([]);
+        setReceiptStitching(false);
+        setReceiptExtracting(false);
+        setReceiptError(null);
+        setReceiptRows([]);
+        setReceiptExtractResult(null);
+        setReceiptMetaById({});
+        setReceiptMapOpenByOrderId({});
+        if (receiptFileInputRef.current) {
+            receiptFileInputRef.current.value = '';
+        }
         try {
             sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
         } catch {
             // ignore
         }
+    }, []);
+
+    const openReceiptOrder = () => {
+        resetReceiptOrderForm();
+        setReceiptOrderOpen(true);
+    };
+
+    const closeReceiptOrder = () => {
+        if (receiptSubmitting || receiptExtracting) return;
+        resetReceiptOrderForm();
+        setReceiptOrderOpen(false);
     };
 
     const runReceiptExtractionOnImage = async (compressedDataUrl: string) => {
@@ -1644,6 +1646,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     useEffect(() => {
         if (!receiptOrderOpen) return;
         if (receiptSubmitting) return;
+        const hasDraftWork = receiptSegments.length > 0 || !!receiptImage || receiptRows.length > 0;
+        if (!hasDraftWork) {
+            try {
+                sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
+            } catch {
+                // ignore
+            }
+            return;
+        }
         const payload = {
             savedAt: Date.now(),
             receiptOrderOpen,
@@ -1704,6 +1715,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const filteredReceiptHistory = useMemo(() => {
         return receiptHistoryRows.filter((r) => {
             if (!isOrdersReceiptScanHistorySource(receiptScanHistoryRowSource(r))) return false;
+            // Only scans that were sent to Orders (linked order); skip abandoned preview-only rows.
+            if (r.ORDER_ID == null) return false;
             return isWithinDateRange(r.ENCODED_DT);
         });
     }, [receiptHistoryRows, isWithinDateRange]);
@@ -1842,18 +1855,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 toast.warning(t('orders.receipt_history_save_failed'));
             }
 
+            resetReceiptOrderForm();
             setReceiptOrderOpen(false);
-            setReceiptOrderTableId('');
-            setReceiptImage(null);
-            setReceiptSegments([]);
-            setReceiptRows([]);
-            setReceiptExtractResult(null);
-            setReceiptMetaById({});
-            try {
-                sessionStorage.removeItem(RECEIPT_DRAFT_KEY);
-            } catch {
-                // ignore
-            }
             await loadOrders();
             toast.success(
                 createdOrderNos.length > 1
