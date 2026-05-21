@@ -262,6 +262,23 @@ function expenseCountsTowardDashboardAnalytics(
   return Boolean(oc?.active);
 }
 
+/** Label used when Expense Breakdown groups by sub category (must match `expenseBreakdown` useMemo). */
+function subCategoryBreakdownLabel(mc: InventoryCategory, useAnalyticsExpenseRows: boolean): string {
+  if (useAnalyticsExpenseRows) {
+    return ((mc.name || 'Unknown') as string).trim() || 'Unknown';
+  }
+  return ((mc.categoryType || mc.name || 'Unknown') as string).trim() || 'Unknown';
+}
+
+function tableItemBreakdownLabel(exp: ExpenseRecord, subCategoryName: string): string {
+  const rawLabel = (exp.expDesc || exp.expName || exp.expSource || 'Unknown') as string;
+  const label = rawLabel && rawLabel.trim() ? rawLabel.trim() : 'Unknown';
+  if (label === subCategoryName) {
+    return ((exp.expDesc || exp.expSource || exp.expName || 'Unknown') as string).trim() || 'Unknown';
+  }
+  return label;
+}
+
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
   const location = useLocation();
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -327,6 +344,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [receiptHistorySourceFilter, setReceiptHistorySourceFilter] = useState<
     'all' | 'resto_admin' | 'receiptlens'
   >('all');
+  const [breakdownDetailModal, setBreakdownDetailModal] = useState<{
+    title: string;
+    subtitle: string;
+    expenses: ExpenseRecord[];
+    total: number;
+  } | null>(null);
   const [receiptHistoryDetailOpen, setReceiptHistoryDetailOpen] = useState(false);
   const [receiptHistoryDetailLoading, setReceiptHistoryDetailLoading] = useState(false);
   const [receiptHistoryDetail, setReceiptHistoryDetail] = useState<{
@@ -1054,14 +1077,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       for (const exp of rangeEntriesForCategoryAnalytics) {
         const amount = Number(exp.expAmount) || 0;
         if (amount <= 0) continue;
-        const rawLabel = (exp.expDesc || exp.expName || exp.expSource || 'Unknown') as string;
-        const label = rawLabel && rawLabel.trim() ? rawLabel.trim() : 'Unknown';
-        // If backend stored the sub-category label as the item name, fall back to source/desc for better variety.
-        const finalLabel =
-          label === selectedCategory.name
-            ? ((exp.expDesc || exp.expSource || exp.expName || 'Unknown') as string).trim() || 'Unknown'
-            : label;
-        add(map, finalLabel, amount);
+        add(map, tableItemBreakdownLabel(exp, selectedCategory.name), amount);
       }
     } else if (
       analyticsGrandOk &&
@@ -1102,7 +1118,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         if (selectedOperationId) {
           // Under the selected main category, group by CATEGORY_TYPE
           if (mc?.opCategoryId == null || String(mc.opCategoryId) !== String(selectedOperationId)) continue;
-          add(map, (mc.categoryType || mc.name || 'Unknown') as string, amount);
+          add(map, subCategoryBreakdownLabel(mc, false), amount);
           continue;
         }
 
@@ -1156,6 +1172,66 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     selectedCategory,
     selectedOperationId,
   ]);
+
+  const breakdownUsesAnalyticsSubCategoryRows = useMemo(
+    () =>
+      analyticsGrandOk &&
+      analyticsExpenseBreakdownRows !== null &&
+      Boolean(branchId) &&
+      Boolean(selectedOperationId) &&
+      !selectedCategory,
+    [analyticsGrandOk, analyticsExpenseBreakdownRows, branchId, selectedCategory, selectedOperationId],
+  );
+
+  const openBreakdownRowDetail = useCallback(
+    (rowName: string) => {
+      if (rowName === 'Others') return;
+
+      const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
+      let items: ExpenseRecord[] = [];
+
+      if (selectedCategory) {
+        items = rangeEntriesForCategoryAnalytics.filter((exp) => {
+          return tableItemBreakdownLabel(exp, selectedCategory.name) === rowName;
+        });
+      } else if (selectedOperationId) {
+        items = expensesInAnalyticsRange.filter((exp) => {
+          const mc = exp.masterCatId != null ? masterById.get(String(exp.masterCatId)) : undefined;
+          if (!mc || String(mc.opCategoryId) !== String(selectedOperationId)) return false;
+          return subCategoryBreakdownLabel(mc, breakdownUsesAnalyticsSubCategoryRows) === rowName;
+        });
+      } else {
+        return;
+      }
+
+      items.sort((a, b) => {
+        const ad = expenseEncodedYmd(a.encodedDt) || '';
+        const bd = expenseEncodedYmd(b.encodedDt) || '';
+        return bd.localeCompare(ad);
+      });
+
+      const total = items.reduce((sum, row) => sum + (Number(row.expAmount) || 0), 0);
+      const subtitle = selectedCategory
+        ? `${selectedOperation?.name ?? ''} • ${selectedCategory.name}`
+        : (selectedOperation?.name ?? '');
+
+      setBreakdownDetailModal({
+        title: rowName,
+        subtitle: subtitle.trim(),
+        expenses: items,
+        total,
+      });
+    },
+    [
+      breakdownUsesAnalyticsSubCategoryRows,
+      expensesInAnalyticsRange,
+      masterCategories,
+      rangeEntriesForCategoryAnalytics,
+      selectedCategory,
+      selectedOperation,
+      selectedOperationId,
+    ],
+  );
 
   // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
   const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
@@ -2194,8 +2270,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                             !selectedCategory &&
                             !isOthers &&
                             operations.some((op) => op.name === row.name);
-                          const isRowClickable = canClickOthers || canClickMainCategory;
+                          const canClickSubCategory =
+                            Boolean(selectedOperation) && !selectedCategory && !isOthers;
+                          const canClickTableItem = Boolean(selectedCategory) && !isOthers;
+                          const canOpenDetailModal = canClickSubCategory || canClickTableItem;
+                          const isRowClickable = canClickOthers || canClickMainCategory || canOpenDetailModal;
                           const handleBreakdownRowClick = () => {
+                            if (canOpenDetailModal) {
+                              openBreakdownRowDetail(row.name);
+                              return;
+                            }
                             if (canClickOthers) {
                               setCurrentPage(1);
                               setTableSearch('');
@@ -2225,7 +2309,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                           return (
                             <li
                               key={`${row.name}-${idx}`}
-                              className="grid items-center gap-3"
+                              className={cn(
+                                'grid items-center gap-3 rounded-xl transition-colors',
+                                isRowClickable && 'hover:bg-slate-50/80',
+                              )}
                               // Responsive 3-col layout:
                               // - label grows but can't collapse too small
                               // - bar track flexes with screen
@@ -2241,11 +2328,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                   isRowClickable ? 'cursor-pointer hover:opacity-90' : 'cursor-default',
                                 )}
                                 aria-label={
-                                  canClickOthers
-                                    ? 'Filter table items by Others group'
-                                    : canClickMainCategory
-                                      ? 'Open sub category breakdown for selected main category'
-                                      : undefined
+                                  canOpenDetailModal
+                                    ? `View expense items for ${row.name}`
+                                    : canClickOthers
+                                      ? 'Filter table items by Others group'
+                                      : canClickMainCategory
+                                        ? 'Open sub category breakdown for selected main category'
+                                        : undefined
                                 }
                               >
                                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
@@ -2258,11 +2347,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                 disabled={!isRowClickable}
                                 className={cn('w-full min-w-0', isRowClickable ? 'cursor-pointer' : 'cursor-default')}
                                 aria-label={
-                                  canClickOthers
-                                    ? 'Filter table items by Others group'
-                                    : canClickMainCategory
-                                      ? 'Open sub category breakdown for selected main category'
-                                      : undefined
+                                  canOpenDetailModal
+                                    ? `View expense items for ${row.name}`
+                                    : canClickOthers
+                                      ? 'Filter table items by Others group'
+                                      : canClickMainCategory
+                                        ? 'Open sub category breakdown for selected main category'
+                                        : undefined
                                 }
                               >
                                 <div className={cn('h-2.5 rounded-full bg-slate-100 overflow-hidden', isRowClickable ? 'hover:bg-slate-200/60 transition-colors' : '')}>
@@ -2276,7 +2367,18 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                 </div>
                               </button>
 
-                              <div className="text-right text-xs font-bold tabular-nums whitespace-nowrap min-w-0">
+                              <button
+                                type="button"
+                                onClick={handleBreakdownRowClick}
+                                disabled={!isRowClickable}
+                                className={cn(
+                                  'text-right text-xs font-bold tabular-nums whitespace-nowrap min-w-0',
+                                  isRowClickable ? 'cursor-pointer hover:opacity-90' : 'cursor-default',
+                                )}
+                                aria-label={
+                                  canOpenDetailModal ? `View expense items for ${row.name}` : undefined
+                                }
+                              >
                                 <span className="text-slate-900">{formatCurrency(value)}</span>
                                 <span className="ml-2 text-[11px] font-extrabold" style={{ color }}>
                                   ({formatPercent(
@@ -2287,7 +2389,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                     1,
                                   )})
                                 </span>
-                              </div>
+                              </button>
                             </li>
                           );
                         })}
@@ -3702,6 +3804,76 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <Modal
+        isOpen={breakdownDetailModal !== null}
+        onClose={() => setBreakdownDetailModal(null)}
+        title={breakdownDetailModal?.title ?? 'Expense items'}
+        maxWidth="3xl"
+        bodyClassName="p-0"
+        footer={
+          <div className="flex w-full items-center justify-between gap-4">
+            <div className="text-sm text-brand-muted">
+              {breakdownDetailModal ? (
+                <>
+                  <span className="font-bold text-brand-text">{breakdownDetailModal.expenses.length}</span> item
+                  {breakdownDetailModal.expenses.length === 1 ? '' : 's'}
+                  {breakdownDetailModal.subtitle ? (
+                    <span className="ml-2">• {breakdownDetailModal.subtitle}</span>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-3">
+              {breakdownDetailModal ? (
+                <span className="text-sm font-black tabular-nums text-brand-text">
+                  Total {formatCurrency(breakdownDetailModal.total)}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setBreakdownDetailModal(null)}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-bold hover:bg-gray-50 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {breakdownDetailModal ? (
+          <div className="custom-scrollbar max-h-[min(60vh,520px)] overflow-auto">
+            {breakdownDetailModal.expenses.length === 0 ? (
+              <div className="px-6 py-10 text-center text-sm text-brand-muted">No expense items in this range.</div>
+            ) : (
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 z-[1] border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-wide text-brand-muted">
+                  <tr>
+                    <th className="bg-gray-50 px-5 py-3 text-left">Date</th>
+                    <th className="bg-gray-50 px-5 py-3 text-left">Item</th>
+                    <th className="bg-gray-50 px-5 py-3 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {breakdownDetailModal.expenses.map((exp) => (
+                    <tr key={exp.id} className="border-t border-gray-100 hover:bg-gray-50/60">
+                      <td className="px-5 py-3 font-medium text-slate-700 whitespace-nowrap">
+                        {expenseEncodedYmd(exp.encodedDt) ?? '—'}
+                      </td>
+                      <td className="px-5 py-3 text-slate-800">
+                        {exp.expDesc || exp.expName || '—'}
+                      </td>
+                      <td className="px-5 py-3 text-right font-bold tabular-nums text-slate-900">
+                        {formatCurrency(Number(exp.expAmount) || 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : null}
+      </Modal>
 
       {/* Delete Expense Confirmation */}
       <Modal
