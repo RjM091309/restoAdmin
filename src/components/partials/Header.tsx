@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Calendar, Bell, Settings, ChevronDown, MapPin, Globe, ArrowLeft, Check } from 'lucide-react';
 import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { clsx } from 'clsx';
 
 import { useUser } from '../../context/UserContext';
@@ -331,7 +330,8 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={handleClose}
                     aria-hidden
                   />
-                  <div className="absolute top-full right-0 mt-2 z-50 max-w-[calc(100vw-2rem)] overflow-x-auto">
+                  <div className="absolute top-full right-0 mt-2 z-50">
+                    <div className="date-picker-multi-wrap">
                     <DatePicker
                       inline
                       selectsRange
@@ -360,22 +360,22 @@ export const Header: React.FC<HeaderProps> = ({
                         const isLastMonth = customHeaderCount === DATE_PICKER_MONTHS_SHOWN - 1;
 
                         return (
-                          <div className="flex items-center justify-between px-2 py-2 min-h-[44px]">
+                          <div className="react-datepicker-multi-month-header flex items-center justify-between">
                             {isFirstMonth ? (
                               <button
                                 type="button"
                                 onClick={decreaseMonth}
                                 disabled={prevMonthButtonDisabled}
                                 className={cn(
-                                  'p-2 rounded-lg transition-colors shrink-0',
+                                  'rounded transition-colors shrink-0',
                                   prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
                                 )}
                                 aria-label="Previous month"
                               >
-                                <ArrowLeft size={18} className="text-brand-muted" />
+                                <ArrowLeft size={14} className="text-brand-muted" />
                               </button>
                             ) : (
-                              <span className="w-9 shrink-0" aria-hidden />
+                              <span className="w-3 shrink-0" aria-hidden />
                             )}
 
                             <button
@@ -383,7 +383,7 @@ export const Header: React.FC<HeaderProps> = ({
                               onClick={() => {
                                 handleDateRangeChange(getFullMonthRange(monthDate), { closeOnComplete: true });
                               }}
-                              className="text-sm font-bold text-brand-text hover:text-brand-primary cursor-pointer transition-colors rounded-lg px-2 py-1 hover:bg-gray-100 text-center"
+                              className="react-datepicker-multi-month-title font-bold text-brand-text hover:text-brand-primary cursor-pointer transition-colors rounded hover:bg-gray-100 text-center leading-tight"
                               aria-label={`Select all of ${monthLabel}`}
                             >
                               {monthLabel}
@@ -395,20 +395,21 @@ export const Header: React.FC<HeaderProps> = ({
                                 onClick={increaseMonth}
                                 disabled={nextMonthButtonDisabled}
                                 className={cn(
-                                  'p-2 rounded-lg transition-colors shrink-0',
+                                  'rounded transition-colors shrink-0',
                                   nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
                                 )}
                                 aria-label="Next month"
                               >
-                                <ArrowLeft size={18} className="text-brand-muted rotate-180" />
+                                <ArrowLeft size={14} className="text-brand-muted rotate-180" />
                               </button>
                             ) : (
-                              <span className="w-9 shrink-0" aria-hidden />
+                              <span className="w-3 shrink-0" aria-hidden />
                             )}
                           </div>
                         );
                       }}
                     />
+                    </div>
                   </div>
                 </>
               )}

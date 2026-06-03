@@ -8,6 +8,8 @@ import { UserProvider } from './context/UserContext.tsx';
 import './i18n';
 import App from './App.tsx';
 import './index.css';
+import 'react-datepicker/dist/react-datepicker.css';
+import './styles/react-datepicker-multi.css';
 
 const theme = createTheme({
   palette: {

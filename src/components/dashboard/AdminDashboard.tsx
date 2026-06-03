@@ -6,7 +6,6 @@ import { BranchPerformanceCard, type BranchPerformanceData } from './BranchPerfo
 import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import {
   fetchBranchSalesApi,
   fetchTopSellingApi,
