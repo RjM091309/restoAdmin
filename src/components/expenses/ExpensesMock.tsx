@@ -20,6 +20,7 @@ import { uploadExpenseReceipt } from '../../services/uploadService';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey, stitchReceiptImages } from '../../services/receiptScannerService';
 import { extractExpenseItemsFromReceiptImage, type ReceiptExpenseExtractionResult } from '../../services/receiptExpenseExtraction';
 import { syncIngredientsFromExpenses } from '../../services/ingredientService';
+import { resolveExistingMasterCategoryId } from '../../utils/expenseCategoryResolve';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine, History, Eye } from 'lucide-react';
@@ -771,46 +772,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       const defaultOpCategoryId = resolvedOp?.id ?? null;
       const categoryMap = new Map<string, string>();
 
-      const findOrCreateMasterCategory = async (categoryType: string, categoryName: string): Promise<string> => {
-        const key = `${categoryType}|${categoryName}`;
+      const resolveCategory = (extractedCategory: string): string => {
+        const key = String(extractedCategory || '').trim() || 'Others';
         const cached = categoryMap.get(key);
         if (cached) return cached;
-        const existing = masterCategories.find(
-          (c) =>
-            c.active &&
-            String(c.categoryType).trim() === String(categoryType).trim() &&
-            String(c.name).trim() === String(categoryName).trim(),
-        );
-        if (existing) {
-          categoryMap.set(key, existing.id);
-          return existing.id;
-        }
-        const payload: CreateInventoryCategoryPayload = {
-          branchId,
-          name: categoryName,
-          categoryType,
-          description: null,
-          icon: null,
-          opCategoryId: defaultOpCategoryId,
-        };
-        const id = await createInventoryCategory(payload);
-        const idStr = String(id);
-        setMasterCategories((prev) => [
-          ...prev,
-          {
-            id: idStr,
-            branchId,
-            opCategoryId: defaultOpCategoryId,
-            name: categoryName,
-            categoryType,
-            description: null,
-            icon: null,
-            isManualStock: false,
-            active: true,
-          },
-        ]);
-        categoryMap.set(key, idStr);
-        return idStr;
+        const masterCatId = resolveExistingMasterCategoryId(masterCategories, key, defaultOpCategoryId);
+        categoryMap.set(key, masterCatId);
+        return masterCatId;
       };
 
       const encodedDt =
@@ -820,10 +788,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
       await Promise.all(
         receiptExtractResult.items.map(async (item) => {
-          const categoryType = String(item.category || '').trim() || 'Others';
-          const categoryName = categoryType;
           const qty = item.qty != null && Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
-          const masterCatId = await findOrCreateMasterCategory(categoryType, categoryName);
+          const masterCatId = resolveCategory(item.category);
           const unit = normalizeReceiptUnit(item.unit || 'pcs');
           const newId = await createExpense({
             branchId,
