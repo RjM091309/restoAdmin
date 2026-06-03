@@ -61,6 +61,7 @@ const getDefaultSyncDateRange = () => {
         end: toYYYYMMDD(today),
     };
 };
+const DATE_PICKER_MONTHS_SHOWN = 3;
 
 // ─── Shared Types & Helpers ────────────────────────────
 
@@ -1320,16 +1321,18 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                                         onClick={() => setDateDropdownOpen(false)}
                                         aria-hidden
                                     />
-                                    <div className="absolute top-full left-0 mt-2 z-[90] bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden">
+                                    <div className="absolute top-full left-0 mt-2 z-[90] bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden max-w-[calc(100vw-2rem)] overflow-x-auto">
                                         <DatePicker
                                             inline
                                             selectsRange
+                                            monthsShown={DATE_PICKER_MONTHS_SHOWN}
+                                            showPreviousMonths
                                             startDate={pickerValue[0]}
                                             endDate={pickerValue[1]}
-                                            openToDate={pickerValue[0] ?? undefined}
+                                            openToDate={pickerValue[1] ?? pickerValue[0] ?? undefined}
                                             onChange={(update) => handleDateRangeChange(update, { closeOnComplete: true })}
                                             dateFormat="MMM d, yyyy"
-                                            calendarClassName="react-datepicker-material"
+                                            calendarClassName="react-datepicker-material react-datepicker-material--multi"
                                             isClearable
                                             renderCustomHeader={({
                                                 monthDate,
@@ -1337,41 +1340,64 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                                                 increaseMonth,
                                                 prevMonthButtonDisabled,
                                                 nextMonthButtonDisabled,
+                                                customHeaderCount,
                                             }) => {
                                                 const monthLabel = monthDate.toLocaleDateString(localeForLanguage(i18n.language), {
                                                     month: 'long',
                                                     year: 'numeric',
                                                 });
+                                                const isFirstMonth = customHeaderCount === 0;
+                                                const isLastMonth = customHeaderCount === DATE_PICKER_MONTHS_SHOWN - 1;
 
                                                 return (
-                                                    <div className="flex items-center justify-between px-3 py-2">
+                                                    <div className="flex items-center justify-between px-2 py-2 min-h-[44px]">
+                                                        {isFirstMonth ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={decreaseMonth}
+                                                                disabled={prevMonthButtonDisabled}
+                                                                className={cn(
+                                                                    'p-2 rounded-lg transition-colors shrink-0',
+                                                                    prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                                                )}
+                                                                aria-label="Previous month"
+                                                            >
+                                                                <ArrowLeft size={18} className="text-brand-muted" />
+                                                            </button>
+                                                        ) : (
+                                                            <span className="w-9 shrink-0" aria-hidden />
+                                                        )}
+
                                                         <button
                                                             type="button"
-                                                            onClick={decreaseMonth}
-                                                            disabled={prevMonthButtonDisabled}
-                                                            className={cn(
-                                                                'p-2 rounded-lg transition-colors',
-                                                                prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
-                                                            )}
-                                                            aria-label="Previous month"
+                                                            onClick={() => {
+                                                                handleDateRangeChange(
+                                                                    [startOfMonth(monthDate), endOfMonth(monthDate)],
+                                                                    { closeOnComplete: true }
+                                                                );
+                                                            }}
+                                                            className="text-sm font-bold text-brand-text hover:text-brand-primary cursor-pointer transition-colors rounded-lg px-2 py-1 hover:bg-gray-100 text-center"
+                                                            aria-label={`Select all of ${monthLabel}`}
                                                         >
-                                                            <ArrowLeft size={18} className="text-brand-muted" />
+                                                            {monthLabel}
                                                         </button>
 
-                                                        <div className="text-sm font-bold text-brand-text">{monthLabel}</div>
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={increaseMonth}
-                                                            disabled={nextMonthButtonDisabled}
-                                                            className={cn(
-                                                                'p-2 rounded-lg transition-colors',
-                                                                nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
-                                                            )}
-                                                            aria-label="Next month"
-                                                        >
-                                                            <ArrowLeft size={18} className="text-brand-muted rotate-180" />
-                                                        </button>
+                                                        {isLastMonth ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={increaseMonth}
+                                                                disabled={nextMonthButtonDisabled}
+                                                                className={cn(
+                                                                    'p-2 rounded-lg transition-colors shrink-0',
+                                                                    nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                                                )}
+                                                                aria-label="Next month"
+                                                            >
+                                                                <ArrowLeft size={18} className="text-brand-muted rotate-180" />
+                                                            </button>
+                                                        ) : (
+                                                            <span className="w-9 shrink-0" aria-hidden />
+                                                        )}
                                                     </div>
                                                 );
                                             }}

@@ -158,6 +158,22 @@
   color: rgb(203 213 225) !important;
 }
 
+/* Three-month range picker: current month on the right, two prior months visible */
+.react-datepicker-material--multi.react-datepicker {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+}
+
+.react-datepicker-material--multi .react-datepicker__month-container {
+  float: none !important;
+  border-right: 1px solid rgb(226 232 240) !important;
+  padding: 0 6px !important;
+}
+
+.react-datepicker-material--multi .react-datepicker__month-container:last-child {
+  border-right: none !important;
+}
+
 /* --- Skeleton Shimmer --- */
 .skeleton-shimmer {
   position: relative;
