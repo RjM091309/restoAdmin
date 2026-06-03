@@ -149,13 +149,30 @@ const clampFiniteNonNegative = (n: unknown): number => {
   return v < 0 ? 0 : v;
 };
 
-/**
- * Diverging bars: sales (up) vs expenses (down).
- * Y-axis labels use 1:2 — at the same tick, expense label = 2× sales label (e.g. ₱240k / ₱480k).
- * Bar heights use the sales scale so equal peso amounts have equal visual length.
- */
-const TREND_AXIS_TICK_FRACS = [0.4, 0.8, 1] as const;
+/** Diverging bars: shared 40/80/100% ticks; expense axis sized so first tick ≈ peak daily expense. */
 const TREND_EXPENSE_TO_SALES_AXIS_RATIO = 2;
+
+const buildTrendChartScale = (rows: MonthlyData[]) => {
+  const tickFracs = [0.4, 0.8, 1] as const;
+  const firstTickFrac = tickFracs[0];
+  const salesValues = rows.map((d) => clampFiniteNonNegative(d.totalSales));
+  const expenseValues = rows.map((d) => clampFiniteNonNegative(d.totalExpenses));
+  const salesMax = salesValues.reduce((m, v) => Math.max(m, v), 0);
+  const expensesMax = expenseValues.reduce((m, v) => Math.max(m, v), 0);
+  const salesAxisMax = buildNiceMax(salesMax);
+  const expensesAxisMax =
+    expensesMax > 0 ? buildNiceMax(expensesMax / firstTickFrac) : buildNiceMax(expensesMax);
+
+  const posTicksScaled = [...tickFracs];
+  const negTicksScaled = [...tickFracs].reverse().map((f) => -f);
+  const ticksScaled = [...negTicksScaled, 0, ...posTicksScaled];
+  return {
+    salesAxisMax,
+    expensesAxisMax,
+    ticksScaled,
+    domainScaled: [-1.08, 1.08] as [number, number],
+  };
+};
 
 const niceStep = (max: number, targetSteps: number): number => {
   const m = Number(max);
@@ -489,9 +506,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         if (reqId === trendReqIdRef.current) setMonthlyData(normalized);
       } catch (error) {
         console.error('[AdminDashboard] Failed to load performance trend:', error);
-        if (trendReqIdRef.current) setMonthlyData([]);
       } finally {
-        if (trendReqIdRef.current) setTrendLoading(false);
+        if (reqId === trendReqIdRef.current) setTrendLoading(false);
       }
     };
 
@@ -1345,39 +1361,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return Content;
   }, [t, trendAnchorDate, trendFallbackYear, trendPeriod, trendRangeEnd, trendRangeStart]);
 
-  const trendChartScale = useMemo(() => {
-    const salesValues = monthlyData.map((d) => clampFiniteNonNegative(d.totalSales));
-    const expenseValues = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
-    const salesMax = salesValues.reduce((m, v) => Math.max(m, v), 0);
-    const expensesMax = expenseValues.reduce((m, v) => Math.max(m, v), 0);
-    const salesAxisMax = buildNiceMax(Math.max(salesMax, expensesMax));
-    const expensesAxisMax = salesAxisMax * TREND_EXPENSE_TO_SALES_AXIS_RATIO;
-
-    const posTicksScaled = [...TREND_AXIS_TICK_FRACS];
-    const negTicksScaled = TREND_AXIS_TICK_FRACS.slice().reverse().map((f) => -f);
-    const ticksScaled = [...negTicksScaled, 0, ...posTicksScaled];
-    return {
-      salesAxisMax,
-      expensesAxisMax,
-      ticksScaled,
-      domainScaled: [-1.08, 1.08] as [number, number],
-    };
-  }, [monthlyData]);
+  const trendChartScale = useMemo(() => buildTrendChartScale(monthlyData), [monthlyData]);
 
   const trendChartData = useMemo(() => {
     const salesDen = trendChartScale.salesAxisMax || 1;
+    const expensesDen = trendChartScale.expensesAxisMax || salesDen * TREND_EXPENSE_TO_SALES_AXIS_RATIO;
     return monthlyData.map((d) => {
       const rawSales = clampFiniteNonNegative(d.totalSales);
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
       return {
         ...d,
         totalSales: rawSales / salesDen,
-        negativeExpenses: -(rawExpenses / salesDen),
+        negativeExpenses: -(rawExpenses / expensesDen),
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
     });
-  }, [monthlyData, trendChartScale.salesAxisMax]);
+  }, [monthlyData, trendChartScale.salesAxisMax, trendChartScale.expensesAxisMax]);
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
@@ -1566,10 +1566,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   </button>
                 </div>
               </div>
-              <div className="w-full min-w-0 h-96 min-h-[384px]">
+              <div className="relative w-full min-w-0 h-96 min-h-[384px]">
+                {trendLoading && monthlyData.length === 0 ? (
+                  <Skeleton className="h-full w-full rounded-xl" />
+                ) : trendChartData.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    {t('admin_dashboard.no_revenue_data')}
+                  </div>
+                ) : (
+                <>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={384}>
                   <BarChart
-                    key={`${activeBranchId || 'all'}-${trendPeriod}`}
+                    key={activeBranchId || 'all'}
                     data={trendChartData}
                     margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
                     stackOffset="sign"
@@ -1616,6 +1624,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
+                      isAnimationActive={!trendLoading}
                     />
                     <Bar 
                       dataKey="negativeExpenses" 
@@ -1624,9 +1633,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
+                      isAnimationActive={!trendLoading}
                     />
                   </BarChart>
                 </ResponsiveContainer>
+                {trendLoading && (
+                  <div
+                    className="absolute inset-0 rounded-xl bg-white/50 pointer-events-none"
+                    aria-hidden
+                  />
+                )}
+                </>
+                )}
               </div>
             </div>
 
