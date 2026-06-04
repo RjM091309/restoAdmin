@@ -23,6 +23,7 @@ import {
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
 import { useUser } from '../../context/UserContext';
+import { is3coreBranch, sortBranchesBySidebarOrder } from '../../utils/branchLogo';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const REVENUE_DISTRIBUTION_COLORS = [
@@ -747,6 +748,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   }, [isComparePanelOpen]);
 
   const handleBranchCompareToggle = (branchId: number) => {
+    const branch = sourceForCompare.find((b) => b.id === branchId);
+    if (branch && is3coreBranch(branch.name)) return;
     setCompareBranchIds((prev) => {
       if (prev.includes(branchId)) {
         return prev.filter((id) => id !== branchId);
@@ -766,9 +769,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   };
 
   const sourceForCompare = branchCardsData.length > 0 ? branchCardsData : performanceData;
+  const branchesForCompareList = useMemo(
+    () => sortBranchesBySidebarOrder(sourceForCompare, { exclude3core: true }),
+    [sourceForCompare],
+  );
+
+  useEffect(() => {
+    setCompareBranchIds((prev) =>
+      prev.filter((id) => {
+        const b = sourceForCompare.find((x) => x.id === id);
+        return b && !is3coreBranch(b.name);
+      }),
+    );
+  }, [sourceForCompare]);
 
   const selectedCompareBranches = compareBranchIds
-    .map((id) => sourceForCompare.find((branch) => branch.id === id))
+    .map((id) => branchesForCompareList.find((branch) => branch.id === id))
     .filter((branch): branch is BranchPerformanceData => Boolean(branch));
   const canCompare = selectedCompareBranches.length >= 2;
 
@@ -1785,8 +1801,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               const hasAnalytics = branchCardsData.length > 0;
               const canUseLegacy = !analyticsLoading && !hasAnalytics && performanceData.length > 0;
               const list = hasAnalytics ? branchCardsData : canUseLegacy ? performanceData : [];
+              const orderedList = sortBranchesBySidebarOrder(list, { exclude3core: true });
 
-              if (list.length === 0 && (analyticsLoading || loading)) {
+              if (orderedList.length === 0 && (analyticsLoading || loading)) {
                 return (
                   <div className="space-y-3">
                     {Array.from({ length: 5 }).map((_, i) => (
@@ -1796,14 +1813,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 );
               }
 
-              return list
-              .slice()
-              .sort((a, b) => {
-                const aExpenses = getEffectiveBranchTotalExpenses(a);
-                const bExpenses = getEffectiveBranchTotalExpenses(b);
-                return (b.totalSales - bExpenses) - (a.totalSales - aExpenses);
-              })
-              .map((branch) => (
+              return orderedList.map((branch) => (
                 (() => {
                   const effectiveExpenses = getEffectiveBranchTotalExpenses(branch);
                   let branchForCard: BranchPerformanceData = {

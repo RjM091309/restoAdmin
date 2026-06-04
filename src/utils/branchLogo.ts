@@ -29,20 +29,26 @@ export function is3coreBranch(name: string | null | undefined): boolean {
   return n === '3core' || n.includes('3core');
 }
 
-/** All Branches sidebar grid: row1 kim's, Bluemoon, Keumho — row2 EESOME, PRIME, NOIR */
+/** All Branches sidebar grid: row1 kim's, Bluemoon, Keumho — row2 PRIME, EESOME, NOIR */
 const ALL_BRANCHES_SIDEBAR_MATCHERS: Array<(name: string) => boolean> = [
   (n) => /kim/.test(n),
   (n) => /blue\s*moon|bluemoon/.test(n),
   (n) => /keumho|keum\s*ho|daraejung/.test(n),
-  (n) => /eesome/.test(n) && !/noir/.test(n),
   (n) => /prime/.test(n),
+  (n) => /eesome/.test(n) && !/noir/.test(n),
   (n) => /noir/.test(n),
 ];
 
-export function prepareAllBranchesSidebarLogos(branches: Branch[]): Branch[] {
-  const pool = branches.filter((b) => !is3coreBranch(b.name));
+/** Fixed branch order (sidebar + dashboard compare). Excludes 3Core by default. */
+export function sortBranchesBySidebarOrder<T extends { id: number | string; name: string }>(
+  branches: T[],
+  options?: { exclude3core?: boolean; appendUnmatched?: boolean },
+): T[] {
+  const exclude3core = options?.exclude3core ?? true;
+  const appendUnmatched = options?.appendUnmatched ?? true;
+  const pool = exclude3core ? branches.filter((b) => !is3coreBranch(b.name)) : [...branches];
   const used = new Set<string>();
-  const ordered: Branch[] = [];
+  const ordered: T[] = [];
 
   for (const match of ALL_BRANCHES_SIDEBAR_MATCHERS) {
     const found = pool.find((b) => {
@@ -56,5 +62,16 @@ export function prepareAllBranchesSidebarLogos(branches: Branch[]): Branch[] {
     }
   }
 
+  if (appendUnmatched) {
+    const rest = pool
+      .filter((b) => !used.has(String(b.id)))
+      .sort((a, b) => normalizeBranchName(a.name).localeCompare(normalizeBranchName(b.name)));
+    ordered.push(...rest);
+  }
+
   return ordered;
+}
+
+export function prepareAllBranchesSidebarLogos(branches: Branch[]): Branch[] {
+  return sortBranchesBySidebarOrder(branches, { exclude3core: true, appendUnmatched: false });
 }
