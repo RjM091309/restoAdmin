@@ -755,7 +755,15 @@ def daily_sales(
                 SELECT
                     DATE_FORMAT({refund_day_dt}, '%Y-%m-%d') AS sale_date,
                     COALESCE(SUM(r.refund_amount), 0) AS refund
-                FROM loyverse_refund_receipts r
+                FROM (
+                    SELECT
+                        refund_receipt_number,
+                        branch_id,
+                        MAX(refund_amount) AS refund_amount,
+                        MAX(refund_dt) AS refund_dt
+                    FROM loyverse_refund_receipts
+                    GROUP BY refund_receipt_number, branch_id
+                ) r
                 WHERE r.refund_amount > 0
                 {refund_date_filter_sql}
                 {refund_branch_filter_sql}

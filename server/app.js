@@ -237,6 +237,9 @@ app.use((err, req, res, next) => {
 		await ensureOrderItemsLineCostColumn();
 		await ensureReceiptScanHistoryTable();
 		await ensureTelegramSettingsTable();
+		const BillingModel = require('./models/billingModel');
+		await BillingModel.ensureLoyverseRefundsTable();
+		console.log('[BillingModel] Refund tracker ready on boot');
 	} catch (e) {
 		console.error('[Schema] ensure startup schema failed:', e?.message || e);
 	}
