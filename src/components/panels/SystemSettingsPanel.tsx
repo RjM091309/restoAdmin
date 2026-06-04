@@ -43,15 +43,6 @@ const toYYYYMMDD = (d: Date): string =>
     String(d.getMonth() + 1).padStart(2, '0') +
     '-' +
     String(d.getDate()).padStart(2, '0');
-const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
-const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
-const localeForLanguage = (lng: string) => {
-    const base = String(lng || 'en').split('-')[0];
-    if (base === 'ja') return 'ja-JP';
-    if (base === 'ko') return 'ko-KR';
-    if (base === 'zh') return 'zh-CN';
-    return 'en-US';
-};
 const getDefaultSyncDateRange = () => {
     const today = new Date();
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -60,7 +51,6 @@ const getDefaultSyncDateRange = () => {
         end: toYYYYMMDD(today),
     };
 };
-const DATE_PICKER_MONTHS_SHOWN = 3;
 
 // ─── Shared Types & Helpers ────────────────────────────
 
@@ -743,7 +733,6 @@ const VersionInfoView: React.FC<{ onBack: () => void; t: (key: string) => string
 // ═══════════════════════════════════════════════════════
 
 const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }> = ({ onBack, t }) => {
-    const { i18n } = useTranslation();
     const defaultRange = getDefaultSyncDateRange();
     const [toast, setToast] = useState<Toast>(null);
     const [running, setRunning] = useState(false);
@@ -1321,88 +1310,17 @@ const DataSyncView: React.FC<{ onBack: () => void; t: (key: string) => string }>
                                         aria-hidden
                                     />
                                     <div className="absolute top-full left-0 mt-2 z-[90]">
-                                        <div className="date-picker-multi-wrap date-picker-multi-wrap--left">
                                         <DatePicker
                                             inline
                                             selectsRange
-                                            monthsShown={DATE_PICKER_MONTHS_SHOWN}
-                                            showPreviousMonths
                                             startDate={pickerValue[0]}
                                             endDate={pickerValue[1]}
                                             openToDate={pickerValue[1] ?? pickerValue[0] ?? undefined}
                                             onChange={(update) => handleDateRangeChange(update, { closeOnComplete: true })}
                                             dateFormat="MMM d, yyyy"
-                                            calendarClassName="react-datepicker-material react-datepicker-material--multi"
+                                            calendarClassName="react-datepicker-material"
                                             isClearable
-                                            renderCustomHeader={({
-                                                monthDate,
-                                                decreaseMonth,
-                                                increaseMonth,
-                                                prevMonthButtonDisabled,
-                                                nextMonthButtonDisabled,
-                                                customHeaderCount,
-                                            }) => {
-                                                const monthLabel = monthDate.toLocaleDateString(localeForLanguage(i18n.language), {
-                                                    month: 'long',
-                                                    year: 'numeric',
-                                                });
-                                                const isFirstMonth = customHeaderCount === 0;
-                                                const isLastMonth = customHeaderCount === DATE_PICKER_MONTHS_SHOWN - 1;
-
-                                                return (
-                                                    <div className="react-datepicker-multi-month-header flex items-center justify-between">
-                                                        {isFirstMonth ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={decreaseMonth}
-                                                                disabled={prevMonthButtonDisabled}
-                                                                className={cn(
-                                                                    'rounded transition-colors shrink-0',
-                                                                    prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
-                                                                )}
-                                                                aria-label="Previous month"
-                                                            >
-                                                                <ArrowLeft size={14} className="text-brand-muted" />
-                                                            </button>
-                                                        ) : (
-                                                            <span className="w-3 shrink-0" aria-hidden />
-                                                        )}
-
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                handleDateRangeChange(
-                                                                    [startOfMonth(monthDate), endOfMonth(monthDate)],
-                                                                    { closeOnComplete: true }
-                                                                );
-                                                            }}
-                                                            className="react-datepicker-multi-month-title font-bold text-brand-text hover:text-brand-primary cursor-pointer transition-colors rounded hover:bg-gray-100 text-center leading-tight"
-                                                            aria-label={`Select all of ${monthLabel}`}
-                                                        >
-                                                            {monthLabel}
-                                                        </button>
-
-                                                        {isLastMonth ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={increaseMonth}
-                                                                disabled={nextMonthButtonDisabled}
-                                                                className={cn(
-                                                                    'rounded transition-colors shrink-0',
-                                                                    nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
-                                                                )}
-                                                                aria-label="Next month"
-                                                            >
-                                                                <ArrowLeft size={14} className="text-brand-muted rotate-180" />
-                                                            </button>
-                                                        ) : (
-                                                            <span className="w-3 shrink-0" aria-hidden />
-                                                        )}
-                                                    </div>
-                                                );
-                                            }}
                                         />
-                                        </div>
                                     </div>
                                 </>
                             )}
