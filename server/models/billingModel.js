@@ -8,6 +8,8 @@
 const pool = require('../config/db');
 
 class BillingModel {
+	static _loyverseRefundsSchemaReady = false;
+
 	static async ensureLoyverseRefundsTable() {
 		// Stores which Loyverse refund receipts have already been applied, to keep refund sync idempotent.
 		// Without this, auto-sync/manual refresh will keep adding the same refund repeatedly.
@@ -25,6 +27,93 @@ class BillingModel {
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 		`;
 		await pool.execute(sql);
+
+		if (BillingModel._loyverseRefundsSchemaReady) return;
+
+		try {
+			const [pkRows] = await pool.execute(
+				`SELECT COUNT(*) AS c
+				 FROM information_schema.table_constraints
+				 WHERE table_schema = DATABASE()
+				   AND table_name = 'loyverse_refund_receipts'
+				   AND constraint_type = 'PRIMARY KEY'`
+			);
+			const hasPk = Number(pkRows[0]?.c || 0) > 0;
+			if (!hasPk) {
+				console.warn('[BillingModel] Migrating loyverse_refund_receipts: dedupe rows and add PRIMARY KEY');
+				await pool.execute(`
+					CREATE TEMPORARY TABLE IF NOT EXISTS loyverse_refund_receipts_dedup AS
+					SELECT
+						refund_receipt_number,
+						MAX(order_id) AS order_id,
+						MAX(branch_id) AS branch_id,
+						MAX(refund_amount) AS refund_amount,
+						MAX(refund_dt) AS refund_dt,
+						MAX(refund_reason) AS refund_reason,
+						MAX(created_at) AS created_at
+					FROM loyverse_refund_receipts
+					GROUP BY refund_receipt_number
+				`);
+				await pool.execute(`DELETE FROM loyverse_refund_receipts`);
+				await pool.execute(`
+					INSERT INTO loyverse_refund_receipts
+						(refund_receipt_number, order_id, branch_id, refund_amount, refund_dt, refund_reason, created_at)
+					SELECT
+						refund_receipt_number, order_id, branch_id, refund_amount, refund_dt, refund_reason, created_at
+					FROM loyverse_refund_receipts_dedup
+				`);
+				await pool.execute(`DROP TEMPORARY TABLE IF EXISTS loyverse_refund_receipts_dedup`);
+				await pool.execute(
+					`ALTER TABLE loyverse_refund_receipts ADD PRIMARY KEY (refund_receipt_number)`
+				);
+				await BillingModel.rebuildBillingRefundsFromTracker();
+				console.warn('[BillingModel] loyverse_refund_receipts migration complete; billing refunds rebuilt');
+			}
+		} catch (e) {
+			console.warn('[BillingModel.ensureLoyverseRefundsTable] migration skipped:', e?.message || e);
+		}
+
+		BillingModel._loyverseRefundsSchemaReady = true;
+	}
+
+	/** Recompute billing.REFUND from one row per Loyverse refund receipt (fixes duplicate sync totals). */
+	static async rebuildBillingRefundsFromTracker(branchId = null) {
+		await BillingModel.ensureLoyverseRefundsTable();
+		const params = [];
+		let branchSql = '';
+		if (branchId != null && branchId !== '') {
+			branchSql = ' AND branch_id = ?';
+			params.push(Number(branchId));
+		}
+
+		await pool.execute(
+			`UPDATE billing SET REFUND = 0, REFUND_DT = NULL, REFUND_REASON = NULL
+			 WHERE REFUND IS NOT NULL AND REFUND > 0
+			 ${branchId != null && branchId !== '' ? ' AND BRANCH_ID = ?' : ''}`,
+			branchId != null && branchId !== '' ? [Number(branchId)] : []
+		);
+
+		await pool.execute(
+			`
+			UPDATE billing b
+			INNER JOIN (
+				SELECT
+					order_id,
+					SUM(refund_amount) AS total_refund,
+					MAX(refund_dt) AS refund_dt,
+					MAX(refund_reason) AS refund_reason
+				FROM loyverse_refund_receipts
+				WHERE refund_amount > 0
+				${branchSql}
+				GROUP BY order_id
+			) agg ON agg.order_id = b.ORDER_ID
+			SET
+				b.REFUND = agg.total_refund,
+				b.REFUND_DT = agg.refund_dt,
+				b.REFUND_REASON = agg.refund_reason
+			`,
+			params
+		);
 	}
 	static async getAll(branchId = null) {
 		let query = `
@@ -280,12 +369,21 @@ class BillingModel {
 			});
 		}
 
-		// Idempotency guard: record this refund receipt number once.
-		// If we've already applied it, do nothing.
+		// Idempotency guard: one Loyverse refund receipt applies once only.
 		if (refundReceiptNumber) {
 			await this.ensureLoyverseRefundsTable();
 
-			// Try to capture branch_id for reference (best-effort)
+			const [existingRows] = await pool.execute(
+				`SELECT refund_receipt_number FROM loyverse_refund_receipts WHERE refund_receipt_number = ? LIMIT 1`,
+				[refundReceiptNumber]
+			);
+			if (existingRows.length > 0) {
+				if (debug) {
+					console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
+				}
+				return { changed: false };
+			}
+
 			let branchId = null;
 			try {
 				const [orderRows] = await pool.execute(
@@ -295,32 +393,18 @@ class BillingModel {
 				branchId = orderRows[0]?.BRANCH_ID ?? null;
 			} catch (_) {}
 
-			const [ins] = await pool.execute(
-				`INSERT IGNORE INTO loyverse_refund_receipts
-				 (refund_receipt_number, order_id, branch_id, refund_amount, refund_dt, refund_reason)
-				 VALUES (?, ?, ?, ?, ?, ?)`,
-				[refundReceiptNumber, orderId, branchId, refundAmount, refundDt, refundReason]
-			);
-
-			// If insert didn't happen, the receipt key already exists.
-			// Treat as unchanged only when it points to the same order.
-			// If it points to a different historical order mapping, re-apply to the current target order.
-			if (!ins?.affectedRows) {
-				const [existingRows] = await pool.execute(
-					`SELECT order_id FROM loyverse_refund_receipts WHERE refund_receipt_number = ? LIMIT 1`,
-					[refundReceiptNumber]
+			try {
+				await pool.execute(
+					`INSERT INTO loyverse_refund_receipts
+					 (refund_receipt_number, order_id, branch_id, refund_amount, refund_dt, refund_reason)
+					 VALUES (?, ?, ?, ?, ?, ?)`,
+					[refundReceiptNumber, orderId, branchId, refundAmount, refundDt, refundReason]
 				);
-				const existingOrderId = Number(existingRows[0]?.order_id || 0);
-				if (existingOrderId === Number(orderId || 0)) {
-					if (debug) {
-						console.log('[BillingModel.updateRefundForOrder] Refund already applied for receipt:', refundReceiptNumber);
-					}
+			} catch (insertErr) {
+				if (insertErr?.code === 'ER_DUP_ENTRY') {
 					return { changed: false };
 				}
-				console.warn(
-					'[BillingModel.updateRefundForOrder] Re-mapping refund receipt to different order.',
-					{ refundReceiptNumber, previousOrderId: existingOrderId || null, newOrderId: orderId }
-				);
+				throw insertErr;
 			}
 		}
 
@@ -338,26 +422,6 @@ class BillingModel {
 			console.log('[BillingModel.updateRefundForOrder] UPDATE result.affectedRows =', updateResult.affectedRows);
 		}
 		if (updateResult.affectedRows > 0) {
-			if (refundReceiptNumber) {
-				try {
-					let branchId = null;
-					try {
-						const [orows] = await pool.execute(
-							`SELECT BRANCH_ID FROM orders WHERE IDNo = ? LIMIT 1`,
-							[orderId]
-						);
-						branchId = orows[0]?.BRANCH_ID ?? null;
-					} catch (_) {}
-					await pool.execute(
-						`UPDATE loyverse_refund_receipts
-						 SET order_id = ?, branch_id = ?, refund_amount = ?, refund_dt = ?, refund_reason = ?
-						 WHERE refund_receipt_number = ?`,
-						[orderId, branchId, refundAmount, refundDt, refundReason, refundReceiptNumber]
-					);
-				} catch (e) {
-					console.warn('[BillingModel.updateRefundForOrder] Failed to refresh refund tracker row:', e?.message || e);
-				}
-			}
 			return { changed: true };
 		}
 
@@ -408,20 +472,6 @@ class BillingModel {
 
 		if (debug) {
 			console.log('[BillingModel.updateRefundForOrder] INSERTED billing row with refund for orderId=', orderId);
-		}
-
-		if (refundReceiptNumber) {
-			try {
-				// Ensure tracker points to the actual order we updated/inserted.
-				await pool.execute(
-					`UPDATE loyverse_refund_receipts
-					 SET order_id = ?, branch_id = ?, refund_amount = ?, refund_dt = ?, refund_reason = ?
-					 WHERE refund_receipt_number = ?`,
-					[orderId, order.BRANCH_ID || null, refundAmount, refundDt, refundReason, refundReceiptNumber]
-				);
-			} catch (e) {
-				console.warn('[BillingModel.updateRefundForOrder] Failed to refresh refund tracker row:', e?.message || e);
-			}
 		}
 
 		return { changed: true };

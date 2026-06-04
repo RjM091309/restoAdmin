@@ -159,9 +159,7 @@ const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
   const apiNetSales = Number((item as any).net_sales ?? 0);
   const hasApiNetSales = Number.isFinite(apiNetSales) && (item as any).net_sales != null;
 
-  // Loyverse-consistent source of truth: refund = total - discount - net.
-  const derivedRefund = hasApiNetSales ? totalSales - discount - apiNetSales : NaN;
-  const refund = Number.isFinite(derivedRefund) ? Math.max(0, derivedRefund) : Math.max(0, apiRefund);
+  const refund = Math.max(0, apiRefund);
   const netSales = hasApiNetSales ? Math.max(0, apiNetSales) : Math.max(0, totalSales - refund - discount);
   // Loyverse only: daily sum of LINE_COST (same as product_cost used for gross profit)
   const rawCost = (item as any).product_cost ?? (item as any).productCost;

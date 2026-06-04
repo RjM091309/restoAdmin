@@ -163,6 +163,21 @@ def _mysql_column_exists(cur, table: str, column: str) -> bool:
         return False
 
 
+def _mysql_table_exists(cur, table: str) -> bool:
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+            LIMIT 1
+            """,
+            (table,),
+        )
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
 @app.get("/api/analytics/sample")
 def sample_analytics():
     return {
@@ -716,30 +731,50 @@ def daily_sales(
         cur.execute(discount_query, discount_params)
         discount_rows = cur.fetchall()
 
-        # 3) Refund per day from billing table (values synced from Loyverse refunds)
+        # 3) Refund per day — prefer deduped Loyverse tracker (one row per refund receipt)
         refund_date_filter = ""
         refund_branch_filter = ""
         refund_params: List[object] = []
 
         if start_date and end_date:
-            refund_date_filter = f"AND DATE({refund_local_dt}) BETWEEN %s AND %s"
+            refund_date_filter = "AND DATE({refund_day_dt}) BETWEEN %s AND %s"
             refund_params.extend([start_date, end_date])
         if branch_id:
-            # Keep branch source consistent with total_sales/discount filters.
-            refund_branch_filter = "AND b.BRANCH_ID = %s"
+            refund_branch_filter = "AND {refund_branch_col} = %s"
             refund_params.append(branch_id)
 
-        refund_query = f"""
-            SELECT
-                DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
-                COALESCE(SUM(b.REFUND), 0) AS refund
-            FROM billing b
-            INNER JOIN orders o ON o.IDNo = b.ORDER_ID
-            WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
-            {refund_date_filter}
-            {refund_branch_filter}
-            GROUP BY DATE({refund_local_dt})
-        """
+        has_refund_tracker = _mysql_table_exists(cur, "loyverse_refund_receipts")
+        if has_refund_tracker:
+            refund_day_dt = """COALESCE(
+                CONVERT_TZ(r.refund_dt, @@session.time_zone, '+08:00'),
+                DATE_ADD(r.refund_dt, INTERVAL 8 HOUR)
+            )"""
+            refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_day_dt) if refund_date_filter else ""
+            refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="r.branch_id") if refund_branch_filter else ""
+            refund_query = f"""
+                SELECT
+                    DATE_FORMAT({refund_day_dt}, '%Y-%m-%d') AS sale_date,
+                    COALESCE(SUM(r.refund_amount), 0) AS refund
+                FROM loyverse_refund_receipts r
+                WHERE r.refund_amount > 0
+                {refund_date_filter_sql}
+                {refund_branch_filter_sql}
+                GROUP BY DATE({refund_day_dt})
+            """
+        else:
+            refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_local_dt) if refund_date_filter else ""
+            refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="b.BRANCH_ID") if refund_branch_filter else ""
+            refund_query = f"""
+                SELECT
+                    DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
+                    COALESCE(SUM(b.REFUND), 0) AS refund
+                FROM billing b
+                INNER JOIN orders o ON o.IDNo = b.ORDER_ID
+                WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
+                {refund_date_filter_sql}
+                {refund_branch_filter_sql}
+                GROUP BY DATE({refund_local_dt})
+            """
 
         cur.execute(refund_query, refund_params)
         refund_rows = cur.fetchall()
