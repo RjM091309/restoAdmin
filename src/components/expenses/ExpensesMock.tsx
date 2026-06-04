@@ -194,6 +194,23 @@ const roundMoney2 = (n: number) => Math.round(n * 100) / 100;
 const expenseLineQty = (row: ExpenseRecord): number =>
   row.expQty != null && Number.isFinite(Number(row.expQty)) ? Number(row.expQty) : 0;
 
+/** Main category Inventory toggle ON (STATE=1) → sync qty to stock; OFF → expense line qty only. */
+const operationTracksInventory = (opId: string | null | undefined, ops: Operation[]): boolean => {
+  if (opId == null || String(opId).trim() === '') return false;
+  const op = ops.find((o) => String(o.id) === String(opId));
+  return op?.state === 1;
+};
+
+const masterCatTracksInventory = (
+  masterCatId: string | null | undefined,
+  masters: InventoryCategory[],
+  ops: Operation[],
+): boolean => {
+  if (masterCatId == null) return false;
+  const mc = masters.find((c) => String(c.id) === String(masterCatId));
+  return operationTracksInventory(mc?.opCategoryId ?? null, ops);
+};
+
 /** EXP_AMOUNT is the manually entered amount for the line (independent of qty). */
 const expenseLineAmountStored = (row: ExpenseRecord): number =>
   Number.isFinite(row.expAmount) ? Number(row.expAmount) : 0;
@@ -784,11 +801,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             receiptImagePath: receiptPath ?? null,
             encodedDt,
           });
-          try {
-            const stockQty = qty > 0 ? qty : 0;
-            await updateInventoryStock(String(newId), stockQty, branchId, true, unit);
-          } catch {
-            // non-fatal
+          if (masterCatTracksInventory(masterCatId, masterCategories, operations)) {
+            try {
+              const stockQty = qty > 0 ? qty : 0;
+              await updateInventoryStock(String(newId), stockQty, branchId, true, unit);
+            } catch {
+              // non-fatal
+            }
           }
         }),
       );
@@ -1227,8 +1246,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     );
   }, [expensesInAnalyticsRange, masterCategories, selectedOperationId]);
 
-  /** Inventory toggle ON: sync qty to stock. Qty/Unit fields are always available in the UI. */
-  const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
+  /** Inventory toggle ON for selected main category → stock sync. Qty/Unit always shown (standard process). */
+  const isInventoryCategory =
+    selectedOperationId != null && operationTracksInventory(selectedOperationId, operations);
 
   const columns: ColumnDef<ExpenseRecord>[] = useMemo(
     () => [
@@ -1390,6 +1410,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   );
 
   const handleSaveQty = async (row: ExpenseRecord) => {
+    if (!isInventoryCategory) {
+      toast.error('Stock updates apply only when Inventory is enabled on the main category.');
+      return;
+    }
     const qty = Number(editingQtyValue);
     if (!branchId || !Number.isFinite(qty) || qty < 0) {
       toast.error('Enter a valid quantity');
