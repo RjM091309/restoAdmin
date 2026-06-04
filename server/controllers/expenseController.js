@@ -33,6 +33,7 @@ class ExpenseController {
 			EXP_DESC: req.body.EXP_DESC || req.body.expDesc || req.body.description || req.body.DESC || null,
 			EXP_AMOUNT: req.body.EXP_AMOUNT ?? req.body.expAmount ?? req.body.amount ?? null,
 			EXP_QTY: req.body.EXP_QTY ?? req.body.expQty ?? req.body.exp_qty ?? null,
+			UNIT: req.body.UNIT ?? req.body.unit ?? null,
 			EXP_SOURCE: req.body.EXP_SOURCE || req.body.expSource || req.body.source || null,
 			RECEIPT_IMAGE_PATH:
 				req.body.RECEIPT_IMAGE_PATH ??
@@ -122,6 +123,7 @@ class ExpenseController {
 				EXP_DESC: payload.EXP_DESC,
 				EXP_AMOUNT: amount,
 				EXP_QTY: payload.EXP_QTY,
+				UNIT: payload.UNIT,
 				EXP_SOURCE: payload.EXP_SOURCE,
 				RECEIPT_IMAGE_PATH: payload.RECEIPT_IMAGE_PATH,
 				user_id: userId,
@@ -181,6 +183,7 @@ class ExpenseController {
 				EXP_DESC: payload.EXP_DESC,
 				EXP_AMOUNT: amount,
 				EXP_QTY: payload.EXP_QTY,
+				UNIT: payload.UNIT,
 				EXP_SOURCE: payload.EXP_SOURCE,
 				RECEIPT_IMAGE_PATH: payload.RECEIPT_IMAGE_PATH,
 				user_id: userId,

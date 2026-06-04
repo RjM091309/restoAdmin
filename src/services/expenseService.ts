@@ -17,7 +17,7 @@ export interface ExpenseRecord {
   active: boolean;
   stockQty?: number;
   inventoryId?: string | null;
-  unit?: string;
+  unit?: string | null;
   opCatState?: number;
 }
 
@@ -98,7 +98,7 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
   active: Boolean(row.ACTIVE),
   stockQty: typeof row.STOCK_QTY === 'string' ? Number(row.STOCK_QTY) : Number(row.STOCK_QTY ?? 0),
   inventoryId: row.INVENTORY_ID != null ? String(row.INVENTORY_ID) : null,
-  unit: row.UNIT ?? 'pcs',
+  unit: row.UNIT != null && String(row.UNIT).trim() !== '' ? String(row.UNIT).trim() : null,
   opCatState: row.OP_CAT_STATE,
 });
 
@@ -141,7 +141,7 @@ export async function createExpense(payload: CreateExpensePayload): Promise<numb
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
-      UNIT: payload.unit ?? 'pcs',
+      UNIT: payload.unit != null && String(payload.unit).trim() !== '' ? String(payload.unit).trim() : null,
       RECEIPT_IMAGE_PATH: payload.receiptImagePath ?? null,
       ENCODED_DT: payload.encodedDt ?? null,
     }),
@@ -175,7 +175,7 @@ export async function updateExpense(id: string, payload: UpdateExpensePayload): 
       EXP_AMOUNT: payload.expAmount,
       EXP_QTY: payload.expQty ?? null,
       EXP_SOURCE: payload.expSource,
-      UNIT: payload.unit ?? 'pcs',
+      UNIT: payload.unit != null && String(payload.unit).trim() !== '' ? String(payload.unit).trim() : null,
       ...(payload.receiptImagePath !== undefined ? { RECEIPT_IMAGE_PATH: payload.receiptImagePath } : {}),
       ...(payload.encodedDt !== undefined ? { ENCODED_DT: payload.encodedDt } : {}),
     }),

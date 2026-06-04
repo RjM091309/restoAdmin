@@ -87,11 +87,12 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
   return new File([u8arr], filename, { type: mime });
 }
 
-function normalizeReceiptUnit(raw: string | null | undefined): string {
-  const s = String(raw || 'pcs')
+function normalizeReceiptUnit(raw: string | null | undefined): string | null {
+  const s = String(raw ?? '')
     .trim()
     .replace(/\s+/g, '');
-  return canonicalUomValue(s || 'pcs');
+  if (!s) return null;
+  return canonicalUomValue(s);
 }
 
 // Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
@@ -211,6 +212,37 @@ const masterCatTracksInventory = (
   return operationTracksInventory(mc?.opCategoryId ?? null, ops);
 };
 
+const expenseItemDisplayName = (row: ExpenseRecord) => String(row.expDesc || row.expName || '').trim();
+
+const expenseUnitTrimmed = (unit: string | null | undefined) => String(unit ?? '').trim();
+
+/** True when a real (non-template) expense row for this item already has a unit saved. */
+const expenseItemHasEstablishedUnit = (row: ExpenseRecord, siblings: ExpenseRecord[]): boolean => {
+  const name = expenseItemDisplayName(row);
+  const rowHasUnit = (it: ExpenseRecord) => expenseUnitTrimmed(it.unit).length > 0;
+  if (!name) return rowHasUnit(row);
+  return siblings.some(
+    (it) =>
+      !String(it.id || '').startsWith('template-') &&
+      expenseItemDisplayName(it) === name &&
+      rowHasUnit(it),
+  );
+};
+
+/** Latest unit for an item name from existing expense rows (newest encoded date first). */
+const resolveEstablishedUnitForItem = (row: ExpenseRecord, siblings: ExpenseRecord[]): string => {
+  const name = expenseItemDisplayName(row);
+  const matches = siblings
+    .filter(
+      (it) =>
+        !String(it.id || '').startsWith('template-') &&
+        (!name || expenseItemDisplayName(it) === name) &&
+        expenseUnitTrimmed(it.unit).length > 0,
+    )
+    .sort((a, b) => String(b.encodedDt || '').localeCompare(String(a.encodedDt || '')));
+  return expenseUnitTrimmed(matches[0]?.unit) || expenseUnitTrimmed(row.unit);
+};
+
 /** EXP_AMOUNT is the manually entered amount for the line (independent of qty). */
 const expenseLineAmountStored = (row: ExpenseRecord): number =>
   Number.isFinite(row.expAmount) ? Number(row.expAmount) : 0;
@@ -319,6 +351,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [addingAmountForId, setAddingAmountForId] = useState<string | null>(null);
   const [addingAmountValue, setAddingAmountValue] = useState('');
   const [addingQtyValue, setAddingQtyValue] = useState('');
+  const [addingUnitValue, setAddingUnitValue] = useState('');
   const [editingQtyForId, setEditingQtyForId] = useState<string | null>(null);
   const [editingQtyValue, setEditingQtyValue] = useState('');
 
@@ -789,7 +822,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         receiptExtractResult.items.map(async (item) => {
           const qty = item.qty != null && Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
           const masterCatId = resolveCategory(item.category);
-          const unit = normalizeReceiptUnit(item.unit || 'pcs');
+          const unit = normalizeReceiptUnit(item.unit);
           const newId = await createExpense({
             branchId,
             masterCatId,
@@ -797,11 +830,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             expAmount: Number(item.price || 0),
             expQty: qty > 0 ? qty : null,
             expSource: 'Resto_Admin',
-            unit,
+            unit: unit ?? null,
             receiptImagePath: receiptPath ?? null,
             encodedDt,
           });
-          if (masterCatTracksInventory(masterCatId, masterCategories, operations)) {
+          if (masterCatTracksInventory(masterCatId, masterCategories, operations) && unit) {
             try {
               const stockQty = qty > 0 ? qty : 0;
               await updateInventoryStock(String(newId), stockQty, branchId, true, unit);
@@ -1201,7 +1234,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   );
 
   // Unit for expense form: from explicit selection (required when adding) or pre-filled when editing
-  const expenseFormUnit = expenseForm.unit || (editingExpense?.unit ?? 'pcs');
+  const expenseFormUnit = expenseForm.unit || expenseUnitTrimmed(editingExpense?.unit);
 
   const totalForView = useMemo(() => {
     if (selectedCategoryId && selectedCategory) {
@@ -1266,13 +1299,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         header: 'Qty',
         render: (row: ExpenseRecord) => {
           const qty = expenseLineQty(row);
-          const unit = row.unit ?? 'pcs';
+          const unit = resolveEstablishedUnitForItem(row, itemsForCategory);
+          const qtyText = unit ? formatQty(qty, unit) : (qty > 0 ? String(qty) : formatQty(qty, 'pcs'));
           return (
             <div className="flex items-center justify-end gap-1">
-              <span className="text-right px-2 py-1 rounded">
-                {formatQty(qty, unit)}
-              </span>
-              <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span>
+              <span className="text-right px-2 py-1 rounded">{qtyText}</span>
+              {unit ? <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span> : null}
             </div>
           );
         },
@@ -1302,6 +1334,10 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         render: (row) => {
           const isAdding = addingAmountForId === row.id;
           const isTemplateRow = String(row.id || '').startsWith('template-');
+          const needsUnitPick = !expenseItemHasEstablishedUnit(row, itemsForCategory);
+          const inlineUnit = needsUnitPick
+            ? addingUnitValue
+            : resolveEstablishedUnitForItem(row, itemsForCategory);
           return (
             <div className="flex items-center justify-end gap-3">
               {isAdding ? (
@@ -1309,7 +1345,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                   <input
                     type="number"
                     min={0}
-                    step={getQtyInputStep(row.unit ?? 'pcs')}
+                    step={getQtyInputStep(inlineUnit || 'pcs')}
                     value={addingQtyValue}
                     onChange={(e) => setAddingQtyValue(e.target.value)}
                     onKeyDown={(e) => {
@@ -1320,6 +1356,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     placeholder="Qty"
                     autoFocus
                   />
+                  {needsUnitPick ? (
+                    <Select2
+                      options={UOM_OPTIONS.map((u) => ({
+                        value: u,
+                        label: getUnitLabel(u),
+                      }))}
+                      value={addingUnitValue || null}
+                      onChange={(val) => setAddingUnitValue((val as string) || '')}
+                      placeholder="Select unit"
+                      variant="compact"
+                      clearable={false}
+                      className="w-[8.5rem] min-w-[8.5rem] shrink-0 mt-0"
+                    />
+                  ) : null}
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1342,6 +1392,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                       parseExpenseAmount(addingAmountValue) < 0 ||
                       (addingQtyValue.trim() !== '' &&
                         (!Number.isFinite(Number(addingQtyValue)) || Number(addingQtyValue) < 0)) ||
+                      (needsUnitPick &&
+                        (!addingUnitValue.trim() ||
+                          addingQtyValue.trim() === '' ||
+                          !Number.isFinite(Number(addingQtyValue)) ||
+                          Number(addingQtyValue) < 0)) ||
                       (isInventoryCategory &&
                         (addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue))))
                     }
@@ -1406,7 +1461,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         },
       },
     ],
-    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId, totalForView],
+    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, addingUnitValue, itemsForCategory, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId, totalForView],
   );
 
   const handleSaveQty = async (row: ExpenseRecord) => {
@@ -1524,7 +1579,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       expAmount: amountForForm,
       expSource: row.expSource ?? '',
       stockQty: String(qty),
-      unit: canonicalUomValue(row.unit),
+      unit: expenseUnitTrimmed(row.unit) ? canonicalUomValue(row.unit) : '',
       encodedDate: expenseEncodedYmd(row.encodedDt) ?? getManilaDateStr(new Date()),
     };
   };
@@ -1691,12 +1746,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setAddingAmountForId(row.id);
     setAddingAmountValue('');
     setAddingQtyValue('');
+    setAddingUnitValue('');
   };
 
   const handleCancelAddSameItemAmount = () => {
     setAddingAmountForId(null);
     setAddingAmountValue('');
     setAddingQtyValue('');
+    setAddingUnitValue('');
   };
 
   const handleSaveSameItemAmount = async (row: ExpenseRecord) => {
@@ -1727,6 +1784,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         setAddingAmountForId(null);
         setAddingAmountValue('');
         setAddingQtyValue('');
+        setAddingUnitValue('');
         toast.success(`${qty} qty added to stock`);
       } catch (error) {
         console.error('Failed to add qty:', error);
@@ -1751,6 +1809,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         return;
       }
     }
+    const needsUnitPick = !expenseItemHasEstablishedUnit(row, itemsForCategory);
+    if (needsUnitPick) {
+      if (!hasQty || !Number.isFinite(qty) || qty < 0) {
+        toast.error('Enter quantity for first entry');
+        return;
+      }
+    }
+    const unitForSave = needsUnitPick
+      ? canonicalUomValue(addingUnitValue)
+      : canonicalUomValue(resolveEstablishedUnitForItem(row, itemsForCategory));
+    if (!expenseUnitTrimmed(unitForSave)) {
+      toast.error('Select a unit of measurement');
+      return;
+    }
     setIsSubmitting(true);
     try {
       const encodedDt = toManilaDateTimeStr(getManilaDateStr(new Date()));
@@ -1762,12 +1834,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         expAmount: lineAmountNew,
         expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
         expSource: row.expSource ?? null,
-        unit: row.unit || 'pcs',
+        unit: unitForSave,
         encodedDt,
       });
       if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
         try {
-          await updateInventoryStock(String(newId), qty, branchId, true);
+          await updateInventoryStock(String(newId), qty, branchId, true, unitForSave);
         } catch (error) {
           console.error('Failed to update inventory qty after adding amount:', error);
           toast.error('Amount saved, but failed to update inventory stock.');
@@ -1780,6 +1852,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       setAddingAmountForId(null);
       setAddingAmountValue('');
       setAddingQtyValue('');
+      setAddingUnitValue('');
       toast.success('Amount added');
     } catch (error) {
       console.error('Failed to add amount:', error);
@@ -2954,19 +3027,24 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           </div>
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-              Qty <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
+              Qty
+              {expenseFormUnit ? (
+                <span className="text-brand-muted font-normal normal-case"> — {getUnitLabel(expenseFormUnit)}</span>
+              ) : null}
             </label>
             <div className="flex items-center gap-2">
               <input
                 type="number"
                 min={0}
-                step={getQtyInputStep(expenseFormUnit)}
+                step={getQtyInputStep(expenseFormUnit || 'pcs')}
                 value={expenseForm.stockQty}
                 onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                 placeholder="0"
               />
-              <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
+              {expenseFormUnit ? (
+                <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
+              ) : null}
             </div>
           </div>
           <div className="space-y-3">
@@ -3277,7 +3355,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right tabular-nums">{Number(it.qty || 0) || 0}</td>
-                          <td className="px-4 py-3 text-brand-muted">{String(it.unit || 'pcs').toLowerCase()}</td>
+                          <td className="px-4 py-3 text-brand-muted">
+                            {expenseUnitTrimmed(it.unit) ? getUnitLabel(it.unit!).toLowerCase() : '—'}
+                          </td>
                           <td className="px-4 py-3 text-right font-semibold tabular-nums">
                             {formatCurrency(Number(it.price || 0))}
                           </td>
@@ -3525,9 +3605,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                     {String(r.expDesc || r.expName || '').trim() || '—'}
                                   </td>
                                   <td className="px-4 py-3 text-right tabular-nums">
-                                    {formatQty(expenseLineQty(r), r.unit || 'pcs')}
+                                    {formatQty(
+                                      expenseLineQty(r),
+                                      expenseUnitTrimmed(r.unit) || 'pcs',
+                                    )}
                                   </td>
-                                  <td className="px-4 py-3 text-brand-muted">{getUnitLabel(r.unit || 'pcs')}</td>
+                                  <td className="px-4 py-3 text-brand-muted">
+                                    {expenseUnitTrimmed(r.unit) ? getUnitLabel(r.unit!) : '—'}
+                                  </td>
                                   <td className="px-4 py-3 text-right font-semibold tabular-nums">
                                     {formatCurrency(Number(r.expAmount || 0))}
                                   </td>
@@ -3623,7 +3708,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums">{Number(it.qty || 0) || 0}</td>
-                        <td className="px-4 py-3 text-brand-muted">{String(it.unit || 'pcs').toLowerCase()}</td>
+                        <td className="px-4 py-3 text-brand-muted">
+                          {expenseUnitTrimmed(it.unit) ? getUnitLabel(it.unit!).toLowerCase() : '—'}
+                        </td>
                         <td className="px-4 py-3 text-right font-semibold tabular-nums">
                           {formatCurrency(Number(it.price || 0))}
                         </td>

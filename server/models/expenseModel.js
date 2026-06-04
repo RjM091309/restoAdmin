@@ -66,6 +66,7 @@ class ExpenseModel {
 					{ col: 'EDITED_BY', sql: `ALTER TABLE expenses ADD COLUMN EDITED_BY VARCHAR(100) NULL` },
 					{ col: 'EDITED_DT', sql: `ALTER TABLE expenses ADD COLUMN EDITED_DT TIMESTAMP NULL` },
 					{ col: 'INGREDIENT_ID', sql: `ALTER TABLE expenses ADD COLUMN INGREDIENT_ID INT NULL AFTER MASTER_CAT_ID` },
+					{ col: 'UNIT', sql: `ALTER TABLE expenses ADD COLUMN UNIT VARCHAR(20) NULL AFTER EXP_QTY` },
 				];
 
 				for (const m of migrations) {
@@ -127,7 +128,7 @@ class ExpenseModel {
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
 				inv.IDNo AS INVENTORY_ID,
 				COALESCE(inv.STOCK_QTY, 0) AS STOCK_QTY,
-				COALESCE(ing.UNIT, 'pcs') AS UNIT,
+				NULLIF(TRIM(e.UNIT), '') AS UNIT,
 				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
@@ -153,7 +154,9 @@ class ExpenseModel {
 				// Fallback without inventory join
 				let fb = `SELECT e.*, b.BRANCH_NAME, mc.IDNo AS MASTER_CATEGORY_ID, oc.NAME AS EXP_CAT, mc.CATEGORY_NAME AS EXP_NAME,
 					mc.ICON AS MASTER_CATEGORY_ICON, mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
-					NULL AS INVENTORY_ID, 0 AS STOCK_QTY, 'pcs' AS UNIT, oc.STATE AS OP_CAT_STATE
+					NULL AS INVENTORY_ID, 0 AS STOCK_QTY,
+					CASE WHEN e.UNIT IS NOT NULL AND TRIM(e.UNIT) <> '' THEN TRIM(e.UNIT) ELSE NULL END AS UNIT,
+					oc.STATE AS OP_CAT_STATE
 					FROM expenses e
 					LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 					LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
@@ -191,12 +194,12 @@ class ExpenseModel {
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
-				COALESCE(ing.UNIT, 'pcs') AS UNIT,
+				NULLIF(TRIM(e.UNIT), '') AS UNIT,
 				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
-			LEFT JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			LEFT JOIN ingredients ing ON ing.ACTIVE = 1 AND ((e.INGREDIENT_ID IS NOT NULL AND ing.IDNo = e.INGREDIENT_ID) OR (e.INGREDIENT_ID IS NULL AND ing.BRANCH_ID = e.BRANCH_ID AND TRIM(ing.NAME) = TRIM(e.EXP_DESC) AND ing.MASTER_CAT_ID <=> e.MASTER_CAT_ID))
 			WHERE e.IDNo = ? AND e.ACTIVE = 1
 			LIMIT 1
@@ -217,12 +220,16 @@ class ExpenseModel {
 		const receiptImagePathRaw = data.RECEIPT_IMAGE_PATH ?? data.receiptImagePath ?? data.receipt_image_path ?? null;
 		const receiptImagePath =
 			receiptImagePathRaw && String(receiptImagePathRaw).trim() !== '' ? String(receiptImagePathRaw).trim() : null;
+		const unitRaw = data.UNIT ?? data.unit ?? null;
+		const unit =
+			unitRaw != null && String(unitRaw).trim() !== '' ? String(unitRaw).trim().toLowerCase() : null;
 		const values = [
 			Number(data.BRANCH_ID),
 			masterCatId,
 			data.EXP_DESC || null,
 			Number(data.EXP_AMOUNT),
 			expQty,
+			unit,
 			data.EXP_SOURCE || null,
 			receiptImagePath,
 			encodedBy,
@@ -237,12 +244,13 @@ class ExpenseModel {
 					EXP_DESC,
 					EXP_AMOUNT,
 					EXP_QTY,
+					UNIT,
 					EXP_SOURCE,
 					RECEIPT_IMAGE_PATH,
 					ACTIVE,
 					ENCODED_BY,
 					ENCODED_DT
-				) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 				`,
 				values
 			);
@@ -267,12 +275,13 @@ class ExpenseModel {
 								EXP_DESC,
 								EXP_AMOUNT,
 								EXP_QTY,
+								UNIT,
 								EXP_SOURCE,
 								RECEIPT_IMAGE_PATH,
 								ACTIVE,
 								ENCODED_BY,
 								ENCODED_DT
-							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
+							) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))
 							`,
 							[nextId, ...values]
 						);
@@ -285,6 +294,24 @@ class ExpenseModel {
 					}
 				}
 				throw new Error('Failed to allocate unique expenses.IDNo after retries');
+			}
+			if (msg.includes('UNIT') && msg.includes('Unknown column')) {
+				const valuesNoUnit = [
+					Number(data.BRANCH_ID),
+					masterCatId,
+					data.EXP_DESC || null,
+					Number(data.EXP_AMOUNT),
+					expQty,
+					data.EXP_SOURCE || null,
+					receiptImagePath,
+					encodedBy,
+					encodedDt,
+				];
+				const [result] = await pool.execute(
+					`INSERT INTO expenses (BRANCH_ID, MASTER_CAT_ID, EXP_DESC, EXP_AMOUNT, EXP_QTY, EXP_SOURCE, RECEIPT_IMAGE_PATH, ACTIVE, ENCODED_BY, ENCODED_DT) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
+					valuesNoUnit
+				);
+				return result.insertId;
 			}
 			if (msg.includes('EXP_QTY') || msg.includes('Unknown column')) {
 				// Fallback when EXP_QTY column doesn't exist yet
@@ -323,6 +350,10 @@ class ExpenseModel {
 				: shouldUpdateReceiptImage
 					? null
 					: undefined;
+		const unitRaw = data.UNIT ?? data.unit;
+		const shouldUpdateUnit = unitRaw !== undefined;
+		const unit =
+			unitRaw != null && String(unitRaw).trim() !== '' ? String(unitRaw).trim().toLowerCase() : null;
 
 		try {
 			let sql = `
@@ -343,6 +374,10 @@ class ExpenseModel {
 				data.EXP_SOURCE || null,
 				String(data.user_id ?? data.EDITED_BY ?? '').trim() || null,
 			];
+			if (shouldUpdateUnit) {
+				sql = sql.replace('EXP_SOURCE = ?,', 'EXP_SOURCE = ?, UNIT = ?,');
+				params.splice(5, 0, unit);
+			}
 			if (shouldUpdateReceiptImage) {
 				sql += ', RECEIPT_IMAGE_PATH = ?';
 				params.push(receiptImagePath);
