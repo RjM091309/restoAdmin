@@ -190,11 +190,9 @@ const parseExpenseAmount = (value: string): number => Number(String(value || '')
 
 const roundMoney2 = (n: number) => Math.round(n * 100) / 100;
 
-/**
- * Per-expense quantity for table + edit form. API `stockQty` is joined from inventory (running stock per
- * ingredient), while `expQty` is the amount for this line — they can differ when the same item has multiple rows.
- */
-const expenseLineQty = (row: ExpenseRecord): number => (row.expQty != null ? row.expQty : row.stockQty ?? 0);
+/** Per-expense line quantity (EXP_QTY), shown in table and forms for all categories. */
+const expenseLineQty = (row: ExpenseRecord): number =>
+  row.expQty != null && Number.isFinite(Number(row.expQty)) ? Number(row.expQty) : 0;
 
 /** EXP_AMOUNT is the manually entered amount for the line (independent of qty). */
 const expenseLineAmountStored = (row: ExpenseRecord): number =>
@@ -1229,6 +1227,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     );
   }, [expensesInAnalyticsRange, masterCategories, selectedOperationId]);
 
+  /** Inventory toggle ON: sync qty to stock. Qty/Unit fields are always available in the UI. */
   const isInventoryCategory = selectedOperationId != null && operations.some((op) => op.id === selectedOperationId && op.state === 1);
 
   const columns: ColumnDef<ExpenseRecord>[] = useMemo(
@@ -1243,28 +1242,24 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         header: 'Item',
         render: (row) => <span>{row.expDesc || row.expName}</span>,
       },
-      ...(isInventoryCategory
-        ? [
-            {
-              header: 'Qty',
-              render: (row: ExpenseRecord) => {
-                const qty = expenseLineQty(row);
-                const unit = row.unit ?? 'pcs';
-                return (
-                  <div className="flex items-center justify-end gap-1">
-                    <span className="text-right px-2 py-1 rounded">
-                      {formatQty(qty, unit)}
-                    </span>
-                    <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span>
-                  </div>
-                );
-              },
-              className: 'text-right',
-              headerClassName: 'text-right',
-              cellClassName: 'text-right',
-            },
-          ]
-        : []),
+      {
+        header: 'Qty',
+        render: (row: ExpenseRecord) => {
+          const qty = expenseLineQty(row);
+          const unit = row.unit ?? 'pcs';
+          return (
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-right px-2 py-1 rounded">
+                {formatQty(qty, unit)}
+              </span>
+              <span className="text-xs text-brand-muted">{getUnitLabel(unit)}</span>
+            </div>
+          );
+        },
+        className: 'text-right',
+        headerClassName: 'text-right',
+        cellClassName: 'text-right',
+      },
       {
         header: 'Amount',
         render: (row) => {
@@ -1291,22 +1286,20 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             <div className="flex items-center justify-end gap-3">
               {isAdding ? (
                 <>
-                  {isInventoryCategory && (
-                    <input
-                      type="number"
-                      min={0}
-                      step={getQtyInputStep(row.unit ?? 'pcs')}
-                      value={addingQtyValue}
-                      onChange={(e) => setAddingQtyValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveSameItemAmount(row);
-                        if (e.key === 'Escape') handleCancelAddSameItemAmount();
-                      }}
-                      className="w-20 px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
-                      placeholder="Qty"
-                      autoFocus
-                    />
-                  )}
+                  <input
+                    type="number"
+                    min={0}
+                    step={getQtyInputStep(row.unit ?? 'pcs')}
+                    value={addingQtyValue}
+                    onChange={(e) => setAddingQtyValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveSameItemAmount(row);
+                      if (e.key === 'Escape') handleCancelAddSameItemAmount();
+                    }}
+                    className="w-20 px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
+                    placeholder="Qty"
+                    autoFocus
+                  />
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1324,10 +1317,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                     onClick={() => handleSaveSameItemAmount(row)}
                     disabled={
                       isSubmitting ||
-                      (isInventoryCategory
-                        ? addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue)) ||
-                          (addingAmountValue.trim() !== '' && (!Number.isFinite(parseExpenseAmount(addingAmountValue)) || parseExpenseAmount(addingAmountValue) < 0))
-                        : addingAmountValue.trim() === '' || !Number.isFinite(parseExpenseAmount(addingAmountValue)))
+                      addingAmountValue.trim() === '' ||
+                      !Number.isFinite(parseExpenseAmount(addingAmountValue)) ||
+                      parseExpenseAmount(addingAmountValue) < 0 ||
+                      (addingQtyValue.trim() !== '' &&
+                        (!Number.isFinite(Number(addingQtyValue)) || Number(addingQtyValue) < 0)) ||
+                      (isInventoryCategory &&
+                        (addingQtyValue.trim() === '' || !Number.isFinite(Number(addingQtyValue))))
                     }
                     className="p-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary/90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                     aria-label="Save"
@@ -1550,8 +1546,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       toast.error('Enter a valid amount');
       return;
     }
-    if (isInventoryCategory && !editingExpense && !expenseForm.unit.trim()) {
-      toast.error('Select a unit for inventory');
+    if (!expenseForm.unit.trim()) {
+      toast.error('Select a unit of measurement');
       return;
     }
     const qtyRaw = expenseForm.stockQty.trim();
@@ -1563,7 +1559,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setIsSubmitting(true);
     try {
       if (editingExpense) {
-        const unitSaved = canonicalUomValue(expenseForm.unit || editingExpense.unit || 'pcs');
+        const unitSaved = canonicalUomValue(expenseForm.unit);
         await updateExpense(editingExpense.id, {
           masterCatId: editingExpense.masterCatId ?? selectedCategory.masterCategoryId,
           expDesc: expenseForm.expDesc.trim() || null,
@@ -1611,7 +1607,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           expAmount: lineAmountForSave,
           expQty: hasQty && Number.isFinite(qty) && qty >= 0 ? qty : null,
           expSource: expenseForm.expSource.trim() || null,
-          unit: canonicalUomValue(expenseForm.unit || 'pcs'),
+          unit: canonicalUomValue(expenseForm.unit),
           encodedDt,
         });
         const list = await getExpenses(branchId);
@@ -1619,7 +1615,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         setExpenses(filtered);
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
           try {
-            await updateInventoryStock(String(newId), qty, branchId, true, canonicalUomValue(expenseForm.unit || 'pcs'));
+            await updateInventoryStock(String(newId), qty, branchId, true, canonicalUomValue(expenseForm.unit));
             const refreshed = await getExpenses(branchId);
             setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
           } catch (error) {
@@ -2868,7 +2864,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                 isSubmitting ||
                 expenseForm.expAmount.trim() === '' ||
                 !Number.isFinite(parseExpenseAmount(expenseForm.expAmount)) ||
-                (isInventoryCategory && !editingExpense && !expenseForm.unit.trim())
+                !expenseForm.unit.trim()
               }
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
@@ -2915,44 +2911,40 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
               placeholder={isInventoryCategory ? '0' : '0.00'}
             />
           </div>
-          {isInventoryCategory && (
-            <>
-              <div className="space-y-3">
-                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-                  Unit <span className="text-red-500">{!editingExpense ? '*' : ''}</span>
-                </label>
-                <Select2
-                  options={UOM_OPTIONS.map((u) => ({
-                    value: u,
-                    label: getUnitLabel(u),
-                  }))}
-                  value={expenseForm.unit || null}
-                  onChange={(val) =>
-                    setExpenseForm((prev) => ({ ...prev, unit: (val as string) || '' }))
-                  }
-                  placeholder="Select unit"
-                  className="mt-0"
-                />
-              </div>
-              <div className="space-y-3">
-                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
-                  Qty <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    step={getQtyInputStep(expenseFormUnit)}
-                    value={expenseForm.stockQty}
-                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
-                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-                    placeholder="0"
-                  />
-                  <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
-                </div>
-              </div>
-            </>
-          )}
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+              Unit <span className="text-red-500">*</span>
+            </label>
+            <Select2
+              options={UOM_OPTIONS.map((u) => ({
+                value: u,
+                label: getUnitLabel(u),
+              }))}
+              value={expenseForm.unit || null}
+              onChange={(val) =>
+                setExpenseForm((prev) => ({ ...prev, unit: (val as string) || '' }))
+              }
+              placeholder="Select unit"
+              className="mt-0"
+            />
+          </div>
+          <div className="space-y-3">
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+              Qty <span className="text-brand-muted font-normal normal-case">— {getUnitLabel(expenseFormUnit)}</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step={getQtyInputStep(expenseFormUnit)}
+                value={expenseForm.stockQty}
+                onChange={(e) => setExpenseForm((prev) => ({ ...prev, stockQty: e.target.value }))}
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
+                placeholder="0"
+              />
+              <span className="text-sm text-brand-muted shrink-0">{getUnitLabel(expenseFormUnit)}</span>
+            </div>
+          </div>
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
               Encoded Date
