@@ -1,25 +1,28 @@
 /**
- * UOM (Unit of Measure) utilities for ingredients.
- * - Whole: pcs, box, pack, bottle, jar, can, bag, head, bunch, cup
- * - Decimal: kg, g, L, mL (4 decimal places for computation consistency)
+ * UOM (Unit of Measure) utilities for ingredients and expenses.
+ * Qty may be fractional for any unit (e.g. 0.4 case, 0.7 kg) — aligned with DB DECIMAL(12,3).
  */
 
-/** Decimal units (weight/volume) — use 4 decimal places */
+/** Legacy: weight/volume units often entered with decimals (display hints only). */
 const DECIMAL_UNITS = new Set(['kg', 'g', 'l', 'ml']);
 
-/** Whole/count units — no decimals */
+/** Legacy: count-style units (qty may still be fractional on insert). */
 const WHOLE_NUMBER_UNITS = new Set([
   'pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
 ]);
 
-/** All UOM options for selection, grouped: whole first, then decimal */
-export const UOM_OPTIONS = [
-  'pcs', 'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
-  'kg', 'g', 'L', 'mL',
+/** Max fractional digits for qty entry/display (expenses/inventory EXP_QTY & STOCK_QTY). */
+export const QTY_DECIMAL_PLACES = 3;
+
+/** Priority units shown first in all UOM dropdowns */
+export const UOM_PRIORITY = ['pcs', 'kg', 'g', 'L', 'mL'] as const;
+
+const UOM_OTHERS = [
+  'case', 'box', 'pack', 'bottle', 'jar', 'can', 'bag', 'head', 'bunch', 'cup',
 ] as const;
 
-/** Decimal places for display (aligned with DB precision) */
-const DECIMAL_PLACES = 4;
+/** All UOM options for selection — priority units first, then the rest */
+export const UOM_OPTIONS = [...UOM_PRIORITY, ...UOM_OTHERS] as const;
 
 /** Normalize unit for comparison (lowercase, trimmed) */
 function normalizeUnit(unit: string): string {
@@ -48,23 +51,20 @@ export function isWholeNumberUnit(unit: string): boolean {
   return WHOLE_NUMBER_UNITS.has(u) || !DECIMAL_UNITS.has(u);
 }
 
-/** Input step: 1 for whole, 0.0001 for decimal */
-export function getQtyInputStep(unit: string): string {
-  return isDecimalUnit(unit) ? '0.0001' : '1';
+/** Input step for qty fields — any UOM may use fractional values. */
+export function getQtyInputStep(_unit?: string): string {
+  return 'any';
 }
 
-/** Decimal places for display: 0 for whole, 4 for kg/g/L/mL */
-export function getQtyDecimalPlaces(unit: string): number {
-  return isDecimalUnit(unit) ? DECIMAL_PLACES : 0;
+/** Fractional digits for qty display (same for all UOM). */
+export function getQtyDecimalPlaces(_unit?: string): number {
+  return QTY_DECIMAL_PLACES;
 }
 
-/** Format quantity for display based on UOM */
-export function formatQty(value: number | null | undefined, unit: string): string {
+/** Format quantity for display; strips trailing zeros (e.g. 0.5, 1.25). */
+export function formatQty(value: number | null | undefined, _unit?: string): string {
   const n = Number.isFinite(value) ? Number(value) : 0;
-  const places = getQtyDecimalPlaces(unit);
-  if (places === 0) return String(Math.round(n));
-  // For decimal units: strip trailing zeros so 3, 100, 0.5 look clean
-  return parseFloat(n.toFixed(places)).toString();
+  return parseFloat(n.toFixed(QTY_DECIMAL_PLACES)).toString();
 }
 
 /** Valid unit values for backend validation (lowercase) */
