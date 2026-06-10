@@ -46,6 +46,7 @@ import { MenuReport } from './components/analytics/MenuReport';
 import { CategoryReport } from './components/analytics/CategoryReport';
 import { PaymentReport } from './components/analytics/PaymentReport';
 import { ReceiptReport } from './components/analytics/ReceiptReport';
+import { AnalyticsAiAssistant } from './components/analytics/AnalyticsAiAssistant';
 import { cn } from './lib/utils';
 
 // Panels
@@ -490,6 +491,7 @@ export default function App() {
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
     if (part === 'sales-analytics') return 'Sales Analytics';
+    if (part === 'ai-assistant') return 'AI Sales Assistant';
     if (part === 'expenses-mock') return 'Expenses';
     if (primaryPath === 'inventory' && idx === 1) {
       const id = String(part);
@@ -577,6 +579,7 @@ export default function App() {
       case 'Category': navigate(`/sales-report/category${suffix}`); break;
       case 'Payment type': navigate(`/sales-report/payment-type${suffix}`); break;
       case 'Receipt': navigate(`/sales-report/receipt${suffix}`); break;
+      case 'AI Sales Assistant': navigate(`/sales-report/ai-assistant${suffix}`); break;
       case 'Expenses Mock': navigate(`/expenses-mock${suffix}`); break;
       case 'Ingredients': navigate(`/ingredients${suffix}`); break;
       default: navigate(`/${tab.toLowerCase()}${suffix}`);
@@ -848,6 +851,15 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <ReceiptReport selectedBranch={selectedBranch} dateRange={dateRange} />
+                  </motion.div>
+                } />
+                <Route path="/sales-report/ai-assistant" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <AnalyticsAiAssistant selectedBranch={selectedBranch} dateRange={dateRange} />
                   </motion.div>
                 } />
 

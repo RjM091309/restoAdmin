@@ -10,26 +10,33 @@ from main import get_connection
 router = APIRouter(prefix="/api/analytics", tags=["analytics-reports"])
 
 
+def _clean_binary_sql(col: str) -> str:
+    """Strip NBSP byte variants before charset conversion (legacy rows may use non-utf8 bytes)."""
+    return (
+        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
+    )
+
+
 def _norm_text_sql(col: str) -> str:
     """
     UPPER+TRIM after stripping NBSP variants in `col`.
-    Important: some legacy rows contain raw byte 0xA0 (invalid in utf8mb4).
-    We first treat the value as BINARY and replace NBSP bytes before converting to utf8mb4.
+    utf8mb4 conversion can return NULL for legacy Korean/latin1 names; fall back to latin1
+    so rows are not dropped by `NULL <> 'ROOM CHARGE'` filters.
     """
-    cleaned = (
-        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
-    )
-    return f"UPPER(TRIM(CONVERT({cleaned} USING utf8mb4)))"
+    cleaned = _clean_binary_sql(col)
+    as_utf8 = f"CONVERT({cleaned} USING utf8mb4)"
+    as_latin1 = f"CONVERT({cleaned} USING latin1)"
+    return f"UPPER(TRIM(COALESCE({as_utf8}, {as_latin1}, '')))"
+
 
 def _safe_text_sql(col: str) -> str:
     """
-    Returns a display-safe SQL expression for text columns that may contain NBSP bytes.
-    Strips NBSP variants, trims, and returns NULL when result is empty.
+    Display-safe text: NBSP cleanup, utf8mb4 with latin1 fallback, NULL when empty.
     """
-    cleaned = (
-        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
-    )
-    return f"NULLIF(TRIM(CONVERT({cleaned} USING utf8mb4)), '')"
+    cleaned = _clean_binary_sql(col)
+    as_utf8 = f"CONVERT({cleaned} USING utf8mb4)"
+    as_latin1 = f"CONVERT({cleaned} USING latin1)"
+    return f"NULLIF(TRIM(COALESCE({as_utf8}, {as_latin1}, '')), '')"
 
 def _norm_text_py(value: object) -> str:
     """Python-side normalization matching `_norm_text_sql` intent (NBSP → space, trim, upper, collapse spaces)."""

@@ -29,11 +29,11 @@ export function is3coreBranch(name: string | null | undefined): boolean {
   return n === '3core' || n.includes('3core');
 }
 
-/** All Branches sidebar grid: row1 kim's, Bluemoon, Keumho — row2 PRIME, EESOME, NOIR */
+/** All Branches sidebar grid: row1 kim's, Bluemoon, Kumho — row2 PRIME, EESOME, NOIR */
 const ALL_BRANCHES_SIDEBAR_MATCHERS: Array<(name: string) => boolean> = [
   (n) => /kim/.test(n),
   (n) => /blue\s*moon|bluemoon/.test(n),
-  (n) => /keumho|keum\s*ho|daraejung/.test(n),
+  (n) => /kumho|kum\s*ho|keumho|keum\s*ho|daraejung/.test(n),
   (n) => /prime/.test(n),
   (n) => /eesome/.test(n) && !/noir/.test(n),
   (n) => /noir/.test(n),

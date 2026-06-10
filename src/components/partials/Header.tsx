@@ -101,6 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
       Category: 'sidebar.category',
       'Payment type': 'sidebar.payment_type',
       Receipt: 'sidebar.receipt',
+      'AI Sales Assistant': 'sidebar.ai_sales_assistant',
       Orders: 'sidebar.orders',
       Inventory: 'sidebar.inventory',
       'User Info': 'sidebar.user_info',
@@ -133,6 +134,7 @@ export const Header: React.FC<HeaderProps> = ({
       Category: 'header.subtitle_category',
       'Payment type': 'header.subtitle_payment_type',
       Receipt: 'header.subtitle_receipt',
+      'AI Sales Assistant': 'header.subtitle_ai_assistant',
       'User Management': 'header.subtitle_user_management',
     };
 
