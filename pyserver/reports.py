@@ -5,9 +5,16 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from main import get_connection
+from sales_query_filters import billing_join_on, billing_where_clauses, orders_join_on_billing
 
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics-reports"])
+
+_BILLING_JOIN = billing_join_on()
+_BILLING_JOIN_OQ = billing_join_on("oq", "bq")
+_BILLING_JOIN_O2 = billing_join_on("o2", "b2")
+_BILLING_WHERE = billing_where_clauses()
+_ORDERS_ON_BILLING = orders_join_on_billing()
 
 
 def _norm_text_sql(col: str) -> str:
@@ -183,7 +190,7 @@ def menu_report(
                 0 AS discounts,
                 0 AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
@@ -221,7 +228,7 @@ def menu_report(
                   COALESCE((
                     SELECT SUM(oiq.QTY)
                     FROM orders oq
-                    INNER JOIN billing bq ON bq.ORDER_ID = oq.IDNo AND bq.STATUS IN (1, 2)
+                    INNER JOIN billing bq ON {_BILLING_JOIN_OQ}
                     INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
                     INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
                     LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
@@ -237,7 +244,7 @@ def menu_report(
                   COALESCE((
                     SELECT SUM(oi2.LINE_TOTAL)
                     FROM orders o2
-                    INNER JOIN billing b2 ON b2.ORDER_ID = o2.IDNo AND b2.STATUS IN (1, 2)
+                    INNER JOIN billing b2 ON {_BILLING_JOIN_O2}
                     INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
                     INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
                     LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
@@ -252,7 +259,7 @@ def menu_report(
                 0 AS discounts,
                 0 AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
@@ -285,7 +292,7 @@ def menu_report(
                 0 AS discounts,
                 0 AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
@@ -409,7 +416,7 @@ def category_report(
                 0 AS discounts,
                 0 AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
@@ -447,7 +454,7 @@ def category_report(
                   COALESCE((
                     SELECT SUM(oiq.QTY)
                     FROM orders oq
-                    INNER JOIN billing bq ON bq.ORDER_ID = oq.IDNo AND bq.STATUS IN (1, 2)
+                    INNER JOIN billing bq ON {_BILLING_JOIN_OQ}
                     INNER JOIN order_items oiq ON oiq.ORDER_ID = oq.IDNo
                     INNER JOIN menu mq ON mq.IDNo = oiq.MENU_ID
                     LEFT JOIN categories cq ON cq.IDNo = mq.CATEGORY_ID
@@ -463,7 +470,7 @@ def category_report(
                   COALESCE((
                     SELECT SUM(oi2.LINE_TOTAL)
                     FROM orders o2
-                    INNER JOIN billing b2 ON b2.ORDER_ID = o2.IDNo AND b2.STATUS IN (1, 2)
+                    INNER JOIN billing b2 ON {_BILLING_JOIN_O2}
                     INNER JOIN order_items oi2 ON oi2.ORDER_ID = o2.IDNo
                     INNER JOIN menu m2 ON m2.IDNo = oi2.MENU_ID
                     LEFT JOIN categories c2 ON c2.IDNo = m2.CATEGORY_ID
@@ -478,7 +485,7 @@ def category_report(
                 0 AS discounts,
                 0 AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
@@ -592,7 +599,7 @@ def category_menu_breakdown(
                     COUNT(DISTINCT o.IDNo) AS salesQty,
                     COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalService
                 FROM orders o
-                INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+                INNER JOIN billing b ON {_BILLING_JOIN}
                 INNER JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
                 WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
                   AND COALESCE(rt.ROOM_CHARGE, 0) > 0
@@ -643,7 +650,7 @@ def category_menu_breakdown(
                     COALESCE(MAX(m.MENU_PRICE), 0) AS unitPrice,
                     COALESCE(SUM(oi.LINE_TOTAL), 0) AS netSales
                 FROM orders o
-                INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+                INNER JOIN billing b ON {_BILLING_JOIN}
                 INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
                 INNER JOIN menu m ON m.IDNo = oi.MENU_ID
                 LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
@@ -722,7 +729,7 @@ def category_menu_breakdown(
                 COALESCE(MAX(m.MENU_PRICE), 0) AS unitPrice,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS netSales
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
@@ -816,7 +823,8 @@ def payment_report(
                 COALESCE(SUM(CASE WHEN b.REFUND IS NOT NULL AND b.REFUND > 0 THEN 1 ELSE 0 END), 0) AS refundTransaction,
                 COALESCE(SUM(b.REFUND), 0) AS refundAmount
             FROM billing b
-            WHERE b.STATUS IN (1, 2)
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+            WHERE {_BILLING_WHERE}
             {date_filter}
             {branch_filter}
             GROUP BY b.PAYMENT_METHOD
@@ -998,7 +1006,7 @@ def receipt_report(
                 COALESCE(b.AMOUNT_PAID, 0) AS total,
                 COALESCE(o.DISCOUNT_AMOUNT, 0) AS discount
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             WHERE 1=1
             {date_filter}
             {branch_filter}
