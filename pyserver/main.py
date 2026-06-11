@@ -11,8 +11,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from sales_query_filters import billing_join_on, billing_where_clauses, orders_join_on_billing
+
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+
+_BILLING_JOIN = billing_join_on()
+_BILLING_WHERE = billing_where_clauses()
+_ORDERS_ON_BILLING = orders_join_on_billing()
 
 # Load shared env used by Node server
 load_dotenv(BASE_DIR / ".env.local")
@@ -323,14 +329,17 @@ def branch_sales(
                 br.IDNo as branch_id,
                 br.BRANCH_NAME as branch_name,
                 br.BRANCH_CODE as branch_code,
-                COALESCE(SUM(b.AMOUNT_PAID), 0) as total_sales,
-                COUNT(DISTINCT b.ORDER_ID) as order_count,
+                COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID ELSE 0 END), 0) as total_sales,
+                COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) as order_count,
                 CASE 
-                    WHEN COUNT(DISTINCT b.ORDER_ID) > 0 THEN COALESCE(SUM(b.AMOUNT_PAID), 0) / COUNT(DISTINCT b.ORDER_ID)
+                    WHEN COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) > 0
+                        THEN COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID ELSE 0 END), 0)
+                             / COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END)
                     ELSE 0
                 END as avg_order_value
             FROM branches br
-            LEFT JOIN billing b ON b.BRANCH_ID = br.IDNo AND b.STATUS IN (1, 2) {date_filter_billing}
+            LEFT JOIN billing b ON b.BRANCH_ID = br.IDNo AND {_BILLING_WHERE} {date_filter_billing}
+            LEFT JOIN orders o ON {_ORDERS_ON_BILLING}
             WHERE br.ACTIVE = 1 {branch_filter_billing}
             GROUP BY br.IDNo, br.BRANCH_NAME, br.BRANCH_CODE
             ORDER BY total_sales DESC
@@ -692,7 +701,8 @@ def daily_sales(
                 DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(b.AMOUNT_PAID), 0) AS total_sales
             FROM billing b
-            WHERE b.STATUS IN (1, 2)
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+            WHERE {_BILLING_WHERE}
             {billing_date_filter}
             {billing_branch_filter}
             GROUP BY DATE({billing_local_dt})
@@ -721,7 +731,7 @@ def daily_sales(
                 DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo AND b.STATUS IN (1, 2)
+            INNER JOIN billing b ON {_BILLING_JOIN}
             WHERE 1=1
             {discount_date_filter}
             {discount_branch_filter}
@@ -777,8 +787,9 @@ def daily_sales(
                     DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
                     COALESCE(SUM(b.REFUND), 0) AS refund
                 FROM billing b
-                INNER JOIN orders o ON o.IDNo = b.ORDER_ID
+                INNER JOIN orders o ON {_ORDERS_ON_BILLING}
                 WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
+                  AND {_BILLING_WHERE}
                 {refund_date_filter_sql}
                 {refund_branch_filter_sql}
                 GROUP BY DATE({refund_local_dt})
@@ -803,9 +814,9 @@ def daily_sales(
                 DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COALESCE(SUM({line_cogs_expr}), 0) AS product_cost
             FROM billing b
-            INNER JOIN orders o ON o.IDNo = b.ORDER_ID
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
-            WHERE b.STATUS IN (1, 2)
+            WHERE {_BILLING_WHERE}
             {cogs_date_filter}
             {cogs_branch_filter}
             GROUP BY DATE({billing_local_dt})
