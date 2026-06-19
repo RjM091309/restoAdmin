@@ -3,17 +3,25 @@ const {
   buildManagementContext,
   buildManagementBriefCharts,
 } = require('./managementReportBuilder');
+const { fetchPyCached } = require('./analyticsPyFetch');
 
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
 const VERTEX_PROJECT_ID = 'core-api-495501';
 const VERTEX_LOCATION_PRIMARY = process.env.VERTEX_LOCATION || 'us-central1';
 const VERTEX_LOCATION_FALLBACK = 'global';
 const MODEL_CANDIDATES = process.env.VERTEX_GEMINI_MODEL
   ? [process.env.VERTEX_GEMINI_MODEL.trim()].filter(Boolean)
-  : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-2.0-flash-lite-001'];
+  : ['gemini-2.0-flash-lite-001', 'gemini-2.0-flash', 'gemini-2.5-flash'];
 const SERVICE_ACCOUNT_KEY_PATH = path.resolve(__dirname, '..', '..', 'core-api-495501-4096e683bc08.json');
+const LOG_TIMING = process.env.ANALYTICS_AI_TIMING === '1';
 
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+let vertexSdkPromise = null;
+const vertexClients = new Map();
+/** @type {{ location: string, modelId: string } | null} */
+let provenVertexModel = null;
+
+function logTiming(label, ms) {
+  if (LOG_TIMING) console.info(`[AnalyticsAI] ${label}: ${ms}ms`);
+}
 
 function toYmd(d) {
   return (
@@ -37,23 +45,6 @@ function previousPeriod(startDate, endDate) {
   const prevStart = new Date(prevEnd);
   prevStart.setDate(prevStart.getDate() - (days - 1));
   return { start: toYmd(prevStart), end: toYmd(prevEnd) };
-}
-
-async function fetchPy(path, params) {
-  const url = new URL(path, PYSERVER_BASE_URL);
-  for (const [k, v] of Object.entries(params || {})) {
-    if (v != null && v !== '') url.searchParams.set(k, String(v));
-  }
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`PyServer ${path} failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-  const json = await res.json().catch(() => null);
-  if (!json || json.success === false) {
-    throw new Error(json?.message || `PyServer ${path} returned error`);
-  }
-  return json;
 }
 
 function sumDaily(rows) {
@@ -472,46 +463,77 @@ function buildManagementBriefResponseSchema(SchemaType) {
   };
 }
 
-async function vertexGenerateJson(prompt, opts = {}) {
-  const schemaBuilder = opts.schemaBuilder || buildAnalyticsResponseSchema;
-  const maxOutputTokens = opts.maxOutputTokens ?? 2048;
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+async function getVertexSdk() {
+  if (!vertexSdkPromise) {
+    vertexSdkPromise = import('@google-cloud/vertexai');
   }
-  const { VertexAI, SchemaType } = await import('@google-cloud/vertexai');
+  return vertexSdkPromise;
+}
+
+function getVertexClient(VertexAI, location) {
+  if (!vertexClients.has(location)) {
+    vertexClients.set(location, new VertexAI({ project: VERTEX_PROJECT_ID, location }));
+  }
+  return vertexClients.get(location);
+}
+
+function vertexAttemptOrder() {
   const locationOrder =
     process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
       ? [String(process.env.VERTEX_LOCATION).trim()]
       : [VERTEX_LOCATION_PRIMARY, VERTEX_LOCATION_FALLBACK].filter((loc, i, arr) => arr.indexOf(loc) === i);
 
-  let lastErr = null;
+  const attempts = [];
+  if (provenVertexModel) {
+    attempts.push(provenVertexModel);
+  }
   for (const location of locationOrder) {
-    const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
     for (const modelId of MODEL_CANDIDATES) {
-      try {
-        const model = vertex.getGenerativeModel({
-          model: modelId,
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens,
-            responseMimeType: 'application/json',
-            responseSchema: schemaBuilder(SchemaType),
-          },
-        });
-        const resp = await model.generateContent({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        });
-        const text =
-          resp?.response?.candidates?.[0]?.content?.parts
-            ?.map((p) => p?.text)
-            .filter(Boolean)
-            .join('\n') ?? '';
-        if (!text) throw new Error('Empty Vertex response');
-        return text;
-      } catch (e) {
-        lastErr = e;
-        if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
-      }
+      const dup = attempts.some((a) => a.location === location && a.modelId === modelId);
+      if (!dup) attempts.push({ location, modelId });
+    }
+  }
+  return attempts;
+}
+
+async function vertexGenerateJson(prompt, opts = {}) {
+  const schemaBuilder = opts.schemaBuilder || buildAnalyticsResponseSchema;
+  const maxOutputTokens = opts.maxOutputTokens ?? 1024;
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+  }
+  const { VertexAI, SchemaType } = await getVertexSdk();
+  const attempts = vertexAttemptOrder();
+
+  let lastErr = null;
+  const t0 = Date.now();
+  for (const { location, modelId } of attempts) {
+    const vertex = getVertexClient(VertexAI, location);
+    try {
+      const model = vertex.getGenerativeModel({
+        model: modelId,
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens,
+          responseMimeType: 'application/json',
+          responseSchema: schemaBuilder(SchemaType),
+        },
+      });
+      const resp = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+      const text =
+        resp?.response?.candidates?.[0]?.content?.parts
+          ?.map((p) => p?.text)
+          .filter(Boolean)
+          .join('\n') ?? '';
+      if (!text) throw new Error('Empty Vertex response');
+      provenVertexModel = { location, modelId };
+      logTiming(`Vertex ${modelId}@${location}`, Date.now() - t0);
+      return text;
+    } catch (e) {
+      lastErr = e;
+      if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
     }
   }
   throw lastErr || new Error('Vertex generation failed');
@@ -585,19 +607,29 @@ async function runAnalyticsChat(input) {
   const focus = detectFocus(message);
   const params = { start_date, end_date };
   const prevParams = { start_date: prev.start, end_date: prev.end };
+  const needsBranches = focus === 'branches' || focus === 'overview';
+  const needsMenu = focus === 'menu' || focus === 'overview' || focus === 'trend';
+  const needsCategory = focus === 'category';
+  const needsPayment = focus === 'payment';
 
+  const tFetch = Date.now();
   const [dailyRes, dailyPrevRes, branchRes, menuRes, categoryRes, paymentRes] = await Promise.all([
-    fetchPy('/api/analytics/daily-sales', params),
-    fetchPy('/api/analytics/daily-sales', prevParams),
-    fetchPy('/api/analytics/branch-sales', params).catch(() => ({ data: { data: [] } })),
-    fetchPy('/api/analytics/menu-report', params),
-    focus === 'category'
-      ? fetchPy('/api/analytics/category-report', params)
+    fetchPyCached('/api/analytics/daily-sales', params),
+    fetchPyCached('/api/analytics/daily-sales', prevParams),
+    needsBranches
+      ? fetchPyCached('/api/analytics/branch-sales', params).catch(() => ({ data: { data: [] } }))
       : Promise.resolve({ data: { data: [] } }),
-    focus === 'payment'
-      ? fetchPy('/api/analytics/payment-report', params)
+    needsMenu
+      ? fetchPyCached('/api/analytics/menu-report', params)
+      : Promise.resolve({ data: { data: [] } }),
+    needsCategory
+      ? fetchPyCached('/api/analytics/category-report', params)
+      : Promise.resolve({ data: { data: [] } }),
+    needsPayment
+      ? fetchPyCached('/api/analytics/payment-report', params)
       : Promise.resolve({ data: { data: [] } }),
   ]);
+  logTiming('PyServer fetch', Date.now() - tFetch);
 
   const dailyCurrent = dailyRes?.data?.data || [];
   const dailyPrevious = dailyPrevRes?.data?.data || [];
@@ -651,7 +683,7 @@ async function runAnalyticsChat(input) {
     let parsed = parseModelJson(raw);
     narrative = parseNarrativeFromModel(parsed);
 
-    if (!narrativeMatchesLocale(narrative, locale)) {
+    if (!narrativeMatchesLocale(narrative, locale) && locale === 'ko') {
       console.warn('[AnalyticsAI] Model reply wrong language, retrying once. locale=', locale);
       const retryPrompt =
         locale === 'ko'
@@ -674,6 +706,19 @@ async function runAnalyticsChat(input) {
     ...narrative,
     charts,
     contextMeta: { focus, period: { start: start_date, end: end_date }, locale },
+  };
+}
+
+function compactManagementContext(ctx) {
+  return {
+    period: ctx.period,
+    previous_period: ctx.previous_period,
+    kpi: ctx.kpi,
+    kpi_previous: ctx.kpi_previous,
+    comparisons: ctx.comparisons,
+    sales_breakdown: ctx.sales_breakdown,
+    expense_breakdown: ctx.expense_breakdown,
+    context: ctx.context,
   };
 }
 
@@ -702,7 +747,7 @@ Rules:
 - suggestedReplies: 3-4 short follow-up questions the CEO might ask.
 
 MANAGEMENT_CONTEXT:
-${JSON.stringify(context)}
+${JSON.stringify(compactManagementContext(context))}
 
 Return JSON only with keys: executive_summary, sales_analysis, expense_analysis, recommendations, suggestedReplies.`;
 }
@@ -795,19 +840,19 @@ async function runManagementBrief(input) {
     const prompt = buildManagementBriefPrompt(locale, ctx);
     let raw = await vertexGenerateJson(prompt, {
       schemaBuilder: buildManagementBriefResponseSchema,
-      maxOutputTokens: 4096,
+      maxOutputTokens: 2048,
     });
     let parsed = parseModelJson(raw);
     brief = parseBriefFromModel(parsed);
 
-    if (!briefMatchesLocale(brief, locale)) {
+    if (!briefMatchesLocale(brief, locale) && locale === 'ko') {
       const retryPrompt =
         locale === 'ko'
           ? `${prompt}\n\n이전 응답이 영어였습니다. executive_summary, sales_analysis, expense_analysis, recommendations, suggestedReplies 전부 한국어로 다시 작성하세요.`
           : `${prompt}\n\nRewrite entirely in the required language.`;
       raw = await vertexGenerateJson(retryPrompt, {
         schemaBuilder: buildManagementBriefResponseSchema,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 2048,
       });
       parsed = parseModelJson(raw);
       brief = parseBriefFromModel(parsed);

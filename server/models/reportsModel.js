@@ -132,8 +132,21 @@ class ReportsModel {
 
 		// Combine params for execution
 		const allParams = [...params, ...summaryParams];
-		const [rows] = await pool.execute(query, allParams);
-		return rows;
+		try {
+			const [rows] = await pool.execute(query, allParams);
+			return rows;
+		} catch (err) {
+			if (err?.code !== 'ER_NO_SUCH_TABLE' || !String(err?.sqlMessage || '').includes('sales_hourly_summary')) {
+				throw err;
+			}
+			// Fallback when imported sales summary table is not deployed — billing-only revenue.
+			let billingOnlyQuery = billingQuery;
+			if (period === 'daily') {
+				billingOnlyQuery += ` ORDER BY date DESC`;
+			}
+			const [billingRows] = await pool.execute(billingOnlyQuery, params);
+			return billingRows;
+		}
 	}
 
 	// Get order reports

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
@@ -8,6 +8,7 @@ import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Skeleton } from '../ui/Skeleton';
 import { fetchPaymentReportApi, type ApiPaymentReportRow } from '../../services/analyticsService';
+import { useAnalyticsReportLoad } from '../../hooks/useAnalyticsReportLoad';
 
 type PaymentReportProps = {
   selectedBranch: Branch | null;
@@ -27,13 +28,89 @@ type PaymentReportRow = {
   netAmount: number;
 };
 
+type PaymentReportCachePayload = {
+  rows: PaymentReportRow[];
+};
+
+function buildPaymentRows(apiRows: ApiPaymentReportRow[]): PaymentReportRow[] {
+  const computedRows: PaymentReportRow[] = apiRows.map((row) => ({
+    id: String(row.id),
+    paymentMethod: row.paymentMethod,
+    paymentTransaction: row.paymentTransaction,
+    paymentAmount: row.paymentAmount,
+    refundTransaction: row.refundTransaction,
+    refundAmount: row.refundAmount,
+    netAmount: row.netAmount,
+  }));
+
+  const total = computedRows.reduce(
+    (acc, row) => ({
+      paymentTransaction: acc.paymentTransaction + row.paymentTransaction,
+      paymentAmount: Number((acc.paymentAmount + row.paymentAmount).toFixed(2)),
+      refundTransaction: acc.refundTransaction + row.refundTransaction,
+      refundAmount: Number((acc.refundAmount + row.refundAmount).toFixed(2)),
+      netAmount: Number((acc.netAmount + row.netAmount).toFixed(2)),
+    }),
+    { paymentTransaction: 0, paymentAmount: 0, refundTransaction: 0, refundAmount: 0, netAmount: 0 },
+  );
+
+  return [
+    ...computedRows,
+    {
+      id: 'total',
+      paymentMethod: 'total',
+      paymentTransaction: total.paymentTransaction,
+      paymentAmount: total.paymentAmount,
+      refundTransaction: total.refundTransaction,
+      refundAmount: total.refundAmount,
+      netAmount: total.netAmount,
+    },
+  ];
+}
+
 const MOCK_PAYMENT_REPORT_BASE: Omit<PaymentReportRow, 'id'>[] = [];
 
 export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<PaymentReportRow[]>([]);
-  const [reportLoading, setReportLoading] = useState(true);
+
+  const branchIdForCache =
+    selectedBranch && String(selectedBranch.id) !== 'all' ? String(selectedBranch.id) : null;
+
+  const hasPaymentCacheData = useCallback(
+    (cached: PaymentReportCachePayload | null) =>
+      !!cached && cached.rows.some((r) => r.id !== 'total'),
+    [],
+  );
+
+  const hydratePaymentCache = useCallback((cached: PaymentReportCachePayload) => {
+    setRows(cached.rows);
+  }, []);
+
+  const clearPaymentCache = useCallback(() => {
+    setRows([]);
+  }, []);
+
+  const fetchPaymentReportData = useCallback(async (): Promise<PaymentReportCachePayload> => {
+    const params = new URLSearchParams();
+    if (dateRange.start) params.set('start_date', dateRange.start);
+    if (dateRange.end) params.set('end_date', dateRange.end);
+    if (branchIdForCache) params.set('branch_id', branchIdForCache);
+
+    const apiRows = await fetchPaymentReportApi(params);
+    return { rows: buildPaymentRows(apiRows) };
+  }, [branchIdForCache, dateRange.end, dateRange.start]);
+
+  const { loading: reportLoading } = useAnalyticsReportLoad<PaymentReportCachePayload>({
+    report: 'payment',
+    dateRange,
+    branchId: branchIdForCache,
+    hasCacheData: hasPaymentCacheData,
+    fetchData: fetchPaymentReportData,
+    onHydrate: hydratePaymentCache,
+    onClear: clearPaymentCache,
+  });
 
   const money = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -44,61 +121,6 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
   const bodyTextClass = 'text-sm text-brand-text bg-white group-hover:bg-brand-bg/50';
   const methodHeaderClass = 'text-[13px] font-medium whitespace-nowrap bg-violet-50';
   const methodBodyClass = 'text-sm text-brand-text font-medium bg-violet-50 group-hover:bg-violet-100';
-
-  useEffect(() => {
-    const load = async () => {
-      setReportLoading(true);
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
-      if (selectedBranch && String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-      try {
-        const apiRows: ApiPaymentReportRow[] = await fetchPaymentReportApi(params);
-        const computedRows: PaymentReportRow[] = apiRows.map((row) => ({
-          id: String(row.id),
-          paymentMethod: row.paymentMethod,
-          paymentTransaction: row.paymentTransaction,
-          paymentAmount: row.paymentAmount,
-          refundTransaction: row.refundTransaction,
-          refundAmount: row.refundAmount,
-          netAmount: row.netAmount,
-        }));
-
-        const total = computedRows.reduce(
-          (acc, row) => ({
-            paymentTransaction: acc.paymentTransaction + row.paymentTransaction,
-            paymentAmount: Number((acc.paymentAmount + row.paymentAmount).toFixed(2)),
-            refundTransaction: acc.refundTransaction + row.refundTransaction,
-            refundAmount: Number((acc.refundAmount + row.refundAmount).toFixed(2)),
-            netAmount: Number((acc.netAmount + row.netAmount).toFixed(2)),
-          }),
-          { paymentTransaction: 0, paymentAmount: 0, refundTransaction: 0, refundAmount: 0, netAmount: 0 }
-        );
-
-        setRows([
-          ...computedRows,
-          {
-            id: 'total',
-            paymentMethod: 'total',
-            paymentTransaction: total.paymentTransaction,
-            paymentAmount: total.paymentAmount,
-            refundTransaction: total.refundTransaction,
-            refundAmount: total.refundAmount,
-            netAmount: total.netAmount,
-          },
-        ]);
-      } catch (err) {
-        console.error('Failed to load payment report', err);
-        setRows([]);
-      } finally {
-        setReportLoading(false);
-      }
-    };
-
-    void load();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();

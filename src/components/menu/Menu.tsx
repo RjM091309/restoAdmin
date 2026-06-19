@@ -1320,8 +1320,6 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     return (
         <SkeletonTransition
             loading={loading}
-            minDelayMs={400}
-            fadeOutMs={250}
             skeleton={menuSkeleton}
             className="block"
         >

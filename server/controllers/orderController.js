@@ -25,7 +25,13 @@ class OrderController {
 			const rawBranch = req.query.branch_id ?? req.body.branch_id ?? req.session?.branch_id ?? req.user?.branch_id ?? null;
 			// If 'all' is passed, fetch orders for ALL branches (admin view)
 			const branchId = (rawBranch === 'all' || rawBranch === '') ? null : rawBranch;
-			const orders = await OrderModel.getAll(branchId);
+			const { start_date, end_date, limit, include_item_meta } = req.query;
+			const orders = await OrderModel.getAll(branchId, {
+				start_date: start_date || null,
+				end_date: end_date || null,
+				limit: limit || null,
+				includeItemMeta: include_item_meta === '1' || include_item_meta === 'true',
+			});
 			return ApiResponse.success(res, orders, 'Orders retrieved successfully');
 		} catch (error) {
 			console.error('Error fetching orders:', error);

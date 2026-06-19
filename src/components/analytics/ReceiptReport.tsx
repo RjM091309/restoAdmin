@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import {
   type ApiReceiptDetail,
 } from '../../services/analyticsService';
 import { getOrderById, getOrderItems } from '../../services/orderService';
+import { useAnalyticsReportLoad } from '../../hooks/useAnalyticsReportLoad';
 
 type ReceiptReportProps = {
   selectedBranch: Branch | null;
@@ -32,6 +33,10 @@ type ReceiptReportRow = {
   type: string;
   total: number;
   discount: number;
+};
+
+type ReceiptReportCachePayload = {
+  rows: ReceiptReportRow[];
 };
 
 type ReceiptLineItem = {
@@ -85,42 +90,53 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
   const receiptBodyClass = 'text-sm text-brand-text bg-violet-50 group-hover:bg-violet-100';
 
   const [rows, setRows] = useState<ReceiptReportRow[]>([]);
-  const [reportLoading, setReportLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      setReportLoading(true);
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
-      if (selectedBranch && String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-      if (activeFilter !== 'all') {
-        params.set('type', activeFilter);
-      }
-      try {
-        const apiRows: ApiReceiptReportRow[] = await fetchReceiptReportApi(params);
-        setRows(
-          apiRows.map((row) => ({
-            id: String(row.id),
-            receiptNumber: row.receiptNumber,
-            date: row.date,
-            type: row.type,
-            total: row.total,
-            discount: Number(row.discount ?? 0),
-          }))
-        );
-      } catch (err) {
-        console.error('Failed to load receipt report', err);
-        setRows([]);
-      } finally {
-        setReportLoading(false);
-      }
+  const branchIdForCache =
+    selectedBranch && String(selectedBranch.id) !== 'all' ? String(selectedBranch.id) : null;
+
+  const hasReceiptCacheData = useCallback(
+    (cached: ReceiptReportCachePayload | null) => !!cached && cached.rows.length > 0,
+    [],
+  );
+
+  const hydrateReceiptCache = useCallback((cached: ReceiptReportCachePayload) => {
+    setRows(cached.rows);
+  }, []);
+
+  const clearReceiptCache = useCallback(() => {
+    setRows([]);
+  }, []);
+
+  const fetchReceiptReportData = useCallback(async (): Promise<ReceiptReportCachePayload> => {
+    const params = new URLSearchParams();
+    if (dateRange.start) params.set('start_date', dateRange.start);
+    if (dateRange.end) params.set('end_date', dateRange.end);
+    if (branchIdForCache) params.set('branch_id', branchIdForCache);
+    if (activeFilter !== 'all') params.set('type', activeFilter);
+
+    const apiRows = await fetchReceiptReportApi(params);
+    return {
+      rows: apiRows.map((row) => ({
+        id: String(row.id),
+        receiptNumber: row.receiptNumber,
+        date: row.date,
+        type: row.type,
+        total: row.total,
+        discount: Number(row.discount ?? 0),
+      })),
     };
+  }, [activeFilter, branchIdForCache, dateRange.end, dateRange.start]);
 
-    void load();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id, activeFilter]);
+  const { loading: reportLoading } = useAnalyticsReportLoad<ReceiptReportCachePayload>({
+    report: 'receipt',
+    dateRange,
+    branchId: branchIdForCache,
+    cacheExtra: activeFilter,
+    hasCacheData: hasReceiptCacheData,
+    fetchData: fetchReceiptReportData,
+    onHydrate: hydrateReceiptCache,
+    onClear: clearReceiptCache,
+  });
 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();

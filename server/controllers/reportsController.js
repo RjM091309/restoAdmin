@@ -7,13 +7,49 @@
 
 const ReportsModel = require('../models/reportsModel');
 const ApiResponse = require('../utils/apiResponse');
+const { buildSalesDashboardBundle } = require('../services/salesDashboardBundle');
+const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
 
 // Python analytics service (PyServer) base URL - internal only
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
+const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
+const PYSERVER_TIMEOUT_MS = Number(process.env.PYSERVER_TIMEOUT_MS || 15000);
 // node-fetch v3 is ESM-only; use dynamic import bridge for CommonJS
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 class ReportsController {
+	/** Prefer explicit query branch_id; ignore session when client sends all/none. */
+	static resolveAnalyticsBranchId(req) {
+		const raw = req.query.branch_id;
+		if (raw === 'all' || raw === '') return null;
+		if (raw != null && String(raw).trim() !== '') return raw;
+		return req.user?.branch_id || req.session?.branch_id || null;
+	}
+
+	static async fetchPyServer(urlString) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), PYSERVER_TIMEOUT_MS);
+		try {
+			return await fetch(urlString, { signal: controller.signal });
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	static mapRevenueRowsToDailySales(rows) {
+		return (rows || []).map((row) => {
+			const total = Number(row?.revenue ?? row?.total_sales ?? 0) || 0;
+			const dateKey = String(row?.date ?? row?.sale_date ?? '').slice(0, 10);
+			return {
+				sale_date: dateKey,
+				total_sales: total,
+				refund: 0,
+				discount: 0,
+				net_sales: total,
+				product_cost: 0,
+				gross_profit: total,
+			};
+		});
+	}
 	// Get revenue report
 	static async getRevenueReport(req, res) {
 		try {
@@ -394,37 +430,30 @@ class ReportsController {
 	static async getAnalyticsDailySales(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/daily-sales', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
 			if (end_date) url.searchParams.set('end_date', end_date);
 			if (branchId) url.searchParams.set('branch_id', String(branchId));
 
-			const pyRes = await fetch(url.toString());
-			if (!pyRes.ok) {
-				const text = await pyRes.text().catch(() => '');
-				console.error('[PyServer] daily-sales HTTP error:', pyRes.status, text);
-				return ApiResponse.error(
-					res,
-					`Python analytics service error (status ${pyRes.status})`,
-					502,
-					text || `PyServer responded with status ${pyRes.status}`
-				);
+			let series = [];
+			try {
+				const pyRes = await ReportsController.fetchPyServer(url.toString());
+				if (!pyRes.ok) {
+					const text = await pyRes.text().catch(() => '');
+					throw new Error(`PyServer status ${pyRes.status}: ${text}`);
+				}
+				const json = await pyRes.json().catch(() => null);
+				if (!json || json.success === false) {
+					throw new Error(json?.message || 'PyServer daily-sales error');
+				}
+				series = json?.data?.data || [];
+			} catch (pyErr) {
+				console.warn('[PyServer] daily-sales unavailable, using Node revenue fallback:', pyErr?.message || pyErr);
+				const report = await ReportsModel.getRevenueReport('daily', start_date, end_date, branchId);
+				series = ReportsController.mapRevenueRowsToDailySales(report);
 			}
-
-			const json = await pyRes.json().catch((err) => {
-				console.error('[PyServer] daily-sales JSON parse error:', err);
-				return null;
-			});
-
-			if (!json || json.success === false) {
-				const msg = json?.message || 'Unknown error from Python analytics service';
-				console.error('[PyServer] daily-sales error payload:', json);
-				return ApiResponse.error(res, msg, 502, json?.error || msg);
-			}
-
-			const series = json?.data?.data || [];
 
 			return ApiResponse.success(
 				res,
@@ -434,10 +463,10 @@ class ReportsController {
 					branch_id: branchId,
 					data: series
 				},
-				'Daily sales analytics retrieved from Python service'
+				'Daily sales analytics retrieved'
 			);
 		} catch (error) {
-			console.error('Error fetching analytics daily sales from PyServer:', error);
+			console.error('Error fetching analytics daily sales:', error);
 			return ApiResponse.error(res, 'Failed to fetch analytics daily sales', 500, error.message);
 		}
 	}
@@ -702,6 +731,60 @@ class ReportsController {
 		}
 	}
 
+	// Top profit drivers for Sales Analytics dashboard (proxied to PyServer)
+	static async getAnalyticsTopProfitDrivers(req, res) {
+		try {
+			const { start_date, end_date, limit = 20 } = req.query;
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/top-profit-drivers', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+			if (limit) url.searchParams.set('limit', String(limit));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] top-profit-drivers HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] top-profit-drivers JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] top-profit-drivers error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					limit: parseInt(limit, 10) || 20,
+					data: rows
+				},
+				'Top profit drivers retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics top profit drivers from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics top profit drivers', 500, error.message);
+		}
+	}
+
 	// Top-selling menu items (proxied to PyServer)
 	static async getAnalyticsTopSelling(req, res) {
 		try {
@@ -911,6 +994,115 @@ class ReportsController {
 		} catch (error) {
 			console.error('Error fetching analytics receipt detail from PyServer:', error);
 			return ApiResponse.error(res, 'Failed to fetch analytics receipt detail', 500, error.message);
+		}
+	}
+
+	// Consolidated Sales Analytics payload (single round-trip for branch load)
+	static async getAnalyticsSalesDashboardBundle(req, res) {
+		try {
+			const { start_date, end_date, profit_branch_id } = req.query;
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const profitBranchId =
+				profit_branch_id != null && String(profit_branch_id).trim() !== ''
+					? String(profit_branch_id).trim()
+					: branchId;
+
+			const bundle = await buildSalesDashboardBundle({
+				start_date,
+				end_date,
+				branchId,
+				profitBranchId,
+				branchNameFallback: branchId ? `Branch #${branchId}` : 'All Branches',
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date,
+					end_date,
+					branch_id: branchId,
+					profit_branch_id: profitBranchId,
+					...bundle,
+				},
+				'Sales dashboard bundle retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching sales dashboard bundle:', error);
+			return ApiResponse.error(res, 'Failed to fetch sales dashboard bundle', 500, error.message);
+		}
+	}
+
+	// Fast SQL probe — empty branches skip skeleton; active branches show skeleton then load bundle.
+	static async getAnalyticsBranchDashboardProbe(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			if (!branchId) {
+				return ApiResponse.badRequest(res, 'branch_id is required');
+			}
+
+			const probe = await probeBranchDashboardActivity({
+				branchId,
+				start_date,
+				end_date,
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date,
+					end_date,
+					branch_id: branchId,
+					...probe,
+				},
+				'Branch dashboard probe retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching branch dashboard probe:', error);
+			return ApiResponse.error(res, 'Failed to fetch branch dashboard probe', 500, error.message);
+		}
+	}
+
+	// Consolidated branch Dashboard payload (single round-trip)
+	static async getAnalyticsBranchDashboardBundle(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			if (!branchId) {
+				return ApiResponse.badRequest(res, 'branch_id is required');
+			}
+
+			const bundle = await buildBranchDashboardBundle({
+				branchId,
+				start_date,
+				end_date,
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date,
+					end_date,
+					branch_id: branchId,
+					...bundle,
+				},
+				'Branch dashboard bundle retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching branch dashboard bundle:', error);
+			return ApiResponse.error(res, 'Failed to fetch branch dashboard bundle', 500, error.message);
 		}
 	}
 }

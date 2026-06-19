@@ -19,11 +19,26 @@ const getAuthHeaders = (): Record<string, string> => {
 
 const isSameOriginUrl = (url: string) => url.startsWith('/') && !url.startsWith('//');
 
-async function fetchJson(url: string): Promise<{ res: Response; json: any }> {
+/** Client timeout — must exceed server PyServer timeout (15s) + Node SQL fallback. */
+const ANALYTICS_FETCH_MS = 35000;
+
+export function isAnalyticsFetchTimeout(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === 'AbortError') return true;
+  if (err instanceof Error && /aborted|timeout/i.test(err.message)) return true;
+  return false;
+}
+
+async function fetchJson(url: string, timeoutMs = ANALYTICS_FETCH_MS): Promise<{ res: Response; json: any }> {
   const headers = isSameOriginUrl(url) ? getAuthHeaders() : {};
-  const res = await fetch(url, { headers });
-  const json = await res.json().catch(() => null);
-  return { res, json };
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort('timeout'), timeoutMs);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    const json = await res.json().catch(() => null);
+    return { res, json };
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export type ApiBranchSalesItem = {
@@ -229,30 +244,15 @@ export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTo
 
 export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDailySalesItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  // PyServer path when configured, otherwise fall back to Node revenue report.
   const url = baseUrl
     ? `${baseUrl}/api/analytics/daily-sales?${params.toString()}`
-    : `/api/reports/revenue?period=daily&${params.toString()}`;
+    : `/api/analytics/daily-sales?${params.toString()}`;
 
+  // Node proxy already falls back to SQL when PyServer is slow/unreachable.
   const { res, json } = await fetchJson(url);
   if (!res.ok) throw new Error(`Analytics daily-sales failed with status ${res.status}`);
   if (json.success && json.data?.data) {
-    // PyServer returns { data: { data: [...] } }
     return json.data.data as ApiDailySalesItem[];
-  }
-  // Node revenue returns { data: { data: [{ date, revenue, ...}] } }
-  if (json.success && Array.isArray(json.data?.data)) {
-    return (json.data.data as any[]).map((row) => {
-      const total = Number(row?.revenue ?? row?.total_sales ?? 0) || 0;
-      return {
-        sale_date: String(row?.date ?? row?.sale_date ?? ''),
-        total_sales: total,
-        refund: 0,
-        discount: 0,
-        net_sales: total,
-        gross_profit: total,
-      } satisfies ApiDailySalesItem;
-    });
   }
   return [];
 }
@@ -279,6 +279,20 @@ export async function fetchDailyExpensesApi(params: URLSearchParams): Promise<Ap
   const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailyExpenseItem[];
+  }
+  return [];
+}
+
+export async function fetchTopProfitDriversApi(params: URLSearchParams): Promise<Array<ApiMenuReportRow & { branch_id?: number | null }>> {
+  const baseUrl = getAnalyticsBaseUrl();
+  if (!params.has('limit')) params.set('limit', '20');
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/top-profit-drivers?${params.toString()}`
+    : `/api/analytics/top-profit-drivers?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
+  if (!res.ok) throw new Error(`Analytics top-profit-drivers failed with status ${res.status}`);
+  if (json.success && json.data?.data) {
+    return json.data.data as Array<ApiMenuReportRow & { branch_id?: number | null }>;
   }
   return [];
 }
@@ -412,5 +426,132 @@ export async function fetchPerformanceTrendApi(params: URLSearchParams): Promise
     return json.data.data as ApiPerformanceTrendRow[];
   }
   return [];
+}
+
+export type SalesDashboardBundlePayload = {
+  dailySalesCurrent: ApiDailySalesItem[];
+  dailySalesPrevious: ApiDailySalesItem[];
+  branchSalesData: ApiBranchSalesItem[];
+  profitDriversData: Array<{
+    row: ApiMenuReportRow;
+    profit: number;
+    branchId: number | null;
+    branchName: string;
+  }>;
+  reconAdjustCurrent: { byDate: Record<string, number>; total: number };
+  reconAdjustPreviousTotal: number;
+};
+
+export type BranchDashboardBundlePayload = {
+  dashboardData: {
+    stats: {
+      totalOrders: number;
+      totalSales: number;
+      totalExpenses: number;
+      totalProfit: number;
+    };
+    revenueData: Array<{ name: string; date?: string; income: number; expense: number }>;
+    ordersOverview: Array<{ name: string; orders: number; date?: string }>;
+  } | null;
+  topCategories: Array<{ name: string; value: number; color: string }>;
+  trendingMenusData: Array<{
+    key: string;
+    name: string;
+    category: string;
+    totalQty: number;
+    netSales: number;
+    image: string;
+  }>;
+  recentOrders: Array<Record<string, unknown>>;
+  recentOrderItemsMeta: Record<string, { lineCount: number; totalQty: number }>;
+};
+
+/** Single backend round-trip for Sales Analytics (replaces 6 frontend API calls). */
+export async function fetchSalesDashboardBundleApi(params: {
+  start: string;
+  end: string;
+  branchId?: string | null;
+  profitBranchId?: string | null;
+}): Promise<SalesDashboardBundlePayload> {
+  const qs = new URLSearchParams();
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+  if (params.branchId === null || params.branchId === 'all') {
+    qs.set('branch_id', 'all');
+  } else if (params.branchId) {
+    qs.set('branch_id', params.branchId);
+  }
+  if (params.profitBranchId) qs.set('profit_branch_id', params.profitBranchId);
+
+  const url = `/api/analytics/sales-dashboard-bundle?${qs.toString()}`;
+  const { res, json } = await fetchJson(url, 15000);
+  if (!res.ok) {
+    throw new Error(`Analytics sales-dashboard-bundle failed with status ${res.status}`);
+  }
+  if (!json?.success || !json?.data) {
+    throw new Error(json?.message || 'Analytics sales-dashboard-bundle returned an error');
+  }
+
+  const data = json.data;
+  return {
+    dailySalesCurrent: (data.dailySalesCurrent || []) as ApiDailySalesItem[],
+    dailySalesPrevious: (data.dailySalesPrevious || []) as ApiDailySalesItem[],
+    branchSalesData: (data.branchSalesData || []) as ApiBranchSalesItem[],
+    profitDriversData: (data.profitDriversData || []) as SalesDashboardBundlePayload['profitDriversData'],
+    reconAdjustCurrent: data.reconAdjustCurrent || { byDate: {}, total: 0 },
+    reconAdjustPreviousTotal: Number(data.reconAdjustPreviousTotal) || 0,
+  };
+}
+
+/** Fast SQL probe (~100–300ms) — decides skeleton vs empty shell before full bundle. */
+export async function fetchBranchDashboardProbeApi(params: {
+  branchId: string;
+  start: string;
+  end: string;
+}): Promise<{ hasActivity: boolean }> {
+  const qs = new URLSearchParams();
+  qs.set('branch_id', params.branchId);
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+
+  const url = `/api/analytics/branch-dashboard-probe?${qs.toString()}`;
+  const { res, json } = await fetchJson(url, 8000);
+  if (!res.ok) {
+    throw new Error(`Analytics branch-dashboard-probe failed with status ${res.status}`);
+  }
+  if (!json?.success || !json?.data) {
+    throw new Error(json?.message || 'Analytics branch-dashboard-probe returned an error');
+  }
+  return { hasActivity: Boolean(json.data.hasActivity) };
+}
+
+/** Single backend round-trip for branch Dashboard (replaces ~10 frontend API calls). */
+export async function fetchBranchDashboardBundleApi(params: {
+  branchId: string;
+  start: string;
+  end: string;
+}): Promise<BranchDashboardBundlePayload> {
+  const qs = new URLSearchParams();
+  qs.set('branch_id', params.branchId);
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+
+  const url = `/api/analytics/branch-dashboard-bundle?${qs.toString()}`;
+  const { res, json } = await fetchJson(url, 12000);
+  if (!res.ok) {
+    throw new Error(`Analytics branch-dashboard-bundle failed with status ${res.status}`);
+  }
+  if (!json?.success || !json?.data) {
+    throw new Error(json?.message || 'Analytics branch-dashboard-bundle returned an error');
+  }
+
+  const data = json.data;
+  return {
+    dashboardData: data.dashboardData ?? null,
+    topCategories: data.topCategories || [],
+    trendingMenusData: data.trendingMenusData || [],
+    recentOrders: data.recentOrders || [],
+    recentOrderItemsMeta: data.recentOrderItemsMeta || {},
+  };
 }
 

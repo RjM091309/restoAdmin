@@ -19,6 +19,8 @@ export type OrderRecord = {
     ENCODED_BY?: number | null;
     ENCODED_BY_NAME?: string | null;
     payment_method?: string | null;
+    item_line_count?: number;
+    item_total_qty?: number;
 };
 
 export type OrderItemRecord = {
@@ -132,10 +134,24 @@ export function getOrderStatusLabel(status: number): string {
 
 // ---- Public API ----
 
-export async function getOrders(branchId: string | null): Promise<OrderRecord[]> {
+export type GetOrdersOptions = {
+    startDate?: string;
+    endDate?: string;
+    limit?: number;
+    includeItemMeta?: boolean;
+};
+
+export async function getOrders(
+    branchId: string | null,
+    options: GetOrdersOptions = {},
+): Promise<OrderRecord[]> {
     const params: Record<string, string> = {
         branch_id: branchId && branchId !== 'all' ? branchId : 'all',
     };
+    if (options.startDate) params.start_date = options.startDate;
+    if (options.endDate) params.end_date = options.endDate;
+    if (options.limit != null && options.limit > 0) params.limit = String(options.limit);
+    if (options.includeItemMeta) params.include_item_meta = '1';
     const response = await fetch(buildUrl('/orders/data', params), {
         credentials: 'include',
         headers: authHeaders(),

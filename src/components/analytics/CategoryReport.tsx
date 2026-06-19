@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
@@ -16,6 +16,7 @@ import {
   type ApiCategoryReportRow,
   type ApiCategoryMenuBreakdownRow,
 } from '../../services/analyticsService';
+import { useAnalyticsReportLoad } from '../../hooks/useAnalyticsReportLoad';
 
 type CategoryReportProps = {
   selectedBranch: Branch | null;
@@ -33,11 +34,14 @@ type CategoryReportRow = {
   totalSales: number;
 };
 
+type CategoryReportCachePayload = {
+  rows: CategoryReportRow[];
+};
+
 export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<CategoryReportRow[]>([]);
-  const [reportLoading, setReportLoading] = useState(true);
   const [viewRow, setViewRow] = useState<CategoryReportRow | null>(null);
   const [breakdownRows, setBreakdownRows] = useState<ApiCategoryMenuBreakdownRow[]>([]);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
@@ -45,6 +49,50 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const [breakdownSort, setBreakdownSort] = useState<{ key: 'menuName' | 'salesQty' | 'unitPrice' | 'netSales'; dir: 'asc' | 'desc' } | null>(
     null
   );
+
+  const branchIdForCache =
+    selectedBranch && String(selectedBranch.id) !== 'all' ? String(selectedBranch.id) : null;
+
+  const hasCategoryCacheData = useCallback(
+    (cached: CategoryReportCachePayload | null) => !!cached && cached.rows.length > 0,
+    [],
+  );
+
+  const hydrateCategoryCache = useCallback((cached: CategoryReportCachePayload) => {
+    setRows(cached.rows);
+  }, []);
+
+  const clearCategoryCache = useCallback(() => {
+    setRows([]);
+  }, []);
+
+  const fetchCategoryReportData = useCallback(async (): Promise<CategoryReportCachePayload> => {
+    const params = new URLSearchParams();
+    if (dateRange.start) params.set('start_date', dateRange.start);
+    if (dateRange.end) params.set('end_date', dateRange.end);
+    if (branchIdForCache) params.set('branch_id', branchIdForCache);
+
+    const apiRows: ApiCategoryReportRow[] = await fetchCategoryReportApi(params);
+    return {
+      rows: apiRows.map((row) => ({
+        id: String(row.id),
+        category: row.category,
+        branch: row.branch || selectedBranch?.name || 'All Branches',
+        salesQty: row.salesQty,
+        totalSales: row.totalSales,
+      })),
+    };
+  }, [branchIdForCache, dateRange.end, dateRange.start, selectedBranch?.name]);
+
+  const { loading: reportLoading } = useAnalyticsReportLoad<CategoryReportCachePayload>({
+    report: 'category',
+    dateRange,
+    branchId: branchIdForCache,
+    hasCacheData: hasCategoryCacheData,
+    fetchData: fetchCategoryReportData,
+    onHydrate: hydrateCategoryCache,
+    onClear: clearCategoryCache,
+  });
 
   const money = (value: number) => {
     const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
@@ -57,37 +105,6 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
     const isInt = Math.abs(n - Math.round(n)) < 1e-9;
     return isInt ? Math.round(n).toLocaleString() : (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
   };
-
-  useEffect(() => {
-    const load = async () => {
-      setReportLoading(true);
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
-      if (selectedBranch && String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-      try {
-        const apiRows: ApiCategoryReportRow[] = await fetchCategoryReportApi(params);
-        setRows(
-          apiRows.map((row) => ({
-            id: String(row.id),
-            category: row.category,
-            branch: row.branch || selectedBranch?.name || 'All Branches',
-            salesQty: row.salesQty,
-            totalSales: row.totalSales,
-          }))
-        );
-      } catch (err) {
-        console.error('Failed to load category report', err);
-        setRows([]);
-      } finally {
-        setReportLoading(false);
-      }
-    };
-
-    void load();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   useEffect(() => {
     if (!viewRow) {

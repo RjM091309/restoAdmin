@@ -4,28 +4,24 @@ import { useTranslation } from 'react-i18next';
 const shimmerClass = 'skeleton-shimmer';
 
 export interface SkeletonTransitionProps {
-  /** When true, skeleton is shown (with min delay + fade-out when it becomes false). */
+  /** When true, skeleton is shown. Hides as soon as loading becomes false. */
   loading: boolean;
-  /** Minimum time skeleton is visible before allowing hide (ms). Default 500. */
-  minDelayMs?: number;
-  /** Fade-out duration (ms). Default 300. */
+  /** Optional fade-out when loading completes (ms). Default 0 = instant. */
   fadeOutMs?: number;
   /** Skeleton content to show while loading. */
   skeleton: React.ReactNode;
-  /** Content to show after skeleton fades out. */
+  /** Content to show after skeleton hides. */
   children: React.ReactNode;
   /** Optional wrapper class for the skeleton container (e.g. for positioning). */
   className?: string;
 }
 
 /**
- * Shows skeleton for at least minDelayMs, then when loading becomes false
- * fades out the skeleton over fadeOutMs before showing children.
+ * Shows skeleton only while `loading` is true — no artificial minimum display time.
  */
 export const SkeletonTransition: React.FC<SkeletonTransitionProps> = ({
   loading,
-  minDelayMs = 500,
-  fadeOutMs = 300,
+  fadeOutMs = 0,
   skeleton,
   children,
   className = '',
@@ -33,38 +29,33 @@ export const SkeletonTransition: React.FC<SkeletonTransitionProps> = ({
   const { t } = useTranslation();
   const [showSkeleton, setShowSkeleton] = useState(loading);
   const [fadeOut, setFadeOut] = useState(false);
-  const loadingStartRef = useRef<number | null>(null);
-  const waitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (loading) {
-      loadingStartRef.current = Date.now();
       setShowSkeleton(true);
       setFadeOut(false);
-      if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       return;
     }
 
-    const start = loadingStartRef.current ?? Date.now();
-    const elapsed = Date.now() - start;
-    const remaining = Math.max(0, minDelayMs - elapsed);
+    if (!showSkeleton) return;
 
-    waitTimerRef.current = setTimeout(() => {
-      waitTimerRef.current = null;
-      setFadeOut(true);
-      fadeTimerRef.current = setTimeout(() => {
-        fadeTimerRef.current = null;
-        setShowSkeleton(false);
-      }, fadeOutMs);
-    }, remaining);
+    if (fadeOutMs <= 0) {
+      setShowSkeleton(false);
+      return;
+    }
+
+    setFadeOut(true);
+    fadeTimerRef.current = setTimeout(() => {
+      fadeTimerRef.current = null;
+      setShowSkeleton(false);
+    }, fadeOutMs);
 
     return () => {
-      if (waitTimerRef.current) clearTimeout(waitTimerRef.current);
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     };
-  }, [loading, minDelayMs, fadeOutMs]);
+  }, [fadeOutMs, loading, showSkeleton]);
 
   if (!showSkeleton) {
     return <>{children}</>;
@@ -73,7 +64,7 @@ export const SkeletonTransition: React.FC<SkeletonTransitionProps> = ({
   return (
     <div
       className={`skeleton-transition-wrapper ${fadeOut ? 'skeleton-fade-out' : ''} ${className}`.trim()}
-      style={{ transition: `opacity ${fadeOutMs}ms ease-out` }}
+      style={fadeOutMs > 0 ? { transition: `opacity ${fadeOutMs}ms ease-out` } : undefined}
       aria-busy={loading}
       aria-live="polite"
       aria-label={loading ? t('common.loading') : undefined}
@@ -215,7 +206,7 @@ export const SkeletonPage: React.FC<{ showStats?: boolean; tableRows?: number }>
   showStats = false,
   tableRows = 10,
 }) => (
-  <div className="space-y-8 animate-in fade-in duration-300">
+  <div className="space-y-8">
     <SkeletonPageHeader />
     {showStats && <SkeletonStatCards />}
     <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden p-6 md:p-8">

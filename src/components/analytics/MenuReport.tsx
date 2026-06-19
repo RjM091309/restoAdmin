@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
@@ -21,6 +21,7 @@ import {
   type ApiDailySalesItem,
   type ApiMenuReportRow,
 } from '../../services/analyticsService';
+import { useAnalyticsReportLoad } from '../../hooks/useAnalyticsReportLoad';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
 function ChartContainer({
@@ -69,6 +70,11 @@ type MenuReportRow = {
   netSales: number;
 };
 
+type MenuReportCachePayload = {
+  rows: MenuReportRow[];
+  dailySalesCurrent: ApiDailySalesItem[];
+};
+
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
 type TopProductRow = {
@@ -91,80 +97,69 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<MenuReportRow[]>([]);
-  const [reportLoading, setReportLoading] = useState(true);
-
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
   /** When set, chart shows only this product's bar; when null, shows stacked bars for all. */
   const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null);
+
+  const branchIdForCache =
+    selectedBranch && String(selectedBranch.id) !== 'all' ? String(selectedBranch.id) : null;
+
+  const hasMenuCacheData = useCallback(
+    (cached: MenuReportCachePayload | null) =>
+      !!cached && (cached.rows.length > 0 || cached.dailySalesCurrent.length > 0),
+    [],
+  );
+
+  const hydrateMenuCache = useCallback((cached: MenuReportCachePayload) => {
+    setRows(cached.rows);
+    setDailySalesCurrent(cached.dailySalesCurrent);
+  }, []);
+
+  const clearMenuCache = useCallback(() => {
+    setRows([]);
+    setDailySalesCurrent([]);
+  }, []);
+
+  const fetchMenuReportData = useCallback(async (): Promise<MenuReportCachePayload> => {
+    const params = new URLSearchParams();
+    if (dateRange.start) params.set('start_date', dateRange.start);
+    if (dateRange.end) params.set('end_date', dateRange.end);
+    if (branchIdForCache) params.set('branch_id', branchIdForCache);
+
+    const paramsDaily = new URLSearchParams(params);
+    const [apiRows, currentData] = await Promise.all([
+      fetchMenuReportApi(params),
+      fetchDailySalesApi(paramsDaily),
+    ]);
+
+    return {
+      rows: apiRows.map((row) => ({
+        id: String(row.id),
+        goods: row.goods,
+        branch: row.branch || selectedBranch?.name || 'All Branches',
+        salesQty: row.salesQty,
+        totalSales: row.totalSales,
+        netSales: row.netSales,
+      })),
+      dailySalesCurrent: currentData,
+    };
+  }, [branchIdForCache, dateRange.end, dateRange.start, selectedBranch?.name]);
+
+  const { loading: reportLoading } = useAnalyticsReportLoad<MenuReportCachePayload>({
+    report: 'menu',
+    dateRange,
+    branchId: branchIdForCache,
+    hasCacheData: hasMenuCacheData,
+    fetchData: fetchMenuReportData,
+    onHydrate: hydrateMenuCache,
+    onClear: clearMenuCache,
+  });
 
   const money = (value: number) =>
     `${t('common.currency_symbol')}${value.toLocaleString(undefined, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     })}`;
-
-  useEffect(() => {
-    const load = async () => {
-      setReportLoading(true);
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
-      if (selectedBranch && String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-      try {
-        const apiRows: ApiMenuReportRow[] = await fetchMenuReportApi(params);
-        setRows(
-          apiRows.map((row) => ({
-            id: String(row.id),
-            goods: row.goods,
-            branch: row.branch || selectedBranch?.name || 'All Branches',
-            salesQty: row.salesQty,
-            totalSales: row.totalSales,
-            netSales: row.netSales,
-          }))
-        );
-      } catch (err) {
-        console.error('Failed to load menu report', err);
-        setRows([]);
-      } finally {
-        setReportLoading(false);
-      }
-    };
-
-    void load();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
-
-  useEffect(() => {
-    // Top 5 is computed client-side from menu-report rows so it can include
-    // synthetic rows like Room charge / Service charge (not in menu masterlist).
-  }, []);
-
-  useEffect(() => {
-    const loadDailySales = async () => {
-      try {
-        if (!dateRange.start || !dateRange.end) {
-          setDailySalesCurrent([]);
-          return;
-        }
-
-        const paramsCurrent = new URLSearchParams();
-        paramsCurrent.set('start_date', dateRange.start);
-        paramsCurrent.set('end_date', dateRange.end);
-        if (selectedBranch && String(selectedBranch.id) !== 'all') {
-          paramsCurrent.set('branch_id', String(selectedBranch.id));
-        }
-
-        const currentData = await fetchDailySalesApi(paramsCurrent);
-        setDailySalesCurrent(currentData);
-      } catch (err) {
-        console.error(err);
-        setDailySalesCurrent([]);
-      }
-    };
-
-    void loadDailySales();
-  }, [dateRange.start, dateRange.end, selectedBranch?.id]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();

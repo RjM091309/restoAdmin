@@ -1,16 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, LayoutGrid, Store, TrendingUp, Loader2, AlertCircle } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
 import { Modal } from '../ui/Modal';
 import {
-  fetchBranchSalesApi,
-  fetchMenuReportApi,
-  fetchDailySalesApi,
+  fetchTopProfitDriversApi,
+  fetchSalesDashboardBundleApi,
+  isAnalyticsFetchTimeout,
   type ApiBranchSalesItem,
   type ApiMenuReportRow,
   type ApiDailySalesItem,
@@ -28,6 +26,13 @@ import {
 } from 'recharts';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from './CashReconciliationModal';
+import {
+  buildSalesAnalyticsCacheKey,
+  hasSalesAnalyticsCacheData,
+  readSalesAnalyticsCache,
+  writeSalesAnalyticsCache,
+  type SalesAnalyticsCachePayload,
+} from '../../utils/salesAnalyticsCache';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
 function ChartContainer({
@@ -145,8 +150,24 @@ function InlineDropdown<T extends string>({ value, options, onChange, formatOpti
 
 const parseDateSafe = (value: string) => {
   if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00`);
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const parsed = new Date(`${s.slice(0, 10)}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const parsed = new Date(s.includes('T') ? s : `${s}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toSaleDateKey = (value: string) => {
+  const s = String(value ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const parsed = parseDateSafe(s);
+  if (!parsed) return s.slice(0, 10);
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, '0');
+  const d = String(parsed.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
 const formatDateLabel = (date: Date) =>
@@ -238,6 +259,9 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [viewMode, setViewMode] = useState<ViewMode>('glance');
   const [tablePage, setTablePage] = useState(0);
   const profitDriversRef = useRef<HTMLDivElement | null>(null);
+  const dashboardReqIdRef = useRef(0);
+  const profitDriversReqIdRef = useRef(0);
+  const loadedCacheKeyRef = useRef<string | null>(null);
 
   // API data state for the two new cards
   const [branchSalesData, setBranchSalesData] = useState<ApiBranchSalesItem[]>([]);
@@ -282,9 +306,9 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     }> = [];
 
     for (const item of dailySalesCurrent) {
-      const saleDate = String(item.sale_date).slice(0, 10);
+      const saleDate = toSaleDateKey(item.sale_date);
       saleDatesWithPosRow.add(saleDate);
-      const parsed = parseDateSafe(item.sale_date);
+      const parsed = parseDateSafe(saleDate);
       const label = parsed ? formatDateLabel(parsed) : item.sale_date;
       const tableDate = parsed
         ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -339,27 +363,6 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
 
   useEffect(() => { setTablePage(0); }, [dateRange.start, dateRange.end, selectedBranch?.id, activeMetric]);
 
-  // Fetch sales per branch data (real data from backend)
-  const fetchBranchSales = useCallback(async () => {
-    setBranchSalesLoading(true);
-    setBranchSalesError(null);
-    try {
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
-      if (!isAllBranch && selectedBranch?.id) params.set('branch_id', String(selectedBranch.id));
-
-      const rawData = await fetchBranchSalesApi(params);
-      setBranchSalesData(rawData);
-    } catch (err) {
-      console.error(err);
-      setBranchSalesError(t('sales_analytics.network_error'));
-    } finally {
-      setBranchSalesLoading(false);
-    }
-  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id]);
-
-  // Compute previous-period date range for comparison (same length immediately before current range)
   const previousRange = useMemo(() => {
     const start = parseDateSafe(dateRange.start);
     const end = parseDateSafe(dateRange.end);
@@ -371,65 +374,19 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     prevEnd.setDate(prevEnd.getDate() - 1);
     const prevStart = new Date(prevEnd);
     prevStart.setDate(prevStart.getDate() - (days - 1));
-
     const toIso = (d: Date) => d.toISOString().slice(0, 10);
     return { previousStart: toIso(prevStart), previousEnd: toIso(prevEnd) };
   }, [dateRange.start, dateRange.end]);
 
-  // Fetch daily sales data for main chart/stat cards (current + previous period)
-  const fetchDailySales = useCallback(async () => {
-    setDailySalesLoading(true);
-    setDailySalesError(null);
-    try {
-      const hasRange = dateRange.start && dateRange.end;
-      if (!hasRange) {
-        setDailySalesCurrent([]);
-        setDailySalesPrevious([]);
-        return;
-      }
-
-      const paramsCurrent = new URLSearchParams();
-      paramsCurrent.set('start_date', dateRange.start);
-      paramsCurrent.set('end_date', dateRange.end);
-      if (!isAllBranch && selectedBranch?.id) paramsCurrent.set('branch_id', String(selectedBranch.id));
-
-      const { previousStart, previousEnd } = previousRange;
-      let paramsPrevious: URLSearchParams | null = null;
-      if (previousStart && previousEnd) {
-        paramsPrevious = new URLSearchParams();
-        paramsPrevious.set('start_date', previousStart);
-        paramsPrevious.set('end_date', previousEnd);
-        if (!isAllBranch && selectedBranch?.id) paramsPrevious.set('branch_id', String(selectedBranch.id));
-      }
-
-      const [currentData, prevData] = await Promise.all([
-        fetchDailySalesApi(paramsCurrent),
-        paramsPrevious ? fetchDailySalesApi(paramsPrevious) : Promise.resolve([]),
-      ]);
-
-      setDailySalesCurrent(currentData);
-      setDailySalesPrevious(prevData);
-    } catch (err) {
-      console.error(err);
-      setDailySalesError(t('sales_analytics.network_error'));
-      setDailySalesCurrent([]);
-      setDailySalesPrevious([]);
-    } finally {
-      setDailySalesLoading(false);
-    }
-  }, [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id, previousRange, t]);
-
   const getProfitValue = useCallback((row: ApiMenuReportRow) => {
     const rawProfit = Number((row as any).totalRevenue ?? 0);
     if (Number.isFinite(rawProfit) && rawProfit !== 0) return rawProfit;
-
     const revenue = Number((row as any).netSales ?? (row as any).totalSales ?? 0);
     const cost = Number((row as any).unitCost ?? 0);
     const derived = revenue - cost;
     return Number.isFinite(derived) ? derived : 0;
   }, []);
 
-  // When the global filter is a specific branch, don't keep a separate "per-branch drivers" override.
   useEffect(() => {
     if (!isAllBranch) setProfitDriversBranchId(null);
   }, [isAllBranch]);
@@ -453,110 +410,223 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     return t('sales_analytics.all_branches');
   }, [profitDriversBranchId, branchSalesData, isAllBranch, selectedBranch, t]);
 
+  const cacheKey = useMemo(
+    () =>
+      buildSalesAnalyticsCacheKey({
+        start: dateRange.start,
+        end: dateRange.end,
+        branchId: isAllBranch ? null : String(selectedBranch?.id ?? ''),
+      }),
+    [dateRange.start, dateRange.end, isAllBranch, selectedBranch?.id]
+  );
+
+  const hydrateFromCache = useCallback((cached: SalesAnalyticsCachePayload) => {
+    setDailySalesCurrent(cached.dailySalesCurrent);
+    setDailySalesPrevious(cached.dailySalesPrevious);
+    setBranchSalesData(cached.branchSalesData);
+    setProfitDriversData(cached.profitDriversData);
+    setReconAdjustCurrent(cached.reconAdjustCurrent);
+    setReconAdjustPreviousTotal(cached.reconAdjustPreviousTotal);
+    setDailySalesError(null);
+    setBranchSalesError(null);
+    setProfitDriversError(null);
+    setDailySalesLoading(false);
+    setBranchSalesLoading(false);
+    setProfitDriversLoading(false);
+  }, []);
+
+  const loadProfitDriversOnly = useCallback(
+    async (background: boolean) => {
+      if (!dateRange.start || !dateRange.end) return;
+      const reqId = ++profitDriversReqIdRef.current;
+      if (!background) setProfitDriversLoading(true);
+      setProfitDriversError(null);
+      try {
+        const profitParams = new URLSearchParams();
+        profitParams.set('start_date', dateRange.start);
+        profitParams.set('end_date', dateRange.end);
+        if (profitDriversEffectiveBranchId) profitParams.set('branch_id', profitDriversEffectiveBranchId);
+
+        const profitRows = await fetchTopProfitDriversApi(profitParams);
+        const driversBranchName =
+          profitDriversBranchId != null
+            ? (branchSalesData.find((b) => b.branch_id === profitDriversBranchId)?.branch_name ||
+                `${t('sales_analytics.branch')} #${profitDriversBranchId}`)
+            : !isAllBranch && selectedBranch
+              ? selectedBranch.name
+              : t('sales_analytics.all_branches');
+
+        const combined = profitRows
+          .map((row) => ({
+            row,
+            profit: getProfitValue(row),
+            branchId:
+              (row as ApiMenuReportRow & { branch_id?: number | null }).branch_id ??
+              (profitDriversEffectiveBranchId ? Number(profitDriversEffectiveBranchId) : null),
+            branchName:
+              profitDriversEffectiveBranchId && !isAllBranch
+                ? driversBranchName
+                : String(row.branch || driversBranchName),
+          }))
+          .filter((x) => x.profit > 0)
+          .sort((a, b) => b.profit - a.profit)
+          .slice(0, 20);
+
+        if (reqId !== profitDriversReqIdRef.current) return;
+
+        setProfitDriversData(combined);
+
+        const cached = readSalesAnalyticsCache(cacheKey);
+        if (cached && hasSalesAnalyticsCacheData(cached)) {
+          writeSalesAnalyticsCache(cacheKey, { ...cached, profitDriversData: combined });
+        }
+      } catch (err) {
+        if (reqId !== profitDriversReqIdRef.current) return;
+        if (background && isAnalyticsFetchTimeout(err)) return;
+        if (!isAnalyticsFetchTimeout(err)) console.error(err);
+        if (!background) {
+          setProfitDriversError(t('sales_analytics.network_error'));
+          setProfitDriversData([]);
+        }
+      } finally {
+        if (!background && reqId === profitDriversReqIdRef.current) setProfitDriversLoading(false);
+      }
+    },
+    [
+      cacheKey,
+      dateRange.start,
+      dateRange.end,
+      getProfitValue,
+      isAllBranch,
+      profitDriversBranchId,
+      profitDriversEffectiveBranchId,
+      branchSalesData,
+      selectedBranch,
+      t,
+    ]
+  );
+
+  const loadDashboardData = useCallback(
+    async (background: boolean) => {
+      const reqId = ++dashboardReqIdRef.current;
+      const hasRange = dateRange.start && dateRange.end;
+      if (!hasRange) {
+        setDailySalesCurrent([]);
+        setDailySalesPrevious([]);
+        return;
+      }
+
+      if (!background) {
+        setDailySalesLoading(true);
+        setBranchSalesLoading(true);
+        setProfitDriversLoading(true);
+      }
+      setDailySalesError(null);
+      setBranchSalesError(null);
+      setProfitDriversError(null);
+
+      const branchOpt =
+        !isAllBranch && selectedBranch?.id && String(selectedBranch.id) !== 'all'
+          ? String(selectedBranch.id)
+          : undefined;
+
+      try {
+        const bundle = await fetchSalesDashboardBundleApi({
+          start: dateRange.start,
+          end: dateRange.end,
+          branchId: branchOpt ?? null,
+          profitBranchId: profitDriversEffectiveBranchId,
+        });
+        if (reqId !== dashboardReqIdRef.current) return;
+
+        setDailySalesCurrent(bundle.dailySalesCurrent);
+        setDailySalesPrevious(bundle.dailySalesPrevious);
+        setBranchSalesData(bundle.branchSalesData);
+        setProfitDriversData(bundle.profitDriversData);
+        setReconAdjustCurrent(bundle.reconAdjustCurrent);
+        setReconAdjustPreviousTotal(bundle.reconAdjustPreviousTotal);
+
+        const hasCoreSales =
+          bundle.dailySalesCurrent.some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0) ||
+          bundle.branchSalesData.some((b) => Number(b.total_sales ?? 0) > 0);
+        if (hasCoreSales || bundle.profitDriversData.length === 0) {
+          writeSalesAnalyticsCache(cacheKey, bundle);
+        }
+      } catch (err) {
+        if (reqId !== dashboardReqIdRef.current) return;
+        if (background && isAnalyticsFetchTimeout(err)) return;
+        if (!isAnalyticsFetchTimeout(err)) console.error(err);
+        const msg = t('sales_analytics.network_error');
+        if (!background) {
+          setDailySalesError(msg);
+          setBranchSalesError(msg);
+          setProfitDriversError(msg);
+          setDailySalesCurrent([]);
+          setDailySalesPrevious([]);
+        }
+      } finally {
+        if (!background && reqId === dashboardReqIdRef.current) {
+          setDailySalesLoading(false);
+          setBranchSalesLoading(false);
+          setProfitDriversLoading(false);
+        }
+      }
+    },
+    [
+      cacheKey,
+      dateRange.start,
+      dateRange.end,
+      isAllBranch,
+      profitDriversEffectiveBranchId,
+      selectedBranch,
+      t,
+    ]
+  );
+
+  const fetchDailySales = useCallback(() => loadDashboardData(false), [loadDashboardData]);
+  const fetchBranchSales = useCallback(() => loadDashboardData(false), [loadDashboardData]);
+  const fetchProfitDrivers = useCallback(() => loadProfitDriversOnly(false), [loadProfitDriversOnly]);
+
   const handleSelectDriversBranch = useCallback((branchId: number) => {
     setProfitDriversBranchId(branchId);
-    // Give React a tick to render the updated card before scrolling.
     setTimeout(() => profitDriversRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 0);
   }, []);
 
-  // Fetch top profit drivers (computed from menu-report for accurate profit totals)
-  const fetchProfitDrivers = useCallback(async () => {
-    setProfitDriversLoading(true);
-    setProfitDriversError(null);
-    try {
-      const params = new URLSearchParams();
-      if (dateRange.start) params.set('start_date', dateRange.start);
-      if (dateRange.end) params.set('end_date', dateRange.end);
+  const loadDashboardDataRef = useRef(loadDashboardData);
+  loadDashboardDataRef.current = loadDashboardData;
 
-      // If a branch is selected (either global filter or clicked branch), fetch only that branch.
-      if (profitDriversEffectiveBranchId) {
-        params.set('branch_id', profitDriversEffectiveBranchId);
-        const apiRows = await fetchMenuReportApi(params);
-        const branchName =
-          profitDriversBranchId != null
-            ? (branchSalesData.find((b) => b.branch_id === profitDriversBranchId)?.branch_name || profitDriversBranchLabel)
-            : (!isAllBranch && selectedBranch ? selectedBranch.name : profitDriversBranchLabel);
+  useEffect(() => {
+    if (!cacheKey || !dateRange.start || !dateRange.end) return;
 
-        const top = [...apiRows]
-          .map((row) => ({ row, profit: getProfitValue(row) }))
-          .filter((x) => x.profit > 0)
-          .sort((a, b) => b.profit - a.profit)
-          .slice(0, 20)
-          .map((x) => ({
-            row: x.row,
-            profit: x.profit,
-            branchId: Number(profitDriversEffectiveBranchId),
-            branchName,
-          }));
+    const cacheKeyChanged = loadedCacheKeyRef.current !== cacheKey;
+    loadedCacheKeyRef.current = cacheKey;
 
-        setProfitDriversData(top);
-        return;
-      }
-
-      // All branches view: compute per-branch drivers so each item has a real branch owner label.
-      // Uses existing branch list from branch-sales endpoint.
-      const branches = branchSalesData.map((b) => ({ id: b.branch_id, name: b.branch_name }));
-      if (branches.length === 0) {
-        setProfitDriversData([]);
-        return;
-      }
-
-      const perBranchRows = await Promise.all(
-        branches.map(async (b) => {
-          const p = new URLSearchParams(params);
-          p.set('branch_id', String(b.id));
-          const rows = await fetchMenuReportApi(p);
-          return { branchId: b.id, branchName: b.name, rows };
-        })
-      );
-
-      const combined = perBranchRows
-        .flatMap(({ branchId, branchName, rows }) =>
-          rows.map((row) => ({
-            row,
-            profit: getProfitValue(row),
-            branchId,
-            branchName,
-          }))
-        )
-        .filter((x) => x.profit > 0)
-        .sort((a, b) => b.profit - a.profit)
-        .slice(0, 20);
-
-      setProfitDriversData(combined);
-    } catch (err) {
-      console.error(err);
-      setProfitDriversError(t('sales_analytics.network_error'));
-      setProfitDriversData([]);
-    } finally {
-      setProfitDriversLoading(false);
+    const cached = readSalesAnalyticsCache(cacheKey);
+    if (hasSalesAnalyticsCacheData(cached)) {
+      hydrateFromCache(cached);
+      void loadDashboardDataRef.current(true);
+      return;
     }
-  }, [
-    dateRange.start,
-    dateRange.end,
-    getProfitValue,
-    profitDriversEffectiveBranchId,
-    profitDriversBranchId,
-    profitDriversBranchLabel,
-    branchSalesData,
-    isAllBranch,
-    selectedBranch,
-    t,
-  ]);
 
-  // UI rule:
-  // - When header dropdown is "All branches": show Top 7 (even if user clicked a branch row in the table).
-  // - When header dropdown is a specific branch: show Top 5.
-  const topProfitDriversLimit = isAllBranch ? 7 : 5;
-  const topProfitDrivers = useMemo(
-    () => profitDriversData.slice(0, topProfitDriversLimit),
-    [profitDriversData, topProfitDriversLimit]
-  );
-  const modalProfitDrivers = useMemo(() => profitDriversData.slice(0, 20), [profitDriversData]);
+    if (cacheKeyChanged) {
+      setDailySalesCurrent([]);
+      setDailySalesPrevious([]);
+      setBranchSalesData([]);
+      setProfitDriversData([]);
+      setReconAdjustCurrent({ byDate: {}, total: 0 });
+      setReconAdjustPreviousTotal(0);
+    }
+    void loadDashboardDataRef.current(false);
+  }, [cacheKey, dateRange.start, dateRange.end, hydrateFromCache]);
 
-  useEffect(() => { fetchBranchSales(); }, [fetchBranchSales]);
-  useEffect(() => { fetchProfitDrivers(); }, [fetchProfitDrivers]);
-  useEffect(() => { fetchDailySales(); }, [fetchDailySales]);
+  const profitDriversFilterMounted = useRef(false);
+  useEffect(() => {
+    if (!profitDriversFilterMounted.current) {
+      profitDriversFilterMounted.current = true;
+      return;
+    }
+    void loadProfitDriversOnly(dailySalesCurrent.length > 0);
+  }, [profitDriversEffectiveBranchId, loadProfitDriversOnly, dailySalesCurrent.length]);
 
   const loadReconAggregates = useCallback(async () => {
     const hasRange = dateRange.start && dateRange.end;
@@ -585,17 +655,28 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
             })
           : Promise.resolve({ total: 0, byDate: {} as Record<string, number> }),
       ]);
-      setReconAdjustCurrent({
+      const reconCurrent = {
         byDate: cur.byDate || {},
         total: Number(cur.total) || 0,
-      });
-      setReconAdjustPreviousTotal(Number(prev.total) || 0);
+      };
+      const reconPrevTotal = Number(prev.total) || 0;
+      setReconAdjustCurrent(reconCurrent);
+      setReconAdjustPreviousTotal(reconPrevTotal);
+      const cached = readSalesAnalyticsCache(cacheKey);
+      if (cached) {
+        writeSalesAnalyticsCache(cacheKey, {
+          ...cached,
+          reconAdjustCurrent: reconCurrent,
+          reconAdjustPreviousTotal: reconPrevTotal,
+        });
+      }
     } catch (e) {
       console.error('[SalesAnalytics] cash reconciliation aggregates', e);
       setReconAdjustCurrent({ byDate: {}, total: 0 });
       setReconAdjustPreviousTotal(0);
     }
   }, [
+    cacheKey,
     dateRange.start,
     dateRange.end,
     isAllBranch,
@@ -604,9 +685,15 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     previousRange.previousEnd,
   ]);
 
-  useEffect(() => {
-    void loadReconAggregates();
-  }, [loadReconAggregates]);
+  // UI rule:
+  // - When header dropdown is "All branches": show Top 7 (even if user clicked a branch row in the table).
+  // - When header dropdown is a specific branch: show Top 5.
+  const topProfitDriversLimit = isAllBranch ? 7 : 5;
+  const topProfitDrivers = useMemo(
+    () => profitDriversData.slice(0, topProfitDriversLimit),
+    [profitDriversData, topProfitDriversLimit]
+  );
+  const modalProfitDrivers = useMemo(() => profitDriversData.slice(0, 20), [profitDriversData]);
 
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
@@ -875,7 +962,11 @@ const metricConfig = {
     URL.revokeObjectURL(url);
   }, [salesTableRows, selectedBranch, dateRange, t]);
 
-  const handleExportPdf = useCallback(() => {
+  const handleExportPdf = useCallback(async () => {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ]);
     const doc = new jsPDF('l', 'pt', 'a4');
 
     const headers = [
@@ -913,7 +1004,7 @@ const metricConfig = {
     doc.save(filename);
   }, [salesTableRows, selectedBranch, dateRange, t]);
 
-  const isPageLoading = dailySalesLoading;
+  const isPageLoading = dailySalesLoading && dailySalesCurrent.length === 0;
 
   return (
     <div className="pt-6 space-y-8">
@@ -927,7 +1018,6 @@ const metricConfig = {
             transition={{ duration: 0.3 }}
             className="space-y-8"
           >
-            {/* Stat cards skeleton */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="grid grid-cols-1 md:grid-cols-5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -949,7 +1039,6 @@ const metricConfig = {
                 <Skeleton className="h-72 w-full rounded-2xl" />
               </div>
             </div>
-            {/* Two col cards skeleton */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
                 <Skeleton className="h-5 w-48 mb-4 rounded-lg" />
@@ -963,7 +1052,6 @@ const metricConfig = {
                 ))}
               </div>
             </div>
-            {/* Table skeleton */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden p-5">
               <div className="flex justify-between mb-4">
                 <Skeleton className="h-9 w-28 rounded-lg" />
@@ -973,10 +1061,6 @@ const metricConfig = {
               {Array.from({ length: 10 }).map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full rounded-lg mb-1" />
               ))}
-              <div className="flex justify-between mt-4 pt-4">
-                <Skeleton className="h-9 w-20 rounded-lg" />
-                <Skeleton className="h-5 w-24 rounded-lg" />
-              </div>
             </div>
           </motion.div>
         ) : (
@@ -987,6 +1071,22 @@ const metricConfig = {
             transition={{ duration: 0.5, ease: 'easeOut' }}
             className="space-y-8"
           >
+      {dailySalesError ? (
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-red-700">
+            <AlertCircle size={18} />
+            <span>{dailySalesError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchDailySales()}
+            className="text-xs font-semibold text-red-700 hover:underline shrink-0"
+          >
+            {t('sales_analytics.retry')}
+          </button>
+        </div>
+      ) : null}
+
       {/* ── Stat Cards ─────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-5">
@@ -1055,7 +1155,7 @@ const metricConfig = {
             </div>
           </div>
           <div className="flex-1 px-5 py-4">
-            {branchSalesLoading ? (
+            {branchSalesLoading && branchSalesData.length === 0 ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
@@ -1209,7 +1309,7 @@ const metricConfig = {
             </div>
           </div>
           <div className="flex-1 px-5 py-4">
-            {profitDriversLoading ? (
+            {profitDriversLoading && profitDriversData.length === 0 ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>

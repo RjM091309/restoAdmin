@@ -1,7 +1,8 @@
-from typing import Any, List, Optional, Literal, Dict, cast
+from typing import Any, List, Optional, Literal, Dict, cast, Tuple
 import os
 from pathlib import Path
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, date
 
 import mysql.connector
@@ -218,6 +219,23 @@ class TopSellingItem(LeastSellingItem):
     Top-selling menu item. Shape is identical to LeastSellingItem.
     """
     pass
+
+
+class ProfitDriverRow(BaseModel):
+    """Lightweight row for Sales Analytics profit drivers (menu-report compatible shape)."""
+    id: int
+    goods: str
+    category: str
+    branch: str
+    branch_id: Optional[int] = None
+    salesQty: int
+    totalSales: float
+    refundQty: int = 0
+    refundAmount: float = 0.0
+    discounts: float = 0.0
+    netSales: float
+    unitCost: float
+    totalRevenue: float
 
 class DailySalesItem(BaseModel):
     sale_date: str
@@ -651,6 +669,300 @@ def top_selling(
     return {"success": True, "data": {"data": [item.model_dump() for item in merged_items]}}
 
 
+def _daily_sales_billing_local_dt() -> str:
+    return """COALESCE(
+        CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+        DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+    )"""
+
+
+def _daily_sales_refund_local_dt() -> str:
+    refund_source_dt = "COALESCE(b.REFUND_DT, b.ENCODED_DT)"
+    return f"""COALESCE(
+        CONVERT_TZ({refund_source_dt}, @@session.time_zone, '+08:00'),
+        DATE_ADD({refund_source_dt}, INTERVAL 8 HOUR)
+    )"""
+
+
+def _daily_sales_date_branch_filters(
+    billing_local_dt: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    branch_id: Optional[int],
+    *,
+    branch_col: str = "b.BRANCH_ID",
+) -> Tuple[str, str, List[object]]:
+    date_filter = ""
+    branch_filter = ""
+    params: List[object] = []
+    if start_date and end_date:
+        date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
+        params.extend([start_date, end_date])
+    if branch_id:
+        branch_filter = f"AND {branch_col} = %s"
+        params.append(branch_id)
+    return date_filter, branch_filter, params
+
+
+def _daily_sales_fetch_billing(
+    start_date: Optional[str],
+    end_date: Optional[str],
+    branch_id: Optional[int],
+) -> List[Dict[str, Any]]:
+    billing_local_dt = _daily_sales_billing_local_dt()
+    date_filter, branch_filter, params = _daily_sales_date_branch_filters(
+        billing_local_dt, start_date, end_date, branch_id
+    )
+    query = f"""
+        SELECT
+            DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+            COALESCE(SUM(b.AMOUNT_PAID), 0) AS total_sales
+        FROM billing b
+        INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+        WHERE {_BILLING_WHERE}
+        {date_filter}
+        {branch_filter}
+        GROUP BY DATE({billing_local_dt})
+    """
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(query, params)
+        return cast(List[Dict[str, Any]], cur.fetchall() or [])
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _daily_sales_fetch_discount(
+    start_date: Optional[str],
+    end_date: Optional[str],
+    branch_id: Optional[int],
+) -> List[Dict[str, Any]]:
+    billing_local_dt = _daily_sales_billing_local_dt()
+    date_filter, branch_filter, params = _daily_sales_date_branch_filters(
+        billing_local_dt, start_date, end_date, branch_id, branch_col="o.BRANCH_ID"
+    )
+    query = f"""
+        SELECT
+            DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+            COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount
+        FROM orders o
+        INNER JOIN billing b ON {_BILLING_JOIN}
+        WHERE 1=1
+        {date_filter}
+        {branch_filter}
+        GROUP BY DATE({billing_local_dt})
+    """
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(query, params)
+        return cast(List[Dict[str, Any]], cur.fetchall() or [])
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _daily_sales_fetch_refund(
+    start_date: Optional[str],
+    end_date: Optional[str],
+    branch_id: Optional[int],
+    *,
+    has_refund_tracker: bool,
+) -> List[Dict[str, Any]]:
+    refund_local_dt = _daily_sales_refund_local_dt()
+    refund_date_filter = ""
+    refund_branch_filter = ""
+    refund_params: List[object] = []
+    if start_date and end_date:
+        refund_date_filter = "AND DATE({refund_day_dt}) BETWEEN %s AND %s"
+        refund_params.extend([start_date, end_date])
+    if branch_id:
+        refund_branch_filter = "AND {refund_branch_col} = %s"
+        refund_params.append(branch_id)
+
+    if has_refund_tracker:
+        refund_day_dt = """COALESCE(
+            CONVERT_TZ(r.refund_dt, @@session.time_zone, '+08:00'),
+            DATE_ADD(r.refund_dt, INTERVAL 8 HOUR)
+        )"""
+        refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_day_dt) if refund_date_filter else ""
+        refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="r.branch_id") if refund_branch_filter else ""
+        query = f"""
+            SELECT
+                DATE_FORMAT({refund_day_dt}, '%Y-%m-%d') AS sale_date,
+                COALESCE(SUM(r.refund_amount), 0) AS refund
+            FROM (
+                SELECT
+                    refund_receipt_number,
+                    branch_id,
+                    MAX(refund_amount) AS refund_amount,
+                    MAX(refund_dt) AS refund_dt
+                FROM loyverse_refund_receipts
+                GROUP BY refund_receipt_number, branch_id
+            ) r
+            WHERE r.refund_amount > 0
+            {refund_date_filter_sql}
+            {refund_branch_filter_sql}
+            GROUP BY DATE({refund_day_dt})
+        """
+    else:
+        refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_local_dt) if refund_date_filter else ""
+        refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="b.BRANCH_ID") if refund_branch_filter else ""
+        query = f"""
+            SELECT
+                DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
+                COALESCE(SUM(b.REFUND), 0) AS refund
+            FROM billing b
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+            WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
+              AND {_BILLING_WHERE}
+            {refund_date_filter_sql}
+            {refund_branch_filter_sql}
+            GROUP BY DATE({refund_local_dt})
+        """
+
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(query, refund_params)
+        return cast(List[Dict[str, Any]], cur.fetchall() or [])
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _daily_sales_fetch_cogs(
+    start_date: Optional[str],
+    end_date: Optional[str],
+    branch_id: Optional[int],
+    *,
+    has_line_cost: bool,
+) -> List[Dict[str, Any]]:
+    billing_local_dt = _daily_sales_billing_local_dt()
+    line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
+    date_filter, branch_filter, params = _daily_sales_date_branch_filters(
+        billing_local_dt, start_date, end_date, branch_id
+    )
+    query = f"""
+        SELECT
+            DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+            COALESCE(SUM({line_cogs_expr}), 0) AS product_cost
+        FROM billing b
+        INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+        INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+        WHERE {_BILLING_WHERE}
+        {date_filter}
+        {branch_filter}
+        GROUP BY DATE({billing_local_dt})
+    """
+    conn = get_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(query, params)
+        return cast(List[Dict[str, Any]], cur.fetchall() or [])
+    except Exception as cogs_exc:
+        print("[PyServer] daily-sales COGS query skipped:", getattr(cogs_exc, "message", str(cogs_exc)))
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/api/analytics/top-profit-drivers")
+def top_profit_drivers(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+    limit: int = 20,
+) -> dict:
+    """
+    Fast profit drivers for Sales Analytics dashboard.
+    One grouped query (menu + branch) instead of the heavy menu-report UNION.
+    """
+    try:
+        effective_limit = max(1, min(int(limit or 20), 50))
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+
+        billing_local_dt = _daily_sales_billing_local_dt()
+        date_filter = ""
+        branch_filter = ""
+        params: List[object] = []
+        if start_date and end_date:
+            date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        if branch_id:
+            branch_filter = "AND b.BRANCH_ID = %s"
+            params.append(branch_id)
+
+        has_line_cost = _mysql_column_exists(cur, "order_items", "LINE_COST")
+        line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
+
+        query = f"""
+            SELECT
+                m.IDNo AS id,
+                COALESCE(m.MENU_NAME, '') AS goods,
+                COALESCE(c.CAT_NAME, 'Uncategorized') AS category,
+                COALESCE(br.BRANCH_NAME, 'Unknown Branch') AS branch,
+                b.BRANCH_ID AS branch_id,
+                COALESCE(SUM(oi.QTY), 0) AS salesQty,
+                COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
+                COALESCE(SUM({line_cogs_expr}), 0) AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON b.ORDER_ID = o.IDNo
+            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+            INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+            LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
+            WHERE b.STATUS IN (1, 2)
+            {date_filter}
+            {branch_filter}
+            GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME, b.BRANCH_ID, br.BRANCH_NAME
+            HAVING totalSales > 0
+            ORDER BY (totalSales - unitCost) DESC, salesQty DESC
+            LIMIT {effective_limit}
+        """
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as exc:
+        print("[PyServer] top-profit-drivers query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch top profit drivers",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    items: List[ProfitDriverRow] = []
+    for row in rows:
+        total_sales = float(row.get("totalSales") or 0.0)
+        unit_cost = float(row.get("unitCost") or 0.0)
+        net_sales = total_sales
+        profit = max(0.0, net_sales - unit_cost)
+        if profit <= 0:
+            continue
+        branch_id_val = row.get("branch_id")
+        items.append(
+            ProfitDriverRow(
+                id=int(row.get("id") or 0),
+                goods=str(row.get("goods") or ""),
+                category=str(row.get("category") or "Uncategorized"),
+                branch=str(row.get("branch") or "Unknown Branch"),
+                branch_id=int(branch_id_val) if branch_id_val is not None else None,
+                salesQty=int(row.get("salesQty") or 0),
+                totalSales=total_sales,
+                netSales=net_sales,
+                unitCost=unit_cost,
+                totalRevenue=profit,
+            )
+        )
+
+    return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
 @app.get("/api/analytics/daily-sales")
 def daily_sales(
     start_date: Optional[str] = None,
@@ -667,170 +979,34 @@ def daily_sales(
     - gross_profit: net_sales - product_cost
     """
     try:
-        conn = get_connection()
-        cur = conn.cursor(dictionary=True)
+        meta_conn = get_connection()
+        meta_cur = meta_conn.cursor(dictionary=True)
+        has_line_cost = _mysql_column_exists(meta_cur, "order_items", "LINE_COST")
+        has_refund_tracker = _mysql_table_exists(meta_cur, "loyverse_refund_receipts")
+        meta_cur.close()
+        meta_conn.close()
 
-        # Align grouping/filtering to PH local time (UTC+8) to match Loyverse UI/export.
-        # MySQL DATETIME is timezone-naive; conversion must be applied consistently at query time.
-        billing_local_dt = """COALESCE(
-            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
-            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
-        )"""
-        # Discount must bucket by the same PH calendar day as billing (paid_total), not order.ENCODED_DT,
-        # or the same receipt can split across days and KPI totals diverge from Loyverse.
-        refund_source_dt = "COALESCE(b.REFUND_DT, b.ENCODED_DT)"
-        refund_local_dt = f"""COALESCE(
-            CONVERT_TZ({refund_source_dt}, @@session.time_zone, '+08:00'),
-            DATE_ADD({refund_source_dt}, INTERVAL 8 HOUR)
-        )"""
-
-        # 1) Billing-based daily totals
-        billing_date_filter = ""
-        billing_branch_filter = ""
-        billing_params: List[object] = []
-
-        if start_date and end_date:
-            billing_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            billing_params.extend([start_date, end_date])
-        if branch_id:
-            billing_branch_filter = "AND b.BRANCH_ID = %s"
-            billing_params.append(branch_id)
-
-        billing_query = f"""
-            SELECT 
-                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
-                COALESCE(SUM(b.AMOUNT_PAID), 0) AS total_sales
-            FROM billing b
-            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
-            WHERE {_BILLING_WHERE}
-            {billing_date_filter}
-            {billing_branch_filter}
-            GROUP BY DATE({billing_local_dt})
-        """
-
-        cur.execute(billing_query, billing_params)
-        billing_rows = cur.fetchall()
-
-        has_line_cost = _mysql_column_exists(cur, "order_items", "LINE_COST")
-        line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
-
-        # 2) Discount per day from orders (only paid orders)
-        discount_date_filter = ""
-        discount_branch_filter = ""
-        discount_params: List[object] = []
-
-        if start_date and end_date:
-            discount_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            discount_params.extend([start_date, end_date])
-        if branch_id:
-            discount_branch_filter = "AND o.BRANCH_ID = %s"
-            discount_params.append(branch_id)
-
-        discount_query = f"""
-            SELECT 
-                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
-                COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount
-            FROM orders o
-            INNER JOIN billing b ON {_BILLING_JOIN}
-            WHERE 1=1
-            {discount_date_filter}
-            {discount_branch_filter}
-            GROUP BY DATE({billing_local_dt})
-        """
-
-        cur.execute(discount_query, discount_params)
-        discount_rows = cur.fetchall()
-
-        # 3) Refund per day — prefer deduped Loyverse tracker (one row per refund receipt)
-        refund_date_filter = ""
-        refund_branch_filter = ""
-        refund_params: List[object] = []
-
-        if start_date and end_date:
-            refund_date_filter = "AND DATE({refund_day_dt}) BETWEEN %s AND %s"
-            refund_params.extend([start_date, end_date])
-        if branch_id:
-            refund_branch_filter = "AND {refund_branch_col} = %s"
-            refund_params.append(branch_id)
-
-        has_refund_tracker = _mysql_table_exists(cur, "loyverse_refund_receipts")
-        if has_refund_tracker:
-            refund_day_dt = """COALESCE(
-                CONVERT_TZ(r.refund_dt, @@session.time_zone, '+08:00'),
-                DATE_ADD(r.refund_dt, INTERVAL 8 HOUR)
-            )"""
-            refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_day_dt) if refund_date_filter else ""
-            refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="r.branch_id") if refund_branch_filter else ""
-            refund_query = f"""
-                SELECT
-                    DATE_FORMAT({refund_day_dt}, '%Y-%m-%d') AS sale_date,
-                    COALESCE(SUM(r.refund_amount), 0) AS refund
-                FROM (
-                    SELECT
-                        refund_receipt_number,
-                        branch_id,
-                        MAX(refund_amount) AS refund_amount,
-                        MAX(refund_dt) AS refund_dt
-                    FROM loyverse_refund_receipts
-                    GROUP BY refund_receipt_number, branch_id
-                ) r
-                WHERE r.refund_amount > 0
-                {refund_date_filter_sql}
-                {refund_branch_filter_sql}
-                GROUP BY DATE({refund_day_dt})
-            """
-        else:
-            refund_date_filter_sql = refund_date_filter.format(refund_day_dt=refund_local_dt) if refund_date_filter else ""
-            refund_branch_filter_sql = refund_branch_filter.format(refund_branch_col="b.BRANCH_ID") if refund_branch_filter else ""
-            refund_query = f"""
-                SELECT
-                    DATE_FORMAT({refund_local_dt}, '%Y-%m-%d') AS sale_date,
-                    COALESCE(SUM(b.REFUND), 0) AS refund
-                FROM billing b
-                INNER JOIN orders o ON {_ORDERS_ON_BILLING}
-                WHERE b.REFUND IS NOT NULL AND b.REFUND > 0
-                  AND {_BILLING_WHERE}
-                {refund_date_filter_sql}
-                {refund_branch_filter_sql}
-                GROUP BY DATE({refund_local_dt})
-            """
-
-        cur.execute(refund_query, refund_params)
-        refund_rows = cur.fetchall()
-
-        # 4) Loyverse "Product unit price" daily total = SUM(LINE_COST) — same PH sale-day as billing
-        cogs_date_filter = ""
-        cogs_branch_filter = ""
-        cogs_params: List[object] = []
-        if start_date and end_date:
-            cogs_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            cogs_params.extend([start_date, end_date])
-        if branch_id:
-            cogs_branch_filter = "AND b.BRANCH_ID = %s"
-            cogs_params.append(branch_id)
-
-        cogs_query = f"""
-            SELECT
-                DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
-                COALESCE(SUM({line_cogs_expr}), 0) AS product_cost
-            FROM billing b
-            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
-            INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
-            WHERE {_BILLING_WHERE}
-            {cogs_date_filter}
-            {cogs_branch_filter}
-            GROUP BY DATE({billing_local_dt})
-        """
-        cogs_rows: List[Dict[str, Any]] = []
-        try:
-            cur.execute(cogs_query, cogs_params)
-            cogs_rows = cast(List[Dict[str, Any]], cur.fetchall() or [])
-        except Exception as cogs_exc:
-            print("[PyServer] daily-sales COGS query skipped:", getattr(cogs_exc, "message", str(cogs_exc)))
-            cogs_rows = []
-
-        cur.close()
-        conn.close()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            billing_future = pool.submit(_daily_sales_fetch_billing, start_date, end_date, branch_id)
+            discount_future = pool.submit(_daily_sales_fetch_discount, start_date, end_date, branch_id)
+            refund_future = pool.submit(
+                _daily_sales_fetch_refund,
+                start_date,
+                end_date,
+                branch_id,
+                has_refund_tracker=has_refund_tracker,
+            )
+            cogs_future = pool.submit(
+                _daily_sales_fetch_cogs,
+                start_date,
+                end_date,
+                branch_id,
+                has_line_cost=has_line_cost,
+            )
+            billing_rows = billing_future.result()
+            discount_rows = discount_future.result()
+            refund_rows = refund_future.result()
+            cogs_rows = cogs_future.result()
     except Exception as exc:
         print("[PyServer] daily-sales query failed:", getattr(exc, "message", str(exc)))
         return {

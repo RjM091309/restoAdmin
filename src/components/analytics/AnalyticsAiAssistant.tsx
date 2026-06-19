@@ -60,6 +60,27 @@ function formatCompact(value: number) {
   return formatMoney(n);
 }
 
+/** Adds thousands separators to large numbers in AI-generated prose. */
+function formatNumbersInText(text: string): string {
+  if (!text) return text;
+  return text.replace(/(?<![\d,])(\d+)(\.\d{1,2})?(?![\d-])/g, (match, intPart, decPart) => {
+    const intLen = intPart.length;
+    const isCurrencyLike = intLen >= 4 || (decPart?.length === 3);
+    if (!isCurrencyLike) return match;
+    if (!decPart && intLen === 4) {
+      const year = Number(intPart);
+      if (year >= 1900 && year <= 2100) return match;
+    }
+    const num = Number(intPart + (decPart ?? ''));
+    if (!Number.isFinite(num)) return match;
+    const fracDigits = decPart ? decPart.length - 1 : 0;
+    return num.toLocaleString(undefined, {
+      minimumFractionDigits: fracDigits,
+      maximumFractionDigits: fracDigits,
+    });
+  });
+}
+
 function truncateLabel(label: string, max = 14) {
   const s = String(label || '').trim();
   if (s.length <= max) return s;
@@ -304,7 +325,7 @@ function BriefSection({ title, body }: { title: string; body: string }) {
   return (
     <div className="space-y-1">
       <p className="text-[11px] font-bold uppercase tracking-wide text-brand-primary/80">{title}</p>
-      <p className="text-[13px] leading-relaxed text-brand-text">{body}</p>
+      <p className="text-[13px] leading-relaxed text-brand-text">{formatNumbersInText(body)}</p>
     </div>
   );
 }
@@ -339,7 +360,7 @@ function AssistantReplyBody({
             {response.recommendations!.map((b, i) => (
               <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
                 <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
-                {b}
+                {formatNumbersInText(b)}
               </li>
             ))}
           </ul>
@@ -348,13 +369,13 @@ function AssistantReplyBody({
     </div>
   ) : (
     <div className="space-y-3 min-w-0">
-      <p className="font-medium leading-relaxed text-brand-text">{response.summary}</p>
+      <p className="font-medium leading-relaxed text-brand-text">{formatNumbersInText(response.summary)}</p>
       {response.bullets?.length > 0 && (
         <ul className="space-y-1.5">
           {response.bullets.map((b, i) => (
             <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
               <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
-              {b}
+              {formatNumbersInText(b)}
             </li>
           ))}
         </ul>

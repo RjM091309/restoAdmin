@@ -1,5 +1,4 @@
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+const { fetchPyCached } = require('./analyticsPyFetch');
 
 function toYmd(d) {
   return (
@@ -23,23 +22,6 @@ function previousPeriod(startDate, endDate) {
   const prevStart = new Date(prevEnd);
   prevStart.setDate(prevStart.getDate() - (days - 1));
   return { start: toYmd(prevStart), end: toYmd(prevEnd) };
-}
-
-async function fetchPy(path, params) {
-  const url = new URL(path, PYSERVER_BASE_URL);
-  for (const [k, v] of Object.entries(params || {})) {
-    if (v != null && v !== '') url.searchParams.set(k, String(v));
-  }
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`PyServer ${path} failed (${res.status}): ${text.slice(0, 200)}`);
-  }
-  const json = await res.json().catch(() => null);
-  if (!json || json.success === false) {
-    throw new Error(json?.message || `PyServer ${path} returned error`);
-  }
-  return json;
 }
 
 function sumDaily(rows) {
@@ -156,16 +138,16 @@ async function buildManagementContext(start_date, end_date) {
     expenseBreakRes,
     expenseBreakPrevRes,
   ] = await Promise.all([
-    fetchPy('/api/analytics/daily-sales', params),
-    fetchPy('/api/analytics/daily-sales', prevParams),
-    fetchPy('/api/analytics/branch-sales', params).catch(() => ({ data: { data: [] } })),
-    fetchPy('/api/analytics/menu-report', params),
-    fetchPy('/api/analytics/category-report', params),
-    fetchPy('/api/analytics/payment-report', params).catch(() => ({ data: { data: [] } })),
-    fetchPy('/api/analytics/expense-summary', params).catch(() => ({ data: { total_expense: 0 } })),
-    fetchPy('/api/analytics/expense-summary', prevParams).catch(() => ({ data: { total_expense: 0 } })),
-    fetchPy('/api/analytics/expense-breakdown', params).catch(() => ({ data: { data: [] } })),
-    fetchPy('/api/analytics/expense-breakdown', prevParams).catch(() => ({ data: { data: [] } })),
+    fetchPyCached('/api/analytics/daily-sales', params),
+    fetchPyCached('/api/analytics/daily-sales', prevParams),
+    fetchPyCached('/api/analytics/branch-sales', params).catch(() => ({ data: { data: [] } })),
+    fetchPyCached('/api/analytics/menu-report', params),
+    fetchPyCached('/api/analytics/category-report', params),
+    fetchPyCached('/api/analytics/payment-report', params).catch(() => ({ data: { data: [] } })),
+    fetchPyCached('/api/analytics/expense-summary', params).catch(() => ({ data: { total_expense: 0 } })),
+    fetchPyCached('/api/analytics/expense-summary', prevParams).catch(() => ({ data: { total_expense: 0 } })),
+    fetchPyCached('/api/analytics/expense-breakdown', params).catch(() => ({ data: { data: [] } })),
+    fetchPyCached('/api/analytics/expense-breakdown', prevParams).catch(() => ({ data: { data: [] } })),
   ]);
 
   const salesCur = sumDaily(dailyRes?.data?.data || []);

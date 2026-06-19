@@ -9,7 +9,14 @@ const pool = require('../config/db');
 const TableModel = require('./tableModel');
 
 class OrderModel {
-	static async getAll(branchId = null) {
+	static async getAll(branchId = null, options = {}) {
+		const {
+			start_date: startDate = null,
+			end_date: endDate = null,
+			limit = null,
+			includeItemMeta = false,
+		} = options;
+
 		// NOTE: Do not JOIN billing 1:1 — multiple billing rows per order (refunds, retries) would duplicate
 		// every order row in the list UI. Use a scalar subquery for the latest payment method instead.
 		let query = `
@@ -33,6 +40,9 @@ class OrderModel {
 				o.ENCODED_BY,
 				ui.FIRSTNAME AS ENCODED_BY_NAME,
 				(SELECT bill.PAYMENT_METHOD FROM billing bill WHERE bill.ORDER_ID = o.IDNo ORDER BY bill.IDNo DESC LIMIT 1) AS payment_method
+				${includeItemMeta ? `,
+				(SELECT COUNT(*) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_line_count,
+				(SELECT COALESCE(SUM(oi.QTY), 0) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_total_qty` : ''}
 			FROM orders o
 			LEFT JOIN restaurant_tables t ON t.IDNo = o.TABLE_ID
 			LEFT JOIN branches b ON b.IDNo = o.BRANCH_ID
@@ -46,8 +56,22 @@ class OrderModel {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
+		if (startDate) {
+			query += ` AND DATE(o.ENCODED_DT) >= ?`;
+			params.push(String(startDate).slice(0, 10));
+		}
+		if (endDate) {
+			query += ` AND DATE(o.ENCODED_DT) <= ?`;
+			params.push(String(endDate).slice(0, 10));
+		}
 
 		query += ` ORDER BY o.ENCODED_DT DESC`;
+
+		const parsedLimit = limit != null ? parseInt(String(limit), 10) : 0;
+		// mysql2 prepared statements reject bound LIMIT placeholders (ER_WRONG_ARGUMENTS).
+		if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+			query += ` LIMIT ${parsedLimit}`;
+		}
 
 		const [rows] = await pool.execute(query, params);
 		return rows;

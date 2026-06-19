@@ -809,6 +809,7 @@ export default function App() {
                 <Route path="/sales-report" element={<Navigate to={`/sales-report/sales-analytics${location.search || ''}`} replace />} />
                 <Route path="/sales-report/sales-analytics" element={
                   <motion.div
+                    key={selectedBranch ? selectedBranch.id : 'initial'}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}

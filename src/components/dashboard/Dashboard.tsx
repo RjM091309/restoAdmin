@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { type Branch } from '../partials/Header';
-import { SkeletonPageHeader, SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
+import { SkeletonStatCards, SkeletonChart, SkeletonTable } from '../ui/Skeleton';
 import {
   ClipboardList,
   Package,
@@ -34,25 +34,26 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Modal } from '../ui/Modal';
-import { getOrders, getOrderItems, ORDER_STATUS, type OrderItemRecord, type OrderRecord } from '../../services/orderService';
+import { ORDER_STATUS, type OrderRecord } from '../../services/orderService';
 import { getMenus, resolveImageUrl, type MenuRecord } from '../../services/menuService';
 import {
-  fetchDailySalesApi,
-  fetchDailyOrdersApi,
-  fetchDailyExpensesApi,
-  fetchExpenseSummaryApi,
-  fetchBranchSalesApi,
-  fetchCategoryReportApi,
   fetchTopSellingApi,
-  type ApiDailySalesItem,
-  type ApiDailyOrdersItem,
-  type ApiDailyExpenseItem,
-  type ApiExpenseSummary,
-  type ApiBranchSalesItem,
-  type ApiCategoryReportRow,
+  fetchBranchDashboardBundleApi,
+  fetchBranchDashboardProbeApi,
   type ApiTopSellingItem,
 } from '../../services/analyticsService';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
+import {
+  buildBranchDashboardCacheKey,
+  clearKnownEmptyBranch,
+  hasBranchDashboardCacheData,
+  isBranchDashboardPayloadEmpty,
+  isKnownEmptyBranch,
+  markKnownEmptyBranch,
+  readBranchDashboardCache,
+  writeBranchDashboardCache,
+  type BranchDashboardCachePayload,
+} from '../../utils/branchDashboardCache';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -175,50 +176,15 @@ type RevenuePoint = {
   expense: number;
 };
 
-/** Every calendar day in [startYmd, endYmd] inclusive (local noon dates). */
-const eachDateKeyInclusive = (startYmd: string, endYmd: string): string[] => {
-  const start = parseIsoDate(startYmd.slice(0, 10));
-  const end = parseIsoDate(endYmd.slice(0, 10));
-  if (!start || !end || start.getTime() > end.getTime()) return [];
-  const keys: string[] = [];
-  const cur = new Date(start.getTime());
-  const endMs = end.getTime();
-  while (cur.getTime() <= endMs) {
-    keys.push(toYYYYMMDD(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return keys;
-};
-
-/**
- * One chart point per day in the selected range so weekends are visible even when
- * daily-sales omits days with no billing row (intermittent empty days).
- */
-const fillRevenueDataGaps = (
-  points: RevenuePoint[],
-  startYmd: string,
-  endYmd: string,
-  expenseByDate: Map<string, number>,
-  reconByDate: Record<string, number>,
-): RevenuePoint[] => {
-  const rangeKeys = eachDateKeyInclusive(startYmd, endYmd);
-  if (rangeKeys.length === 0) return points;
-  const byDate = new Map<string, RevenuePoint>();
-  for (const p of points) {
-    const k = p.date?.slice(0, 10);
-    if (k) byDate.set(k, p);
-  }
-  return rangeKeys.map((key) => {
-    const existing = byDate.get(key);
-    if (existing) return existing;
-    const d = parseIsoDate(key);
-    return {
-      name: d ? String(d.getDate()) : key,
-      date: key,
-      income: Number(reconByDate[key] ?? 0),
-      expense: expenseByDate.get(key) ?? 0,
-    };
-  });
+const EMPTY_BRANCH_DASHBOARD = {
+  stats: {
+    totalOrders: 0,
+    totalSales: 0,
+    totalExpenses: 0,
+    totalProfit: 0,
+  },
+  revenueData: [] as RevenuePoint[],
+  ordersOverview: [] as { name: string; orders: number; date?: string }[],
 };
 
 type DashboardProps = {
@@ -294,8 +260,6 @@ const orderTypeLabel = (t: any, orderType: string | null | undefined) => {
   if (normalized === 'DELIVERY') return t('orders.delivery');
   return orderType;
 };
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const StatCard = ({
   icon: Icon,
@@ -441,26 +405,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const topCategoriesReqSeq = React.useRef(0);
-  const trendingReqSeq = React.useRef(0);
+  const dashboardReqSeq = React.useRef(0);
+  const loadedCacheKeyRef = React.useRef<string | null>(null);
+
+  const initialBranchLoad = React.useMemo(() => {
+    if (!selectedBranch) {
+      return { cached: null as BranchDashboardCachePayload | null, knownEmpty: false, needsSkeleton: false };
+    }
+    const fallback = getCurrentMonthRange();
+    const key = buildBranchDashboardCacheKey({
+      branchId: String(selectedBranch.id),
+      start: dateRange.start || fallback.start,
+      end: dateRange.end || fallback.end,
+    });
+    const cached = readBranchDashboardCache(key);
+    const hasCache = hasBranchDashboardCacheData(cached);
+    const knownEmpty = isKnownEmptyBranch(key);
+    return {
+      cached: hasCache ? cached : null,
+      knownEmpty,
+      needsSkeleton: !hasCache && !knownEmpty,
+    };
+  }, [selectedBranch?.id, dateRange.start, dateRange.end]);
+
   const [dashboardData, setDashboardData] = React.useState<{
     stats: DashboardStats;
     revenueData: RevenuePoint[];
     ordersOverview: { name: string; orders: number }[];
-  } | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  } | null>(() => initialBranchLoad.cached?.dashboardData ?? EMPTY_BRANCH_DASHBOARD);
+  const [pageLoading, setPageLoading] = React.useState(() => initialBranchLoad.needsSkeleton);
   const [topCategories, setTopCategories] = React.useState<
     { name: string; value: number; color: string }[]
-  >([]);
-  const [loadingTopCategories, setLoadingTopCategories] = React.useState(false);
+  >(() => initialBranchLoad.cached?.topCategories ?? []);
+  const [loadingTopCategories, setLoadingTopCategories] = React.useState(
+    () => !(initialBranchLoad.cached?.topCategories.length),
+  );
   const [activeCategoryIndex, setActiveCategoryIndex] = React.useState<number | null>(null);
-  const [recentOrders, setRecentOrders] = React.useState<OrderRecord[]>([]);
-  const [loadingRecentOrders, setLoadingRecentOrders] = React.useState(false);
+  const [recentOrders, setRecentOrders] = React.useState<OrderRecord[]>(
+    () => initialBranchLoad.cached?.recentOrders ?? [],
+  );
+  const [loadingRecentOrders, setLoadingRecentOrders] = React.useState(
+    () => !(initialBranchLoad.cached?.recentOrders.length),
+  );
   const [recentOrderItemsMeta, setRecentOrderItemsMeta] = React.useState<
     Record<string, { lineCount: number; totalQty: number }>
-  >({});
-  const [trendingMenusData, setTrendingMenusData] = React.useState<TrendingMenuRow[]>([]);
-  const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(false);
+  >(() => initialBranchLoad.cached?.recentOrderItemsMeta ?? {});
+  const [trendingMenusData, setTrendingMenusData] = React.useState<TrendingMenuRow[]>(
+    () => initialBranchLoad.cached?.trendingMenusData ?? [],
+  );
+  const [loadingTrendingMenus, setLoadingTrendingMenus] = React.useState(
+    () => !(initialBranchLoad.cached?.trendingMenusData.length),
+  );
   const [menuImageByName, setMenuImageByName] = React.useState<Record<string, string>>({});
   const [isIncomeTopModalOpen, setIsIncomeTopModalOpen] = React.useState(false);
   const [incomeTopDate, setIncomeTopDate] = React.useState<string>('');
@@ -476,6 +471,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     () => incomeTopGrandTotal + incomeTopReconDay,
     [incomeTopGrandTotal, incomeTopReconDay],
   );
+
+  const cacheKey = React.useMemo(() => {
+    if (!selectedBranch) return '';
+    const fallback = getCurrentMonthRange();
+    return buildBranchDashboardCacheKey({
+      branchId: String(selectedBranch.id),
+      start: dateRange.start || fallback.start,
+      end: dateRange.end || fallback.end,
+    });
+  }, [selectedBranch?.id, dateRange.start, dateRange.end]);
+
+  const hydrateFromCache = React.useCallback((cached: BranchDashboardCachePayload) => {
+    if (cached.dashboardData) {
+      setDashboardData(cached.dashboardData);
+    }
+    if (cached.topCategories.length) {
+      setTopCategories(cached.topCategories);
+      setLoadingTopCategories(false);
+    }
+    if (cached.trendingMenusData.length) {
+      setTrendingMenusData(cached.trendingMenusData);
+      setLoadingTrendingMenus(false);
+    }
+    if (cached.recentOrders.length) {
+      setRecentOrders(cached.recentOrders);
+      setRecentOrderItemsMeta(cached.recentOrderItemsMeta);
+      setLoadingRecentOrders(false);
+    }
+  }, []);
 
   const navigateToBreakdown = React.useCallback(
     (metric: 'income' | 'expense', pointDate?: string) => {
@@ -677,190 +701,154 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     return Content;
   }, [t]);
 
-  React.useEffect(() => {
-    const loadBranchDashboard = async () => {
-      if (!selectedBranch) {
-        setDashboardData(null);
-        setLoading(false);
-        return;
-      }
+  const applyBundle = React.useCallback((bundle: BranchDashboardCachePayload) => {
+    const payload: BranchDashboardCachePayload = {
+      ...bundle,
+      dashboardData: bundle.dashboardData ?? EMPTY_BRANCH_DASHBOARD,
+    };
+    setDashboardData(payload.dashboardData);
+    setTopCategories(payload.topCategories);
+    setTrendingMenusData(payload.trendingMenusData);
+    setRecentOrders(payload.recentOrders);
+    setRecentOrderItemsMeta(payload.recentOrderItemsMeta);
+    if (isBranchDashboardPayloadEmpty(payload)) {
+      markKnownEmptyBranch(cacheKey);
+    } else {
+      clearKnownEmptyBranch(cacheKey);
+      writeBranchDashboardCache(cacheKey, payload);
+    }
+  }, [cacheKey]);
 
-      setLoading(true);
+  const loadDashboardBundle = React.useCallback(
+    async (background: boolean) => {
+      if (!selectedBranch || !cacheKey) return;
+      const reqId = ++dashboardReqSeq.current;
+      if (!background) {
+        setLoadingTopCategories(true);
+        setLoadingTrendingMenus(true);
+        setLoadingRecentOrders(true);
+      }
       try {
         const fallback = getCurrentMonthRange();
         const start = dateRange.start || fallback.start;
         const end = dateRange.end || fallback.end;
 
-        const baseParams = new URLSearchParams();
-        baseParams.set('branch_id', String(selectedBranch.id));
-        baseParams.set('start_date', start);
-        baseParams.set('end_date', end);
-
-        const [dailySales, dailyOrders, dailyExpenses, expenseSummary, branchSales, reconAgg]: [
-          ApiDailySalesItem[],
-          ApiDailyOrdersItem[],
-          ApiDailyExpenseItem[],
-          ApiExpenseSummary,
-          ApiBranchSalesItem[],
-          Awaited<ReturnType<typeof fetchCashReconciliationAggregates>>,
-        ] = await Promise.all([
-          fetchDailySalesApi(new URLSearchParams(baseParams)),
-          fetchDailyOrdersApi(new URLSearchParams(baseParams)),
-          fetchDailyExpensesApi(new URLSearchParams(baseParams)),
-          fetchExpenseSummaryApi(new URLSearchParams(baseParams)),
-          fetchBranchSalesApi(new URLSearchParams(baseParams)),
-          fetchCashReconciliationAggregates({
-            start,
-            end,
-            branchId: String(selectedBranch.id),
-          }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
-        ]);
-
-        const reconByDate = reconAgg?.byDate && typeof reconAgg.byDate === 'object' ? reconAgg.byDate : {};
-        const reconPeriodTotal = Number(reconAgg?.total) || 0;
-
-        const branchItem = branchSales.find(
-          (b) => String(b.branch_id) === String(selectedBranch.id),
-        );
-
-        // Prefer daily-sales for totalSales so it stays aligned with revenue chart.
-        // Fallback to branch-sales when daily-sales is temporarily empty or fails warm-up.
-        const totalSalesFromDaily = dailySales.reduce(
-          (sum, item) => sum + Number(item.total_sales || 0),
-          0,
-        );
-        const totalSalesFromBranch = branchItem ? Number(branchItem.total_sales || 0) : 0;
-
-        // Primary source for expenses is the summary endpoint, but the Python
-        // service can occasionally return 0 during warm-up or transient DB issues.
-        // Fall back to summing daily-expenses so the Total Expenses card is stable.
-        const totalExpensesFromSummary = expenseSummary?.total_expense ?? 0;
-        const totalExpensesFromDaily = dailyExpenses.reduce(
-          (sum, item) => sum + Number(item.total_expense || 0),
-          0,
-        );
-        const totalExpenses = totalExpensesFromSummary || totalExpensesFromDaily;
-
-        // Primary source for total orders is branch-sales (already aggregated by branch),
-        // but when that endpoint returns empty data we fall back to summing daily-orders.
-        const totalOrdersFromBranch = branchItem?.order_count ?? 0;
-        const totalOrdersFromDaily = dailyOrders.reduce(
-          (sum, item) => sum + Number(item.order_count || 0),
-          0,
-        );
-        const totalOrders = totalOrdersFromBranch || totalOrdersFromDaily;
-
-        // Build a map of daily expenses by date to align with daily sales
-        const expenseByDate = new Map<string, number>();
-        dailyExpenses.forEach((e) => {
-          expenseByDate.set(e.expense_date, Number(e.total_expense || 0));
+        const bundle = await fetchBranchDashboardBundleApi({
+          branchId: String(selectedBranch.id),
+          start,
+          end,
         });
+        if (reqId !== dashboardReqSeq.current) return;
 
-        const saleDatesWithPosRow = new Set(
-          dailySales.map((item) => String(item.sale_date).slice(0, 10)),
-        );
-
-        let revenueData: RevenuePoint[] = [];
-        if (dailySales.length > 0) {
-          revenueData = dailySales.map((item) => {
-            const key = String(item.sale_date).slice(0, 10);
-            const dailyExpense = expenseByDate.get(key) ?? expenseByDate.get(item.sale_date) ?? 0;
-            const reconDay = Number(reconByDate[key] ?? 0);
-            const d = new Date(item.sale_date);
-            return {
-              // X-axis: show day-of-month only so all labels fit (e.g. "1", "2", ...).
-              // Tooltip uses the attached ISO date.
-              name: Number.isNaN(d.getTime()) ? item.sale_date : String(d.getDate()),
-              date: key,
-              income: Number(item.total_sales || 0) + reconDay,
-              expense: dailyExpense,
-            };
-          });
-          for (const [dateKey, raw] of Object.entries(reconByDate)) {
-            const recon = Number(raw) || 0;
-            if (recon <= 0 || saleDatesWithPosRow.has(dateKey)) continue;
-            const d = new Date(`${dateKey}T12:00:00`);
-            revenueData.push({
-              name: Number.isNaN(d.getTime()) ? dateKey : String(d.getDate()),
-              date: dateKey,
-              income: recon,
-              expense: expenseByDate.get(dateKey) ?? 0,
-            });
-          }
-          revenueData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-        } else if (totalExpenses > 0 || reconPeriodTotal > 0) {
-          if (reconPeriodTotal > 0) {
-            for (const [dateKey, raw] of Object.entries(reconByDate)) {
-              const recon = Number(raw) || 0;
-              if (recon <= 0) continue;
-              const d = new Date(`${dateKey}T12:00:00`);
-              revenueData.push({
-                name: Number.isNaN(d.getTime()) ? dateKey : String(d.getDate()),
-                date: dateKey,
-                income: recon,
-                expense: expenseByDate.get(dateKey) ?? 0,
-              });
-            }
-            revenueData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-          }
-          if (revenueData.length === 0) {
-            // No POS daily rows and no per-day recon: single point (e.g. expenses only)
-            const d = new Date(start);
-            revenueData = [
-              {
-                name: Number.isNaN(d.getTime()) ? formatDateLabel(start) : String(d.getDate()),
-                date: start,
-                income: 0,
-                expense: totalExpenses,
-              },
-            ];
-          }
-        }
-
-        const aggregateExpenseOnlyFallback =
-          dailySales.length === 0 &&
-          revenueData.length === 1 &&
-          (revenueData[0]?.income ?? 0) === 0 &&
-          Math.abs((revenueData[0]?.expense ?? 0) - totalExpenses) < 1e-6;
-        if (revenueData.length > 0 && !aggregateExpenseOnlyFallback) {
-          revenueData = fillRevenueDataGaps(revenueData, start, end, expenseByDate, reconByDate);
-        }
-
-        // Total sales on the cards must match the sum of chart points (POS + recon per day after gap-fill).
-        const totalSalesFromSeries = revenueData.reduce((s, p) => s + Number(p.income || 0), 0);
-        const totalSales =
-          revenueData.length > 0 && !aggregateExpenseOnlyFallback
-            ? totalSalesFromSeries
-            : (totalSalesFromDaily || totalSalesFromBranch) + reconPeriodTotal;
-        const totalProfit = totalSales - totalExpenses;
-
-        const last7Days = dailyOrders.slice(-7);
-        const ordersOverview = last7Days.map((item) => ({
-          name: new Date(item.sale_date).toLocaleDateString('en-US', { weekday: 'short' }),
-          date: item.sale_date,
-          orders: item.order_count,
-        }));
-
-          setDashboardData({
-          stats: {
-            totalOrders,
-            totalSales,
-            totalExpenses,
-            totalProfit,
-          },
-          revenueData,
-          ordersOverview,
+        applyBundle({
+          ...bundle,
+          recentOrders: bundle.recentOrders as OrderRecord[],
         });
       } catch (error) {
-        console.error('Failed to load branch dashboard data:', error);
-        setDashboardData(null);
+        if (reqId !== dashboardReqSeq.current) return;
+        console.error('Failed to load branch dashboard bundle:', error);
+        if (!background) {
+          setDashboardData(EMPTY_BRANCH_DASHBOARD);
+          setTopCategories([]);
+          setTrendingMenusData([]);
+          setRecentOrders([]);
+          setRecentOrderItemsMeta({});
+        }
       } finally {
-        setLoading(false);
+        if (reqId !== dashboardReqSeq.current) return;
+        setLoadingTopCategories(false);
+        setLoadingTrendingMenus(false);
+        setLoadingRecentOrders(false);
+      }
+    },
+    [applyBundle, cacheKey, dateRange.end, dateRange.start, selectedBranch?.id],
+  );
+
+  React.useEffect(() => {
+    if (!selectedBranch || !cacheKey) {
+      loadedCacheKeyRef.current = null;
+      setPageLoading(false);
+      setDashboardData(EMPTY_BRANCH_DASHBOARD);
+      setTopCategories([]);
+      setTrendingMenusData([]);
+      setRecentOrders([]);
+      setRecentOrderItemsMeta({});
+      return;
+    }
+
+    const cacheKeyChanged = loadedCacheKeyRef.current !== cacheKey;
+    loadedCacheKeyRef.current = cacheKey;
+
+    const cached = readBranchDashboardCache(cacheKey);
+    if (hasBranchDashboardCacheData(cached)) {
+      hydrateFromCache(cached);
+      setPageLoading(false);
+      void loadDashboardBundle(true);
+      return;
+    }
+
+    if (isKnownEmptyBranch(cacheKey)) {
+      if (cacheKeyChanged) {
+        setDashboardData(EMPTY_BRANCH_DASHBOARD);
+        setTopCategories([]);
+        setTrendingMenusData([]);
+        setRecentOrders([]);
+        setRecentOrderItemsMeta({});
+      }
+      setPageLoading(false);
+      void loadDashboardBundle(true);
+      return;
+    }
+
+    // Unknown branch — skeleton immediately (no ₱0 flash), probe decides empty vs load bundle.
+    setPageLoading(true);
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const fallback = getCurrentMonthRange();
+        const start = dateRange.start || fallback.start;
+        const end = dateRange.end || fallback.end;
+
+        const probe = await fetchBranchDashboardProbeApi({
+          branchId: String(selectedBranch.id),
+          start,
+          end,
+        });
+        if (cancelled) return;
+
+        if (!probe.hasActivity) {
+          markKnownEmptyBranch(cacheKey);
+          setDashboardData(EMPTY_BRANCH_DASHBOARD);
+          setTopCategories([]);
+          setTrendingMenusData([]);
+          setRecentOrders([]);
+          setRecentOrderItemsMeta({});
+          setLoadingTopCategories(false);
+          setLoadingTrendingMenus(false);
+          setLoadingRecentOrders(false);
+          setPageLoading(false);
+          return;
+        }
+
+        await loadDashboardBundle(false);
+        if (!cancelled) setPageLoading(false);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn('Branch dashboard probe failed, loading full bundle:', error);
+        try {
+          await loadDashboardBundle(false);
+        } finally {
+          if (!cancelled) setPageLoading(false);
+        }
       }
     };
 
-    void loadBranchDashboard();
-  }, [selectedBranch, dateRange.start, dateRange.end]);
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, dateRange.end, dateRange.start, hydrateFromCache, loadDashboardBundle, selectedBranch?.id]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -891,188 +879,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   }, [selectedBranch?.id]);
 
   React.useEffect(() => {
-    const loadRecentOrders = async () => {
-      if (!selectedBranch) {
-        setRecentOrders([]);
-        return;
-      }
-
-      const fallback = getCurrentMonthRange();
-      const startStr = dateRange.start || fallback.start;
-      const endStr = dateRange.end || fallback.end;
-      const start = new Date(`${startStr}T00:00:00`);
-      const end = new Date(`${endStr}T23:59:59`);
-
-      setLoadingRecentOrders(true);
-      try {
-        const branchId = String(selectedBranch.id);
-        const all = await getOrders(branchId);
-        const filtered = (Array.isArray(all) ? all : [])
-          .filter((o) => {
-            const d = parseDateSafe(o.ENCODED_DT);
-            return d ? isBetweenInclusive(d, start, end) : false;
-          })
-          .sort((a, b) => {
-            const ad = parseDateSafe(a.ENCODED_DT)?.getTime() ?? 0;
-            const bd = parseDateSafe(b.ENCODED_DT)?.getTime() ?? 0;
-            return bd - ad;
-          })
-          .slice(0, 5);
-        setRecentOrders(filtered);
-      } catch (err) {
-        console.error('Failed to load recent orders:', err);
-        setRecentOrders([]);
-      } finally {
-        setLoadingRecentOrders(false);
-      }
-    };
-
-    void loadRecentOrders();
-  }, [selectedBranch, dateRange.start, dateRange.end]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const loadRecentOrderItemCounts = async () => {
-      if (!recentOrders.length) {
-        setRecentOrderItemsMeta({});
-        return;
-      }
-      try {
-        const results = await Promise.all(
-          recentOrders.map(async (o) => {
-            try {
-              const items: OrderItemRecord[] = await getOrderItems(String(o.IDNo));
-              const totalQty = (Array.isArray(items) ? items : []).reduce(
-                (sum, it) => sum + Number(it.QTY || 0),
-                0
-              );
-              return [String(o.IDNo), { lineCount: Array.isArray(items) ? items.length : 0, totalQty }] as const;
-            } catch {
-              return [String(o.IDNo), { lineCount: 0, totalQty: 0 }] as const;
-            }
-          })
-        );
-        if (cancelled) return;
-        setRecentOrderItemsMeta(Object.fromEntries(results));
-      } catch {
-        if (!cancelled) setRecentOrderItemsMeta({});
-      }
-    };
-    void loadRecentOrderItemCounts();
-    return () => {
-      cancelled = true;
-    };
-  }, [recentOrders]);
-
-  React.useEffect(() => {
-    const loadTopCategories = async () => {
-      const reqId = ++topCategoriesReqSeq.current;
-      if (!selectedBranch) {
-        setTopCategories([]);
-        return;
-      }
-
-      const fallback = getCurrentMonthRange();
-      const start = dateRange.start || fallback.start;
-      const end = dateRange.end || fallback.end;
-
-      const params = new URLSearchParams();
-      params.set('start_date', start);
-      params.set('end_date', end);
-      if (String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-
-      // Keep previous categories while loading to avoid "No data" flicker on fast date changes.
-      setLoadingTopCategories(true);
-      try {
-        // Retry once on transient backend slowness (PyServer sometimes returns empty during warm-up).
-        let rows: ApiCategoryReportRow[] = [];
-        for (let attempt = 0; attempt < 2; attempt++) {
-          rows = await fetchCategoryReportApi(params);
-          if (rows && rows.length > 0) break;
-          // Wait a bit before retrying (but bail if a newer request started).
-          if (reqId !== topCategoriesReqSeq.current) return;
-          if (attempt === 0) await sleep(450);
-        }
-        if (reqId !== topCategoriesReqSeq.current) return; // ignore stale response
-        // API is already ordered by totalSales DESC; show Top 5 only.
-        const mapped = rows.slice(0, 5).map((row, i) => ({
-          name: row.category || 'Uncategorized',
-          value: row.netSales ?? 0,
-          color: TOP_CATEGORY_COLORS[i % TOP_CATEGORY_COLORS.length],
-        }));
-        setTopCategories(mapped);
-      } catch (err) {
-        if (reqId !== topCategoriesReqSeq.current) return;
-        console.error('Failed to load top categories:', err);
-        // Do not force-clear; keep previous data if any.
-        setTopCategories((prev) => prev);
-      } finally {
-        if (reqId === topCategoriesReqSeq.current) setLoadingTopCategories(false);
-      }
-    };
-
-    void loadTopCategories();
-  }, [selectedBranch, dateRange.start, dateRange.end]);
-
-  React.useEffect(() => {
-    const loadTrendingMenus = async () => {
-      const reqId = ++trendingReqSeq.current;
-      if (!selectedBranch) {
-        setTrendingMenusData([]);
-        return;
-      }
-
-      const fallback = getCurrentMonthRange();
-      const start = dateRange.start || fallback.start;
-      const end = dateRange.end || fallback.end;
-
-      const params = new URLSearchParams();
-      params.set('start_date', start);
-      params.set('end_date', end);
-      if (String(selectedBranch.id) !== 'all') {
-        params.set('branch_id', String(selectedBranch.id));
-      }
-      params.set('limit', '5');
-
-      setLoadingTrendingMenus(true);
-      try {
-        // Same source as Sales Report -> Menu Top 5 Products
-        let rows: ApiTopSellingItem[] = [];
-        for (let attempt = 0; attempt < 2; attempt++) {
-          rows = await fetchTopSellingApi(params);
-          if (rows && rows.length > 0) break;
-          if (reqId !== trendingReqSeq.current) return;
-          if (attempt === 0) await sleep(450);
-        }
-        if (reqId !== trendingReqSeq.current) return;
-
-        setTrendingMenusData(
-          (Array.isArray(rows) ? rows : []).slice(0, 5).map((r, idx) => {
-            const name = r.MENU_NAME || '';
-            const img = menuImageByName[name.trim().toLowerCase()] || DEFAULT_TRENDING_IMAGE;
-            return {
-              key: String(r.IDNo ?? idx),
-              name,
-              category: r.category || 'Uncategorized',
-              totalQty: Number(r.total_quantity ?? 0),
-              netSales: Number(r.total_revenue ?? 0),
-              image: img,
-            };
-          })
-        );
-      } catch (err) {
-        if (reqId !== trendingReqSeq.current) return;
-        console.error('Failed to load trending menus:', err);
-        setTrendingMenusData((prev) => prev);
-      } finally {
-        if (reqId === trendingReqSeq.current) setLoadingTrendingMenus(false);
-      }
-    };
-
-    void loadTrendingMenus();
-  }, [selectedBranch, dateRange.start, dateRange.end, menuImageByName]);
+    if (Object.keys(menuImageByName).length === 0) return;
+    setTrendingMenusData((prev) => {
+      if (!prev.length) return prev;
+      return prev.map((row) => ({
+        ...row,
+        image: menuImageByName[row.name.trim().toLowerCase()] || row.image,
+      }));
+    });
+  }, [menuImageByName]);
 
   const orderTypes = [
     {
@@ -1100,13 +915,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
 
   return (
     <AnimatePresence mode="wait">
-      {loading || !dashboardData ? (
+      {pageLoading ? (
         <motion.div
           key="skeleton"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.3 }}
+          transition={{ duration: 0.15 }}
           className="flex gap-8 pt-6"
         >
           <div className="flex-1 space-y-8">
@@ -1126,13 +941,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           </div>
         </motion.div>
       ) : (
-        <motion.div
-          key="content"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="flex gap-8 pt-6"
-        >
+      <motion.div
+        key="content"
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        className="flex gap-8 pt-6"
+      >
           <div className="flex-1 space-y-8">
             <div className="flex gap-6">
               <StatCard
@@ -1300,7 +1115,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                   <h4 className="text-base font-bold">{t('dashboard.top_categories')}</h4>
                 </div>
                 <div className="h-48 w-full relative">
-                  {loadingTopCategories ? (
+                  {loadingTopCategories && topCategories.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl">
                       {t('common.loading')}
                     </div>
@@ -1455,7 +1270,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                   {t('dashboard.see_all_orders')}
                 </button>
               </div>
-              {loadingRecentOrders ? (
+              {loadingRecentOrders && recentOrders.length === 0 ? (
                 <div className="flex items-center justify-center border border-dashed border-slate-200 rounded-2xl py-12 text-sm font-medium text-brand-muted">
                   {t('common.loading')}
                 </div>
@@ -1552,7 +1367,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 <h4 className="text-base font-bold">{t('dashboard.trending_menus')}</h4>
               </div>
               <div className="flex-1 overflow-hidden">
-                {loadingTrendingMenus ? (
+                {loadingTrendingMenus && trendingMenusData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-sm text-brand-muted border border-dashed border-slate-200 rounded-2xl py-8">
                     <span className="animate-pulse">{t('common.loading')}</span>
                   </div>

@@ -90,6 +90,22 @@ router.get("/reports/least-selling-items", authenticate, ReportsController.getLe
 // Query: ?branch_id=...&start_date=...&end_date=...
 router.get("/reports/validate-imported-data", authenticate, ReportsController.validateImportedData);
 
+// GET - Python analytics proxies (Sales Analytics, reports)
+router.get("/api/analytics/daily-sales", authenticate, ReportsController.getAnalyticsDailySales);
+router.get("/api/analytics/branch-sales", authenticate, ReportsController.getAnalyticsBranchSales);
+router.get("/api/analytics/menu-report", authenticate, ReportsController.getAnalyticsMenuReport);
+router.get("/api/analytics/category-report", authenticate, ReportsController.getAnalyticsCategoryReport);
+router.get("/api/analytics/payment-report", authenticate, ReportsController.getAnalyticsPaymentReport);
+router.get("/api/analytics/top-selling", authenticate, ReportsController.getAnalyticsTopSelling);
+router.get("/api/analytics/top-profit-drivers", authenticate, ReportsController.getAnalyticsTopProfitDrivers);
+router.get("/api/analytics/least-selling", authenticate, ReportsController.getAnalyticsLeastSelling);
+router.get("/api/analytics/receipt-report", authenticate, ReportsController.getAnalyticsReceiptReport);
+router.get("/api/analytics/receipt-detail", authenticate, ReportsController.getAnalyticsReceiptDetail);
+router.get("/api/analytics/expense-summary", authenticate, ReportsController.getAnalyticsExpenseSummary);
+router.get("/api/analytics/sales-dashboard-bundle", authenticate, ReportsController.getAnalyticsSalesDashboardBundle);
+router.get("/api/analytics/branch-dashboard-probe", authenticate, ReportsController.getAnalyticsBranchDashboardProbe);
+router.get("/api/analytics/branch-dashboard-bundle", authenticate, ReportsController.getAnalyticsBranchDashboardBundle);
+
 // ============================================
 // EXPORT
 // ============================================

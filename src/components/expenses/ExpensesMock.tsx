@@ -2089,8 +2089,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   return (
     <SkeletonTransition
       loading={loading}
-      minDelayMs={400}
-      fadeOutMs={250}
       skeleton={expensesSkeleton}
       className="block"
     >
