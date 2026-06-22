@@ -17,6 +17,7 @@ export type BranchPerformanceData = {
 type BranchPerformanceCardProps = {
   branch: BranchPerformanceData;
   onClick?: () => void;
+  onMouseEnter?: () => void;
   onCompareToggle?: () => void;
   /** Opens cash reconciliation (Sales Analytics parity); click does not focus the card */
   onTotalSalesClick?: (e: React.MouseEvent) => void;
@@ -27,6 +28,7 @@ type BranchPerformanceCardProps = {
 export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
   branch,
   onClick,
+  onMouseEnter,
   onCompareToggle,
   onTotalSalesClick,
   isSelected,
@@ -38,6 +40,7 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
   return (
     <div
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
       className={cn(
         'relative overflow-hidden rounded-2xl shadow-sm border group transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-pointer',
         // Active (focused) branch: keep only left accent (no outer border color, no white hover bg)
