@@ -192,6 +192,10 @@
 		"date_range": "期間",
 		"branch_overview": "店舗概要",
 		"net_revenue": "純収益",
+		"no_revenue_data": "選択した期間の売上または費用データがありません。",
+		"no_products_data": "選択した期間の売れ筋商品がありません。",
+		"no_branch_revenue_data": "この期間の{{branch}}の売上または費用データがありません。",
+		"no_branch_products_data": "この期間の{{branch}}の売れ筋商品がありません。",
 		"sections": {
 			"inventory": "在庫",
 			"fresh_produce": "生鮮食品",

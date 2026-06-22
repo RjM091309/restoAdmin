@@ -11,6 +11,11 @@ export type AdminDashboardTrendPoint = {
 };
 
 export type AdminDashboardCachePayload = {
+  summary?: {
+    totalSales: number;
+    totalExpenses: number;
+    totalRevenue: number;
+  };
   branchCardsData: BranchPerformanceData[];
   branchRevenueDistribution: { name: string; value: number }[];
   topProductsData: { name: string; sales: number }[];
@@ -20,7 +25,10 @@ export type AdminDashboardCachePayload = {
   trendByPeriod: Partial<Record<AdminDashboardTrendPeriod, AdminDashboardTrendPoint[]>>;
 };
 
-const STORAGE_KEY = 'resto_admin_dashboard_cache_v1';
+const SESSION_STORAGE_KEY = 'resto_admin_dashboard_cache_v1';
+const LOCAL_STORAGE_KEY = 'resto_admin_dashboard_cache_v1_local';
+/** Persist across browser sessions; refreshed in background after TTL. */
+const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ENTRIES = 10;
 
 const EMPTY_PAYLOAD: AdminDashboardCachePayload = {
@@ -34,6 +42,30 @@ const EMPTY_PAYLOAD: AdminDashboardCachePayload = {
 };
 
 type CacheStore = Record<string, { at: number; data: AdminDashboardCachePayload }>;
+
+function readCacheStore(storage: Storage, storageKey: string): CacheStore | null {
+  try {
+    const raw = storage.getItem(storageKey);
+    if (!raw) return null;
+    return JSON.parse(raw) as CacheStore;
+  } catch {
+    return null;
+  }
+}
+
+function pruneCacheStore(store: CacheStore): CacheStore {
+  const keys = Object.entries(store)
+    .sort(([, a], [, b]) => b.at - a.at)
+    .map(([k]) => k);
+  for (const k of keys.slice(MAX_ENTRIES)) {
+    delete store[k];
+  }
+  return store;
+}
+
+function writeCacheStore(storage: Storage, storageKey: string, store: CacheStore): void {
+  storage.setItem(storageKey, JSON.stringify(pruneCacheStore(store)));
+}
 
 export function buildAdminDashboardCacheKey(params: {
   start: string;
@@ -57,37 +89,55 @@ export function hasAdminDashboardCacheData(
   );
 }
 
+function payloadFromEntry(entry: AdminDashboardCachePayload): AdminDashboardCachePayload {
+  return {
+    ...EMPTY_PAYLOAD,
+    ...entry,
+    trendByPeriod: entry.trendByPeriod ?? {},
+  };
+}
+
 export function readAdminDashboardCache(key: string): AdminDashboardCachePayload | null {
+  const now = Date.now();
+
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const store = JSON.parse(raw) as CacheStore;
-    const entry = store[key]?.data;
-    if (!entry) return null;
-    return {
-      ...EMPTY_PAYLOAD,
-      ...entry,
-      trendByPeriod: entry.trendByPeriod ?? {},
-    };
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data) {
+      return payloadFromEntry(sessionEntry.data);
+    }
+  } catch {
+    // sessionStorage unavailable — fall through to localStorage
+  }
+
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (!localEntry?.data) return null;
+    if (now - localEntry.at > LOCAL_CACHE_TTL_MS) return null;
+    return payloadFromEntry(localEntry.data);
   } catch {
     return null;
   }
 }
 
 export function writeAdminDashboardCache(key: string, data: AdminDashboardCachePayload): void {
+  const entry = { at: Date.now(), data };
+
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    const store: CacheStore = raw ? (JSON.parse(raw) as CacheStore) : {};
-    store[key] = { at: Date.now(), data };
-    const keys = Object.entries(store)
-      .sort(([, a], [, b]) => b.at - a.at)
-      .map(([k]) => k);
-    for (const k of keys.slice(MAX_ENTRIES)) {
-      delete store[k];
-    }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    const store = readCacheStore(sessionStorage, SESSION_STORAGE_KEY) ?? {};
+    store[key] = entry;
+    writeCacheStore(sessionStorage, SESSION_STORAGE_KEY, store);
   } catch {
     // sessionStorage full or unavailable — ignore
+  }
+
+  try {
+    const store = readCacheStore(localStorage, LOCAL_STORAGE_KEY) ?? {};
+    store[key] = entry;
+    writeCacheStore(localStorage, LOCAL_STORAGE_KEY, store);
+  } catch {
+    // localStorage quota — ignore
   }
 }
 
@@ -103,6 +153,14 @@ export function patchAdminDashboardCache(
   writeAdminDashboardCache(key, {
     ...base,
     ...patch,
+    topProductsData:
+      patch.topProductsData && patch.topProductsData.length > 0
+        ? patch.topProductsData
+        : base.topProductsData,
+    expenseCategoryByBranch:
+      patch.expenseCategoryByBranch && Object.keys(patch.expenseCategoryByBranch).length > 0
+        ? patch.expenseCategoryByBranch
+        : base.expenseCategoryByBranch,
     trendByPeriod: {
       ...base.trendByPeriod,
       ...(patch.trendByPeriod ?? {}),

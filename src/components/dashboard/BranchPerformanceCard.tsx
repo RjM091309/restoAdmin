@@ -96,39 +96,37 @@ export const BranchPerformanceCard: React.FC<BranchPerformanceCardProps> = ({
         {/* Horizontal metrics: Sales, Expenses, Profit */}
         <div className="mt-auto">
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1.5 text-[12px]">
+            {onTotalSalesClick ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTotalSalesClick(e);
+                }}
+                className="flex w-full items-baseline justify-between gap-2 rounded-lg py-0.5 hover:bg-brand-primary/5 transition-colors cursor-pointer"
+              >
+                <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
+                <p className="font-bold text-[12px] text-brand-text text-right tabular-nums">
+                  ₱{Math.trunc(branch.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              </button>
+            ) : (
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
+                <p className="font-bold text-[12px] text-brand-text text-right tabular-nums">
+                  ₱{Math.trunc(branch.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+              </div>
+            )}
             <div className="flex items-baseline justify-between gap-2">
-              {onTotalSalesClick ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onTotalSalesClick(e);
-                  }}
-                  className="flex w-full items-baseline justify-between text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-brand-primary/5 transition-colors"
-                >
-                  <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
-                  <p className="font-bold text-[12px] text-brand-text text-right">
-                    ₱{Math.trunc(branch.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </button>
-              ) : (
-                <>
-                  <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_sales')}</p>
-                  <p className="font-bold text-[12px] text-brand-text text-right">
-                    ₱{Math.trunc(branch.totalSales).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                  </p>
-                </>
-              )}
-            </div>
-            <div className="flex items-baseline justify-between">
               <p className="text-[11px] text-brand-muted">{t('admin_dashboard.total_expenses')}</p>
-              <p className="font-bold text-[12px] text-brand-text text-right">
+              <p className="font-bold text-[12px] text-brand-text text-right tabular-nums">
                 ₱{Math.trunc(branch.totalExpenses).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
             </div>
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between gap-2">
               <p className="text-[11px] text-brand-muted">Total Profit</p>
-              <p className="font-bold text-[12px] text-brand-text text-right">
+              <p className="font-bold text-[12px] text-brand-text text-right tabular-nums">
                 ₱{Math.trunc(netRevenue).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
             </div>

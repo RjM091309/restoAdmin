@@ -192,6 +192,10 @@
 		"date_range": "날짜 범위",
 		"branch_overview": "지점 개요",
 		"net_revenue": "순이익",
+		"no_revenue_data": "선택한 기간에 매출 또는 비용 데이터가 없습니다.",
+		"no_products_data": "선택한 기간에 최다 판매 제품이 없습니다.",
+		"no_branch_revenue_data": "이 기간에 {{branch}}의 매출 또는 비용 데이터가 없습니다.",
+		"no_branch_products_data": "이 기간에 {{branch}}의 최다 판매 제품이 없습니다.",
 		"sections": {
 			"inventory": "재고",
 			"fresh_produce": "신선 농산물",

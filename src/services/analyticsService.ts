@@ -231,11 +231,13 @@ export async function fetchLeastSellingApi(params: URLSearchParams): Promise<Api
 
 export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTopSellingItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/top-selling?${params.toString()}`);
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/top-selling?${params.toString()}`
+    : `/api/analytics/top-selling?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
   if (!res.ok) {
     throw new Error(`Analytics top-selling failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiTopSellingItem[];
   }
@@ -404,11 +406,13 @@ export async function fetchExpenseCategoryBreakdownApi(
   params: URLSearchParams,
 ): Promise<ApiExpenseCategoryRow[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/expense-breakdown?${params.toString()}`);
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/expense-breakdown?${params.toString()}`
+    : `/api/analytics/expense-breakdown?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
   if (!res.ok) {
     throw new Error(`Analytics expense-breakdown failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiExpenseCategoryRow[];
   }
@@ -417,11 +421,13 @@ export async function fetchExpenseCategoryBreakdownApi(
 
 export async function fetchPerformanceTrendApi(params: URLSearchParams): Promise<ApiPerformanceTrendRow[]> {
   const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/performance-trend?${params.toString()}`);
+  const url = baseUrl
+    ? `${baseUrl}/api/analytics/performance-trend?${params.toString()}`
+    : `/api/analytics/performance-trend?${params.toString()}`;
+  const { res, json } = await fetchJson(url);
   if (!res.ok) {
     throw new Error(`Analytics performance-trend failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiPerformanceTrendRow[];
   }
@@ -552,6 +558,80 @@ export async function fetchBranchDashboardBundleApi(params: {
     trendingMenusData: data.trendingMenusData || [],
     recentOrders: data.recentOrders || [],
     recentOrderItemsMeta: data.recentOrderItemsMeta || {},
+  };
+}
+
+export type AdminDashboardBundlePayload = {
+  summary: {
+    totalSales: number;
+    totalExpenses: number;
+    totalRevenue: number;
+  };
+  branchCardsData: Array<{
+    id: number;
+    name: string;
+    totalSales: number;
+    reportSalesPos?: number;
+    reconTotal?: number;
+    totalExpenses: number;
+    totalOrders: number;
+  }>;
+  branchRevenueDistribution: { name: string; value: number }[];
+  topProductsData: { name: string; sales: number }[];
+  dailySalesForCards: ApiDailySalesItem[];
+  expenseCategoryByBranch: Record<number, Record<string, number>>;
+  comparePeriodReconAll: number;
+  trendData: Array<{
+    name: string;
+    totalSales: number;
+    totalExpenses: number;
+    date?: string;
+  }>;
+  trendPeriod: string;
+};
+
+/** Single backend round-trip for admin Dashboard (summary + branch cards + chart data). */
+export async function fetchAdminDashboardBundleApi(params: {
+  start: string;
+  end: string;
+  branchId?: string | null;
+  period?: string;
+}): Promise<AdminDashboardBundlePayload> {
+  const qs = new URLSearchParams();
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+  if (params.period) qs.set('period', params.period);
+  if (params.branchId && params.branchId !== 'all') {
+    qs.set('branch_id', params.branchId);
+  } else {
+    qs.set('branch_id', 'all');
+  }
+
+  const url = `/api/analytics/admin-dashboard-bundle?${qs.toString()}`;
+  const { res, json } = await fetchJson(url, 35000);
+  if (!res.ok) {
+    throw new Error(`Analytics admin-dashboard-bundle failed with status ${res.status}`);
+  }
+  if (!json?.success || !json?.data) {
+    throw new Error(json?.message || 'Analytics admin-dashboard-bundle returned an error');
+  }
+
+  const data = json.data;
+  const summary = data.summary || {};
+  return {
+    summary: {
+      totalSales: Number(summary.totalSales) || 0,
+      totalExpenses: Number(summary.totalExpenses) || 0,
+      totalRevenue: Number(summary.totalRevenue) || 0,
+    },
+    branchCardsData: data.branchCardsData || [],
+    branchRevenueDistribution: data.branchRevenueDistribution || [],
+    topProductsData: data.topProductsData || [],
+    dailySalesForCards: data.dailySalesForCards || [],
+    expenseCategoryByBranch: data.expenseCategoryByBranch || {},
+    comparePeriodReconAll: Number(data.comparePeriodReconAll) || 0,
+    trendData: Array.isArray(data.trendData) ? data.trendData : [],
+    trendPeriod: String(data.trendPeriod || params.period || 'monthly'),
   };
 }
 

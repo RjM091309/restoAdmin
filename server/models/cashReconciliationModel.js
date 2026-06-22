@@ -190,6 +190,38 @@ class CashReconciliationModel {
 		}
 		return { total, byDate };
 	}
+
+	/**
+	 * Per-branch period totals in one query (replaces N separate aggregate calls).
+	 * @returns {Record<number, number>} branchId → total recon amount
+	 */
+	static async totalsByBranchForRange(startDate = null, endDate = null) {
+		await CashReconciliationModel.ensureSchema();
+		const params = [];
+		let sql = `
+			SELECT BRANCH_ID, COALESCE(SUM(AMOUNT), 0) AS branch_total
+			FROM cash_reconciliation
+			WHERE ACTIVE = 1
+		`;
+		if (startDate) {
+			sql += ' AND BUSINESS_DATE >= ?';
+			params.push(String(startDate).slice(0, 10));
+		}
+		if (endDate) {
+			sql += ' AND BUSINESS_DATE <= ?';
+			params.push(String(endDate).slice(0, 10));
+		}
+		sql += ' GROUP BY BRANCH_ID';
+		const [rows] = await pool.execute(sql, params);
+		/** @type {Record<number, number>} */
+		const byBranch = {};
+		for (const r of rows) {
+			const bid = Number(r.BRANCH_ID);
+			if (!Number.isFinite(bid)) continue;
+			byBranch[bid] = Number(r.branch_total) || 0;
+		}
+		return byBranch;
+	}
 }
 
 module.exports = CashReconciliationModel;

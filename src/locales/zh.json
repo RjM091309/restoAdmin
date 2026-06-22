@@ -360,6 +360,10 @@
 		"date_range": "日期范围",
 		"branch_overview": "分店概览",
 		"net_revenue": "净收入",
+		"no_revenue_data": "所选期间没有销售或支出数据。",
+		"no_products_data": "所选期间没有畅销产品。",
+		"no_branch_revenue_data": "此期间{{branch}}没有销售或支出数据。",
+		"no_branch_products_data": "此期间{{branch}}没有畅销产品。",
 		"sections": {
 			"inventory": "库存",
 			"fresh_produce": "生鲜农产品",

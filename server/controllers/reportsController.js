@@ -9,6 +9,7 @@ const ReportsModel = require('../models/reportsModel');
 const ApiResponse = require('../utils/apiResponse');
 const { buildSalesDashboardBundle } = require('../services/salesDashboardBundle');
 const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
+const { buildAdminDashboardBundle } = require('../services/adminDashboardBundle');
 
 // Python analytics service (PyServer) base URL - internal only
 const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
@@ -575,6 +576,112 @@ class ReportsController {
 		}
 	}
 
+	// Expense breakdown by category (proxied to PyServer)
+	static async getAnalyticsExpenseBreakdown(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+
+			const url = new URL('/api/analytics/expense-breakdown', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] expense-breakdown HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] expense-breakdown JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] expense-breakdown error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: rows,
+				},
+				'Expense breakdown retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics expense breakdown from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics expense breakdown', 500, error.message);
+		}
+	}
+
+	// Performance trend (proxied to PyServer)
+	static async getAnalyticsPerformanceTrend(req, res) {
+		try {
+			const { start_date, end_date, period = 'monthly' } = req.query;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+
+			const url = new URL('/api/analytics/performance-trend', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+			if (period) url.searchParams.set('period', String(period));
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] performance-trend HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] performance-trend JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] performance-trend error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					period: String(period || 'monthly'),
+					data: rows,
+				},
+				'Performance trend retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics performance trend from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics performance trend', 500, error.message);
+		}
+	}
+
 	// Menu-level sales report (proxied to PyServer)
 	static async getAnalyticsMenuReport(req, res) {
 		try {
@@ -1103,6 +1210,43 @@ class ReportsController {
 		} catch (error) {
 			console.error('Error fetching branch dashboard bundle:', error);
 			return ApiResponse.error(res, 'Failed to fetch branch dashboard bundle', 500, error.message);
+		}
+	}
+
+	// Consolidated admin Dashboard payload (summary + branch cards + chart data in one round-trip)
+	static async getAnalyticsAdminDashboardBundle(req, res) {
+		try {
+			const { start_date, end_date, period } = req.query;
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const trendPeriod = ['weekly', 'monthly', 'yearly'].includes(String(period || ''))
+				? String(period)
+				: 'monthly';
+
+			const bundle = await buildAdminDashboardBundle({
+				start_date,
+				end_date,
+				branchId,
+				period: trendPeriod,
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date,
+					end_date,
+					branch_id: branchId,
+					period: trendPeriod,
+					...bundle,
+				},
+				'Admin dashboard bundle retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching admin dashboard bundle:', error);
+			return ApiResponse.error(res, 'Failed to fetch admin dashboard bundle', 500, error.message);
 		}
 	}
 }

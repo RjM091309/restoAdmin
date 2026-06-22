@@ -102,9 +102,12 @@ router.get("/api/analytics/least-selling", authenticate, ReportsController.getAn
 router.get("/api/analytics/receipt-report", authenticate, ReportsController.getAnalyticsReceiptReport);
 router.get("/api/analytics/receipt-detail", authenticate, ReportsController.getAnalyticsReceiptDetail);
 router.get("/api/analytics/expense-summary", authenticate, ReportsController.getAnalyticsExpenseSummary);
+router.get("/api/analytics/expense-breakdown", authenticate, ReportsController.getAnalyticsExpenseBreakdown);
+router.get("/api/analytics/performance-trend", authenticate, ReportsController.getAnalyticsPerformanceTrend);
 router.get("/api/analytics/sales-dashboard-bundle", authenticate, ReportsController.getAnalyticsSalesDashboardBundle);
 router.get("/api/analytics/branch-dashboard-probe", authenticate, ReportsController.getAnalyticsBranchDashboardProbe);
 router.get("/api/analytics/branch-dashboard-bundle", authenticate, ReportsController.getAnalyticsBranchDashboardBundle);
+router.get("/api/analytics/admin-dashboard-bundle", authenticate, ReportsController.getAnalyticsAdminDashboardBundle);
 
 // ============================================
 // EXPORT

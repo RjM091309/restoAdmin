@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { Suspense, useCallback, useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -27,8 +27,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './components/partials/Sidebar';
 import { Header } from './components/partials/Header';
 import { Footer } from './components/partials/Footer';
-import { Dashboard } from './components/dashboard/Dashboard';
-import { AdminDashboard } from './components/dashboard/AdminDashboard';
+import { DashboardSkeleton } from './components/dashboard/DashboardSkeleton';
+
+const Dashboard = React.lazy(() =>
+  import('./components/dashboard/Dashboard').then((m) => ({ default: m.Dashboard })),
+);
+const AdminDashboard = React.lazy(() =>
+  import('./components/dashboard/AdminDashboard').then((m) => ({ default: m.AdminDashboard })),
+);
 import { Inventory } from './components/inventory/Inventory';
 import { Categories } from './components/categories/Categories';
 import { ExpensesMock } from './components/expenses/ExpensesMock';
@@ -645,18 +651,20 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                   >
-                    {selectedBranch && selectedBranch.id === 'all' ? (
-                      <AdminDashboard
-                        selectedBranch={selectedBranch}
-                        dateRange={dateRange}
-                        onDateRangeChange={setDateRange}
-                      />
-                    ) : (
-                      <Dashboard
-                        selectedBranch={selectedBranch}
-                        dateRange={dateRange}
-                      />
-                    )}
+                    <Suspense fallback={<div className="pt-6"><DashboardSkeleton /></div>}>
+                      {selectedBranch && selectedBranch.id === 'all' ? (
+                        <AdminDashboard
+                          selectedBranch={selectedBranch}
+                          dateRange={dateRange}
+                          onDateRangeChange={setDateRange}
+                        />
+                      ) : (
+                        <Dashboard
+                          selectedBranch={selectedBranch}
+                          dateRange={dateRange}
+                        />
+                      )}
+                    </Suspense>
                   </motion.div>
                 } />
 

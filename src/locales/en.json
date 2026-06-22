@@ -203,6 +203,10 @@
 		"date_range": "Date range",
 		"branch_overview": "Branch overview",
 		"net_revenue": "Net Revenue",
+		"no_revenue_data": "No sales or expense data for the selected period.",
+		"no_products_data": "No top selling products for the selected period.",
+		"no_branch_revenue_data": "No sales or expense data for {{branch}} in this period.",
+		"no_branch_products_data": "No top selling products for {{branch}} in this period.",
 		"sections": {
 			"inventory": "Inventory",
 			"fresh_produce": "Fresh Produce",

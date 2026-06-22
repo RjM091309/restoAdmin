@@ -39,7 +39,6 @@ import { getMenus, resolveImageUrl, type MenuRecord } from '../../services/menuS
 import {
   fetchTopSellingApi,
   fetchBranchDashboardBundleApi,
-  fetchBranchDashboardProbeApi,
   type ApiTopSellingItem,
 } from '../../services/analyticsService';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
@@ -800,63 +799,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       return;
     }
 
-    // Unknown branch — skeleton immediately (no ₱0 flash), probe decides empty vs load bundle.
+    // Unknown branch — load bundle directly (server Phase 1 detects empty branches fast).
     setPageLoading(true);
-
     let cancelled = false;
-    const run = async () => {
-      try {
-        const fallback = getCurrentMonthRange();
-        const start = dateRange.start || fallback.start;
-        const end = dateRange.end || fallback.end;
-
-        const probe = await fetchBranchDashboardProbeApi({
-          branchId: String(selectedBranch.id),
-          start,
-          end,
-        });
-        if (cancelled) return;
-
-        if (!probe.hasActivity) {
-          markKnownEmptyBranch(cacheKey);
-          setDashboardData(EMPTY_BRANCH_DASHBOARD);
-          setTopCategories([]);
-          setTrendingMenusData([]);
-          setRecentOrders([]);
-          setRecentOrderItemsMeta({});
-          setLoadingTopCategories(false);
-          setLoadingTrendingMenus(false);
-          setLoadingRecentOrders(false);
-          setPageLoading(false);
-          return;
-        }
-
-        await loadDashboardBundle(false);
-        if (!cancelled) setPageLoading(false);
-      } catch (error) {
-        if (cancelled) return;
-        console.warn('Branch dashboard probe failed, loading full bundle:', error);
-        try {
-          await loadDashboardBundle(false);
-        } finally {
-          if (!cancelled) setPageLoading(false);
-        }
-      }
-    };
-
-    void run();
+    void loadDashboardBundle(false).finally(() => {
+      if (!cancelled) setPageLoading(false);
+    });
     return () => {
       cancelled = true;
     };
   }, [cacheKey, dateRange.end, dateRange.start, hydrateFromCache, loadDashboardBundle, selectedBranch?.id]);
 
   React.useEffect(() => {
+    if (!selectedBranch || pageLoading || trendingMenusData.length === 0) return;
+
     let cancelled = false;
     const loadMenuImages = async () => {
-      if (!selectedBranch) {
-        setMenuImageByName({});
-        return;
-      }
       try {
         const branchId = String(selectedBranch.id);
         const menus: MenuRecord[] = await getMenus(branchId);
@@ -872,11 +830,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         if (!cancelled) setMenuImageByName({});
       }
     };
-    void loadMenuImages();
+
+    const timer = window.setTimeout(() => {
+      void loadMenuImages();
+    }, 0);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [selectedBranch?.id]);
+  }, [selectedBranch?.id, pageLoading, trendingMenusData.length]);
 
   React.useEffect(() => {
     if (Object.keys(menuImageByName).length === 0) return;

@@ -7,22 +7,19 @@ import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown } from 'luc
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import DatePicker from 'react-datepicker';
 import {
-  fetchBranchSalesApi,
+  fetchAdminDashboardBundleApi,
   fetchTopSellingApi,
-  fetchDailySalesApi,
-  fetchExpenseSummaryApi,
-  type ApiBranchSalesItem,
-  type ApiTopSellingItem,
-  type ApiDailySalesItem,
-  type ApiExpenseSummary,
   fetchExpenseCategoryBreakdownApi,
-  type ApiExpenseCategoryRow,
   fetchPerformanceTrendApi,
+  fetchDailySalesApi,
+  fetchDailyExpensesApi,
+  type ApiDailySalesItem,
+  type ApiDailyExpenseItem,
   type ApiPerformanceTrendRow,
+  type ApiExpenseCategoryRow,
 } from '../../services/analyticsService';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
-import { useUser } from '../../context/UserContext';
 import { is3coreBranch, sortBranchesBySidebarOrder } from '../../utils/branchLogo';
 import {
   buildAdminDashboardCacheKey,
@@ -158,30 +155,42 @@ const clampFiniteNonNegative = (n: unknown): number => {
   return v < 0 ? 0 : v;
 };
 
-/** Diverging bars: shared 40/80/100% ticks; expense axis sized so first tick ≈ peak daily expense. */
-const TREND_EXPENSE_TO_SALES_AXIS_RATIO = 2;
+const hasNonZeroTrendRows = (rows: MonthlyData[]): boolean =>
+  rows.some(
+    (d) => clampFiniteNonNegative(d.totalSales) > 0 || clampFiniteNonNegative(d.totalExpenses) > 0,
+  );
 
-const buildTrendChartScale = (rows: MonthlyData[]) => {
-  const tickFracs = [0.4, 0.8, 1] as const;
-  const firstTickFrac = tickFracs[0];
-  const salesValues = rows.map((d) => clampFiniteNonNegative(d.totalSales));
-  const expenseValues = rows.map((d) => clampFiniteNonNegative(d.totalExpenses));
-  const salesMax = salesValues.reduce((m, v) => Math.max(m, v), 0);
-  const expensesMax = expenseValues.reduce((m, v) => Math.max(m, v), 0);
-  const salesAxisMax = buildNiceMax(salesMax);
-  const expensesAxisMax =
-    expensesMax > 0 ? buildNiceMax(expensesMax / firstTickFrac) : buildNiceMax(expensesMax);
-
-  const posTicksScaled = [...tickFracs];
-  const negTicksScaled = [...tickFracs].reverse().map((f) => -f);
-  const ticksScaled = [...negTicksScaled, 0, ...posTicksScaled];
-  return {
-    salesAxisMax,
-    expensesAxisMax,
-    ticksScaled,
-    domainScaled: [-1.08, 1.08] as [number, number],
-  };
-};
+/** Explicit chart dimensions — avoids Recharts 3 ResponsiveContainer sizing glitches. */
+function TrendChartContainer({
+  className = '',
+  minHeight = 384,
+  render,
+}: {
+  className?: string;
+  minHeight?: number;
+  render: (size: { width: number; height: number }) => React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setSize({ width: w, height: h });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} style={{ minHeight }}>
+      {size.width > 0 && size.height > 0 ? render(size) : null}
+    </div>
+  );
+}
 
 const niceStep = (max: number, targetSteps: number): number => {
   const m = Number(max);
@@ -279,9 +288,207 @@ const getCurrentMonthRange = (): DateRange => {
   };
 };
 
+const YEARLY_TREND_LABELS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+] as const;
+
+const WEEKDAY_LABELS_MON_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+
+/** Index calendar dates into sales/expense maps (net sales + recon per day). */
+const buildDailyTrendMaps = (
+  dailySales: ApiDailySalesItem[],
+  dailyExpenses: ApiDailyExpenseItem[],
+  byDate: Record<string, number>,
+  start: string,
+  end: string,
+) => {
+  const salesByDate = new Map<string, number>();
+  const expensesByDate = new Map<string, number>();
+
+  for (const row of dailySales) {
+    const date = String(row.sale_date ?? '').slice(0, 10);
+    if (!date || date < start || date > end) continue;
+    const net = Number(row.net_sales ?? 0);
+    const recon = Number(byDate[date] ?? 0);
+    salesByDate.set(date, (salesByDate.get(date) ?? 0) + net + recon);
+  }
+
+  for (const [date, amt] of Object.entries(byDate)) {
+    if (date < start || date > end) continue;
+    if (!salesByDate.has(date)) {
+      salesByDate.set(date, Number(amt) || 0);
+    }
+  }
+
+  for (const row of dailyExpenses) {
+    const date = String(row.expense_date ?? '').slice(0, 10);
+    if (!date || date < start || date > end) continue;
+    expensesByDate.set(date, (expensesByDate.get(date) ?? 0) + Number(row.total_expense ?? 0));
+  }
+
+  return { salesByDate, expensesByDate };
+};
+
+/** Branch-card-aligned trend (net sales + recon) from daily-sales / daily-expenses. */
+const buildTrendFromDailySeries = ({
+  dailySales,
+  dailyExpenses,
+  byDate,
+  period,
+  start,
+  end,
+}: {
+  dailySales: ApiDailySalesItem[];
+  dailyExpenses: ApiDailyExpenseItem[];
+  byDate: Record<string, number>;
+  period: TrendPeriod;
+  start: string;
+  end: string;
+}): AdminDashboardTrendPoint[] => {
+  const { salesByDate, expensesByDate } = buildDailyTrendMaps(
+    dailySales,
+    dailyExpenses,
+    byDate,
+    start,
+    end,
+  );
+
+  if (period === 'weekly') {
+    const windowEnd = new Date(`${end}T12:00:00`);
+    const rangeStart = new Date(`${start}T12:00:00`);
+    const windowStart = new Date(windowEnd);
+    windowStart.setDate(windowStart.getDate() - 6);
+    if (windowStart < rangeStart) windowStart.setTime(rangeStart.getTime());
+
+    const rows: AdminDashboardTrendPoint[] = [];
+    for (const cursor = new Date(windowStart); cursor <= windowEnd; cursor.setDate(cursor.getDate() + 1)) {
+      const key = toYYYYMMDD(cursor);
+      const jsDay = cursor.getDay();
+      rows.push({
+        name: WEEKDAY_LABELS_MON_FIRST[(jsDay + 6) % 7],
+        date: key,
+        totalSales: salesByDate.get(key) ?? 0,
+        totalExpenses: expensesByDate.get(key) ?? 0,
+      });
+    }
+    return rows;
+  }
+
+  if (period === 'yearly') {
+    const salesByMonth = Array(12).fill(0);
+    const expensesByMonth = Array(12).fill(0);
+    for (const [date, val] of salesByDate) {
+      const monthIdx = new Date(`${date}T12:00:00`).getMonth();
+      salesByMonth[monthIdx] += val;
+    }
+    for (const [date, val] of expensesByDate) {
+      const monthIdx = new Date(`${date}T12:00:00`).getMonth();
+      expensesByMonth[monthIdx] += val;
+    }
+    return YEARLY_TREND_LABELS.map((name, idx) => ({
+      name,
+      totalSales: salesByMonth[idx],
+      totalExpenses: expensesByMonth[idx],
+    }));
+  }
+
+  const salesByDom = Array(31).fill(0);
+  const expensesByDom = Array(31).fill(0);
+  for (const [date, val] of salesByDate) {
+    const dom = new Date(`${date}T12:00:00`).getDate();
+    if (dom >= 1 && dom <= 31) salesByDom[dom - 1] += val;
+  }
+  for (const [date, val] of expensesByDate) {
+    const dom = new Date(`${date}T12:00:00`).getDate();
+    if (dom >= 1 && dom <= 31) expensesByDom[dom - 1] += val;
+  }
+  return Array.from({ length: 31 }, (_, idx) => ({
+    name: String(idx + 1),
+    totalSales: salesByDom[idx],
+    totalExpenses: expensesByDom[idx],
+  }));
+};
+
+/** Add cash-recon adjustments onto performance-trend rows (all-branches path). */
+const applyReconToPerformanceTrend = (
+  rows: AdminDashboardTrendPoint[],
+  period: TrendPeriod,
+  byDate: Record<string, number>,
+  start: string,
+  end: string,
+): AdminDashboardTrendPoint[] => {
+  if (period === 'weekly') {
+    return rows.map((row) => {
+      if (!row.date) return row;
+      const extra = Number(byDate[row.date] ?? 0);
+      return extra
+        ? { ...row, totalSales: Number(row.totalSales || 0) + extra }
+        : row;
+    });
+  }
+
+  if (period === 'monthly') {
+    const reconByDom = new Map<number, number>();
+    for (const [date, amt] of Object.entries(byDate)) {
+      if (date < start || date > end) continue;
+      const dom = new Date(`${date}T12:00:00`).getDate();
+      reconByDom.set(dom, (reconByDom.get(dom) ?? 0) + (Number(amt) || 0));
+    }
+    return rows.map((row) => {
+      const dom = Number(row.name);
+      const extra = Number.isFinite(dom) ? (reconByDom.get(dom) ?? 0) : 0;
+      return extra
+        ? { ...row, totalSales: Number(row.totalSales || 0) + extra }
+        : row;
+    });
+  }
+
+  if (period === 'yearly') {
+    const reconByMonth = Array(12).fill(0);
+    for (const [date, amt] of Object.entries(byDate)) {
+      if (date < start || date > end) continue;
+      const monthIdx = new Date(`${date}T12:00:00`).getMonth();
+      reconByMonth[monthIdx] += Number(amt) || 0;
+    }
+    return rows.map((row, idx) => {
+      const extra = reconByMonth[idx] ?? 0;
+      return extra
+        ? { ...row, totalSales: Number(row.totalSales || 0) + extra }
+        : row;
+    });
+  }
+
+  return rows;
+};
+
+const INITIAL_ADMIN_CACHE = (() => {
+  const range = getCurrentMonthRange();
+  const key = buildAdminDashboardCacheKey({ start: range.start, end: range.end, branchId: null });
+  const cached = readAdminDashboardCache(key);
+  return { key, cached: hasAdminDashboardCacheData(cached) ? cached : null };
+})();
+
+const buildSummaryCacheKey = (branchScope: string, start: string, end: string): string =>
+  `${SUMMARY_CACHE_PREFIX}:${branchScope}:${start}:${end}`;
+
+const readSummaryCache = (key: string): SummaryData | null => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SummaryData> | null;
+    if (!parsed) return null;
+    const totalSales = Number(parsed.totalSales);
+    const totalExpenses = Number(parsed.totalExpenses);
+    const totalRevenue = Number(parsed.totalRevenue);
+    if (![totalSales, totalExpenses, totalRevenue].every(Number.isFinite)) return null;
+    return { totalSales, totalExpenses, totalRevenue };
+  } catch {
+    return null;
+  }
+};
+
 /** Gross POS total per day — same basis as Sales Analytics “Total sales” KPI (sum of `total_sales`). */
-const sumDailyTotalSales = (items: ApiDailySalesItem[]): number =>
-  items.reduce((sum, item) => sum + Number(item.total_sales || 0), 0);
 
 const formatModalMoney = (n: number) =>
   `₱${Math.trunc(Number.isFinite(n) ? n : 0).toLocaleString(undefined, {
@@ -289,23 +496,73 @@ const formatModalMoney = (n: number) =>
     maximumFractionDigits: 0,
   })}`;
 
+const buildExpenseMaps = (rows: ApiExpenseCategoryRow[]) => {
+  const expenseMap: Record<number, Record<string, number>> = {};
+  const expenseByBranch: Record<number, number> = {};
+  const makeKey = (cat: string, name: string) =>
+    `${cat.trim().toLowerCase()}|${name.trim().toLowerCase()}`;
+
+  for (const row of rows || []) {
+    const bid = Number(row.branch_id);
+    if (!Number.isFinite(bid)) continue;
+    if (!expenseMap[bid]) expenseMap[bid] = {};
+    const key = makeKey(row.exp_cat, row.exp_name);
+    const amt = Number(row.total_amount || 0);
+    expenseMap[bid][key] = (expenseMap[bid][key] || 0) + amt;
+    expenseByBranch[bid] = (expenseByBranch[bid] || 0) + amt;
+  }
+
+  return { expenseMap, expenseByBranch };
+};
+
+const preferNonEmptyArray = <T,>(next: T[], prev: T[]): T[] =>
+  next.length > 0 ? next : prev;
+
+const preferNonEmptyRecord = <T,>(
+  next: Record<number, T>,
+  prev: Record<number, T>,
+): Record<number, T> => (Object.keys(next).length > 0 ? next : prev);
+
+const expenseByBranchFromMap = (expenseMap: Record<number, Record<string, number>>) => {
+  const expenseByBranch: Record<number, number> = {};
+  for (const [bid, cats] of Object.entries(expenseMap)) {
+    const id = Number(bid);
+    if (!Number.isFinite(id)) continue;
+    expenseByBranch[id] = Object.values(cats).reduce((s, v) => s + (Number(v) || 0), 0);
+  }
+  return expenseByBranch;
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange, onDateRangeChange }) => {
   const { t } = useTranslation();
-  const { user } = useUser();
-  const isAdmin = user?.permissions === 1;
-  const hasLoggedBranchBreakdownPyRef = useRef(false);
   const analyticsReqIdRef = useRef(0);
   const trendReqIdRef = useRef(0);
-  const expenseReqIdRef = useRef(0);
-  const [loading, setLoading] = useState(true);
-  const [performanceData, setPerformanceData] = useState<BranchPerformanceData[]>([]);
-  const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>([]);
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
-  const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
+  const isFirstTrendEffectRef = useRef(true);
+  const prevFocusedBranchIdRef = useRef<number | null>(null);
+  const activeBranchIdRef = useRef<number | null>(null);
+  const topProductsReqIdRef = useRef(0);
+  const allBranchesTopProductsRef = useRef<{ name: string; sales: number }[]>([]);
+  const initialMonthRange = getCurrentMonthRange();
+  const [performanceData] = useState<BranchPerformanceData[]>([]);
+  const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>(
+    () => INITIAL_ADMIN_CACHE.cached?.branchCardsData ?? [],
+  );
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(() => {
+    if (INITIAL_ADMIN_CACHE.cached?.summary) return INITIAL_ADMIN_CACHE.cached.summary;
+    return readSummaryCache(buildSummaryCacheKey('all', initialMonthRange.start, initialMonthRange.end));
+  });
+  const [monthlyData, setMonthlyData] = useState<MonthlyData[]>(() => {
+    const trend = INITIAL_ADMIN_CACHE.cached?.trendByPeriod?.monthly;
+    return trend?.length && hasNonZeroTrendRows(trend) ? trend : [];
+  });
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('monthly');
 
   const [trendLoading, setTrendLoading] = useState(false);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
+
+  useEffect(() => {
+    activeBranchIdRef.current = activeBranchId;
+  }, [activeBranchId]);
   const [compareBranchIds, setCompareBranchIds] = useState<number[]>([]);
   const [isComparePanelOpen, setIsComparePanelOpen] = useState(false);
   const [isComparePanelLoading, setIsComparePanelLoading] = useState(false);
@@ -313,18 +570,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [compareDateRange, setCompareDateRange] = useState<DateRange>(getCurrentMonthRange);
 
   // Analytics-based data for pie chart (revenue distribution) and top products
-  const [branchRevenueDistribution, setBranchRevenueDistribution] = useState<{ name: string; value: number }[]>([]);
-  const [topProductsData, setTopProductsData] = useState<{ name: string; sales: number }[]>([]);
-  const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>([]);
-  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(null);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<Record<number, Record<string, number>>>({});
+  const [branchRevenueDistribution, setBranchRevenueDistribution] = useState<{ name: string; value: number }[]>(
+    () => INITIAL_ADMIN_CACHE.cached?.branchRevenueDistribution ?? [],
+  );
+  const [topProductsData, setTopProductsData] = useState<{ name: string; sales: number }[]>(
+    () => INITIAL_ADMIN_CACHE.cached?.topProductsData ?? [],
+  );
+  const [topProductsLoading, setTopProductsLoading] = useState(false);
+  const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>(
+    () => INITIAL_ADMIN_CACHE.cached?.dailySalesForCards ?? [],
+  );
+  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(() =>
+    INITIAL_ADMIN_CACHE.cached?.summary ? INITIAL_ADMIN_CACHE.cached.summary.totalExpenses : null,
+  );
+  const [analyticsLoading, setAnalyticsLoading] = useState(() => !INITIAL_ADMIN_CACHE.cached);
+  const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<
+    Record<number, Record<string, number>>
+  >(() => INITIAL_ADMIN_CACHE.cached?.expenseCategoryByBranch ?? {});
 
   const [cashReconModalOpen, setCashReconModalOpen] = useState(false);
   const [cashReconModalBranch, setCashReconModalBranch] = useState<BranchPerformanceData | null>(null);
   const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
   /** Recon sum for all branches in compare range (used when daily-sales is unscoped) */
-  const [comparePeriodReconAll, setComparePeriodReconAll] = useState(0);
+  const [comparePeriodReconAll, setComparePeriodReconAll] = useState(
+    () => INITIAL_ADMIN_CACHE.cached?.comparePeriodReconAll ?? 0,
+  );
   const totalRevenueDistribution = useMemo(
     () => branchRevenueDistribution.reduce((sum, item) => sum + Number(item.value || 0), 0),
     [branchRevenueDistribution],
@@ -344,12 +614,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     () => Math.max(...topProductsChartData.map((item) => Number(item.sales) || 0), 1),
     [topProductsChartData],
   );
+  const focusedBranchName = useMemo(() => {
+    if (!activeBranchId) return null;
+    return branchCardsData.find((b) => b.id === activeBranchId)?.name ?? null;
+  }, [activeBranchId, branchCardsData]);
   const summaryCacheKey = useMemo(() => {
     const currentRange = getCurrentMonthRange();
     const start = compareDateRange.start || currentRange.start;
     const end = compareDateRange.end || currentRange.end;
     const branchScope = activeBranchId ? String(activeBranchId) : 'all';
-    return `${SUMMARY_CACHE_PREFIX}:${branchScope}:${start}:${end}`;
+    return buildSummaryCacheKey(branchScope, start, end);
   }, [activeBranchId, compareDateRange.start, compareDateRange.end]);
 
   const analyticsCacheKey = useMemo(() => {
@@ -359,9 +633,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return buildAdminDashboardCacheKey({
       start,
       end,
-      branchId: activeBranchId ? String(activeBranchId) : null,
+      branchId: null,
     });
-  }, [activeBranchId, compareDateRange.start, compareDateRange.end]);
+  }, [compareDateRange.start, compareDateRange.end]);
 
   // Cleanup legacy cache keys from older summary logic versions.
   useEffect(() => {
@@ -386,38 +660,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     setActiveBranchId((prev) => (prev === next ? prev : next));
   }, [selectedBranch?.id]);
 
-  useEffect(() => {
-    const currentRange = getCurrentMonthRange();
-    const initialKey = buildAdminDashboardCacheKey({
-      start: currentRange.start,
-      end: currentRange.end,
-      branchId: null,
-    });
-    if (hasAdminDashboardCacheData(readAdminDashboardCache(initialKey))) {
-      setLoading(false);
-    }
-
-    const fetchData = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const perfRes = await fetch('/api/admin/branch-performance', {
-          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        });
-
-        const perfJson = await perfRes.json();
-        if (perfJson.success) {
-          setPerformanceData(perfJson.data.branches);
-        }
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void fetchData();
-  }, []);
-
   // Keep internal compareDateRange in sync with global dateRange from Header
   useEffect(() => {
     if (dateRange.start || dateRange.end) {
@@ -428,20 +670,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
   }, [dateRange.start, dateRange.end]);
 
+  const applyAdminBundlePayload = useCallback(
+    (
+      payload: {
+        summary: SummaryData;
+        branchCardsData: BranchPerformanceData[];
+        branchRevenueDistribution: { name: string; value: number }[];
+        topProductsData: { name: string; sales: number }[];
+        dailySalesForCards: ApiDailySalesItem[];
+        expenseCategoryByBranch: Record<number, Record<string, number>>;
+        comparePeriodReconAll: number;
+      },
+      options: { background?: boolean } = {},
+    ) => {
+      const { background = false } = options;
+      const summary = payload.summary;
+
+      if (background) {
+        setBranchCardsData((prev) =>
+          payload.branchCardsData.length > 0 ? payload.branchCardsData : prev,
+        );
+        setBranchRevenueDistribution((prev) =>
+          preferNonEmptyArray(payload.branchRevenueDistribution, prev),
+        );
+        if (!activeBranchIdRef.current) {
+          setTopProductsData((prev) => preferNonEmptyArray(payload.topProductsData, prev));
+        }
+        setDailySalesForCards((prev) => preferNonEmptyArray(payload.dailySalesForCards, prev));
+        setExpenseCategoryByBranch((prev) =>
+          preferNonEmptyRecord(payload.expenseCategoryByBranch, prev),
+        );
+        setSummaryData((prev) =>
+          summary.totalSales > 0 || summary.totalExpenses > 0 ? summary : (prev ?? summary),
+        );
+      } else {
+        setBranchCardsData(payload.branchCardsData);
+        setBranchRevenueDistribution(payload.branchRevenueDistribution);
+        if (!activeBranchIdRef.current) {
+          setTopProductsData(payload.topProductsData);
+        }
+        setDailySalesForCards(payload.dailySalesForCards);
+        setExpenseCategoryByBranch(payload.expenseCategoryByBranch);
+        setSummaryData(summary);
+      }
+
+      setComparePeriodReconAll(payload.comparePeriodReconAll);
+      setExpenseSummaryTotal(summary.totalExpenses);
+
+      patchAdminDashboardCache(analyticsCacheKey, {
+        summary,
+        branchCardsData: payload.branchCardsData,
+        branchRevenueDistribution: payload.branchRevenueDistribution,
+        topProductsData: payload.topProductsData,
+        dailySalesForCards: payload.dailySalesForCards,
+        expenseCategoryByBranch: payload.expenseCategoryByBranch,
+        comparePeriodReconAll: payload.comparePeriodReconAll,
+      });
+    },
+    [analyticsCacheKey],
+  );
+
   const hydrateFromCache = useCallback((cached: AdminDashboardCachePayload) => {
-    setBranchCardsData(cached.branchCardsData);
-    setBranchRevenueDistribution(cached.branchRevenueDistribution);
-    setTopProductsData(cached.topProductsData);
-    setDailySalesForCards(cached.dailySalesForCards);
-    setExpenseCategoryByBranch(cached.expenseCategoryByBranch);
-    setComparePeriodReconAll(cached.comparePeriodReconAll);
-    setAnalyticsLoading(false);
-    const trendRows = cached.trendByPeriod?.[trendPeriod];
-    if (trendRows?.length) {
-      setMonthlyData(trendRows);
-      setTrendLoading(false);
+    if (cached.summary) {
+      setSummaryData(cached.summary);
+      setExpenseSummaryTotal(cached.summary.totalExpenses);
     }
-  }, [trendPeriod]);
+    const cachedTrend = cached.trendByPeriod?.[trendPeriod];
+    if (cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
+      setMonthlyData(cachedTrend);
+    }
+    applyAdminBundlePayload(
+      {
+        summary: cached.summary ?? { totalSales: 0, totalExpenses: 0, totalRevenue: 0 },
+        branchCardsData: cached.branchCardsData,
+        branchRevenueDistribution: cached.branchRevenueDistribution,
+        topProductsData: cached.topProductsData,
+        dailySalesForCards: cached.dailySalesForCards,
+        expenseCategoryByBranch: cached.expenseCategoryByBranch,
+        comparePeriodReconAll: cached.comparePeriodReconAll,
+      },
+      { background: true },
+    );
+    setAnalyticsLoading(false);
+  }, [applyAdminBundlePayload, trendPeriod]);
 
   const loadTrend = useCallback(
     async (background: boolean) => {
@@ -452,113 +763,150 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         const start = compareDateRange.start || currentRange.start;
         const end = compareDateRange.end || currentRange.end;
 
-        const params = new URLSearchParams();
-        params.set('period', trendPeriod);
-        params.set('start_date', start);
-        params.set('end_date', end);
+        const analyticsParams = new URLSearchParams();
+        analyticsParams.set('start_date', start);
+        analyticsParams.set('end_date', end);
         if (activeBranchId) {
-          params.set('branch_id', String(activeBranchId));
+          analyticsParams.set('branch_id', String(activeBranchId));
         }
 
-        const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
-        if (reqId !== trendReqIdRef.current) return;
+        let chartData: AdminDashboardTrendPoint[];
 
-        const weeklyHasCalendarDates =
-          trendPeriod === 'weekly' && rows.length > 0 && rows.every((r) => r.sale_date);
+        if (activeBranchId) {
+          const [dailySales, dailyExpenses, recon] = await Promise.all([
+            fetchDailySalesApi(analyticsParams),
+            fetchDailyExpensesApi(analyticsParams),
+            fetchCashReconciliationAggregates({
+              start,
+              end,
+              branchId: String(activeBranchId),
+            }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
+          ]);
+          if (reqId !== trendReqIdRef.current) return;
 
-        let rowsForChart = rows;
-        if (weeklyHasCalendarDates) {
-          const wStart = String(rows[0].sale_date).slice(0, 10);
-          const wEnd = String(rows[rows.length - 1].sale_date).slice(0, 10);
-          try {
-            const recon = await fetchCashReconciliationAggregates({
-              start: wStart,
-              end: wEnd,
-              ...(activeBranchId ? { branchId: String(activeBranchId) } : {}),
-            });
-            if (reqId !== trendReqIdRef.current) return;
-            const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
-            rowsForChart = rows.map((r) => {
-              const key = String(r.sale_date).slice(0, 10);
-              const extra = Number(byDate[key] ?? 0) || 0;
-              return {
-                ...r,
-                totalSales: Number(r.totalSales || 0) + extra,
-              };
-            });
-          } catch {
-            rowsForChart = rows;
-          }
-        }
-
-        const normalized: AdminDashboardTrendPoint[] = rowsForChart.map((r) => ({
-          name: r.name,
-          totalSales: Number(r.totalSales || 0),
-          totalExpenses: Number(r.totalExpenses || 0),
-          ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
-        }));
-
-        let chartData: AdminDashboardTrendPoint[] = normalized;
-
-        if (trendPeriod === 'weekly' && normalized.length > 0 && normalized.every((d) => d.date)) {
-          const lastKey = normalized[normalized.length - 1].date!;
-          const anchor = new Date(`${lastKey}T12:00:00`);
-          const now = new Date();
-          const isAnchorToday =
-            anchor.getFullYear() === now.getFullYear() &&
-            anchor.getMonth() === now.getMonth() &&
-            anchor.getDate() === now.getDate();
-          if (isAnchorToday) {
-            const copy = [...normalized];
-            copy[copy.length - 1] = { ...copy[copy.length - 1], name: 'Today' };
-            chartData = copy;
-          }
-        } else if (trendPeriod === 'weekly' && normalized.length === 7) {
-          const anchor =
-            (compareDateRange.end ? new Date(compareDateRange.end) : null) ??
-            (compareDateRange.start ? new Date(compareDateRange.start) : null) ??
-            new Date();
-
-          const jsDay = anchor.getDay();
-          const todayIdxMon0 = (jsDay + 6) % 7;
-          const startIdx = (todayIdxMon0 + 1) % 7;
-          const rotated = [...normalized.slice(startIdx), ...normalized.slice(0, startIdx)];
-
-          const now = new Date();
-          const isAnchorToday =
-            anchor.getFullYear() === now.getFullYear() &&
-            anchor.getMonth() === now.getMonth() &&
-            anchor.getDate() === now.getDate();
-
-          const anchorName = isAnchorToday
-            ? 'Today'
-            : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][todayIdxMon0] ?? rotated[rotated.length - 1].name;
-
-          const anchorMidday = new Date(anchor);
-          anchorMidday.setHours(12, 0, 0, 0);
-          const withDates = rotated.map((row, idx) => {
-            const offsetDays = idx - (rotated.length - 1);
-            const d = new Date(
-              anchorMidday.getFullYear(),
-              anchorMidday.getMonth(),
-              anchorMidday.getDate() + offsetDays,
-              12,
-              0,
-              0,
-            );
-            return { ...row, date: toYYYYMMDD(d) };
+          chartData = buildTrendFromDailySeries({
+            dailySales,
+            dailyExpenses,
+            byDate: recon.byDate ?? {},
+            period: trendPeriod,
+            start,
+            end,
           });
+        } else {
+          const params = new URLSearchParams();
+          params.set('period', trendPeriod);
+          params.set('start_date', start);
+          params.set('end_date', end);
 
-          withDates[withDates.length - 1] = { ...withDates[withDates.length - 1], name: anchorName };
-          chartData = withDates;
+          const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
+          if (reqId !== trendReqIdRef.current) return;
+
+          let rowsForChart = rows.map((r) => ({
+            name: r.name,
+            totalSales: Number(r.totalSales || 0),
+            totalExpenses: Number(r.totalExpenses || 0),
+            ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
+          }));
+
+          const weeklyHasCalendarDates =
+            trendPeriod === 'weekly' && rowsForChart.length > 0 && rowsForChart.every((r) => r.date);
+
+          if (weeklyHasCalendarDates) {
+            const wStart = String(rowsForChart[0].date).slice(0, 10);
+            const wEnd = String(rowsForChart[rowsForChart.length - 1].date).slice(0, 10);
+            try {
+              const recon = await fetchCashReconciliationAggregates({ start: wStart, end: wEnd });
+              if (reqId !== trendReqIdRef.current) return;
+              const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
+              rowsForChart = applyReconToPerformanceTrend(rowsForChart, 'weekly', byDate, wStart, wEnd);
+            } catch {
+              // keep API rows
+            }
+          } else {
+            try {
+              const recon = await fetchCashReconciliationAggregates({ start, end });
+              if (reqId !== trendReqIdRef.current) return;
+              const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
+              rowsForChart = applyReconToPerformanceTrend(rowsForChart, trendPeriod, byDate, start, end);
+            } catch {
+              // keep API rows
+            }
+          }
+
+          chartData = rowsForChart;
+
+          if (trendPeriod === 'weekly' && chartData.length > 0 && chartData.every((d) => d.date)) {
+            const lastKey = chartData[chartData.length - 1].date!;
+            const anchor = new Date(`${lastKey}T12:00:00`);
+            const now = new Date();
+            const isAnchorToday =
+              anchor.getFullYear() === now.getFullYear() &&
+              anchor.getMonth() === now.getMonth() &&
+              anchor.getDate() === now.getDate();
+            if (isAnchorToday) {
+              const copy = [...chartData];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], name: 'Today' };
+              chartData = copy;
+            }
+          } else if (trendPeriod === 'weekly' && chartData.length === 7) {
+            const anchor =
+              (compareDateRange.end ? new Date(compareDateRange.end) : null) ??
+              (compareDateRange.start ? new Date(compareDateRange.start) : null) ??
+              new Date();
+
+            const jsDay = anchor.getDay();
+            const todayIdxMon0 = (jsDay + 6) % 7;
+            const startIdx = (todayIdxMon0 + 1) % 7;
+            const rotated = [...chartData.slice(startIdx), ...chartData.slice(0, startIdx)];
+
+            const now = new Date();
+            const isAnchorToday =
+              anchor.getFullYear() === now.getFullYear() &&
+              anchor.getMonth() === now.getMonth() &&
+              anchor.getDate() === now.getDate();
+
+            const anchorName = isAnchorToday
+              ? 'Today'
+              : WEEKDAY_LABELS_MON_FIRST[todayIdxMon0] ?? rotated[rotated.length - 1].name;
+
+            const anchorMidday = new Date(anchor);
+            anchorMidday.setHours(12, 0, 0, 0);
+            const withDates = rotated.map((row, idx) => {
+              const offsetDays = idx - (rotated.length - 1);
+              const d = new Date(
+                anchorMidday.getFullYear(),
+                anchorMidday.getMonth(),
+                anchorMidday.getDate() + offsetDays,
+                12,
+                0,
+                0,
+              );
+              return { ...row, date: toYYYYMMDD(d) };
+            });
+
+            withDates[withDates.length - 1] = { ...withDates[withDates.length - 1], name: anchorName };
+            chartData = withDates;
+          }
         }
 
         if (reqId !== trendReqIdRef.current) return;
+
+        if (!hasNonZeroTrendRows(chartData)) {
+          setMonthlyData([]);
+          if (!activeBranchId) {
+            patchAdminDashboardCache(analyticsCacheKey, {
+              trendByPeriod: { [trendPeriod]: [] },
+            });
+          }
+          return;
+        }
 
         setMonthlyData(chartData);
-        patchAdminDashboardCache(analyticsCacheKey, {
-          trendByPeriod: { [trendPeriod]: chartData },
-        });
+        if (!activeBranchId) {
+          patchAdminDashboardCache(analyticsCacheKey, {
+            trendByPeriod: { [trendPeriod]: chartData },
+          });
+        }
       } catch (error) {
         if (reqId !== trendReqIdRef.current) return;
         console.error('[AdminDashboard] Failed to load performance trend:', error);
@@ -575,236 +923,257 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     ],
   );
 
-  const loadAnalytics = useCallback(
+  const loadAdminBundle = useCallback(
     async (background: boolean) => {
       const reqId = ++analyticsReqIdRef.current;
-      if (!background) setAnalyticsLoading(true);
+      if (!background) {
+        setAnalyticsLoading(true);
+      }
       try {
         const currentRange = getCurrentMonthRange();
         const start = compareDateRange.start || currentRange.start;
         const end = compareDateRange.end || currentRange.end;
 
-        const analyticsParams = new URLSearchParams();
-        analyticsParams.set('start_date', start);
-        analyticsParams.set('end_date', end);
-        if (activeBranchId) {
-          analyticsParams.set('branch_id', String(activeBranchId));
-        }
-
-        const branchSalesParams = new URLSearchParams();
-        branchSalesParams.set('start_date', start);
-        branchSalesParams.set('end_date', end);
-
-        const [branchSales, topSelling, dailySales, expenseBreakdown]: [
-          ApiBranchSalesItem[],
-          ApiTopSellingItem[],
-          ApiDailySalesItem[],
-          ApiExpenseCategoryRow[],
-        ] = await Promise.all([
-          fetchBranchSalesApi(branchSalesParams),
-          fetchTopSellingApi(
-            new URLSearchParams({
-              start_date: start,
-              end_date: end,
-              ...(activeBranchId ? { branch_id: String(activeBranchId) } : {}),
-              limit: '5',
-            } as any),
-          ),
-          fetchDailySalesApi(analyticsParams),
-          (() => {
-            const breakdownParams = new URLSearchParams();
-            breakdownParams.set('start_date', start);
-            breakdownParams.set('end_date', end);
-            if (activeBranchId) {
-              breakdownParams.set('branch_id', String(activeBranchId));
-            }
-            return fetchExpenseCategoryBreakdownApi(breakdownParams);
-          })(),
-        ]);
+        const bundle = await fetchAdminDashboardBundleApi({
+          start,
+          end,
+          branchId: 'all',
+          period: trendPeriod,
+        });
         if (reqId !== analyticsReqIdRef.current) return;
 
-        const expenseMap: Record<number, Record<string, number>> = {};
-        const expenseByBranch: Record<number, number> = {};
-        const makeKey = (cat: string, name: string) =>
-          `${cat.trim().toLowerCase()}|${name.trim().toLowerCase()}`;
+        applyAdminBundlePayload(
+          {
+            summary: bundle.summary,
+            branchCardsData: bundle.branchCardsData,
+            branchRevenueDistribution: bundle.branchRevenueDistribution,
+            topProductsData: bundle.topProductsData,
+            dailySalesForCards: bundle.dailySalesForCards,
+            expenseCategoryByBranch: bundle.expenseCategoryByBranch,
+            comparePeriodReconAll: bundle.comparePeriodReconAll,
+          },
+          { background },
+        );
 
-        for (const row of expenseBreakdown || []) {
-          const bid = Number(row.branch_id);
-          if (!Number.isFinite(bid)) continue;
-          if (!expenseMap[bid]) expenseMap[bid] = {};
-          const key = makeKey(row.exp_cat, row.exp_name);
-          const amt = Number(row.total_amount || 0);
-          expenseMap[bid][key] = (expenseMap[bid][key] || 0) + amt;
-          expenseByBranch[bid] = (expenseByBranch[bid] || 0) + amt;
-        }
-        setExpenseCategoryByBranch(expenseMap);
-
-        const revenueDist = branchSales.map((b) => ({
-          name: b.branch_name,
-          value: b.total_sales,
-        }));
-        const topProducts = topSelling.map((item) => ({
-          name: item.MENU_NAME,
-          sales: item.total_quantity,
-        }));
-
-        setBranchRevenueDistribution(revenueDist);
-        setTopProductsData(topProducts);
-        setDailySalesForCards(dailySales);
-
-        // Phase 1: branch cards from POS totals immediately (no per-branch recon wait)
-        let cards: BranchPerformanceData[] = [];
-        if (branchSales.length > 0) {
-          cards = branchSales.map((b) => {
-            const posBase = Number(b.total_sales || 0);
-            return {
-              id: b.branch_id,
-              name: b.branch_name,
-              totalSales: posBase,
-              reportSalesPos: posBase,
-              reconTotal: 0,
-              totalExpenses: expenseByBranch[b.branch_id] || 0,
-              totalOrders: b.order_count,
-            };
+        if (!activeBranchId && hasNonZeroTrendRows(bundle.trendData)) {
+          setMonthlyData(bundle.trendData);
+          patchAdminDashboardCache(analyticsCacheKey, {
+            trendByPeriod: { [trendPeriod]: bundle.trendData },
           });
-          setBranchCardsData(cards);
         }
 
-        if (!background && reqId === analyticsReqIdRef.current) {
-          setAnalyticsLoading(false);
-        }
+        let topProducts = bundle.topProductsData;
+        allBranchesTopProductsRef.current = topProducts;
+        let expenseMap = bundle.expenseCategoryByBranch;
+        let branchCards = bundle.branchCardsData;
+        let summary = bundle.summary;
 
-        // Phase 2: refine branch cards with recon (background-friendly)
-        if (branchSales.length > 0) {
-          const reconResults = await Promise.all(
-            branchSales.map((b) =>
-              fetchCashReconciliationAggregates({
-                start,
-                end,
-                branchId: String(b.branch_id),
-              }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
-            ),
-          );
-          if (reqId !== analyticsReqIdRef.current) return;
+        const needsTopProducts = topProducts.length === 0;
+        const needsExpenseBreakdown = Object.keys(expenseMap).length === 0;
+        if (needsTopProducts || needsExpenseBreakdown) {
+          try {
+            const analyticsParams = new URLSearchParams();
+            analyticsParams.set('start_date', start);
+            analyticsParams.set('end_date', end);
 
-          cards = branchSales.map((b, i) => {
-            const reconTotal = Number(reconResults[i]?.total) || 0;
-            const posBase = Number(b.total_sales || 0);
-            return {
-              id: b.branch_id,
-              name: b.branch_name,
-              totalSales: posBase + reconTotal,
-              reportSalesPos: posBase,
-              reconTotal,
-              totalExpenses: expenseByBranch[b.branch_id] || 0,
-              totalOrders: b.order_count,
-            };
-          });
-          setBranchCardsData(cards);
+            const [topSelling, expenseBreakdown] = await Promise.all([
+              needsTopProducts
+                ? fetchTopSellingApi(
+                    new URLSearchParams({
+                      start_date: start,
+                      end_date: end,
+                      limit: '5',
+                    } as any),
+                  )
+                : Promise.resolve(null),
+              needsExpenseBreakdown
+                ? fetchExpenseCategoryBreakdownApi(new URLSearchParams(analyticsParams))
+                : Promise.resolve(null),
+            ]);
+            if (reqId !== analyticsReqIdRef.current) return;
 
-          if (!hasLoggedBranchBreakdownPyRef.current) {
-            hasLoggedBranchBreakdownPyRef.current = true;
-            // eslint-disable-next-line no-console
-            console.log(
-              '[AdminDashboard] branch breakdown (py)',
-              cards.map((c) => ({
-                id: c.id,
-                name: c.name,
-                total_sales_py: c.totalSales,
-                total_expense_py: c.totalExpenses,
-              })),
+            if (Array.isArray(topSelling) && topSelling.length > 0) {
+              topProducts = topSelling.map((item) => ({
+                name: item.MENU_NAME,
+                sales: item.total_quantity,
+              }));
+            }
+            if (Array.isArray(expenseBreakdown) && expenseBreakdown.length > 0) {
+              const maps = buildExpenseMaps(expenseBreakdown);
+              expenseMap = maps.expenseMap;
+              const expenseByBranch = maps.expenseByBranch;
+              if (branchCards.length > 0) {
+                branchCards = branchCards.map((card) => ({
+                  ...card,
+                  totalExpenses: expenseByBranch[card.id] ?? card.totalExpenses,
+                }));
+              }
+              const totalExpenses = Object.values(expenseByBranch).reduce(
+                (sum, v) => sum + (Number(v) || 0),
+                0,
+              );
+              if (totalExpenses > 0) {
+                summary = {
+                  ...summary,
+                  totalExpenses,
+                  totalRevenue: summary.totalSales - totalExpenses,
+                };
+              }
+            }
+
+            applyAdminBundlePayload(
+              {
+                summary,
+                branchCardsData: branchCards,
+                branchRevenueDistribution: bundle.branchRevenueDistribution,
+                topProductsData: topProducts,
+                dailySalesForCards: bundle.dailySalesForCards,
+                expenseCategoryByBranch: expenseMap,
+                comparePeriodReconAll: bundle.comparePeriodReconAll,
+              },
+              { background },
             );
+          } catch (error) {
+            console.warn('[AdminDashboard] Supplemental bundle fetch failed:', error);
           }
         }
 
-        let compareReconAll = 0;
-        try {
-          const allRecon = await fetchCashReconciliationAggregates({ start, end });
-          compareReconAll = Number(allRecon.total) || 0;
-        } catch {
-          compareReconAll = 0;
-        }
-        if (reqId !== analyticsReqIdRef.current) return;
-        setComparePeriodReconAll(compareReconAll);
-
-        patchAdminDashboardCache(analyticsCacheKey, {
-          branchCardsData: cards,
-          branchRevenueDistribution: revenueDist,
-          topProductsData: topProducts,
-          dailySalesForCards: dailySales,
-          expenseCategoryByBranch: expenseMap,
-          comparePeriodReconAll: compareReconAll,
-        });
       } catch (error) {
         if (reqId !== analyticsReqIdRef.current) return;
-        console.error('Failed to load dashboard analytics data:', error);
-        if (!background) {
-          setBranchRevenueDistribution([]);
-          setTopProductsData([]);
-          setDailySalesForCards([]);
-          setComparePeriodReconAll(0);
-        }
+        console.error('Failed to load admin dashboard bundle:', error);
       } finally {
-        if (reqId === analyticsReqIdRef.current) setAnalyticsLoading(false);
+        if (reqId === analyticsReqIdRef.current) {
+          setAnalyticsLoading(false);
+        }
       }
     },
-    [activeBranchId, analyticsCacheKey, compareDateRange.end, compareDateRange.start],
+    [
+      activeBranchId,
+      analyticsCacheKey,
+      applyAdminBundlePayload,
+      compareDateRange.end,
+      compareDateRange.start,
+      trendPeriod,
+    ],
   );
 
   useEffect(() => {
     const cached = readAdminDashboardCache(analyticsCacheKey);
     if (hasAdminDashboardCacheData(cached)) {
       hydrateFromCache(cached);
-      void loadAnalytics(true);
+      void loadAdminBundle(true);
     } else {
-      void loadAnalytics(false);
+      void loadAdminBundle(false);
     }
-  }, [analyticsCacheKey, hydrateFromCache, loadAnalytics, analyticsReloadKey]);
+  }, [analyticsCacheKey, hydrateFromCache, loadAdminBundle, analyticsReloadKey]);
 
+  // Bundle covers trend on mount / date change; refetch only when user switches Weekly/Monthly/Yearly.
   useEffect(() => {
+    if (isFirstTrendEffectRef.current) {
+      isFirstTrendEffectRef.current = false;
+      return;
+    }
+
+    if (activeBranchId) {
+      setMonthlyData([]);
+      setTrendLoading(true);
+      void loadTrend(false);
+      return;
+    }
+
     const cached = readAdminDashboardCache(analyticsCacheKey);
     const cachedTrend = cached?.trendByPeriod?.[trendPeriod];
-    if (cachedTrend?.length) {
+    if (cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
       setMonthlyData(cachedTrend);
       setTrendLoading(false);
       void loadTrend(true);
-    } else {
-      setMonthlyData([]);
-      void loadTrend(false);
+      return;
     }
-  }, [
-    activeBranchId,
-    analyticsCacheKey,
-    compareDateRange.end,
-    compareDateRange.start,
-    loadTrend,
-    trendPeriod,
-  ]);
+    void loadTrend(false);
+  }, [activeBranchId, analyticsCacheKey, loadTrend, trendPeriod]);
 
-  // Load expense summary from Python analytics (expense-summary)
+  // Branch focus filters charts only — keep all-branch card expenses intact.
   useEffect(() => {
-    const loadExpensesFromPython = async () => {
-      const reqId = ++expenseReqIdRef.current;
-      try {
-        const params = new URLSearchParams();
-        if (activeBranchId && Number.isFinite(activeBranchId)) {
-          params.set('branch_id', String(activeBranchId));
-        }
-        // Respect global/compare date range like SalesAnalytics
-        if (compareDateRange.start) params.set('start_date', compareDateRange.start);
-        if (compareDateRange.end) params.set('end_date', compareDateRange.end);
+    const prev = prevFocusedBranchIdRef.current;
+    if (prev === activeBranchId) return;
+    prevFocusedBranchIdRef.current = activeBranchId;
 
-        const summary: ApiExpenseSummary = await fetchExpenseSummaryApi(params);
-        if (reqId === expenseReqIdRef.current) setExpenseSummaryTotal(summary.total_expense);
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Error loading expense summary from Python analytics:', error);
-        if (reqId === expenseReqIdRef.current) setExpenseSummaryTotal(null);
+    const currentRange = getCurrentMonthRange();
+    const start = compareDateRange.start || currentRange.start;
+    const end = compareDateRange.end || currentRange.end;
+
+    if (!activeBranchId) {
+      topProductsReqIdRef.current += 1;
+      if (allBranchesTopProductsRef.current.length > 0) {
+        setTopProductsData(allBranchesTopProductsRef.current);
       }
-    };
+      setTopProductsLoading(false);
+      void loadTrend(prev != null);
+      return;
+    }
 
-    void loadExpensesFromPython();
-  }, [activeBranchId, isAdmin, compareDateRange.start, compareDateRange.end]);
+    const focusedBranch = branchCardsData.find((b) => b.id === activeBranchId);
+    const hasNoBranchActivity =
+      focusedBranch &&
+      (Number(focusedBranch.totalSales) || 0) === 0 &&
+      getEffectiveBranchTotalExpenses(focusedBranch) === 0;
+
+    setTrendLoading(true);
+    setTopProductsLoading(true);
+    setMonthlyData([]);
+    setTopProductsData([]);
+    topProductsReqIdRef.current += 1;
+
+    if (hasNoBranchActivity) {
+      setTrendLoading(false);
+      setTopProductsLoading(false);
+      return;
+    }
+
+    const topProductsReqId = topProductsReqIdRef.current;
+    void loadTrend(false);
+    void (async () => {
+      try {
+        const params = new URLSearchParams({
+          start_date: start,
+          end_date: end,
+          branch_id: String(activeBranchId),
+          limit: '5',
+        });
+        const rows = await fetchTopSellingApi(params);
+        if (
+          topProductsReqId !== topProductsReqIdRef.current ||
+          activeBranchIdRef.current !== activeBranchId
+        ) {
+          return;
+        }
+        setTopProductsData(
+          Array.isArray(rows)
+            ? rows.map((item) => ({
+                name: item.MENU_NAME,
+                sales: item.total_quantity,
+              }))
+            : [],
+        );
+      } catch (error) {
+        if (
+          topProductsReqId !== topProductsReqIdRef.current ||
+          activeBranchIdRef.current !== activeBranchId
+        ) {
+          return;
+        }
+        console.warn('[AdminDashboard] Branch-scoped top products fetch failed:', error);
+        setTopProductsData([]);
+      } finally {
+        if (
+          topProductsReqId === topProductsReqIdRef.current &&
+          activeBranchIdRef.current === activeBranchId
+        ) {
+          setTopProductsLoading(false);
+        }
+      }
+    })();
+  }, [activeBranchId, branchCardsData, compareDateRange.end, compareDateRange.start, loadTrend]);
 
   useEffect(() => {
     if (!isComparePanelOpen) {
@@ -861,109 +1230,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     .filter((branch): branch is BranchPerformanceData => Boolean(branch));
   const canCompare = selectedCompareBranches.length >= 2;
 
-  // Recompute summary cards (total revenue, sales, expenses)
+  // When user focuses a branch card, mirror that branch's totals in the summary row.
   useEffect(() => {
-    // If a specific branch is focused, mirror that branch card exactly (per-branch view).
-    if (activeBranchId && branchCardsData.length > 0) {
-      const source = branchCardsData;
-      const branch = source.find((b) => b.id === activeBranchId);
-      if (!branch) {
-        return;
-      }
-      const totalExpenses = getEffectiveBranchTotalExpenses(branch);
-      const totalSales = branch.totalSales;
-      const totalRevenue = totalSales - totalExpenses;
+    if (branchCardsData.length === 0) return;
+
+    if (!activeBranchId) {
+      const totalSales = branchCardsData.reduce((s, b) => s + (Number(b.totalSales) || 0), 0);
+      const totalExpenses = branchCardsData.reduce(
+        (s, b) => s + getEffectiveBranchTotalExpenses(b),
+        0,
+      );
       setSummaryData({
-        totalRevenue,
         totalSales,
         totalExpenses,
-      });
-      return;
-    }
-
-    // While analytics calls are in-flight with no data yet, keep the previous summary (or cache).
-    if (analyticsLoading && branchCardsData.length === 0 && dailySalesForCards.length === 0) {
-      return;
-    }
-
-    // Aggregated (no focused branch): match branch cards when available (net + recon per branch).
-    if (!activeBranchId && branchCardsData.length > 0) {
-      const totalSales = branchCardsData.reduce((s, b) => s + b.totalSales, 0);
-      const totalExpenses = expenseSummaryTotal ?? 0;
-      setSummaryData({
         totalRevenue: totalSales - totalExpenses,
-        totalSales,
-        totalExpenses,
       });
       return;
     }
 
-    // Fallback: daily gross + period recon (all branches)
-    if (dailySalesForCards && dailySalesForCards.length > 0) {
-      const grossFromDaily = sumDailyTotalSales(dailySalesForCards || []);
-      const totalSales = grossFromDaily + (comparePeriodReconAll || 0);
-      const totalExpenses = expenseSummaryTotal ?? 0;
-      const totalRevenue = totalSales - totalExpenses;
-
-      setSummaryData({
-        totalRevenue,
-        totalSales,
-        totalExpenses,
-      });
-      return;
-    }
-
-    // Last-resort fallback (only when analytics is not loading and returned nothing): use legacy performance totals.
-    if (performanceData.length > 0) {
-      const totalSales = performanceData.reduce((s, b) => s + Number(b.totalSales || 0), 0);
-      const totalExpensesFromPerf = performanceData.reduce((s, b) => s + Number(b.totalExpenses || 0), 0);
-      const totalExpenses = expenseSummaryTotal ?? totalExpensesFromPerf;
-      setSummaryData({
-        totalRevenue: totalSales - totalExpenses,
-        totalSales,
-        totalExpenses,
-      });
-      return;
-    }
-
-    if (expenseSummaryTotal == null) setSummaryData(null);
-  }, [
-    activeBranchId,
-    analyticsLoading,
-    branchCardsData,
-    performanceData,
-    dailySalesForCards,
-    expenseSummaryTotal,
-    comparePeriodReconAll,
-  ]);
-
-  // Instant first paint: use last known-good summary for same branch/date scope.
-  useEffect(() => {
-    if (summaryData) return;
-    try {
-      const raw = localStorage.getItem(summaryCacheKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<SummaryData> | null;
-      if (!parsed) return;
-      const totalSales = Number(parsed.totalSales);
-      const totalExpenses = Number(parsed.totalExpenses);
-      const totalRevenue = Number(parsed.totalRevenue);
-      if (![totalSales, totalExpenses, totalRevenue].every(Number.isFinite)) return;
-      setSummaryData({ totalSales, totalExpenses, totalRevenue });
-    } catch {
-      // Ignore cache parse issues.
-    }
-  }, [summaryCacheKey, summaryData]);
+    const branch = branchCardsData.find((b) => b.id === activeBranchId);
+    if (!branch) return;
+    const totalExpenses = getEffectiveBranchTotalExpenses(branch);
+    const totalSales = branch.totalSales;
+    setSummaryData({
+      totalRevenue: totalSales - totalExpenses,
+      totalSales,
+      totalExpenses,
+    });
+  }, [activeBranchId, branchCardsData, expenseCategoryByBranch]);
 
   // Persist latest computed summary for fast subsequent loads.
   useEffect(() => {
     if (!summaryData) return;
-    // Persist only when summary comes from authoritative sources.
-    // Do not cache temporary fallback values from legacy/perf-only snapshots.
-    const hasAuthoritativeSource = Boolean(
-      (activeBranchId && (branchCardsData.length > 0 || performanceData.length > 0)) ||
-      (!activeBranchId && (branchCardsData.length > 0 || dailySalesForCards.length > 0))
-    );
+    const hasAuthoritativeSource = branchCardsData.length > 0 || dailySalesForCards.length > 0;
     if (!hasAuthoritativeSource) return;
     try {
       localStorage.setItem(summaryCacheKey, JSON.stringify(summaryData));
@@ -1228,7 +1527,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const branchMap = expenseCategoryByBranch[branch.id];
     if (!branchMap) return branch.totalExpenses;
     const fromBreakdown = Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
-    return fromBreakdown || branch.totalExpenses;
+    return fromBreakdown > 0 ? fromBreakdown : branch.totalExpenses;
   };
 
   const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
@@ -1450,23 +1749,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return Content;
   }, [t, trendAnchorDate, trendFallbackYear, trendPeriod, trendRangeEnd, trendRangeStart]);
 
-  const trendChartScale = useMemo(() => buildTrendChartScale(monthlyData), [monthlyData]);
+  const hasNonZeroTrendData = useMemo(() => hasNonZeroTrendRows(monthlyData), [monthlyData]);
 
   const trendChartData = useMemo(() => {
-    const salesDen = trendChartScale.salesAxisMax || 1;
-    const expensesDen = trendChartScale.expensesAxisMax || salesDen * TREND_EXPENSE_TO_SALES_AXIS_RATIO;
     return monthlyData.map((d) => {
       const rawSales = clampFiniteNonNegative(d.totalSales);
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
       return {
         ...d,
-        totalSales: rawSales / salesDen,
-        negativeExpenses: -(rawExpenses / expensesDen),
+        totalSales: rawSales,
+        negativeExpenses: -rawExpenses,
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
     });
-  }, [monthlyData, trendChartScale.salesAxisMax, trendChartScale.expensesAxisMax]);
+  }, [monthlyData]);
+
+  const trendYDomain = useMemo((): [number, number] => {
+    const sales = monthlyData.map((d) => clampFiniteNonNegative(d.totalSales));
+    const expenses = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
+    const maxAbs = Math.max(0, ...sales, ...expenses);
+    const nice = buildNiceMax(maxAbs);
+    return [-nice, nice];
+  }, [monthlyData]);
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
@@ -1541,8 +1846,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     </div>
   );
 
-  const hasDashboardContent = branchCardsData.length > 0 || performanceData.length > 0;
-  const isPageLoading = !hasDashboardContent && (loading || analyticsLoading);
+  const hasDashboardContent = branchCardsData.length > 0;
+  const isPageLoading = !hasDashboardContent && analyticsLoading;
 
   return (
     <>
@@ -1661,15 +1966,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               <div className="relative w-full min-w-0 h-96 min-h-[384px]">
                 {trendLoading && monthlyData.length === 0 ? (
                   <Skeleton className="h-full w-full rounded-xl" />
-                ) : trendChartData.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                    {t('admin_dashboard.no_revenue_data')}
+                ) : trendChartData.length === 0 || !hasNonZeroTrendData ? (
+                  <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-sm text-slate-500">
+                    <p>
+                      {activeBranchId && focusedBranchName
+                        ? t('admin_dashboard.no_branch_revenue_data', { branch: focusedBranchName })
+                        : t('admin_dashboard.no_revenue_data')}
+                    </p>
                   </div>
                 ) : (
                 <>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={384}>
+                <TrendChartContainer className="h-full w-full" minHeight={384} render={({ width, height }) => (
                   <BarChart
-                    key={activeBranchId || 'all'}
+                    key={`${activeBranchId || 'all'}-${trendPeriod}`}
+                    width={width}
+                    height={height}
                     data={trendChartData}
                     margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
                     stackOffset="sign"
@@ -1684,18 +1995,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     />
                     <YAxis 
                       tick={{ fontSize: 12, fill: '#94a3b8' }} 
-                      tickFormatter={(scaled) => {
-                        const s = Number(scaled);
-                        if (!Number.isFinite(s) || s === 0) return formatTrendYAxisTick(0);
-                        const axisMax =
-                          s > 0 ? trendChartScale.salesAxisMax : trendChartScale.expensesAxisMax;
-                        return formatTrendYAxisTick(Math.abs(s) * axisMax);
-                      }}
+                      tickFormatter={(value) => formatTrendYAxisTick(Math.abs(Number(value) || 0))}
                       axisLine={false}
                       tickLine={false}
                       width={52}
-                      domain={trendChartScale.domainScaled}
-                      ticks={trendChartScale.ticksScaled}
+                      domain={trendYDomain}
                     />
                     <Tooltip 
                       content={TrendTooltipContent}
@@ -1716,6 +2020,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
+                      minPointSize={2}
                       isAnimationActive={!trendLoading}
                     />
                     <Bar 
@@ -1725,10 +2030,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
+                      minPointSize={2}
                       isAnimationActive={!trendLoading}
                     />
                   </BarChart>
-                </ResponsiveContainer>
+                )} />
                 {trendLoading && monthlyData.length > 0 && (
                   <div
                     className="absolute inset-0 rounded-xl bg-white/50 pointer-events-none"
@@ -1812,13 +2118,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.top_selling_products')}</h3>
                 <div className="w-full min-w-0 h-72 min-h-[288px]">
-                  {analyticsLoading && topProductsData.length === 0 ? (
+                  {(analyticsLoading || topProductsLoading) && topProductsData.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
                       <Skeleton className="h-40 w-full rounded-2xl" />
                     </div>
                   ) : topProductsData.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-sm text-slate-500">
-                      {t('admin_dashboard.no_products_data')}
+                    <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center text-sm text-slate-500">
+                      <p>
+                        {activeBranchId && focusedBranchName
+                          ? t('admin_dashboard.no_branch_products_data', { branch: focusedBranchName })
+                          : t('admin_dashboard.no_products_data')}
+                      </p>
                     </div>
                   ) : (
                     <div className="h-full flex flex-col">
@@ -1889,28 +2199,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 );
               }
 
-              return orderedList.map((branch) => (
-                (() => {
-                  const effectiveExpenses = getEffectiveBranchTotalExpenses(branch);
-                  let branchForCard: BranchPerformanceData = {
-                    ...branch,
-                    totalExpenses: effectiveExpenses,
-                  };
+              return orderedList.map((branch) => {
+                const branchForCard: BranchPerformanceData = {
+                  ...branch,
+                  totalExpenses: getEffectiveBranchTotalExpenses(branch),
+                };
 
-                  // If this branch is currently focused, mirror the top summary cards (total sales & revenue).
-                  if (activeBranchId === branch.id && summaryData) {
-                    branchForCard = {
-                      ...branchForCard,
-                      totalSales: summaryData.totalSales,
-                      totalExpenses: summaryData.totalExpenses,
-                    };
-                  }
-
-                  return (
-                    <BranchPerformanceCard
-                      key={branch.id}
-                      branch={branchForCard}
-                      onClick={() => handleBranchFocus(branchForCard)}
+                return (
+                  <BranchPerformanceCard
+                    key={branch.id}
+                    branch={branchForCard}
+                    onClick={() => handleBranchFocus(branchForCard)}
                       onCompareToggle={() => handleBranchCompareToggle(branch.id)}
                       onTotalSalesClick={() => {
                         setCashReconModalBranch(branchForCard);
@@ -1918,10 +2217,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       }}
                       isSelected={compareBranchIds.includes(branch.id)}
                       isActive={activeBranchId === branch.id}
-                    />
-                  );
-                })()
-              ));
+                  />
+                );
+              });
             })()}
           </div>
         </motion.div>
