@@ -10,6 +10,11 @@ export type AdminDashboardTrendPoint = {
   date?: string;
 };
 
+export type BranchChartsCacheEntry = {
+  trendMonthly: AdminDashboardTrendPoint[];
+  topProducts: { name: string; sales: number }[];
+};
+
 export type AdminDashboardCachePayload = {
   summary?: {
     totalSales: number;
@@ -23,6 +28,8 @@ export type AdminDashboardCachePayload = {
   expenseCategoryByBranch: Record<number, Record<string, number>>;
   comparePeriodReconAll: number;
   trendByPeriod: Partial<Record<AdminDashboardTrendPeriod, AdminDashboardTrendPoint[]>>;
+  /** Per-branch monthly trend + top products for instant branch-card focus. */
+  branchChartsById?: Record<string, BranchChartsCacheEntry>;
 };
 
 const SESSION_STORAGE_KEY = 'resto_admin_dashboard_cache_v1';
@@ -165,5 +172,8 @@ export function patchAdminDashboardCache(
       ...base.trendByPeriod,
       ...(patch.trendByPeriod ?? {}),
     },
+    branchChartsById: patch.branchChartsById
+      ? { ...base.branchChartsById, ...patch.branchChartsById }
+      : base.branchChartsById,
   });
 }

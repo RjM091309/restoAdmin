@@ -588,6 +588,18 @@ export type AdminDashboardBundlePayload = {
     date?: string;
   }>;
   trendPeriod: string;
+  branchChartsById?: Record<
+    string,
+    {
+      trendMonthly: Array<{
+        name: string;
+        totalSales: number;
+        totalExpenses: number;
+        date?: string;
+      }>;
+      topProducts: { name: string; sales: number }[];
+    }
+  >;
 };
 
 /** Single backend round-trip for admin Dashboard (summary + branch cards + chart data). */
@@ -596,11 +608,13 @@ export async function fetchAdminDashboardBundleApi(params: {
   end: string;
   branchId?: string | null;
   period?: string;
+  includeBranchCharts?: boolean;
 }): Promise<AdminDashboardBundlePayload> {
   const qs = new URLSearchParams();
   qs.set('start_date', params.start);
   qs.set('end_date', params.end);
   if (params.period) qs.set('period', params.period);
+  if (params.includeBranchCharts) qs.set('include_branch_charts', 'true');
   if (params.branchId && params.branchId !== 'all') {
     qs.set('branch_id', params.branchId);
   } else {
@@ -608,7 +622,7 @@ export async function fetchAdminDashboardBundleApi(params: {
   }
 
   const url = `/api/analytics/admin-dashboard-bundle?${qs.toString()}`;
-  const { res, json } = await fetchJson(url, 35000);
+  const { res, json } = await fetchJson(url, 60000);
   if (!res.ok) {
     throw new Error(`Analytics admin-dashboard-bundle failed with status ${res.status}`);
   }
@@ -632,6 +646,7 @@ export async function fetchAdminDashboardBundleApi(params: {
     comparePeriodReconAll: Number(data.comparePeriodReconAll) || 0,
     trendData: Array.isArray(data.trendData) ? data.trendData : [],
     trendPeriod: String(data.trendPeriod || params.period || 'monthly'),
+    branchChartsById: data.branchChartsById ?? {},
   };
 }
 

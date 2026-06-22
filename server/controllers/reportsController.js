@@ -1225,12 +1225,16 @@ class ReportsController {
 			const trendPeriod = ['weekly', 'monthly', 'yearly'].includes(String(period || ''))
 				? String(period)
 				: 'monthly';
+			const includeBranchCharts =
+				req.query.include_branch_charts === '1' ||
+				req.query.include_branch_charts === 'true';
 
 			const bundle = await buildAdminDashboardBundle({
 				start_date,
 				end_date,
 				branchId,
 				period: trendPeriod,
+				include_branch_charts: includeBranchCharts,
 			});
 
 			return ApiResponse.success(

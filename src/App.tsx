@@ -188,6 +188,10 @@ const VerticalCarousel = ({ items }: { items: any[] }) => {
 
 import { useUser } from './context/UserContext';
 import { Toaster } from 'sonner';
+import {
+  isAdminDashboardUser,
+  prefetchAdminDashboardBundle,
+} from './utils/prefetchAdminDashboard';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isLoggedIn } = useUser();
@@ -226,6 +230,10 @@ const LoginView = () => {
 
       if (result.success) {
         login(result.data, result.tokens.accessToken);
+        if (isAdminDashboardUser(result.data?.permissions)) {
+          prefetchAdminDashboardBundle();
+          void import('./components/dashboard/AdminDashboard');
+        }
         navigate('/dashboard');
       } else {
         setError(result.error || 'Invalid username or password');
@@ -363,6 +371,12 @@ export default function App() {
     };
     checkSession();
   }, [logout, syncSessionUser]);
+
+  // Warm admin dashboard cache on session restore so first paint can skip skeleton.
+  useEffect(() => {
+    if (!isLoggedIn || !isAdminDashboardUser(user?.permissions)) return;
+    prefetchAdminDashboardBundle();
+  }, [isLoggedIn, user?.permissions]);
 
   // Panel States
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);

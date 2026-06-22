@@ -92,6 +92,103 @@ function buildSummary({ branchId, branchCards, totalExpenses }) {
 	};
 }
 
+function buildMonthlyTrendFromDaily(dailySales, dailyExpenses, byDate, start, end) {
+	const salesByDate = new Map();
+	const expensesByDom = Array(31).fill(0);
+
+	for (const row of dailySales || []) {
+		const date = String(row.sale_date ?? '').slice(0, 10);
+		if (!date || date < start || date > end) continue;
+		const net = Number(row.net_sales ?? 0);
+		const recon = Number(byDate?.[date] ?? 0);
+		salesByDate.set(date, (salesByDate.get(date) ?? 0) + net + recon);
+	}
+
+	for (const [date, amt] of Object.entries(byDate || {})) {
+		if (date < start || date > end) continue;
+		if (!salesByDate.has(date)) salesByDate.set(date, Number(amt) || 0);
+	}
+
+	for (const row of dailyExpenses || []) {
+		const date = String(row.expense_date ?? '').slice(0, 10);
+		if (!date || date < start || date > end) continue;
+		const dom = new Date(`${date}T12:00:00`).getDate();
+		if (dom >= 1 && dom <= 31) {
+			expensesByDom[dom - 1] += Number(row.total_expense ?? 0);
+		}
+	}
+
+	const salesByDom = Array(31).fill(0);
+	for (const [date, val] of salesByDate) {
+		const dom = new Date(`${date}T12:00:00`).getDate();
+		if (dom >= 1 && dom <= 31) salesByDom[dom - 1] += val;
+	}
+
+	return Array.from({ length: 31 }, (_, idx) => ({
+		name: String(idx + 1),
+		totalSales: salesByDom[idx],
+		totalExpenses: expensesByDom[idx],
+	}));
+}
+
+async function buildBranchChartsForAll(branchCards, start_date, end_date) {
+	const branchChartsById = {};
+	const branches = branchCards || [];
+
+	async function loadBranchChart(branch) {
+		const branchId = branch.id;
+		const hasActivity =
+			(Number(branch.totalSales) || 0) > 0 || (Number(branch.totalExpenses) || 0) > 0;
+		if (!hasActivity) {
+			branchChartsById[String(branchId)] = { trendMonthly: [], topProducts: [] };
+			return;
+		}
+
+		const pyParams = { start_date, end_date, branch_id: String(branchId) };
+		const [dailySalesRes, dailyExpensesRes, topSellingRes, recon] = await Promise.all([
+			fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
+			fetchPyServerOptional('/api/analytics/daily-expenses', pyParams),
+			fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: '5' }),
+			CashReconciliationModel.aggregatesForRange(branchId, start_date, end_date).catch(() => ({
+				total: 0,
+				byDate: {},
+			})),
+		]);
+
+		const dailySales = dailySalesRes?.data?.data || [];
+		const dailyExpenses = dailyExpensesRes?.data?.data || [];
+		const topSelling = topSellingRes?.data?.data || [];
+		const byDate = recon?.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
+
+		branchChartsById[String(branchId)] = {
+			trendMonthly: buildMonthlyTrendFromDaily(
+				dailySales,
+				dailyExpenses,
+				byDate,
+				start_date,
+				end_date,
+			),
+			topProducts: (topSelling || []).slice(0, 5).map((item) => ({
+				name: item.MENU_NAME || '',
+				sales: item.total_quantity,
+			})),
+		};
+	}
+
+	const queue = [...branches];
+	const workerCount = Math.min(4, Math.max(1, queue.length));
+	await Promise.all(
+		Array.from({ length: workerCount }, async () => {
+			while (queue.length > 0) {
+				const branch = queue.shift();
+				if (branch) await loadBranchChart(branch);
+			}
+		}),
+	);
+
+	return branchChartsById;
+}
+
 /**
  * Single server-side bundle for admin dashboard (summary + branch cards + charts data).
  */
@@ -100,6 +197,7 @@ async function buildAdminDashboardBundle({
 	end_date,
 	branchId = null,
 	period = 'monthly',
+	include_branch_charts = false,
 }) {
 	const pyParams = { start_date, end_date };
 	if (branchId != null && String(branchId).trim() !== '') {
@@ -198,6 +296,10 @@ async function buildAdminDashboardBundle({
 		totalExpenses: Number(expenseSummary?.total_expense) || 0,
 	});
 
+	const branchChartsById = include_branch_charts
+		? await buildBranchChartsForAll(branchCardsData, start_date, end_date)
+		: {};
+
 	return {
 		summary,
 		branchCardsData,
@@ -208,6 +310,7 @@ async function buildAdminDashboardBundle({
 		comparePeriodReconAll,
 		trendData: finalTrendData,
 		trendPeriod: String(period || 'monthly'),
+		branchChartsById,
 	};
 }
 
