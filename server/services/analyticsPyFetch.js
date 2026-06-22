@@ -1,6 +1,6 @@
 const { LRUCache } = require('lru-cache');
 
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
+const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
 const PYSERVER_TIMEOUT_MS = Number(process.env.ANALYTICS_PYSERVER_TIMEOUT_MS || 15000);
 const CACHE_TTL_MS = Number(process.env.ANALYTICS_PY_CACHE_TTL_MS || 120000);
 const CACHE_MAX = Number(process.env.ANALYTICS_PY_CACHE_MAX || 64);
@@ -50,4 +50,23 @@ async function fetchPyCached(path, params, opts = {}) {
   }
 }
 
-module.exports = { fetchPyCached, cacheKey };
+/**
+ * Like fetchPyCached but returns null on failure (timeouts, PyServer down).
+ * Used by dashboard bundles so one slow endpoint does not fail the whole payload.
+ */
+async function fetchPyCachedOptional(path, params, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? PYSERVER_TIMEOUT_MS;
+  try {
+    return await fetchPyCached(path, params, { ...opts, timeoutMs });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (/aborted/i.test(msg)) {
+      console.warn(`[analyticsPyFetch] PyServer slow (>${timeoutMs}ms): ${path}`);
+    } else {
+      console.warn(`[analyticsPyFetch] ${path}:`, msg);
+    }
+    return null;
+  }
+}
+
+module.exports = { fetchPyCached, fetchPyCachedOptional, cacheKey };

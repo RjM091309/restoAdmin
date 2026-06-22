@@ -10,6 +10,11 @@ const ApiResponse = require('../utils/apiResponse');
 const { buildSalesDashboardBundle } = require('../services/salesDashboardBundle');
 const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
 const { buildAdminDashboardBundle } = require('../services/adminDashboardBundle');
+const {
+	buildAdminDashboardBundleCacheKey,
+	getCachedAdminDashboardBundle,
+	setCachedAdminDashboardBundle,
+} = require('../services/adminDashboardBundleCache');
 
 // Python analytics service (PyServer) base URL - internal only
 const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
@@ -1229,13 +1234,25 @@ class ReportsController {
 				req.query.include_branch_charts === '1' ||
 				req.query.include_branch_charts === 'true';
 
-			const bundle = await buildAdminDashboardBundle({
+			const cacheKey = buildAdminDashboardBundleCacheKey({
 				start_date,
 				end_date,
 				branchId,
 				period: trendPeriod,
 				include_branch_charts: includeBranchCharts,
 			});
+
+			let bundle = getCachedAdminDashboardBundle(cacheKey);
+			if (!bundle) {
+				bundle = await buildAdminDashboardBundle({
+					start_date,
+					end_date,
+					branchId,
+					period: trendPeriod,
+					include_branch_charts: includeBranchCharts,
+				});
+				setCachedAdminDashboardBundle(cacheKey, bundle);
+			}
 
 			return ApiResponse.success(
 				res,

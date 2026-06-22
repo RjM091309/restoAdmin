@@ -36,6 +36,8 @@ const SESSION_STORAGE_KEY = 'resto_admin_dashboard_cache_v1';
 const LOCAL_STORAGE_KEY = 'resto_admin_dashboard_cache_v1_local';
 /** Persist across browser sessions; refreshed in background after TTL. */
 const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Show stale local cache for instant paint; background refresh updates live data. */
+const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 10;
 
 const EMPTY_PAYLOAD: AdminDashboardCachePayload = {
@@ -128,6 +130,33 @@ export function readAdminDashboardCache(key: string): AdminDashboardCachePayload
   }
 }
 
+/** Fresh session cache, or local cache up to STALE_LOCAL_CACHE_TTL_MS (stale-while-revalidate). */
+export function readAdminDashboardCacheIncludingStale(
+  key: string,
+): AdminDashboardCachePayload | null {
+  const now = Date.now();
+
+  try {
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data) {
+      return payloadFromEntry(sessionEntry.data);
+    }
+  } catch {
+    // sessionStorage unavailable — fall through to localStorage
+  }
+
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (!localEntry?.data) return null;
+    if (now - localEntry.at > STALE_LOCAL_CACHE_TTL_MS) return null;
+    return payloadFromEntry(localEntry.data);
+  } catch {
+    return null;
+  }
+}
+
 export function writeAdminDashboardCache(key: string, data: AdminDashboardCachePayload): void {
   const entry = { at: Date.now(), data };
 
@@ -155,11 +184,23 @@ export function patchAdminDashboardCache(
     trendByPeriod?: Partial<Record<AdminDashboardTrendPeriod, AdminDashboardTrendPoint[]>>;
   },
 ): void {
-  const existing = readAdminDashboardCache(key);
+  const existing = readAdminDashboardCacheIncludingStale(key) ?? readAdminDashboardCache(key);
   const base = existing ?? EMPTY_PAYLOAD;
   writeAdminDashboardCache(key, {
     ...base,
     ...patch,
+    branchCardsData:
+      patch.branchCardsData && patch.branchCardsData.length > 0
+        ? patch.branchCardsData
+        : base.branchCardsData,
+    branchRevenueDistribution:
+      patch.branchRevenueDistribution && patch.branchRevenueDistribution.length > 0
+        ? patch.branchRevenueDistribution
+        : base.branchRevenueDistribution,
+    dailySalesForCards:
+      patch.dailySalesForCards && patch.dailySalesForCards.length > 0
+        ? patch.dailySalesForCards
+        : base.dailySalesForCards,
     topProductsData:
       patch.topProductsData && patch.topProductsData.length > 0
         ? patch.topProductsData

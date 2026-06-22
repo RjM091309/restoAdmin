@@ -2,7 +2,7 @@ import { fetchAdminDashboardBundleApi } from '../services/analyticsService';
 import {
   buildAdminDashboardCacheKey,
   hasAdminDashboardCacheData,
-  readAdminDashboardCache,
+  readAdminDashboardCacheIncludingStale,
   writeAdminDashboardCache,
 } from './adminDashboardCache';
 
@@ -34,7 +34,7 @@ export function getDefaultAdminDashboardCacheKey(): string {
 /** Await in-flight prefetch so AdminDashboard does not duplicate the bundle request. */
 export function waitForAdminDashboardPrefetch(cacheKey?: string): Promise<void> {
   const key = cacheKey ?? getDefaultAdminDashboardCacheKey();
-  if (hasAdminDashboardCacheData(readAdminDashboardCache(key))) {
+  if (hasAdminDashboardCacheData(readAdminDashboardCacheIncludingStale(key))) {
     return Promise.resolve();
   }
   if (inFlightKey === key && inFlightPromise) {
@@ -53,7 +53,7 @@ export function prefetchAdminDashboardBundle(params?: {
   const end = params?.end || current.end;
   const key = buildAdminDashboardCacheKey({ start, end, branchId: null });
 
-  if (hasAdminDashboardCacheData(readAdminDashboardCache(key))) return;
+  if (hasAdminDashboardCacheData(readAdminDashboardCacheIncludingStale(key))) return;
   if (inFlightKey === key && inFlightPromise) return;
 
   inFlightKey = key;
@@ -66,7 +66,7 @@ export function prefetchAdminDashboardBundle(params?: {
         period: 'monthly',
       });
 
-      if (hasAdminDashboardCacheData(readAdminDashboardCache(key))) return;
+      if (hasAdminDashboardCacheData(readAdminDashboardCacheIncludingStale(key))) return;
 
       const trendByPeriod =
         bundle.trendData?.length && hasNonZeroTrendRows(bundle.trendData)

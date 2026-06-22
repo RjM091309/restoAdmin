@@ -25,7 +25,7 @@ import {
   buildAdminDashboardCacheKey,
   hasAdminDashboardCacheData,
   patchAdminDashboardCache,
-  readAdminDashboardCache,
+  readAdminDashboardCacheIncludingStale,
   type AdminDashboardCachePayload,
   type AdminDashboardTrendPoint,
 } from '../../utils/adminDashboardCache';
@@ -532,7 +532,7 @@ const applyReconToPerformanceTrend = (
 const INITIAL_ADMIN_CACHE = (() => {
   const range = getCurrentMonthRange();
   const key = buildAdminDashboardCacheKey({ start: range.start, end: range.end, branchId: null });
-  const cached = readAdminDashboardCache(key);
+  const cached = readAdminDashboardCacheIncludingStale(key);
   return { key, cached: hasAdminDashboardCacheData(cached) ? cached : null };
 })();
 
@@ -784,7 +784,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   useEffect(() => {
     const { start, end } = getDateRangeForAnalytics();
-    const cached = readAdminDashboardCache(analyticsCacheKey);
+    const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
     if (cached?.branchChartsById) {
       seedBranchPrefetchFromChartsById(cached.branchChartsById, start, end);
     }
@@ -1044,8 +1044,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           summary.totalSales > 0 || summary.totalExpenses > 0 ? summary : (prev ?? summary),
         );
       } else {
-        setBranchCardsData(payload.branchCardsData);
-        setBranchRevenueDistribution(payload.branchRevenueDistribution);
+        setBranchCardsData((prev) =>
+          payload.branchCardsData.length > 0 ? payload.branchCardsData : prev,
+        );
+        setBranchRevenueDistribution((prev) =>
+          preferNonEmptyArray(payload.branchRevenueDistribution, prev),
+        );
         if (!activeBranchIdRef.current) {
           setTopProductsData(payload.topProductsData);
         }
@@ -1418,7 +1422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     let cancelled = false;
 
     const run = async () => {
-      const cached = readAdminDashboardCache(analyticsCacheKey);
+      const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(cached)) {
         hydrateFromCache(cached);
         void loadAdminBundle(true);
@@ -1428,7 +1432,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       await waitForAdminDashboardPrefetch(analyticsCacheKey);
       if (cancelled) return;
 
-      const afterPrefetch = readAdminDashboardCache(analyticsCacheKey);
+      const afterPrefetch = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(afterPrefetch)) {
         hydrateFromCache(afterPrefetch);
         void loadAdminBundle(true);
@@ -1483,7 +1487,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       return;
     }
 
-    const cached = readAdminDashboardCache(analyticsCacheKey);
+    const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
     const cachedTrend = cached?.trendByPeriod?.[trendPeriod];
     if (cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
       setMonthlyData(cachedTrend);

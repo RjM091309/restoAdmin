@@ -1,46 +1,10 @@
 const CashReconciliationModel = require('../models/cashReconciliationModel');
+const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 15000);
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
-async function fetchPyServer(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
-	const url = new URL(path, PYSERVER_BASE_URL);
-	for (const [key, value] of Object.entries(params)) {
-		if (value != null && String(value).trim() !== '') {
-			url.searchParams.set(key, String(value));
-		}
-	}
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		const res = await fetch(url.toString(), { signal: controller.signal });
-		if (!res.ok) {
-			const text = await res.text().catch(() => '');
-			throw new Error(`PyServer ${path} status ${res.status}: ${text.slice(0, 200)}`);
-		}
-		const json = await res.json().catch(() => null);
-		if (!json || json.success === false) {
-			throw new Error(json?.message || `PyServer ${path} error`);
-		}
-		return json;
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-async function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
-	try {
-		return await fetchPyServer(path, params, timeoutMs);
-	} catch (err) {
-		const msg = err?.message || String(err);
-		if (/aborted/i.test(msg)) {
-			console.warn(`[adminDashboardBundle] PyServer slow (>${timeoutMs}ms): ${path}`);
-		} else {
-			console.warn(`[adminDashboardBundle] ${path}:`, msg);
-		}
-		return null;
-	}
+function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
+	return fetchPyCachedOptional(path, params, { timeoutMs });
 }
 
 function buildExpenseMaps(rows) {

@@ -249,6 +249,14 @@ app.use((err, req, res, next) => {
 		console.log('API Server running at http://localhost:' + app.get('port'));
 		console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
 
+		// Warm admin dashboard bundle (current month) so first client request is fast after restart.
+		const { warmAdminDashboardBundle } = require('./services/adminDashboardBundleCache');
+		setImmediate(() => {
+			void warmAdminDashboardBundle().catch((err) => {
+				console.warn('[AdminDashboardCache] Background warm error:', err?.message || err);
+			});
+		});
+
 		const telegramPollingEnabled = String(process.env.TELEGRAM_POLLING_ENABLED || 'true').toLowerCase() !== 'false';
 		if (telegramPollingEnabled) {
 			TelegramService.startPolling().catch((error) => {
