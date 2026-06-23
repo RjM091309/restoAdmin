@@ -49,10 +49,11 @@ import {
   isBranchDashboardPayloadEmpty,
   isKnownEmptyBranch,
   markKnownEmptyBranch,
-  readBranchDashboardCache,
+  readBranchDashboardCacheIncludingStale,
   writeBranchDashboardCache,
   type BranchDashboardCachePayload,
 } from '../../utils/branchDashboardCache';
+import { waitForBranchDashboardPrefetch } from '../../utils/prefetchBranchDashboard';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -417,7 +418,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       start: dateRange.start || fallback.start,
       end: dateRange.end || fallback.end,
     });
-    const cached = readBranchDashboardCache(key);
+    const cached = readBranchDashboardCacheIncludingStale(key);
     const hasCache = hasBranchDashboardCacheData(cached);
     const knownEmpty = isKnownEmptyBranch(key);
     return {
@@ -700,23 +701,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     return Content;
   }, [t]);
 
-  const applyBundle = React.useCallback((bundle: BranchDashboardCachePayload) => {
-    const payload: BranchDashboardCachePayload = {
-      ...bundle,
-      dashboardData: bundle.dashboardData ?? EMPTY_BRANCH_DASHBOARD,
-    };
-    setDashboardData(payload.dashboardData);
-    setTopCategories(payload.topCategories);
-    setTrendingMenusData(payload.trendingMenusData);
-    setRecentOrders(payload.recentOrders);
-    setRecentOrderItemsMeta(payload.recentOrderItemsMeta);
-    if (isBranchDashboardPayloadEmpty(payload)) {
-      markKnownEmptyBranch(cacheKey);
-    } else {
-      clearKnownEmptyBranch(cacheKey);
-      writeBranchDashboardCache(cacheKey, payload);
-    }
-  }, [cacheKey]);
+  const hasDashboardPayloadStats = React.useCallback((payload: BranchDashboardCachePayload) => {
+    const stats = payload.dashboardData?.stats;
+    return (
+      !!stats &&
+      (stats.totalOrders > 0 ||
+        stats.totalSales > 0 ||
+        stats.totalExpenses > 0 ||
+        (payload.dashboardData?.revenueData?.length ?? 0) > 0)
+    );
+  }, []);
+
+  const applyBundle = React.useCallback(
+    (bundle: BranchDashboardCachePayload, options: { background?: boolean } = {}) => {
+      const { background = false } = options;
+      const payload: BranchDashboardCachePayload = {
+        ...bundle,
+        dashboardData: bundle.dashboardData ?? EMPTY_BRANCH_DASHBOARD,
+      };
+      const hasStats = hasDashboardPayloadStats(payload);
+
+      if (background) {
+        if (hasStats && payload.dashboardData) {
+          setDashboardData(payload.dashboardData);
+        }
+        setTopCategories((prev) => (payload.topCategories.length > 0 ? payload.topCategories : prev));
+        setTrendingMenusData((prev) =>
+          payload.trendingMenusData.length > 0 ? payload.trendingMenusData : prev,
+        );
+        setRecentOrders((prev) => (payload.recentOrders.length > 0 ? payload.recentOrders : prev));
+        setRecentOrderItemsMeta((prev) =>
+          Object.keys(payload.recentOrderItemsMeta).length > 0
+            ? payload.recentOrderItemsMeta
+            : prev,
+        );
+      } else {
+        setDashboardData((prev) =>
+          hasStats && payload.dashboardData ? payload.dashboardData : (prev ?? EMPTY_BRANCH_DASHBOARD),
+        );
+        setTopCategories((prev) => (payload.topCategories.length > 0 ? payload.topCategories : prev));
+        setTrendingMenusData((prev) =>
+          payload.trendingMenusData.length > 0 ? payload.trendingMenusData : prev,
+        );
+        setRecentOrders((prev) => (payload.recentOrders.length > 0 ? payload.recentOrders : prev));
+        setRecentOrderItemsMeta((prev) =>
+          Object.keys(payload.recentOrderItemsMeta).length > 0
+            ? payload.recentOrderItemsMeta
+            : prev,
+        );
+      }
+
+      if (payload.topCategories.length > 0) setLoadingTopCategories(false);
+      if (payload.trendingMenusData.length > 0) setLoadingTrendingMenus(false);
+      if (payload.recentOrders.length > 0) setLoadingRecentOrders(false);
+
+      if (isBranchDashboardPayloadEmpty(payload)) {
+        if (!background) {
+          markKnownEmptyBranch(cacheKey);
+        }
+      } else {
+        clearKnownEmptyBranch(cacheKey);
+        writeBranchDashboardCache(cacheKey, payload);
+      }
+    },
+    [cacheKey, hasDashboardPayloadStats],
+  );
 
   const loadDashboardBundle = React.useCallback(
     async (background: boolean) => {
@@ -739,19 +788,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         });
         if (reqId !== dashboardReqSeq.current) return;
 
-        applyBundle({
-          ...bundle,
-          recentOrders: bundle.recentOrders as OrderRecord[],
-        });
+        applyBundle(
+          {
+            ...bundle,
+            recentOrders: bundle.recentOrders as OrderRecord[],
+          },
+          { background },
+        );
       } catch (error) {
         if (reqId !== dashboardReqSeq.current) return;
         console.error('Failed to load branch dashboard bundle:', error);
         if (!background) {
-          setDashboardData(EMPTY_BRANCH_DASHBOARD);
-          setTopCategories([]);
-          setTrendingMenusData([]);
-          setRecentOrders([]);
-          setRecentOrderItemsMeta({});
+          setDashboardData((prev) => prev ?? EMPTY_BRANCH_DASHBOARD);
         }
       } finally {
         if (reqId !== dashboardReqSeq.current) return;
@@ -778,33 +826,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
     const cacheKeyChanged = loadedCacheKeyRef.current !== cacheKey;
     loadedCacheKeyRef.current = cacheKey;
 
-    const cached = readBranchDashboardCache(cacheKey);
-    if (hasBranchDashboardCacheData(cached)) {
-      hydrateFromCache(cached);
-      setPageLoading(false);
-      void loadDashboardBundle(true);
-      return;
-    }
-
-    if (isKnownEmptyBranch(cacheKey)) {
-      if (cacheKeyChanged) {
-        setDashboardData(EMPTY_BRANCH_DASHBOARD);
-        setTopCategories([]);
-        setTrendingMenusData([]);
-        setRecentOrders([]);
-        setRecentOrderItemsMeta({});
-      }
-      setPageLoading(false);
-      void loadDashboardBundle(true);
-      return;
-    }
-
-    // Unknown branch — load bundle directly (server Phase 1 detects empty branches fast).
-    setPageLoading(true);
     let cancelled = false;
-    void loadDashboardBundle(false).finally(() => {
-      if (!cancelled) setPageLoading(false);
-    });
+
+    const run = async () => {
+      const cached = readBranchDashboardCacheIncludingStale(cacheKey);
+      if (hasBranchDashboardCacheData(cached)) {
+        hydrateFromCache(cached);
+        setPageLoading(false);
+        void loadDashboardBundle(true);
+        return;
+      }
+
+      await waitForBranchDashboardPrefetch(cacheKey);
+      if (cancelled) return;
+
+      const afterPrefetch = readBranchDashboardCacheIncludingStale(cacheKey);
+      if (hasBranchDashboardCacheData(afterPrefetch)) {
+        hydrateFromCache(afterPrefetch);
+        setPageLoading(false);
+        void loadDashboardBundle(true);
+        return;
+      }
+
+      if (isKnownEmptyBranch(cacheKey)) {
+        if (cacheKeyChanged) {
+          setDashboardData(EMPTY_BRANCH_DASHBOARD);
+          setTopCategories([]);
+          setTrendingMenusData([]);
+          setRecentOrders([]);
+          setRecentOrderItemsMeta({});
+        }
+        setPageLoading(false);
+        void loadDashboardBundle(true);
+        return;
+      }
+
+      setPageLoading(true);
+      void loadDashboardBundle(false).finally(() => {
+        if (!cancelled) setPageLoading(false);
+      });
+    };
+
+    void run();
+
     return () => {
       cancelled = true;
     };

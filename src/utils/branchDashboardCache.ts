@@ -35,8 +35,13 @@ export type BranchDashboardCachePayload = {
   recentOrderItemsMeta: Record<string, { lineCount: number; totalQty: number }>;
 };
 
-const STORAGE_KEY = 'resto_branch_dashboard_cache_v1';
+const SESSION_STORAGE_KEY = 'resto_branch_dashboard_cache_v1';
+const LOCAL_STORAGE_KEY = 'resto_branch_dashboard_cache_v1_local';
 const EMPTY_MARKER_KEY = 'resto_branch_dashboard_empty_v1';
+/** Fresh local cache TTL; background refresh after expiry. */
+const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Stale-while-revalidate for instant paint across sessions/restarts. */
+const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 12;
 
 const EMPTY_PAYLOAD: BranchDashboardCachePayload = {
@@ -48,6 +53,38 @@ const EMPTY_PAYLOAD: BranchDashboardCachePayload = {
 };
 
 type CacheStore = Record<string, { at: number; data: BranchDashboardCachePayload }>;
+
+function readCacheStore(storage: Storage, storageKey: string): CacheStore | null {
+  try {
+    const raw = storage.getItem(storageKey);
+    if (!raw) return null;
+    return JSON.parse(raw) as CacheStore;
+  } catch {
+    return null;
+  }
+}
+
+function pruneCacheStore(store: CacheStore): CacheStore {
+  const keys = Object.entries(store)
+    .sort(([, a], [, b]) => b.at - a.at)
+    .map(([k]) => k);
+  for (const k of keys.slice(MAX_ENTRIES)) {
+    delete store[k];
+  }
+  return store;
+}
+
+function writeCacheStore(storage: Storage, storageKey: string, store: CacheStore): void {
+  storage.setItem(storageKey, JSON.stringify(pruneCacheStore(store)));
+}
+
+function payloadFromEntry(entry: BranchDashboardCachePayload): BranchDashboardCachePayload {
+  return {
+    ...EMPTY_PAYLOAD,
+    ...entry,
+    recentOrderItemsMeta: entry.recentOrderItemsMeta ?? {},
+  };
+}
 
 export function buildBranchDashboardCacheKey(params: {
   branchId: string;
@@ -130,36 +167,73 @@ export function clearKnownEmptyBranch(key: string): void {
 }
 
 export function readBranchDashboardCache(key: string): BranchDashboardCachePayload | null {
+  const now = Date.now();
+
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const store = JSON.parse(raw) as CacheStore;
-    const entry = store[key]?.data;
-    if (!entry) return null;
-    return {
-      ...EMPTY_PAYLOAD,
-      ...entry,
-      recentOrderItemsMeta: entry.recentOrderItemsMeta ?? {},
-    };
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data) {
+      return payloadFromEntry(sessionEntry.data);
+    }
+  } catch {
+    // sessionStorage unavailable — fall through to localStorage
+  }
+
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (!localEntry?.data) return null;
+    if (now - localEntry.at > LOCAL_CACHE_TTL_MS) return null;
+    return payloadFromEntry(localEntry.data);
+  } catch {
+    return null;
+  }
+}
+
+/** Fresh session cache, or local cache up to STALE_LOCAL_CACHE_TTL_MS. */
+export function readBranchDashboardCacheIncludingStale(
+  key: string,
+): BranchDashboardCachePayload | null {
+  const now = Date.now();
+
+  try {
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data) {
+      return payloadFromEntry(sessionEntry.data);
+    }
+  } catch {
+    // sessionStorage unavailable — fall through to localStorage
+  }
+
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (!localEntry?.data) return null;
+    if (now - localEntry.at > STALE_LOCAL_CACHE_TTL_MS) return null;
+    return payloadFromEntry(localEntry.data);
   } catch {
     return null;
   }
 }
 
 export function writeBranchDashboardCache(key: string, data: BranchDashboardCachePayload): void {
+  const entry = { at: Date.now(), data };
+
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    const store: CacheStore = raw ? (JSON.parse(raw) as CacheStore) : {};
-    store[key] = { at: Date.now(), data };
-    const keys = Object.entries(store)
-      .sort(([, a], [, b]) => b.at - a.at)
-      .map(([k]) => k);
-    for (const k of keys.slice(MAX_ENTRIES)) {
-      delete store[k];
-    }
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+    const store = readCacheStore(sessionStorage, SESSION_STORAGE_KEY) ?? {};
+    store[key] = entry;
+    writeCacheStore(sessionStorage, SESSION_STORAGE_KEY, store);
   } catch {
     // sessionStorage full or unavailable — ignore
+  }
+
+  try {
+    const store = readCacheStore(localStorage, LOCAL_STORAGE_KEY) ?? {};
+    store[key] = entry;
+    writeCacheStore(localStorage, LOCAL_STORAGE_KEY, store);
+  } catch {
+    // localStorage quota — ignore
   }
 }
 
@@ -167,11 +241,20 @@ export function patchBranchDashboardCache(
   key: string,
   patch: Partial<BranchDashboardCachePayload>,
 ): void {
-  const existing = readBranchDashboardCache(key);
+  const existing = readBranchDashboardCacheIncludingStale(key) ?? readBranchDashboardCache(key);
   const base = existing ?? EMPTY_PAYLOAD;
   writeBranchDashboardCache(key, {
     ...base,
     ...patch,
+    topCategories:
+      patch.topCategories && patch.topCategories.length > 0 ? patch.topCategories : base.topCategories,
+    trendingMenusData:
+      patch.trendingMenusData && patch.trendingMenusData.length > 0
+        ? patch.trendingMenusData
+        : base.trendingMenusData,
+    recentOrders:
+      patch.recentOrders && patch.recentOrders.length > 0 ? patch.recentOrders : base.recentOrders,
     recentOrderItemsMeta: patch.recentOrderItemsMeta ?? base.recentOrderItemsMeta,
+    dashboardData: patch.dashboardData ?? base.dashboardData,
   });
 }

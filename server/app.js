@@ -255,6 +255,10 @@ app.use((err, req, res, next) => {
 			void warmAdminDashboardBundle().catch((err) => {
 				console.warn('[AdminDashboardCache] Background warm error:', err?.message || err);
 			});
+			const { warmBranchDashboardBundles } = require('./services/branchDashboardBundleCache');
+			void warmBranchDashboardBundles().catch((err) => {
+				console.warn('[BranchDashboardCache] Background warm error:', err?.message || err);
+			});
 		});
 
 		const telegramPollingEnabled = String(process.env.TELEGRAM_POLLING_ENABLED || 'true').toLowerCase() !== 'false';

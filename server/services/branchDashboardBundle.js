@@ -1,11 +1,14 @@
 const OrderModel = require('../models/orderModel');
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const ReportsModel = require('../models/reportsModel');
+const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 
-const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:2100';
 /** Per-call cap for dashboard bundle — avoid 15s waits on empty/slow branches. */
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 8000);
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+
+function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
+	return fetchPyCachedOptional(path, params, { timeoutMs });
+}
 
 const TOP_CATEGORY_COLORS = ['#0f172a', '#2563eb', '#f97316', '#16a34a', '#7c3aed', '#e11d48'];
 const DEFAULT_TRENDING_IMAGE =
@@ -39,6 +42,14 @@ function eachDateKeyInclusive(startYmd, endYmd) {
 		cur.setDate(cur.getDate() + 1);
 	}
 	return keys;
+}
+
+async function fetchPyServer(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
+	const json = await fetchPyServerOptional(path, params, timeoutMs);
+	if (!json) {
+		throw new Error(`PyServer ${path} unavailable`);
+	}
+	return json;
 }
 
 function fillRevenueDataGaps(points, startYmd, endYmd, expenseByDate, reconByDate) {
@@ -85,48 +96,6 @@ function mapRevenueRowsToDailySales(rows) {
 			gross_profit: total,
 		};
 	});
-}
-
-async function fetchPyServer(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
-	const url = new URL(path, PYSERVER_BASE_URL);
-	for (const [key, value] of Object.entries(params)) {
-		if (value != null && String(value).trim() !== '') {
-			url.searchParams.set(key, String(value));
-		}
-	}
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	try {
-		const res = await fetch(url.toString(), { signal: controller.signal });
-		if (!res.ok) {
-			const text = await res.text().catch(() => '');
-			throw new Error(`PyServer ${path} status ${res.status}: ${text.slice(0, 200)}`);
-		}
-		const json = await res.json().catch(() => null);
-		if (!json || json.success === false) {
-			throw new Error(json?.message || `PyServer ${path} error`);
-		}
-		return json;
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-/** Never throws — returns null on timeout/error so bundle can finish quickly. */
-async function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
-	try {
-		return await fetchPyServer(path, params, timeoutMs);
-	} catch (err) {
-		const msg = err?.message || String(err);
-		if (/aborted/i.test(msg)) {
-			console.warn(
-				`[branchDashboardBundle] PyServer slow (>${timeoutMs}ms), using fallback: ${path}`,
-			);
-		} else {
-			console.warn(`[branchDashboardBundle] ${path}:`, msg);
-		}
-		return null;
-	}
 }
 
 async function fetchDailySalesSeries(startDate, endDate, branchId, options = {}) {

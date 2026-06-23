@@ -9,6 +9,11 @@ const ReportsModel = require('../models/reportsModel');
 const ApiResponse = require('../utils/apiResponse');
 const { buildSalesDashboardBundle } = require('../services/salesDashboardBundle');
 const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
+const {
+	buildBranchDashboardBundleCacheKey,
+	getCachedBranchDashboardBundle,
+	setCachedBranchDashboardBundle,
+} = require('../services/branchDashboardBundleCache');
 const { buildAdminDashboardBundle } = require('../services/adminDashboardBundle');
 const {
 	buildAdminDashboardBundleCacheKey,
@@ -1196,11 +1201,21 @@ class ReportsController {
 				return ApiResponse.badRequest(res, 'branch_id is required');
 			}
 
-			const bundle = await buildBranchDashboardBundle({
-				branchId,
+			const cacheKey = buildBranchDashboardBundleCacheKey({
 				start_date,
 				end_date,
+				branchId,
 			});
+
+			let bundle = getCachedBranchDashboardBundle(cacheKey);
+			if (!bundle) {
+				bundle = await buildBranchDashboardBundle({
+					branchId,
+					start_date,
+					end_date,
+				});
+				setCachedBranchDashboardBundle(cacheKey, bundle);
+			}
 
 			return ApiResponse.success(
 				res,

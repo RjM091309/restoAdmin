@@ -192,6 +192,10 @@ import {
   isAdminDashboardUser,
   prefetchAdminDashboardBundle,
 } from './utils/prefetchAdminDashboard';
+import {
+  prefetchBranchDashboardBundle,
+  shouldPrefetchBranchDashboard,
+} from './utils/prefetchBranchDashboard';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isLoggedIn } = useUser();
@@ -233,6 +237,9 @@ const LoginView = () => {
         if (isAdminDashboardUser(result.data?.permissions)) {
           prefetchAdminDashboardBundle();
           void import('./components/dashboard/AdminDashboard');
+        } else if (shouldPrefetchBranchDashboard(result.data?.permissions, result.data?.branch_id)) {
+          prefetchBranchDashboardBundle({ branchId: String(result.data.branch_id) });
+          void import('./components/dashboard/Dashboard');
         }
         navigate('/dashboard');
       } else {
@@ -372,11 +379,17 @@ export default function App() {
     checkSession();
   }, [logout, syncSessionUser]);
 
-  // Warm admin dashboard cache on session restore so first paint can skip skeleton.
+  // Warm dashboard cache on session restore so first paint can skip skeleton.
   useEffect(() => {
-    if (!isLoggedIn || !isAdminDashboardUser(user?.permissions)) return;
-    prefetchAdminDashboardBundle();
-  }, [isLoggedIn, user?.permissions]);
+    if (!isLoggedIn || !user) return;
+    if (isAdminDashboardUser(user.permissions)) {
+      prefetchAdminDashboardBundle();
+      return;
+    }
+    if (shouldPrefetchBranchDashboard(user.permissions, user.branch_id)) {
+      prefetchBranchDashboardBundle({ branchId: String(user.branch_id) });
+    }
+  }, [isLoggedIn, user?.permissions, user?.branch_id]);
 
   // Panel States
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
