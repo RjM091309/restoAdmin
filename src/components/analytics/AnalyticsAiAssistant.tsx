@@ -22,6 +22,9 @@ import {
   AlertCircle,
   User,
   TrendingUp,
+  TrendingDown,
+  RotateCcw,
+  ShoppingBag,
 } from 'lucide-react';
 import { type Branch } from '../partials/Header';
 import { useUser } from '../../context/UserContext';
@@ -29,8 +32,16 @@ import {
   postAnalyticsAiChat,
   postManagementBrief,
   type AnalyticsAiChart,
+  type AnalyticsAiChatHistoryItem,
   type AnalyticsAiChatResponse,
 } from '../../services/analyticsAiService';
+import { fetchSalesDashboardBundleApi, type ApiDailySalesItem } from '../../services/analyticsService';
+import {
+  buildAnalyticsAiSessionKey,
+  clearAnalyticsAiSession,
+  loadAnalyticsAiSession,
+  saveAnalyticsAiSession,
+} from '../../lib/analyticsAiSession';
 import { cn } from '../../lib/utils';
 
 type AnalyticsAiAssistantProps = {
@@ -48,6 +59,45 @@ type ChatMessage = {
 
 const BAR_PALETTE = ['#6366f1', '#818cf8', '#10b981', '#34d399', '#f59e0b', '#fbbf24', '#ec4899', '#8b5cf6'];
 const LINE_COLOR = '#6366f1';
+const MAX_HISTORY_TURNS = 6;
+
+type PeriodKpis = {
+  netSales: number;
+  totalSales: number;
+  grossProfit: number;
+  orders: number;
+  netSalesPrev: number;
+};
+
+function aggregateDailySales(rows: ApiDailySalesItem[]) {
+  return rows.reduce(
+    (acc, row) => {
+      acc.totalSales += Number(row.total_sales) || 0;
+      acc.netSales += Number(row.net_sales) || 0;
+      acc.grossProfit += Number(row.gross_profit) || 0;
+      return acc;
+    },
+    { totalSales: 0, netSales: 0, grossProfit: 0 },
+  );
+}
+
+function pctChange(current: number, previous: number) {
+  if (previous <= 0) return null;
+  return ((current - previous) / previous) * 100;
+}
+
+function buildChatHistory(messages: ChatMessage[]): AnalyticsAiChatHistoryItem[] {
+  const items: AnalyticsAiChatHistoryItem[] = [];
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      items.push({ role: 'user', content: msg.text });
+    } else if (!msg.error) {
+      const content = msg.response?.summary || msg.text;
+      if (content) items.push({ role: 'assistant', content });
+    }
+  }
+  return items.slice(-MAX_HISTORY_TURNS * 2);
+}
 
 function formatMoney(value: number) {
   return `₱${Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -446,6 +496,100 @@ function TypingIndicator() {
   );
 }
 
+function KpiSnapshotCards({
+  kpis,
+  loading,
+}: {
+  kpis: PeriodKpis | null;
+  loading: boolean;
+}) {
+  const { t } = useTranslation();
+  const netPct = kpis ? pctChange(kpis.netSales, kpis.netSalesPrev) : null;
+
+  const cards: Array<{
+    key: string;
+    label: string;
+    value: string;
+    icon: typeof TrendingUp;
+    delta?: number | null;
+    highlight?: boolean;
+  }> = [
+    {
+      key: 'net',
+      label: t('analytics_ai.kpi_net_sales'),
+      value: kpis ? formatMoney(kpis.netSales) : '—',
+      delta: netPct,
+      icon: TrendingUp,
+      highlight: true,
+    },
+    {
+      key: 'total',
+      label: t('analytics_ai.kpi_total_sales'),
+      value: kpis ? formatMoney(kpis.totalSales) : '—',
+      icon: BarChart3,
+    },
+    {
+      key: 'profit',
+      label: t('analytics_ai.kpi_gross_profit'),
+      value: kpis ? formatMoney(kpis.grossProfit) : '—',
+      icon: Sparkles,
+    },
+    {
+      key: 'orders',
+      label: t('analytics_ai.kpi_orders'),
+      value: kpis ? kpis.orders.toLocaleString() : '—',
+      icon: ShoppingBag,
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {cards.map((card, i) => {
+        const Icon = card.icon;
+        const isUp = card.delta != null && card.delta >= 0;
+        return (
+          <motion.div
+            key={card.key}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.25 }}
+            className={cn(
+              'rounded-xl border bg-white p-3.5 shadow-sm',
+              card.highlight ? 'border-brand-primary/15' : 'border-gray-100',
+            )}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg bg-brand-primary/10 flex items-center justify-center text-brand-primary shrink-0">
+                <Icon size={14} />
+              </div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-muted truncate">
+                {card.label}
+              </p>
+            </div>
+            {loading ? (
+              <div className="h-7 w-24 rounded-md bg-gray-100 animate-pulse" />
+            ) : (
+              <p className="text-lg font-bold text-brand-text tracking-tight">{card.value}</p>
+            )}
+            {card.key === 'net' && !loading && card.delta != null && (
+              <p
+                className={cn(
+                  'mt-1.5 text-[11px] font-semibold inline-flex items-center gap-1',
+                  isUp ? 'text-emerald-600' : 'text-red-600',
+                )}
+              >
+                {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                {isUp ? '+' : ''}
+                {card.delta.toFixed(1)}% {t('analytics_ai.kpi_vs_previous')}
+              </p>
+            )}
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
 export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
   selectedBranch,
   dateRange,
@@ -458,11 +602,20 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [kpis, setKpis] = useState<PeriodKpis | null>(null);
+  const [kpisLoading, setKpisLoading] = useState(false);
+  const [restoredHint, setRestoredHint] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const prevMessageCountRef = useRef(0);
+  const skipSaveRef = useRef(true);
+
+  const sessionKey = useMemo(() => {
+    if (!user?.user_id || !dateRange.start || !dateRange.end) return null;
+    return buildAnalyticsAiSessionKey(user.user_id, dateRange.start, dateRange.end);
+  }, [user?.user_id, dateRange.start, dateRange.end]);
 
   const suggestions = useMemo(
     () => [
@@ -484,11 +637,77 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
     return { controller, requestId };
   }, []);
 
+  const clearConversation = useCallback(() => {
+    setMessages([]);
+    setRestoredHint(false);
+    if (sessionKey) clearAnalyticsAiSession(sessionKey);
+    skipSaveRef.current = false;
+    inputRef.current?.focus();
+  }, [sessionKey]);
+
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionKey) return;
+    skipSaveRef.current = true;
+    const loaded = loadAnalyticsAiSession(sessionKey);
+    setMessages(loaded ?? []);
+    setRestoredHint(Boolean(loaded?.length));
+  }, [sessionKey]);
+
+  useEffect(() => {
+    if (!sessionKey || skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+    saveAnalyticsAiSession(sessionKey, messages);
+  }, [messages, sessionKey]);
+
+  useEffect(() => {
+    if (!dateRange.start || !dateRange.end || !isAllBranches) {
+      setKpis(null);
+      return;
+    }
+    let cancelled = false;
+    setKpisLoading(true);
+    fetchSalesDashboardBundleApi({
+      start: dateRange.start,
+      end: dateRange.end,
+      branchId: 'all',
+    })
+      .then((bundle) => {
+        if (cancelled) return;
+        const current = aggregateDailySales(bundle.dailySalesCurrent);
+        const previous = aggregateDailySales(bundle.dailySalesPrevious);
+        const orders = bundle.branchSalesData.reduce(
+          (sum, row) => sum + (Number(row.order_count) || 0),
+          0,
+        );
+        setKpis({
+          netSales: current.netSales,
+          totalSales: current.totalSales,
+          grossProfit: current.grossProfit,
+          orders,
+          netSalesPrev: previous.netSales,
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('[AnalyticsAiAssistant] KPI fetch failed:', err);
+          setKpis(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setKpisLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange.end, dateRange.start, isAllBranches]);
 
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current) {
@@ -504,6 +723,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
       if (!dateRange.start || !dateRange.end) return;
 
       const { controller, requestId } = beginRequest();
+      const history = buildChatHistory(messages);
 
       setMessages((prev) => [
         ...prev,
@@ -511,6 +731,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
       ]);
       setInput('');
       setLoading(true);
+      setRestoredHint(false);
 
       try {
         const data = await postAnalyticsAiChat(
@@ -519,6 +740,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
             start_date: dateRange.start,
             end_date: dateRange.end,
             locale: resolveLocale(i18n.language, trimmed),
+            history,
           },
           controller.signal,
         );
@@ -551,7 +773,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
         }
       }
     },
-    [beginRequest, dateRange.end, dateRange.start, i18n.language, loading, t],
+    [beginRequest, dateRange.end, dateRange.start, i18n.language, loading, messages, t],
   );
 
   const generateManagementBrief = useCallback(async () => {
@@ -657,10 +879,30 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
         </motion.button>
       </motion.div>
 
+      <KpiSnapshotCards kpis={kpis} loading={kpisLoading} />
+
       <div
         className="flex-1 flex flex-col min-h-0 rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
         aria-busy={loading}
       >
+          {messages.length > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50/60">
+            <div className="min-w-0">
+              {restoredHint && (
+                <p className="text-[11px] text-brand-muted truncate">{t('analytics_ai.period_restored_hint')}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={clearConversation}
+              disabled={loading}
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-muted hover:text-brand-primary disabled:opacity-50 transition-colors"
+            >
+              <RotateCcw size={13} />
+              {t('analytics_ai.new_conversation')}
+            </button>
+          </div>
+          )}
           <div
             ref={scrollRef}
             role="log"

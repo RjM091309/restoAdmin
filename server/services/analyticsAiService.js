@@ -114,7 +114,47 @@ function parseNarrativeFromModel(parsed) {
   };
 }
 
-function buildAnalyticsPrompt(locale, message, context) {
+function sanitizeChatHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((item) => item && (item.role === 'user' || item.role === 'assistant'))
+    .map((item) => ({
+      role: item.role,
+      content: String(item.content || '')
+        .trim()
+        .slice(0, 2000),
+    }))
+    .filter((item) => item.content)
+    .slice(-12);
+}
+
+function formatHistoryForPrompt(locale, history) {
+  const items = sanitizeChatHistory(history);
+  if (!items.length) return '';
+  const lines = items.map((item) => {
+    const label =
+      item.role === 'user'
+        ? locale === 'ko'
+          ? '사용자'
+          : locale === 'fil'
+            ? 'User'
+            : 'User'
+        : locale === 'ko'
+          ? '어시스턴트'
+          : 'Assistant';
+    return `${label}: ${item.content}`;
+  });
+  if (locale === 'ko') {
+    return `\n이전 대화 (후속 질문 맥락):\n${lines.join('\n')}\n`;
+  }
+  if (locale === 'fil') {
+    return `\nNakaraang usapan (konteksto para sa follow-up):\n${lines.join('\n')}\n`;
+  }
+  return `\nPrior conversation (context for follow-up questions):\n${lines.join('\n')}\n`;
+}
+
+function buildAnalyticsPrompt(locale, message, context, history = []) {
+  const historyBlock = formatHistoryForPrompt(locale, history);
   if (locale === 'ko') {
     return `당신은 레스토랑 매출 분석 AI입니다.
 
@@ -122,7 +162,8 @@ function buildAnalyticsPrompt(locale, message, context) {
 - summary, bullets, suggestedReplies의 모든 문장은 반드시 한국어(한국어)로만 작성하세요.
 - 영어 문장을 사용하지 마세요. 숫자와 ₱, 날짜, 메뉴명은 그대로 사용해도 됩니다.
 - CONTEXT에 있는 숫자만 사용하세요. 새로운 숫자를 만들지 마세요.
-
+- 이전 대화가 있으면 후속 질문(예: "왜?", "더 자세히", "그 지점은?")에 맥락을 반영하세요.
+${historyBlock}
 사용자 질문: ${message}
 
 CONTEXT (JSON):
@@ -139,6 +180,8 @@ ${JSON.stringify(context)}
   if (locale === 'fil') {
     return `You are a restaurant sales analyst. Write summary, bullets, and suggestedReplies in Filipino (Tagalog).
 Use ONLY numbers from CONTEXT. Do not invent figures.
+If prior conversation exists, use it to answer follow-up questions (e.g. "bakit?", "explain more").
+${historyBlock}
 User question: ${message}
 
 CONTEXT (JSON):
@@ -149,6 +192,8 @@ Return JSON with summary (2-3 sentences), bullets (3-5), suggestedReplies (3-4).
 
   return `You are a restaurant sales analyst. Write summary, bullets, and suggestedReplies in English.
 Use ONLY numbers from CONTEXT. Do not invent figures.
+If prior conversation exists, use it to answer follow-up questions (e.g. "why?", "break that down", "which branch?").
+${historyBlock}
 User question: ${message}
 
 CONTEXT (JSON):
@@ -589,13 +634,14 @@ function fallbackNarrative({ cur, prev, pctChange, menuTop, branchRows, period, 
 }
 
 /**
- * @param {{ message: string, start_date: string, end_date: string, locale?: string }} input
+ * @param {{ message: string, start_date: string, end_date: string, locale?: string, history?: Array<{ role: string, content: string }> }} input
  */
 async function runAnalyticsChat(input) {
   const message = String(input.message || '').trim();
   const start_date = String(input.start_date || '').trim();
   const end_date = String(input.end_date || '').trim();
   const locale = resolveResponseLocale(input.locale, message);
+  const history = sanitizeChatHistory(input.history);
   if (!message) throw new Error('Message is required');
   if (!start_date || !end_date) throw new Error('start_date and end_date are required');
 
@@ -678,7 +724,7 @@ async function runAnalyticsChat(input) {
 
   let narrative;
   try {
-    const prompt = buildAnalyticsPrompt(locale, message, context);
+    const prompt = buildAnalyticsPrompt(locale, message, context, history);
     let raw = await vertexGenerateJson(prompt);
     let parsed = parseModelJson(raw);
     narrative = parseNarrativeFromModel(parsed);

@@ -31,11 +31,17 @@ export type ManagementBriefRequest = {
   locale?: string;
 };
 
+export type AnalyticsAiChatHistoryItem = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 export type AnalyticsAiChatRequest = {
   message: string;
   start_date: string;
   end_date: string;
   locale?: string;
+  history?: AnalyticsAiChatHistoryItem[];
 };
 
 function getAuthHeaders(): Record<string, string> {

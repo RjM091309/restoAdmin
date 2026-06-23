@@ -1815,7 +1815,15 @@
 		"section_executive": "Executive summary",
 		"section_sales": "Sales analysis",
 		"section_expenses": "Expense analysis",
-		"section_recommendations": "Recommendations"
+		"section_recommendations": "Recommendations",
+		"new_conversation": "New conversation",
+		"kpi_net_sales": "Net sales",
+		"kpi_total_sales": "Total sales",
+		"kpi_gross_profit": "Gross profit",
+		"kpi_orders": "Orders",
+		"kpi_vs_previous": "vs prev. period",
+		"kpi_loading": "Loading period KPIs…",
+		"period_restored_hint": "Showing saved conversation for this date range."
 	},
 	"datatable": {
 		"no_data": "No data available",

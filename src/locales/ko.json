@@ -1754,7 +1754,15 @@
 		"section_executive": "경영 요약",
 		"section_sales": "매출 분석",
 		"section_expenses": "비용 분석",
-		"section_recommendations": "권장 전략"
+		"section_recommendations": "권장 전략",
+		"new_conversation": "새 대화",
+		"kpi_net_sales": "순매출",
+		"kpi_total_sales": "총매출",
+		"kpi_gross_profit": "총이익",
+		"kpi_orders": "주문 수",
+		"kpi_vs_previous": "이전 기간 대비",
+		"kpi_loading": "기간 KPI 로딩 중…",
+		"period_restored_hint": "이 날짜 범위의 저장된 대화를 표시합니다."
 	},
 	"datatable": {
 		"no_data": "데이터가 없습니다",

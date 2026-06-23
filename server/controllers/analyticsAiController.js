@@ -21,7 +21,7 @@ class AnalyticsAiController {
 
   static async chat(req, res) {
     try {
-      const { message, start_date, end_date, locale } = req.body || {};
+      const { message, start_date, end_date, locale, history } = req.body || {};
       const msg = String(message || '').trim();
       const data = await runAnalyticsChat({
         message: msg,
@@ -29,6 +29,7 @@ class AnalyticsAiController {
         end_date: String(end_date || '').trim(),
         // Prefer explicit client locale; message language is resolved again server-side.
         locale: String(locale || 'en').trim().slice(0, 10),
+        history: Array.isArray(history) ? history : [],
       });
       return ApiResponse.success(res, data, 'Analytics AI response generated');
     } catch (error) {
