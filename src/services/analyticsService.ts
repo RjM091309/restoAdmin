@@ -312,6 +312,36 @@ export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMe
   return [];
 }
 
+export async function fetchMenuReportBundleApi(params: {
+  start: string;
+  end: string;
+  branchId?: string | null;
+}): Promise<{ menuRows: ApiMenuReportRow[]; dailySalesCurrent: ApiDailySalesItem[] }> {
+  const qs = new URLSearchParams();
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+  if (params.branchId && params.branchId !== 'all') {
+    qs.set('branch_id', params.branchId);
+  } else {
+    qs.set('branch_id', 'all');
+  }
+
+  const url = `/api/analytics/menu-report-bundle?${qs.toString()}`;
+  const { res, json } = await fetchJson(url, 60000);
+  if (!res.ok) {
+    throw new Error(`Analytics menu-report-bundle failed with status ${res.status}`);
+  }
+  if (!json?.success || !json?.data) {
+    throw new Error(json?.message || 'Analytics menu-report-bundle returned an error');
+  }
+
+  const data = json.data;
+  return {
+    menuRows: (data.menuRows || data.data || []) as ApiMenuReportRow[],
+    dailySalesCurrent: (data.dailySalesCurrent || []) as ApiDailySalesItem[],
+  };
+}
+
 export async function fetchCategoryReportApi(params: URLSearchParams): Promise<ApiCategoryReportRow[]> {
   const baseUrl = getAnalyticsBaseUrl();
   const url = baseUrl

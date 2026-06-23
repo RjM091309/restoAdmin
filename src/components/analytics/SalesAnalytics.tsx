@@ -29,10 +29,12 @@ import { CashReconciliationModal } from './CashReconciliationModal';
 import {
   buildSalesAnalyticsCacheKey,
   hasSalesAnalyticsCacheData,
-  readSalesAnalyticsCache,
+  patchSalesAnalyticsCache,
+  readSalesAnalyticsCacheIncludingStale,
   writeSalesAnalyticsCache,
   type SalesAnalyticsCachePayload,
 } from '../../utils/salesAnalyticsCache';
+import { waitForSalesAnalyticsPrefetch } from '../../utils/prefetchSalesAnalytics';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
 function ChartContainer({
@@ -173,6 +175,16 @@ const toSaleDateKey = (value: string) => {
 const formatDateLabel = (date: Date) =>
   date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
+const getCurrentMonthRange = () => {
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    start: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
+    end: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
+  };
+};
+
 const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
   const totalSales = Number(item.total_sales || 0);
   const discount = Number((item as any).discount ?? 0);
@@ -254,6 +266,27 @@ const colorWithAlpha = (color: string, alpha: number) => {
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
+
+  const initialSalesLoad = useMemo(() => {
+    const fallback = getCurrentMonthRange();
+    const start = dateRange.start || fallback.start;
+    const end = dateRange.end || fallback.end;
+    if (!start || !end) {
+      return { cached: null as SalesAnalyticsCachePayload | null, needsSkeleton: false };
+    }
+    const key = buildSalesAnalyticsCacheKey({
+      start,
+      end,
+      branchId: isAllBranch ? null : String(selectedBranch?.id ?? ''),
+    });
+    const cached = readSalesAnalyticsCacheIncludingStale(key);
+    const hasCache = hasSalesAnalyticsCacheData(cached);
+    return {
+      cached: hasCache ? cached : null,
+      needsSkeleton: !hasCache,
+    };
+  }, [selectedBranch?.id, dateRange.start, dateRange.end, isAllBranch]);
+
   const [activeMetric, setActiveMetric] = useState<MetricKey>('totalSales');
   const [chartType, setChartType] = useState<ChartType>('bar chart');
   const [viewMode, setViewMode] = useState<ViewMode>('glance');
@@ -264,29 +297,43 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const loadedCacheKeyRef = useRef<string | null>(null);
 
   // API data state for the two new cards
-  const [branchSalesData, setBranchSalesData] = useState<ApiBranchSalesItem[]>([]);
-  const [branchSalesLoading, setBranchSalesLoading] = useState(false);
+  const [branchSalesData, setBranchSalesData] = useState<ApiBranchSalesItem[]>(
+    () => initialSalesLoad.cached?.branchSalesData ?? [],
+  );
+  const [branchSalesLoading, setBranchSalesLoading] = useState(
+    () => initialSalesLoad.needsSkeleton && !(initialSalesLoad.cached?.branchSalesData.length),
+  );
   const [branchSalesError, setBranchSalesError] = useState<string | null>(null);
 
   const [profitDriversData, setProfitDriversData] = useState<
     Array<{ row: ApiMenuReportRow; profit: number; branchId: number | null; branchName: string }>
-  >([]);
-  const [profitDriversLoading, setProfitDriversLoading] = useState(false);
+  >(() => initialSalesLoad.cached?.profitDriversData ?? []);
+  const [profitDriversLoading, setProfitDriversLoading] = useState(
+    () => initialSalesLoad.needsSkeleton && !(initialSalesLoad.cached?.profitDriversData.length),
+  );
   const [profitDriversError, setProfitDriversError] = useState<string | null>(null);
   const [profitDriversBranchId, setProfitDriversBranchId] = useState<number | null>(null);
   const [profitDriversModalOpen, setProfitDriversModalOpen] = useState(false);
 
-  const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
-  const [dailySalesPrevious, setDailySalesPrevious] = useState<ApiDailySalesItem[]>([]);
-  const [dailySalesLoading, setDailySalesLoading] = useState(false);
+  const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>(
+    () => initialSalesLoad.cached?.dailySalesCurrent ?? [],
+  );
+  const [dailySalesPrevious, setDailySalesPrevious] = useState<ApiDailySalesItem[]>(
+    () => initialSalesLoad.cached?.dailySalesPrevious ?? [],
+  );
+  const [dailySalesLoading, setDailySalesLoading] = useState(
+    () => initialSalesLoad.needsSkeleton && !(initialSalesLoad.cached?.dailySalesCurrent.length),
+  );
   const [dailySalesError, setDailySalesError] = useState<string | null>(null);
 
   const [cashReconciliationOpen, setCashReconciliationOpen] = useState(false);
   const [reconAdjustCurrent, setReconAdjustCurrent] = useState<{
     byDate: Record<string, number>;
     total: number;
-  }>({ byDate: {}, total: 0 });
-  const [reconAdjustPreviousTotal, setReconAdjustPreviousTotal] = useState(0);
+  }>(() => initialSalesLoad.cached?.reconAdjustCurrent ?? { byDate: {}, total: 0 });
+  const [reconAdjustPreviousTotal, setReconAdjustPreviousTotal] = useState(
+    () => initialSalesLoad.cached?.reconAdjustPreviousTotal ?? 0,
+  );
 
   const trendData = useMemo(() => {
     const byDate = reconAdjustCurrent.byDate;
@@ -435,6 +482,54 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     setProfitDriversLoading(false);
   }, []);
 
+  const applySalesBundle = useCallback(
+    (bundle: SalesAnalyticsCachePayload, options: { background?: boolean } = {}) => {
+      const { background = false } = options;
+      const hasCore =
+        bundle.dailySalesCurrent.some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0) ||
+        bundle.branchSalesData.some((b) => Number(b.total_sales ?? 0) > 0);
+
+      const mergeArray = <T,>(next: T[], prev: T[]) => (next.length > 0 ? next : prev);
+
+      if (background) {
+        if (hasCore) {
+          setDailySalesCurrent((prev) => mergeArray(bundle.dailySalesCurrent, prev));
+          setDailySalesPrevious((prev) => mergeArray(bundle.dailySalesPrevious, prev));
+          setBranchSalesData((prev) => mergeArray(bundle.branchSalesData, prev));
+        }
+        setProfitDriversData((prev) => mergeArray(bundle.profitDriversData, prev));
+        if (bundle.reconAdjustCurrent.total > 0 || Object.keys(bundle.reconAdjustCurrent.byDate).length > 0) {
+          setReconAdjustCurrent(bundle.reconAdjustCurrent);
+        }
+        if (bundle.reconAdjustPreviousTotal > 0) {
+          setReconAdjustPreviousTotal(bundle.reconAdjustPreviousTotal);
+        }
+      } else {
+        setDailySalesCurrent((prev) =>
+          hasCore ? bundle.dailySalesCurrent : mergeArray(bundle.dailySalesCurrent, prev),
+        );
+        setDailySalesPrevious((prev) => mergeArray(bundle.dailySalesPrevious, prev));
+        setBranchSalesData((prev) => mergeArray(bundle.branchSalesData, prev));
+        setProfitDriversData((prev) => mergeArray(bundle.profitDriversData, prev));
+        if (bundle.reconAdjustCurrent.total > 0 || Object.keys(bundle.reconAdjustCurrent.byDate).length > 0) {
+          setReconAdjustCurrent(bundle.reconAdjustCurrent);
+        } else if (!hasCore) {
+          setReconAdjustCurrent((prev) => prev);
+        }
+        setReconAdjustPreviousTotal((prev) =>
+          bundle.reconAdjustPreviousTotal > 0 ? bundle.reconAdjustPreviousTotal : prev,
+        );
+      }
+
+      if (hasSalesAnalyticsCacheData(bundle)) {
+        writeSalesAnalyticsCache(cacheKey, bundle);
+      } else if (hasCore) {
+        patchSalesAnalyticsCache(cacheKey, bundle);
+      }
+    },
+    [cacheKey],
+  );
+
   const loadProfitDriversOnly = useCallback(
     async (background: boolean) => {
       if (!dateRange.start || !dateRange.end) return;
@@ -474,11 +569,10 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
 
         if (reqId !== profitDriversReqIdRef.current) return;
 
-        setProfitDriversData(combined);
+        setProfitDriversData((prev) => (combined.length > 0 ? combined : prev));
 
-        const cached = readSalesAnalyticsCache(cacheKey);
-        if (cached && hasSalesAnalyticsCacheData(cached)) {
-          writeSalesAnalyticsCache(cacheKey, { ...cached, profitDriversData: combined });
+        if (combined.length > 0) {
+          patchSalesAnalyticsCache(cacheKey, { profitDriversData: combined });
         }
       } catch (err) {
         if (reqId !== profitDriversReqIdRef.current) return;
@@ -486,7 +580,6 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         if (!isAnalyticsFetchTimeout(err)) console.error(err);
         if (!background) {
           setProfitDriversError(t('sales_analytics.network_error'));
-          setProfitDriversData([]);
         }
       } finally {
         if (!background && reqId === profitDriversReqIdRef.current) setProfitDriversLoading(false);
@@ -539,19 +632,17 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         });
         if (reqId !== dashboardReqIdRef.current) return;
 
-        setDailySalesCurrent(bundle.dailySalesCurrent);
-        setDailySalesPrevious(bundle.dailySalesPrevious);
-        setBranchSalesData(bundle.branchSalesData);
-        setProfitDriversData(bundle.profitDriversData);
-        setReconAdjustCurrent(bundle.reconAdjustCurrent);
-        setReconAdjustPreviousTotal(bundle.reconAdjustPreviousTotal);
-
-        const hasCoreSales =
-          bundle.dailySalesCurrent.some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0) ||
-          bundle.branchSalesData.some((b) => Number(b.total_sales ?? 0) > 0);
-        if (hasCoreSales || bundle.profitDriversData.length === 0) {
-          writeSalesAnalyticsCache(cacheKey, bundle);
-        }
+        applySalesBundle(
+          {
+            dailySalesCurrent: bundle.dailySalesCurrent,
+            dailySalesPrevious: bundle.dailySalesPrevious,
+            branchSalesData: bundle.branchSalesData,
+            profitDriversData: bundle.profitDriversData,
+            reconAdjustCurrent: bundle.reconAdjustCurrent,
+            reconAdjustPreviousTotal: bundle.reconAdjustPreviousTotal,
+          },
+          { background },
+        );
       } catch (err) {
         if (reqId !== dashboardReqIdRef.current) return;
         if (background && isAnalyticsFetchTimeout(err)) return;
@@ -561,8 +652,6 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
           setDailySalesError(msg);
           setBranchSalesError(msg);
           setProfitDriversError(msg);
-          setDailySalesCurrent([]);
-          setDailySalesPrevious([]);
         }
       } finally {
         if (!background && reqId === dashboardReqIdRef.current) {
@@ -573,6 +662,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       }
     },
     [
+      applySalesBundle,
       cacheKey,
       dateRange.start,
       dateRange.end,
@@ -601,22 +691,42 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     const cacheKeyChanged = loadedCacheKeyRef.current !== cacheKey;
     loadedCacheKeyRef.current = cacheKey;
 
-    const cached = readSalesAnalyticsCache(cacheKey);
-    if (hasSalesAnalyticsCacheData(cached)) {
-      hydrateFromCache(cached);
-      void loadDashboardDataRef.current(true);
-      return;
-    }
+    let cancelled = false;
 
-    if (cacheKeyChanged) {
-      setDailySalesCurrent([]);
-      setDailySalesPrevious([]);
-      setBranchSalesData([]);
-      setProfitDriversData([]);
-      setReconAdjustCurrent({ byDate: {}, total: 0 });
-      setReconAdjustPreviousTotal(0);
-    }
-    void loadDashboardDataRef.current(false);
+    const run = async () => {
+      const cached = readSalesAnalyticsCacheIncludingStale(cacheKey);
+      if (hasSalesAnalyticsCacheData(cached)) {
+        hydrateFromCache(cached);
+        void loadDashboardDataRef.current(true);
+        return;
+      }
+
+      await waitForSalesAnalyticsPrefetch(cacheKey);
+      if (cancelled) return;
+
+      const afterPrefetch = readSalesAnalyticsCacheIncludingStale(cacheKey);
+      if (hasSalesAnalyticsCacheData(afterPrefetch)) {
+        hydrateFromCache(afterPrefetch);
+        void loadDashboardDataRef.current(true);
+        return;
+      }
+
+      if (cacheKeyChanged) {
+        setDailySalesCurrent([]);
+        setDailySalesPrevious([]);
+        setBranchSalesData([]);
+        setProfitDriversData([]);
+        setReconAdjustCurrent({ byDate: {}, total: 0 });
+        setReconAdjustPreviousTotal(0);
+      }
+      void loadDashboardDataRef.current(false);
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
   }, [cacheKey, dateRange.start, dateRange.end, hydrateFromCache]);
 
   const profitDriversFilterMounted = useRef(false);
@@ -662,18 +772,16 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
       const reconPrevTotal = Number(prev.total) || 0;
       setReconAdjustCurrent(reconCurrent);
       setReconAdjustPreviousTotal(reconPrevTotal);
-      const cached = readSalesAnalyticsCache(cacheKey);
-      if (cached) {
-        writeSalesAnalyticsCache(cacheKey, {
-          ...cached,
-          reconAdjustCurrent: reconCurrent,
-          reconAdjustPreviousTotal: reconPrevTotal,
-        });
-      }
+      patchSalesAnalyticsCache(cacheKey, {
+        reconAdjustCurrent: reconCurrent,
+        reconAdjustPreviousTotal: reconPrevTotal,
+      });
     } catch (e) {
       console.error('[SalesAnalytics] cash reconciliation aggregates', e);
-      setReconAdjustCurrent({ byDate: {}, total: 0 });
-      setReconAdjustPreviousTotal(0);
+      if (!readSalesAnalyticsCacheIncludingStale(cacheKey)) {
+        setReconAdjustCurrent({ byDate: {}, total: 0 });
+        setReconAdjustPreviousTotal(0);
+      }
     }
   }, [
     cacheKey,

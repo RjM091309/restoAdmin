@@ -8,12 +8,21 @@
 const ReportsModel = require('../models/reportsModel');
 const ApiResponse = require('../utils/apiResponse');
 const { buildSalesDashboardBundle } = require('../services/salesDashboardBundle');
-const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
+const {
+	buildSalesDashboardBundleCacheKey,
+	getCachedSalesDashboardBundle,
+	setCachedSalesDashboardBundle,
+} = require('../services/salesDashboardBundleCache');
+const {
+	getOrBuildMenuReportBundle,
+	getOrBuildCategoryReportRows,
+} = require('../services/analyticsReportBundleCache');
 const {
 	buildBranchDashboardBundleCacheKey,
 	getCachedBranchDashboardBundle,
 	setCachedBranchDashboardBundle,
 } = require('../services/branchDashboardBundleCache');
+const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
 const { buildAdminDashboardBundle } = require('../services/adminDashboardBundle');
 const {
 	buildAdminDashboardBundleCacheKey,
@@ -692,49 +701,29 @@ class ReportsController {
 		}
 	}
 
-	// Menu-level sales report (proxied to PyServer)
+	// Menu-level sales report (proxied to PyServer, cached)
 	static async getAnalyticsMenuReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
-
-			const url = new URL('/api/analytics/menu-report', PYSERVER_BASE_URL);
-			if (start_date) url.searchParams.set('start_date', start_date);
-			if (end_date) url.searchParams.set('end_date', end_date);
-			if (branchId) url.searchParams.set('branch_id', String(branchId));
-
-			const pyRes = await fetch(url.toString());
-			if (!pyRes.ok) {
-				const text = await pyRes.text().catch(() => '');
-				console.error('[PyServer] menu-report HTTP error:', pyRes.status, text);
-				return ApiResponse.error(
-					res,
-					`Python analytics service error (status ${pyRes.status})`,
-					502,
-					text || `PyServer responded with status ${pyRes.status}`
-				);
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
 			}
 
-			const json = await pyRes.json().catch((err) => {
-				console.error('[PyServer] menu-report JSON parse error:', err);
-				return null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const bundle = await getOrBuildMenuReportBundle({
+				start_date,
+				end_date,
+				branchId,
 			});
-
-			if (!json || json.success === false) {
-				const msg = json?.message || 'Unknown error from Python analytics service';
-				console.error('[PyServer] menu-report error payload:', json);
-				return ApiResponse.error(res, msg, 502, json?.error || msg);
-			}
-
-			const rows = json?.data?.data || [];
+			const rows = bundle.menuRows || [];
 
 			return ApiResponse.success(
 				res,
 				{
-					start_date: start_date || null,
-					end_date: end_date || null,
+					start_date,
+					end_date,
 					branch_id: branchId,
-					data: rows
+					data: rows,
 				},
 				'Menu report retrieved from Python service'
 			);
@@ -744,49 +733,60 @@ class ReportsController {
 		}
 	}
 
-	// Category-level sales report (proxied to PyServer)
-	static async getAnalyticsCategoryReport(req, res) {
+	// Menu report + daily sales in one round-trip (MenuReport UI)
+	static async getAnalyticsMenuReportBundle(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
-
-			const url = new URL('/api/analytics/category-report', PYSERVER_BASE_URL);
-			if (start_date) url.searchParams.set('start_date', start_date);
-			if (end_date) url.searchParams.set('end_date', end_date);
-			if (branchId) url.searchParams.set('branch_id', String(branchId));
-
-			const pyRes = await fetch(url.toString());
-			if (!pyRes.ok) {
-				const text = await pyRes.text().catch(() => '');
-				console.error('[PyServer] category-report HTTP error:', pyRes.status, text);
-				return ApiResponse.error(
-					res,
-					`Python analytics service error (status ${pyRes.status})`,
-					502,
-					text || `PyServer responded with status ${pyRes.status}`
-				);
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
 			}
 
-			const json = await pyRes.json().catch((err) => {
-				console.error('[PyServer] category-report JSON parse error:', err);
-				return null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const bundle = await getOrBuildMenuReportBundle({
+				start_date,
+				end_date,
+				branchId,
 			});
-
-			if (!json || json.success === false) {
-				const msg = json?.message || 'Unknown error from Python analytics service';
-				console.error('[PyServer] category-report error payload:', json);
-				return ApiResponse.error(res, msg, 502, json?.error || msg);
-			}
-
-			const rows = json?.data?.data || [];
 
 			return ApiResponse.success(
 				res,
 				{
-					start_date: start_date || null,
-					end_date: end_date || null,
+					start_date,
+					end_date,
 					branch_id: branchId,
-					data: rows
+					menuRows: bundle.menuRows || [],
+					dailySalesCurrent: bundle.dailySalesCurrent || [],
+				},
+				'Menu report bundle retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching menu report bundle:', error);
+			return ApiResponse.error(res, 'Failed to fetch menu report bundle', 500, error.message);
+		}
+	}
+
+	// Category-level sales report (proxied to PyServer, cached)
+	static async getAnalyticsCategoryReport(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			if (!start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const rows = await getOrBuildCategoryReportRows({
+				start_date,
+				end_date,
+				branchId,
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date,
+					end_date,
+					branch_id: branchId,
+					data: rows || [],
 				},
 				'Category report retrieved from Python service'
 			);
@@ -1128,13 +1128,24 @@ class ReportsController {
 					? String(profit_branch_id).trim()
 					: branchId;
 
-			const bundle = await buildSalesDashboardBundle({
+			const cacheKey = buildSalesDashboardBundleCacheKey({
 				start_date,
 				end_date,
 				branchId,
 				profitBranchId,
-				branchNameFallback: branchId ? `Branch #${branchId}` : 'All Branches',
 			});
+
+			let bundle = getCachedSalesDashboardBundle(cacheKey);
+			if (!bundle) {
+				bundle = await buildSalesDashboardBundle({
+					start_date,
+					end_date,
+					branchId,
+					profitBranchId,
+					branchNameFallback: branchId ? `Branch #${branchId}` : 'All Branches',
+				});
+				setCachedSalesDashboardBundle(cacheKey, bundle);
+			}
 
 			return ApiResponse.success(
 				res,

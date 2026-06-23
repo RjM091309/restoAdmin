@@ -666,19 +666,43 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
             role="log"
             aria-live="polite"
             aria-label={t('analytics_ai.title')}
-            className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar"
+            className={cn(
+              'flex-1 overflow-y-auto p-5 custom-scrollbar',
+              messages.length === 0 ? 'flex items-center justify-center' : 'space-y-5',
+            )}
           >
             {messages.length === 0 && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="text-center py-16 px-6"
+                className="flex flex-col items-center justify-center min-h-full py-10 px-6"
               >
-                <div className="w-16 h-16 mx-auto rounded-2xl bg-brand-primary/8 flex items-center justify-center mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-brand-primary/8 flex items-center justify-center mb-4">
                   <Bot size={32} className="text-brand-primary/50" />
                 </div>
-                <p className="text-brand-text font-medium mb-1">{t('analytics_ai.empty_hint')}</p>
-                <p className="text-brand-muted text-xs">{t('analytics_ai.charts_empty')}</p>
+                <p className="text-brand-text font-semibold text-base mb-1">{t('analytics_ai.empty_hint')}</p>
+                <p className="text-brand-muted text-sm mb-8">{t('analytics_ai.charts_empty')}</p>
+                <div className="w-full max-w-2xl grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {suggestions.map((s, i) => (
+                    <motion.button
+                      key={s}
+                      type="button"
+                      disabled={loading}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.08 + i * 0.05, duration: 0.3 }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => sendMessage(s)}
+                      className="flex items-center gap-3 text-left px-5 py-4 rounded-2xl border border-gray-200/90 bg-white text-brand-text hover:border-brand-primary/40 hover:bg-brand-primary/[0.04] hover:text-brand-primary hover:shadow-md shadow-sm transition-all duration-200 disabled:opacity-50"
+                    >
+                      <span className="w-9 h-9 rounded-xl bg-brand-primary/10 flex items-center justify-center shrink-0 text-brand-primary">
+                        <Sparkles size={16} />
+                      </span>
+                      <span className="text-sm sm:text-base font-medium leading-snug">{s}</span>
+                    </motion.button>
+                  ))}
+                </div>
               </motion.div>
             )}
             {messages.map((msg) => {
@@ -754,19 +778,21 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
           </div>
 
           <div className="border-t border-gray-100 p-4 space-y-3 bg-gradient-to-t from-gray-50/80 to-white">
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => sendMessage(s)}
-                  className="text-xs px-3 py-1.5 rounded-full bg-white border border-gray-200/80 text-brand-text hover:border-brand-primary/40 hover:text-brand-primary hover:shadow-sm transition-all duration-200 disabled:opacity-50"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+            {messages.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={loading}
+                    onClick={() => sendMessage(s)}
+                    className="text-xs px-3 py-1.5 rounded-full bg-white border border-gray-200/80 text-brand-text hover:border-brand-primary/40 hover:text-brand-primary hover:shadow-sm transition-all duration-200 disabled:opacity-50"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2 items-end">
               <textarea
                 ref={inputRef}

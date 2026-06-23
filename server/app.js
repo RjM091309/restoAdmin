@@ -259,6 +259,14 @@ app.use((err, req, res, next) => {
 			void warmBranchDashboardBundles().catch((err) => {
 				console.warn('[BranchDashboardCache] Background warm error:', err?.message || err);
 			});
+			const { warmSalesDashboardBundles } = require('./services/salesDashboardBundleCache');
+			void warmSalesDashboardBundles().catch((err) => {
+				console.warn('[SalesDashboardCache] Background warm error:', err?.message || err);
+			});
+			const { warmAnalyticsReports } = require('./services/analyticsReportBundleCache');
+			void warmAnalyticsReports().catch((err) => {
+				console.warn('[AnalyticsReportCache] Background warm error:', err?.message || err);
+			});
 		});
 
 		const telegramPollingEnabled = String(process.env.TELEGRAM_POLLING_ENABLED || 'true').toLowerCase() !== 'false';

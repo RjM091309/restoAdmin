@@ -18,13 +18,29 @@ function cacheKey(path, params) {
   return `${path}?${sorted}`;
 }
 
+/** Do not cache empty menu/category report payloads (timeouts often surface as []). */
+function shouldStorePyCache(path, json) {
+  if (/\/menu-report$|\/category-report$/.test(String(path))) {
+    const rows = json?.data?.data;
+    return Array.isArray(rows) && rows.length > 0;
+  }
+  return true;
+}
+
 /**
  * Cached PyServer fetch for analytics endpoints (short TTL, same period reuses data).
  */
 async function fetchPyCached(path, params, opts = {}) {
   const key = cacheKey(path, params);
-  const cached = pyCache.get(key);
-  if (cached !== undefined) return cached;
+  if (!opts.skipCacheRead) {
+    const cached = pyCache.get(key);
+    if (cached !== undefined) {
+      if (shouldStorePyCache(path, cached)) {
+        return cached;
+      }
+      pyCache.delete(key);
+    }
+  }
 
   const url = new URL(path, PYSERVER_BASE_URL);
   for (const [k, v] of Object.entries(params || {})) {
@@ -43,7 +59,9 @@ async function fetchPyCached(path, params, opts = {}) {
     if (!json || json.success === false) {
       throw new Error(json?.message || `PyServer ${path} returned error`);
     }
-    pyCache.set(key, json);
+    if (!opts.skipCacheWrite && shouldStorePyCache(path, json)) {
+      pyCache.set(key, json);
+    }
     return json;
   } finally {
     clearTimeout(timer);

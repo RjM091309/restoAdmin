@@ -59,7 +59,7 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   );
 
   const hydrateCategoryCache = useCallback((cached: CategoryReportCachePayload) => {
-    setRows(cached.rows);
+    setRows((prev) => (cached.rows.length > 0 ? cached.rows : prev));
   }, []);
 
   const clearCategoryCache = useCallback(() => {

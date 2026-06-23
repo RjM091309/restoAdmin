@@ -94,6 +94,7 @@ router.get("/reports/validate-imported-data", authenticate, ReportsController.va
 router.get("/api/analytics/daily-sales", authenticate, ReportsController.getAnalyticsDailySales);
 router.get("/api/analytics/branch-sales", authenticate, ReportsController.getAnalyticsBranchSales);
 router.get("/api/analytics/menu-report", authenticate, ReportsController.getAnalyticsMenuReport);
+router.get("/api/analytics/menu-report-bundle", authenticate, ReportsController.getAnalyticsMenuReportBundle);
 router.get("/api/analytics/category-report", authenticate, ReportsController.getAnalyticsCategoryReport);
 router.get("/api/analytics/payment-report", authenticate, ReportsController.getAnalyticsPaymentReport);
 router.get("/api/analytics/top-selling", authenticate, ReportsController.getAnalyticsTopSelling);

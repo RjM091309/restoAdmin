@@ -196,6 +196,11 @@ import {
   prefetchBranchDashboardBundle,
   shouldPrefetchBranchDashboard,
 } from './utils/prefetchBranchDashboard';
+import {
+  prefetchSalesAnalyticsBundle,
+  resolveSalesAnalyticsBranchId,
+} from './utils/prefetchSalesAnalytics';
+import { prefetchMenuAndCategoryReports } from './utils/prefetchAnalyticsReports';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { isLoggedIn } = useUser();
@@ -236,10 +241,24 @@ const LoginView = () => {
         login(result.data, result.tokens.accessToken);
         if (isAdminDashboardUser(result.data?.permissions)) {
           prefetchAdminDashboardBundle();
+          prefetchSalesAnalyticsBundle({ branchId: null });
+          prefetchMenuAndCategoryReports({ branchId: null });
           void import('./components/dashboard/AdminDashboard');
         } else if (shouldPrefetchBranchDashboard(result.data?.permissions, result.data?.branch_id)) {
           prefetchBranchDashboardBundle({ branchId: String(result.data.branch_id) });
+          prefetchSalesAnalyticsBundle({ branchId: String(result.data.branch_id) });
+          prefetchMenuAndCategoryReports({
+            branchId: String(result.data.branch_id),
+            branchName: result.data?.branch_name || undefined,
+          });
           void import('./components/dashboard/Dashboard');
+        } else {
+          const salesBranchId = resolveSalesAnalyticsBranchId(result.data?.permissions, result.data?.branch_id);
+          prefetchSalesAnalyticsBundle({ branchId: salesBranchId });
+          prefetchMenuAndCategoryReports({
+            branchId: salesBranchId,
+            branchName: result.data?.branch_name || undefined,
+          });
         }
         navigate('/dashboard');
       } else {
@@ -382,6 +401,12 @@ export default function App() {
   // Warm dashboard cache on session restore so first paint can skip skeleton.
   useEffect(() => {
     if (!isLoggedIn || !user) return;
+    const salesBranchId = resolveSalesAnalyticsBranchId(user.permissions, user.branch_id);
+    prefetchSalesAnalyticsBundle({ branchId: salesBranchId });
+    prefetchMenuAndCategoryReports({
+      branchId: salesBranchId,
+      branchName: user.branch_name || undefined,
+    });
     if (isAdminDashboardUser(user.permissions)) {
       prefetchAdminDashboardBundle();
       return;

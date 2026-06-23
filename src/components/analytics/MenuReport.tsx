@@ -18,6 +18,7 @@ import { DataTable, type ColumnDef } from '../ui/DataTable';
 import {
   fetchDailySalesApi,
   fetchMenuReportApi,
+  fetchMenuReportBundleApi,
   type ApiDailySalesItem,
   type ApiMenuReportRow,
 } from '../../services/analyticsService';
@@ -111,8 +112,8 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   );
 
   const hydrateMenuCache = useCallback((cached: MenuReportCachePayload) => {
-    setRows(cached.rows);
-    setDailySalesCurrent(cached.dailySalesCurrent);
+    setRows((prev) => (cached.rows.length > 0 ? cached.rows : prev));
+    setDailySalesCurrent((prev) => (cached.dailySalesCurrent.length > 0 ? cached.dailySalesCurrent : prev));
   }, []);
 
   const clearMenuCache = useCallback(() => {
@@ -121,27 +122,47 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   }, []);
 
   const fetchMenuReportData = useCallback(async (): Promise<MenuReportCachePayload> => {
+    const branchName = selectedBranch?.name || 'All Branches';
+    const mapRows = (apiRows: ApiMenuReportRow[]) =>
+      apiRows.map((row) => ({
+        id: String(row.id),
+        goods: row.goods,
+        branch: row.branch || branchName,
+        salesQty: row.salesQty,
+        totalSales: row.totalSales,
+        netSales: row.netSales,
+      }));
+
+    try {
+      const bundle = await fetchMenuReportBundleApi({
+        start: dateRange.start,
+        end: dateRange.end,
+        branchId: branchIdForCache,
+      });
+
+      if (bundle.menuRows.length > 0 || bundle.dailySalesCurrent.length > 0) {
+        return {
+          rows: mapRows(bundle.menuRows),
+          dailySalesCurrent: bundle.dailySalesCurrent,
+        };
+      }
+    } catch (error) {
+      console.warn('[MenuReport] bundle fetch failed, falling back:', error);
+    }
+
     const params = new URLSearchParams();
     if (dateRange.start) params.set('start_date', dateRange.start);
     if (dateRange.end) params.set('end_date', dateRange.end);
     if (branchIdForCache) params.set('branch_id', branchIdForCache);
 
-    const paramsDaily = new URLSearchParams(params);
-    const [apiRows, currentData] = await Promise.all([
+    const [apiRows, dailySales] = await Promise.all([
       fetchMenuReportApi(params),
-      fetchDailySalesApi(paramsDaily),
+      fetchDailySalesApi(new URLSearchParams(params)),
     ]);
 
     return {
-      rows: apiRows.map((row) => ({
-        id: String(row.id),
-        goods: row.goods,
-        branch: row.branch || selectedBranch?.name || 'All Branches',
-        salesQty: row.salesQty,
-        totalSales: row.totalSales,
-        netSales: row.netSales,
-      })),
-      dailySalesCurrent: currentData,
+      rows: mapRows(apiRows),
+      dailySalesCurrent: dailySales,
     };
   }, [branchIdForCache, dateRange.end, dateRange.start, selectedBranch?.name]);
 

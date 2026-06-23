@@ -2,11 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import {
   buildAnalyticsReportCacheKey,
-  readAnalyticsReportCache,
+  readAnalyticsReportCacheIncludingStale,
   writeAnalyticsReportCache,
 } from '../utils/analyticsReportCache';
+import { waitForAnalyticsReportPrefetch } from '../utils/prefetchAnalyticsReports';
 
 type ReportCacheId = 'menu' | 'category' | 'payment' | 'receipt';
+
+type HydrateOptions = { background?: boolean };
 
 type UseAnalyticsReportLoadOptions<T> = {
   report: ReportCacheId;
@@ -15,7 +18,7 @@ type UseAnalyticsReportLoadOptions<T> = {
   cacheExtra?: string;
   hasCacheData: (cached: T | null) => boolean;
   fetchData: () => Promise<T>;
-  onHydrate: (cached: T) => void;
+  onHydrate: (cached: T, options?: HydrateOptions) => void;
   onClear: () => void;
 };
 
@@ -42,7 +45,7 @@ export function useAnalyticsReportLoad<T>({
 
   const initialCached = useMemo(() => {
     if (!dateRange.start || !dateRange.end) return null;
-    const cached = readAnalyticsReportCache<T>(report, cacheKey);
+    const cached = readAnalyticsReportCacheIncludingStale<T>(report, cacheKey);
     return hasCacheData(cached) ? cached : null;
   }, [report, cacheKey, dateRange.start, dateRange.end, hasCacheData]);
 
@@ -67,14 +70,17 @@ export function useAnalyticsReportLoad<T>({
       try {
         const data = await fetchDataRef.current();
         if (reqId !== reqIdRef.current) return;
-        onHydrateRef.current(data);
+        onHydrateRef.current(data, { background });
         if (hasCacheDataRef.current(data)) {
           writeAnalyticsReportCache(report, cacheKey, data);
         }
       } catch (err) {
         if (reqId !== reqIdRef.current) return;
         console.error(`Failed to load ${report} report`, err);
-        if (!background) onClearRef.current();
+        const stale = readAnalyticsReportCacheIncludingStale<T>(report, cacheKey);
+        if (!background && !hasCacheDataRef.current(stale)) {
+          onClearRef.current();
+        }
       } finally {
         if (!background && reqId === reqIdRef.current) setLoading(false);
       }
@@ -101,18 +107,41 @@ export function useAnalyticsReportLoad<T>({
     const cacheKeyChanged = loadedCacheKeyRef.current !== cacheKey;
     loadedCacheKeyRef.current = cacheKey;
 
-    const cached = readAnalyticsReportCache<T>(report, cacheKey);
-    if (hasCacheDataRef.current(cached)) {
-      onHydrateRef.current(cached as T);
-      setLoading(false);
-      void loadRef.current(true);
-      return;
-    }
+    let cancelled = false;
 
-    if (cacheKeyChanged) {
-      onClearRef.current();
-    }
-    void loadRef.current(false);
+    const run = async () => {
+      const cached = readAnalyticsReportCacheIncludingStale<T>(report, cacheKey);
+      if (hasCacheDataRef.current(cached)) {
+        onHydrateRef.current(cached as T);
+        setLoading(false);
+        void loadRef.current(true);
+        return;
+      }
+
+      if (report === 'menu' || report === 'category') {
+        await waitForAnalyticsReportPrefetch(report, cacheKey);
+        if (cancelled) return;
+
+        const afterPrefetch = readAnalyticsReportCacheIncludingStale<T>(report, cacheKey);
+        if (hasCacheDataRef.current(afterPrefetch)) {
+          onHydrateRef.current(afterPrefetch as T);
+          setLoading(false);
+          void loadRef.current(true);
+          return;
+        }
+      }
+
+      if (cacheKeyChanged && !hasCacheDataRef.current(readAnalyticsReportCacheIncludingStale<T>(report, cacheKey))) {
+        onClearRef.current();
+      }
+      void loadRef.current(false);
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
   }, [report, cacheKey, dateRange.start, dateRange.end]);
 
   const reload = useCallback(() => {
