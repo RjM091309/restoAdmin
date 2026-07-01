@@ -879,9 +879,11 @@ def top_profit_drivers(
 ) -> dict:
     """
     Fast profit drivers for Sales Analytics dashboard.
-    One grouped query (menu + branch) instead of the heavy menu-report UNION.
+    Menu items per branch plus synthetic Room Charge (matches menu-report logic).
     """
     try:
+        from reports import _norm_text_sql
+
         effective_limit = max(1, min(int(limit or 20), 50))
         conn = get_connection()
         cur = conn.cursor(dictionary=True)
@@ -900,7 +902,7 @@ def top_profit_drivers(
         has_line_cost = _mysql_column_exists(cur, "order_items", "LINE_COST")
         line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
 
-        query = f"""
+        menu_query = f"""
             SELECT
                 m.IDNo AS id,
                 COALESCE(m.MENU_NAME, '') AS goods,
@@ -911,20 +913,78 @@ def top_profit_drivers(
                 COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
                 COALESCE(SUM({line_cogs_expr}), 0) AS unitCost
             FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo
+            INNER JOIN billing b ON {_BILLING_JOIN}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
-            WHERE b.STATUS IN (1, 2)
+            WHERE 1=1
             {date_filter}
             {branch_filter}
+              AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
+              AND {_norm_text_sql('c.CAT_NAME')} <> 'ROOM CHARGE'
             GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME, b.BRANCH_ID, br.BRANCH_NAME
-            HAVING totalSales > 0
+            HAVING COALESCE(SUM(oi.LINE_TOTAL), 0) > 0
+        """
+
+        room_charge_query = f"""
+            SELECT
+                -9998 AS id,
+                'Room Charge' AS goods,
+                'Charges' AS category,
+                COALESCE(MAX(br.BRANCH_NAME), 'Unknown Branch') AS branch,
+                rc.branch_id AS branch_id,
+                SUM(rc.sales_qty) AS salesQty,
+                SUM(rc.total_sales) AS totalSales,
+                0 AS unitCost
+            FROM (
+                SELECT
+                    b.BRANCH_ID AS branch_id,
+                    COUNT(DISTINCT o.IDNo) AS sales_qty,
+                    COALESCE(SUM(o.SERVICE_CHARGE), 0) AS total_sales
+                FROM orders o
+                INNER JOIN billing b ON {_BILLING_JOIN}
+                LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+                WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+                  AND COALESCE(rt.ROOM_CHARGE, 0) > 0
+                {date_filter}
+                {branch_filter}
+                GROUP BY b.BRANCH_ID
+
+                UNION ALL
+
+                SELECT
+                    b.BRANCH_ID AS branch_id,
+                    COALESCE(SUM(oi.QTY), 0) AS sales_qty,
+                    COALESCE(SUM(oi.LINE_TOTAL), 0) AS total_sales
+                FROM orders o
+                INNER JOIN billing b ON {_BILLING_JOIN}
+                INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+                INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+                LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+                WHERE {_norm_text_sql('c.CAT_NAME')} = 'ROOM CHARGE'
+                  AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
+                {date_filter}
+                {branch_filter}
+                GROUP BY b.BRANCH_ID
+            ) rc
+            LEFT JOIN branches br ON br.IDNo = rc.branch_id
+            GROUP BY rc.branch_id
+            HAVING SUM(rc.total_sales) > 0
+        """
+
+        query = f"""
+            SELECT id, goods, category, branch, branch_id, salesQty, totalSales, unitCost
+            FROM (
+                {menu_query}
+                UNION ALL
+                {room_charge_query}
+            ) combined
             ORDER BY (totalSales - unitCost) DESC, salesQty DESC
             LIMIT {effective_limit}
         """
-        cur.execute(query, params)
+        exec_params = params + params + params
+        cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
         conn.close()

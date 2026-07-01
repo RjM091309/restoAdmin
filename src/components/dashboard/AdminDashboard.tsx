@@ -11,10 +11,7 @@ import {
   fetchTopSellingApi,
   fetchExpenseCategoryBreakdownApi,
   fetchPerformanceTrendApi,
-  fetchDailySalesApi,
-  fetchDailyExpensesApi,
   type ApiDailySalesItem,
-  type ApiDailyExpenseItem,
   type ApiPerformanceTrendRow,
   type ApiExpenseCategoryRow,
 } from '../../services/analyticsService';
@@ -161,6 +158,17 @@ const hasNonZeroTrendRows = (rows: MonthlyData[]): boolean =>
     (d) => clampFiniteNonNegative(d.totalSales) > 0 || clampFiniteNonNegative(d.totalExpenses) > 0,
   );
 
+/** Skip branch trend fetch only when the header range has no activity (weekly/monthly). */
+const shouldSkipBranchTrendFetch = (
+  period: TrendPeriod,
+  branch: BranchPerformanceData | undefined,
+  branchExpenses: number,
+): boolean => {
+  if (period === 'yearly') return false;
+  if (!branch) return true;
+  return (Number(branch.totalSales) || 0) === 0 && branchExpenses === 0;
+};
+
 /** Explicit chart dimensions — avoids Recharts 3 ResponsiveContainer sizing glitches. */
 function TrendChartContainer({
   className = '',
@@ -289,127 +297,7 @@ const getCurrentMonthRange = (): DateRange => {
   };
 };
 
-const YEARLY_TREND_LABELS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-] as const;
-
 const WEEKDAY_LABELS_MON_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
-
-/** Index calendar dates into sales/expense maps (net sales + recon per day). */
-const buildDailyTrendMaps = (
-  dailySales: ApiDailySalesItem[],
-  dailyExpenses: ApiDailyExpenseItem[],
-  byDate: Record<string, number>,
-  start: string,
-  end: string,
-) => {
-  const salesByDate = new Map<string, number>();
-  const expensesByDate = new Map<string, number>();
-
-  for (const row of dailySales) {
-    const date = String(row.sale_date ?? '').slice(0, 10);
-    if (!date || date < start || date > end) continue;
-    const net = Number(row.net_sales ?? 0);
-    const recon = Number(byDate[date] ?? 0);
-    salesByDate.set(date, (salesByDate.get(date) ?? 0) + net + recon);
-  }
-
-  for (const [date, amt] of Object.entries(byDate)) {
-    if (date < start || date > end) continue;
-    if (!salesByDate.has(date)) {
-      salesByDate.set(date, Number(amt) || 0);
-    }
-  }
-
-  for (const row of dailyExpenses) {
-    const date = String(row.expense_date ?? '').slice(0, 10);
-    if (!date || date < start || date > end) continue;
-    expensesByDate.set(date, (expensesByDate.get(date) ?? 0) + Number(row.total_expense ?? 0));
-  }
-
-  return { salesByDate, expensesByDate };
-};
-
-/** Branch-card-aligned trend (net sales + recon) from daily-sales / daily-expenses. */
-const buildTrendFromDailySeries = ({
-  dailySales,
-  dailyExpenses,
-  byDate,
-  period,
-  start,
-  end,
-}: {
-  dailySales: ApiDailySalesItem[];
-  dailyExpenses: ApiDailyExpenseItem[];
-  byDate: Record<string, number>;
-  period: TrendPeriod;
-  start: string;
-  end: string;
-}): AdminDashboardTrendPoint[] => {
-  const { salesByDate, expensesByDate } = buildDailyTrendMaps(
-    dailySales,
-    dailyExpenses,
-    byDate,
-    start,
-    end,
-  );
-
-  if (period === 'weekly') {
-    const windowEnd = new Date(`${end}T12:00:00`);
-    const rangeStart = new Date(`${start}T12:00:00`);
-    const windowStart = new Date(windowEnd);
-    windowStart.setDate(windowStart.getDate() - 6);
-    if (windowStart < rangeStart) windowStart.setTime(rangeStart.getTime());
-
-    const rows: AdminDashboardTrendPoint[] = [];
-    for (const cursor = new Date(windowStart); cursor <= windowEnd; cursor.setDate(cursor.getDate() + 1)) {
-      const key = toYYYYMMDD(cursor);
-      const jsDay = cursor.getDay();
-      rows.push({
-        name: WEEKDAY_LABELS_MON_FIRST[(jsDay + 6) % 7],
-        date: key,
-        totalSales: salesByDate.get(key) ?? 0,
-        totalExpenses: expensesByDate.get(key) ?? 0,
-      });
-    }
-    return rows;
-  }
-
-  if (period === 'yearly') {
-    const salesByMonth = Array(12).fill(0);
-    const expensesByMonth = Array(12).fill(0);
-    for (const [date, val] of salesByDate) {
-      const monthIdx = new Date(`${date}T12:00:00`).getMonth();
-      salesByMonth[monthIdx] += val;
-    }
-    for (const [date, val] of expensesByDate) {
-      const monthIdx = new Date(`${date}T12:00:00`).getMonth();
-      expensesByMonth[monthIdx] += val;
-    }
-    return YEARLY_TREND_LABELS.map((name, idx) => ({
-      name,
-      totalSales: salesByMonth[idx],
-      totalExpenses: expensesByMonth[idx],
-    }));
-  }
-
-  const salesByDom = Array(31).fill(0);
-  const expensesByDom = Array(31).fill(0);
-  for (const [date, val] of salesByDate) {
-    const dom = new Date(`${date}T12:00:00`).getDate();
-    if (dom >= 1 && dom <= 31) salesByDom[dom - 1] += val;
-  }
-  for (const [date, val] of expensesByDate) {
-    const dom = new Date(`${date}T12:00:00`).getDate();
-    if (dom >= 1 && dom <= 31) expensesByDom[dom - 1] += val;
-  }
-  return Array.from({ length: 31 }, (_, idx) => ({
-    name: String(idx + 1),
-    totalSales: salesByDom[idx],
-    totalExpenses: expensesByDom[idx],
-  }));
-};
 
 type BranchTopProduct = { name: string; sales: number };
 
@@ -440,20 +328,8 @@ async function fetchBranchDashboardSnapshot({
   end: string;
   period: TrendPeriod;
 }): Promise<{ trend: AdminDashboardTrendPoint[]; topProducts: BranchTopProduct[] }> {
-  const analyticsParams = new URLSearchParams({
-    start_date: start,
-    end_date: end,
-    branch_id: String(branchId),
-  });
-
-  const [dailySales, dailyExpenses, recon, topSelling] = await Promise.all([
-    fetchDailySalesApi(analyticsParams),
-    fetchDailyExpensesApi(analyticsParams),
-    fetchCashReconciliationAggregates({
-      start,
-      end,
-      branchId: String(branchId),
-    }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
+  const [trend, topSelling] = await Promise.all([
+    fetchBranchPerformanceTrend(branchId, start, end, period),
     fetchTopSellingApi(
       new URLSearchParams({
         start_date: start,
@@ -465,14 +341,7 @@ async function fetchBranchDashboardSnapshot({
   ]);
 
   return {
-    trend: buildTrendFromDailySeries({
-      dailySales,
-      dailyExpenses,
-      byDate: recon.byDate ?? {},
-      period,
-      start,
-      end,
-    }),
+    trend,
     topProducts: mapTopSellingRows(topSelling),
   };
 }
@@ -528,6 +397,98 @@ const applyReconToPerformanceTrend = (
 
   return rows;
 };
+
+/** Recon fetch window — mirrors pyserver performance-trend date expansion. */
+const getPerformanceTrendReconRange = (
+  period: TrendPeriod,
+  start: string,
+  end: string,
+): { start: string; end: string } => {
+  if (period === 'yearly') {
+    const ref = end || start;
+    const y = new Date(`${ref}T12:00:00`).getFullYear();
+    return { start: `${y}-01-01`, end: `${y}-12-31` };
+  }
+  if (period === 'weekly') {
+    const windowEnd = new Date(`${end}T12:00:00`);
+    const rangeStart = new Date(`${start}T12:00:00`);
+    const windowStart = new Date(windowEnd);
+    windowStart.setDate(windowStart.getDate() - 6);
+    if (windowStart < rangeStart) windowStart.setTime(rangeStart.getTime());
+    return { start: toYYYYMMDD(windowStart), end: toYYYYMMDD(windowEnd) };
+  }
+  return { start, end };
+};
+
+/** Yearly trend uses the full calendar year — not the header date filter. */
+const getTrendApiDateRange = (
+  period: TrendPeriod,
+  start: string,
+  end: string,
+): { start: string; end: string } => getPerformanceTrendReconRange(period, start, end);
+
+const applyWeeklyTodayLabel = (chartData: AdminDashboardTrendPoint[]): AdminDashboardTrendPoint[] => {
+  if (chartData.length === 0 || !chartData.every((d) => d.date)) return chartData;
+  const lastKey = chartData[chartData.length - 1].date!;
+  const anchor = new Date(`${lastKey}T12:00:00`);
+  const now = new Date();
+  const isAnchorToday =
+    anchor.getFullYear() === now.getFullYear() &&
+    anchor.getMonth() === now.getMonth() &&
+    anchor.getDate() === now.getDate();
+  if (!isAnchorToday) return chartData;
+  const copy = [...chartData];
+  copy[copy.length - 1] = { ...copy[copy.length - 1], name: 'Today' };
+  return copy;
+};
+
+/** Branch trend via performance-trend API (full-year yearly, same as all-branches). */
+async function fetchBranchPerformanceTrend(
+  branchId: number,
+  start: string,
+  end: string,
+  period: TrendPeriod,
+): Promise<AdminDashboardTrendPoint[]> {
+  const apiRange = getTrendApiDateRange(period, start, end);
+  const params = new URLSearchParams({
+    period,
+    start_date: apiRange.start,
+    end_date: apiRange.end,
+    branch_id: String(branchId),
+  });
+
+  const rows = await fetchPerformanceTrendApi(params);
+  let chartData: AdminDashboardTrendPoint[] = rows.map((r) => ({
+    name: r.name,
+    totalSales: Number(r.totalSales || 0),
+    totalExpenses: Number(r.totalExpenses || 0),
+    ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
+  }));
+
+  const reconRange = getPerformanceTrendReconRange(period, start, end);
+  try {
+    const recon = await fetchCashReconciliationAggregates({
+      start: reconRange.start,
+      end: reconRange.end,
+      branchId: String(branchId),
+    });
+    chartData = applyReconToPerformanceTrend(
+      chartData,
+      period,
+      recon.byDate ?? {},
+      reconRange.start,
+      reconRange.end,
+    );
+  } catch {
+    // keep API rows
+  }
+
+  if (period === 'weekly') {
+    chartData = applyWeeklyTodayLabel(chartData);
+  }
+
+  return chartData;
+}
 
 const INITIAL_ADMIN_CACHE = (() => {
   const range = getCurrentMonthRange();
@@ -925,11 +886,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       if (existing?.trendByPeriod[period] !== undefined) return;
 
       const branch = branchCardsData.find((b) => b.id === branchId);
-      if (
-        branch &&
-        (Number(branch.totalSales) || 0) === 0 &&
-        (Number(branch.totalExpenses) || 0) === 0
-      ) {
+      if (shouldSkipBranchTrendFetch(period, branch, Number(branch?.totalExpenses) || 0)) {
         writeBranchPrefetchEntry(branchId, {
           trendPeriod: period,
           trend: [],
@@ -1108,41 +1065,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         const currentRange = getCurrentMonthRange();
         const start = compareDateRange.start || currentRange.start;
         const end = compareDateRange.end || currentRange.end;
-
-        const analyticsParams = new URLSearchParams();
-        analyticsParams.set('start_date', start);
-        analyticsParams.set('end_date', end);
-        if (activeBranchId) {
-          analyticsParams.set('branch_id', String(activeBranchId));
-        }
+        const apiRange = getTrendApiDateRange(trendPeriod, start, end);
 
         let chartData: AdminDashboardTrendPoint[];
 
         if (activeBranchId) {
-          const [dailySales, dailyExpenses, recon] = await Promise.all([
-            fetchDailySalesApi(analyticsParams),
-            fetchDailyExpensesApi(analyticsParams),
-            fetchCashReconciliationAggregates({
-              start,
-              end,
-              branchId: String(activeBranchId),
-            }).catch(() => ({ total: 0, byDate: {} as Record<string, number> })),
-          ]);
+          chartData = await fetchBranchPerformanceTrend(activeBranchId, start, end, trendPeriod);
           if (reqId !== trendReqIdRef.current) return;
-
-          chartData = buildTrendFromDailySeries({
-            dailySales,
-            dailyExpenses,
-            byDate: recon.byDate ?? {},
-            period: trendPeriod,
-            start,
-            end,
-          });
         } else {
           const params = new URLSearchParams();
           params.set('period', trendPeriod);
-          params.set('start_date', start);
-          params.set('end_date', end);
+          params.set('start_date', apiRange.start);
+          params.set('end_date', apiRange.end);
 
           const rows: ApiPerformanceTrendRow[] = await fetchPerformanceTrendApi(params);
           if (reqId !== trendReqIdRef.current) return;
@@ -1170,10 +1104,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             }
           } else {
             try {
-              const recon = await fetchCashReconciliationAggregates({ start, end });
+              const reconRange = getTrendApiDateRange(trendPeriod, start, end);
+              const recon = await fetchCashReconciliationAggregates({
+                start: reconRange.start,
+                end: reconRange.end,
+              });
               if (reqId !== trendReqIdRef.current) return;
               const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
-              rowsForChart = applyReconToPerformanceTrend(rowsForChart, trendPeriod, byDate, start, end);
+              rowsForChart = applyReconToPerformanceTrend(
+                rowsForChart,
+                trendPeriod,
+                byDate,
+                reconRange.start,
+                reconRange.end,
+              );
             } catch {
               // keep API rows
             }
@@ -1467,13 +1411,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       if (branchChanged || !periodChanged) return;
 
       const focusedBranch = branchCardsData.find((b) => b.id === activeBranchId);
-      const hasNoBranchActivity =
-        focusedBranch &&
-        (Number(focusedBranch.totalSales) || 0) === 0 &&
-        (Number(focusedBranch.totalExpenses) || 0) === 0;
+      const focusedBranchExpenses = focusedBranch
+        ? Number(focusedBranch.totalExpenses) || 0
+        : 0;
 
       setTrendLoading(false);
-      if (hasNoBranchActivity) {
+      if (shouldSkipBranchTrendFetch(trendPeriod, focusedBranch, focusedBranchExpenses)) {
         setMonthlyData([]);
         setTopProductsData([]);
         return;
@@ -1524,16 +1467,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
 
     const focusedBranch = branchCardsData.find((b) => b.id === activeBranchId);
-    const hasNoBranchActivity =
-      focusedBranch &&
-      (Number(focusedBranch.totalSales) || 0) === 0 &&
-      getEffectiveBranchTotalExpenses(focusedBranch) === 0;
+    const focusedBranchExpenses = focusedBranch ? getEffectiveBranchTotalExpenses(focusedBranch) : 0;
 
     setTrendLoading(false);
     setTopProductsLoading(false);
     topProductsReqIdRef.current += 1;
 
-    if (hasNoBranchActivity) {
+    if (shouldSkipBranchTrendFetch(trendPeriod, focusedBranch, focusedBranchExpenses)) {
       setBranchChartsLoading(false);
       setMonthlyData([]);
       setTopProductsData([]);
@@ -2084,7 +2024,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const formatMoney = (v: any) =>
         `₱${Math.trunc(Math.abs(Number(v) || 0)).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 
-      const sorted = [...payload].sort((a, b) => (a?.dataKey === 'totalSales' ? -1 : b?.dataKey === 'totalSales' ? 1 : 0));
+      // Always show both series — Recharts omits zero/null bars from payload.
+      const tooltipItems = [
+        { dataKey: 'totalSales', color: 'rgb(139, 92, 246)', raw: Number(dataPoint?.rawTotalSales ?? 0) },
+        { dataKey: 'negativeExpenses', color: 'rgb(245, 158, 11)', raw: Number(dataPoint?.rawTotalExpenses ?? 0) },
+      ];
 
       return (
         <div
@@ -2100,26 +2044,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             {labelText}
           </div>
           <div style={{ display: 'grid', gap: 6 }}>
-            {sorted.map((item: any, idx: number) => {
-              const color = item?.color || '#64748b';
-              const name = getName(String(item?.dataKey ?? item?.name ?? ''));
-              // Show the real amount (axis ticks are also rendered as real amounts).
-              const dataKey = String(item?.dataKey ?? item?.name ?? '');
-              const raw =
-                dataKey === 'totalSales'
-                  ? Number(dataPoint?.rawTotalSales ?? 0)
-                  : dataKey === 'negativeExpenses'
-                    ? Number(dataPoint?.rawTotalExpenses ?? 0)
-                    : Number(item?.value ?? 0);
-              const valueText = formatMoney(raw);
-              return (
-                <div key={`${item?.dataKey ?? item?.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 9999, background: color, display: 'inline-block' }} />
-                  <span style={{ fontSize: 12, color: '#475569', minWidth: 86 }}>{name}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{valueText}</span>
-                </div>
-              );
-            })}
+            {tooltipItems.map((item, idx) => (
+              <div key={`${item.dataKey}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 9999, background: item.color, display: 'inline-block' }} />
+                <span style={{ fontSize: 12, color: '#475569', minWidth: 86 }}>{getName(item.dataKey)}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{formatMoney(item.raw)}</span>
+              </div>
+            ))}
           </div>
         </div>
       );
@@ -2136,8 +2067,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
       return {
         ...d,
-        totalSales: rawSales,
-        negativeExpenses: -rawExpenses,
+        // null skips rendering — avoids minPointSize drawing a sliver on the wrong stack
+        totalSales: rawSales > 0 ? rawSales : null,
+        negativeExpenses: rawExpenses > 0 ? -rawExpenses : null,
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
@@ -2403,7 +2335,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
-                      minPointSize={2}
                       isAnimationActive={!trendLoading}
                     />
                     <Bar 
@@ -2413,7 +2344,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       radius={[6, 6, 0, 0]}
                       barSize={trendPeriod === 'monthly' ? 16 : 32}
                       stackId="stack"
-                      minPointSize={2}
                       isAnimationActive={!trendLoading}
                     />
                   </BarChart>
