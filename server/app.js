@@ -1,10 +1,7 @@
+// Load env from project root before any route/model requires.
 const path = require('path');
-// Load env before any route/model requires (otherwise Loyverse and others read stale process.env).
-require('dotenv').config({
-	path: path.resolve(__dirname, '..', '.env.local'),
-	override: true,
-});
-require('dotenv').config({ override: true });
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env.local'), override: true });
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env'), override: true });
 
 const express = require('express');
 const http = require('http');

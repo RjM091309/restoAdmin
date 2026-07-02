@@ -6,7 +6,6 @@
 // ============================================
 
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 
 // JWT Configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_in_production';

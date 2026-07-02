@@ -219,15 +219,74 @@ const buildNiceMax = (maxAbs: number) => {
   return Math.ceil(effectiveMax / step) * step;
 };
 
-const formatTrendYAxisTick = (value: number): string => {
-  const v = Math.abs(value);
-  if (v === 0) return '₱0k';
-  if (v >= 1_000_000) {
-    const m = v / 1_000_000;
+/** Equal top/bottom panes — domain [-1, 1]. When expenses are significant,
+ *  peak expense maps to middle tick (-⅔); axis max = peak × 1.5. */
+type TrendYScale = {
+  salesMax: number;
+  expenseMax: number;
+  /** Actual max expense — anchored at chart -⅔ (middle expense tick). */
+  peakExpense: number;
+  domain: [number, number];
+};
+
+const EXPENSE_PEAK_CHART = -2 / 3;
+
+const buildTrendYScale = (salesValues: number[], expenseValues: number[]): TrendYScale => {
+  const maxSales = Math.max(0, ...salesValues);
+  const maxExpense = Math.max(0, ...expenseValues);
+  const salesMax = buildNiceMax(maxSales);
+  const expenseFloor = salesMax * 3;
+
+  if (!(maxExpense > 0)) {
+    return { salesMax, expenseMax: expenseFloor, peakExpense: 0, domain: [-1, 1] };
+  }
+
+  const useMiddlePeak = maxExpense > expenseFloor * (2 / 3);
+  if (useMiddlePeak) {
+    const peakExpense = maxExpense;
+    const expenseMax = Math.max(expenseFloor, buildNiceMax(peakExpense * 1.5));
+    return { salesMax, expenseMax, peakExpense, domain: [-1, 1] };
+  }
+
+  return { salesMax, expenseMax: expenseFloor, peakExpense: 0, domain: [-1, 1] };
+};
+
+const toTrendChartSales = (value: number, salesMax: number): number | null => {
+  if (!(value > 0) || !(salesMax > 0)) return null;
+  return Math.min(value / salesMax, 1);
+};
+
+const toTrendChartExpense = (value: number, scale: TrendYScale): number | null => {
+  if (!(value > 0) || !(scale.expenseMax > 0)) return null;
+  if (scale.peakExpense > 0) {
+    const chartMag = Math.min((value / scale.peakExpense) * Math.abs(EXPENSE_PEAK_CHART), 1);
+    return -chartMag;
+  }
+  return -Math.min(value / scale.expenseMax, 1);
+};
+
+/** Sales: 2 ticks (½ & max). Expenses: 3 ticks (⅓, ⅔ & max of expense pane). */
+const buildTrendYTicks = (): number[] => [1, 0.5, 0, -1 / 3, -2 / 3, -1];
+
+const formatTrendYAxisTick = (chartValue: number, scale: TrendYScale): string => {
+  const v = Number(chartValue);
+  if (!Number.isFinite(v) || v === 0) return '₱0k';
+
+  let raw: number;
+  if (v > 0) {
+    raw = v * scale.salesMax;
+  } else if (scale.peakExpense > 0 && Math.abs(v - EXPENSE_PEAK_CHART) < 0.001) {
+    raw = scale.peakExpense;
+  } else {
+    raw = Math.abs(v) * scale.expenseMax;
+  }
+
+  if (raw >= 1_000_000) {
+    const m = raw / 1_000_000;
     return Number.isInteger(m) ? `₱${m}M` : `₱${m.toFixed(1).replace(/\.0$/, '')}M`;
   }
-  if (v >= 1_000) return `₱${Math.round(v / 1_000)}k`;
-  return `₱${v}`;
+  if (raw >= 1_000) return `₱${Math.round(raw / 1_000)}k`;
+  return `₱${raw}`;
 };
 
 const WEEKDAY_ABBR_TO_JS_DAY: Record<string, number> = {
@@ -886,7 +945,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       if (existing?.trendByPeriod[period] !== undefined) return;
 
       const branch = branchCardsData.find((b) => b.id === branchId);
-      if (shouldSkipBranchTrendFetch(period, branch, Number(branch?.totalExpenses) || 0)) {
+      const branchExpenses = branch
+        ? (expenseCategoryByBranch[branch.id]
+            ? Object.values(expenseCategoryByBranch[branch.id]).reduce(
+                (s, v) => s + (Number(v) || 0),
+                0,
+              )
+            : Number(branch.totalExpenses) || 0)
+        : 0;
+      if (shouldSkipBranchTrendFetch(period, branch, branchExpenses)) {
         writeBranchPrefetchEntry(branchId, {
           trendPeriod: period,
           trend: [],
@@ -919,7 +986,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         branchPrefetchInFlightRef.current.delete(inflightKey);
       }
     },
-    [branchCardsData, getDateRangeForAnalytics, trendPeriod, writeBranchPrefetchEntry],
+    [branchCardsData, expenseCategoryByBranch, getDateRangeForAnalytics, trendPeriod, writeBranchPrefetchEntry],
   );
 
   const prefetchAllBranchDashboards = useCallback(async () => {
@@ -2061,28 +2128,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   const hasNonZeroTrendData = useMemo(() => hasNonZeroTrendRows(monthlyData), [monthlyData]);
 
+  const trendYScale = useMemo(() => {
+    const sales = monthlyData.map((d) => clampFiniteNonNegative(d.totalSales));
+    const expenses = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
+    return buildTrendYScale(sales, expenses);
+  }, [monthlyData]);
+
+  const trendYTicks = useMemo(() => buildTrendYTicks(), []);
+
+  const TrendYAxisTick = useMemo(() => {
+    const SALES_COLOR = 'rgb(139, 92, 246)';
+    const EXPENSE_COLOR = 'rgb(245, 158, 11)';
+    const Tick = (props: any) => {
+      const { x = 0, y = 0, payload } = props ?? {};
+      const chartValue = Number(payload?.value);
+      if (!Number.isFinite(chartValue)) return null;
+
+      const text = formatTrendYAxisTick(chartValue, trendYScale);
+      const fill =
+        chartValue > 0 ? SALES_COLOR : chartValue < 0 ? EXPENSE_COLOR : '#94a3b8';
+
+      return (
+        <g transform={`translate(${Number(x)},${Number(y)})`}>
+          <text
+            x={0}
+            y={0}
+            dy={4}
+            textAnchor="end"
+            fill={fill}
+            fontSize={12}
+            fontWeight={chartValue !== 0 ? 600 : 500}
+          >
+            {text}
+          </text>
+        </g>
+      );
+    };
+    return Tick;
+  }, [trendYScale]);
+
   const trendChartData = useMemo(() => {
+    const { salesMax } = trendYScale;
     return monthlyData.map((d) => {
       const rawSales = clampFiniteNonNegative(d.totalSales);
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
       return {
         ...d,
-        // null skips rendering — avoids minPointSize drawing a sliver on the wrong stack
-        totalSales: rawSales > 0 ? rawSales : null,
-        negativeExpenses: rawExpenses > 0 ? -rawExpenses : null,
+        totalSales: toTrendChartSales(rawSales, salesMax),
+        negativeExpenses: toTrendChartExpense(rawExpenses, trendYScale),
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
     });
-  }, [monthlyData]);
-
-  const trendYDomain = useMemo((): [number, number] => {
-    const sales = monthlyData.map((d) => clampFiniteNonNegative(d.totalSales));
-    const expenses = monthlyData.map((d) => clampFiniteNonNegative(d.totalExpenses));
-    const maxAbs = Math.max(0, ...sales, ...expenses);
-    const nice = buildNiceMax(maxAbs);
-    return [-nice, nice];
-  }, [monthlyData]);
+  }, [monthlyData, trendYScale]);
 
   const renderComparisonTable = (rows: UnifiedComparisonRow[]) => (
     <div className="min-w-[760px] rounded-2xl border border-brand-primary/15 bg-white shadow-sm">
@@ -2297,7 +2395,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     width={width}
                     height={height}
                     data={trendChartData}
-                    margin={{ top: 30, right: 20, left: 10, bottom: 5 }}
+                    margin={{ top: 28, right: 20, left: 8, bottom: 8 }}
                     stackOffset="sign"
                   >
                     <XAxis 
@@ -2309,12 +2407,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       minTickGap={0}
                     />
                     <YAxis 
-                      tick={{ fontSize: 12, fill: '#94a3b8' }} 
-                      tickFormatter={(value) => formatTrendYAxisTick(Math.abs(Number(value) || 0))}
+                      tick={TrendYAxisTick}
                       axisLine={false}
                       tickLine={false}
-                      width={52}
-                      domain={trendYDomain}
+                      width={60}
+                      domain={trendYScale.domain}
+                      ticks={trendYTicks}
                     />
                     <Tooltip 
                       content={TrendTooltipContent}

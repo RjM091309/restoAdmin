@@ -259,21 +259,25 @@ function buildDashboardData({
 /** Phase 1 — SQL-only probes (~100–300ms). Used for fast empty detection before PyServer. */
 async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 	const branchParam = branchId ? String(branchId) : null;
+	const pyParams = { start_date, end_date };
+	if (branchParam) pyParams.branch_id = branchParam;
 
-	const [dailySalesResult, reconResult, recentOrdersResult] = await Promise.allSettled([
-		fetchDailySalesSeries(start_date, end_date, branchParam, { sqlOnly: true }),
-		branchParam
-			? CashReconciliationModel.aggregatesForRange(branchParam, start_date, end_date)
-			: Promise.resolve({ byDate: {}, total: 0 }),
-		branchParam
-			? OrderModel.getAll(branchParam, {
-					start_date,
-					end_date,
-					limit: 5,
-					includeItemMeta: true,
-				})
-			: Promise.resolve([]),
-	]);
+	const [dailySalesResult, reconResult, recentOrdersResult, expenseSummaryResult] =
+		await Promise.allSettled([
+			fetchDailySalesSeries(start_date, end_date, branchParam, { sqlOnly: true }),
+			branchParam
+				? CashReconciliationModel.aggregatesForRange(branchParam, start_date, end_date)
+				: Promise.resolve({ byDate: {}, total: 0 }),
+			branchParam
+				? OrderModel.getAll(branchParam, {
+						start_date,
+						end_date,
+						limit: 5,
+						includeItemMeta: true,
+					})
+				: Promise.resolve([]),
+			fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
+		]);
 
 	const dailySales =
 		dailySalesResult.status === 'fulfilled' ? dailySalesResult.value : [];
@@ -283,22 +287,29 @@ async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 			: { byDate: {}, total: 0 };
 	const recentOrders =
 		recentOrdersResult.status === 'fulfilled' ? recentOrdersResult.value : [];
+	const expenseSummary =
+		expenseSummaryResult.status === 'fulfilled'
+			? expenseSummaryResult.value?.data || { total_expense: 0 }
+			: { total_expense: 0 };
 
 	const phase1HadErrors =
 		dailySalesResult.status === 'rejected' ||
 		reconResult.status === 'rejected' ||
-		recentOrdersResult.status === 'rejected';
+		recentOrdersResult.status === 'rejected' ||
+		expenseSummaryResult.status === 'rejected';
 
 	const hasSales = (dailySales || []).some((d) => Number(d.total_sales || 0) > 0);
 	const hasRecon = Number(reconAgg?.total || 0) > 0;
 	const hasRecentOrders = (recentOrders || []).length > 0;
-	const hasActivity = hasSales || hasRecon || hasRecentOrders;
+	const hasExpenses = Number(expenseSummary?.total_expense || 0) > 0;
+	const hasActivity = hasSales || hasRecon || hasRecentOrders || hasExpenses;
 
 	return {
 		branchParam,
 		dailySales,
 		reconAgg,
 		recentOrders,
+		expenseSummary,
 		phase1HadErrors,
 		hasActivity,
 	};

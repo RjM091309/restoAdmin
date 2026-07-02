@@ -260,14 +260,19 @@ const getManilaYmdFromDate = (d: Date) => {
 };
 
 /**
- * Expense ENCODED_DT → calendar YYYY-MM-DD for range filters.
- * API often returns ISO UTC strings; `.slice(0, 10)` is the wrong calendar day vs Python daily-expenses.
+ * Expense ENCODED_DT → calendar YYYY-MM-DD for range filters (Asia/Manila, same as Python analytics).
+ * ISO UTC strings must not use `.slice(0, 10)` — that is the UTC day, not the PH billing day.
  */
 function expenseEncodedYmd(encodedDt: string | null | undefined): string | null {
   const raw = (encodedDt || '').trim();
   if (!raw) return null;
+  // ISO instant from JSON (e.g. 2026-06-30T19:11:45.000Z) → Manila calendar day.
+  if (/^\d{4}-\d{2}-\d{2}T/.test(raw) || raw.endsWith('Z')) {
+    const ms = Date.parse(raw);
+    if (Number.isNaN(ms)) return null;
+    return getManilaYmdFromDate(new Date(ms));
+  }
   const leadingYmd = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  // Keep table date aligned with DB ENCODED_DT calendar date (no timezone shift).
   if (leadingYmd) return leadingYmd[1];
   const ms = Date.parse(raw);
   if (Number.isNaN(ms)) return null;
@@ -288,10 +293,13 @@ function expenseCountsTowardDashboardAnalytics(
   if (!row.active) return false;
   if (row.masterCatId == null || String(row.masterCatId).trim() === '') return false;
   const mc = masterById.get(String(row.masterCatId));
-  if (!mc?.active) return false;
+  if (!mc?.active) {
+    // Linked master category may be outside branch-scoped category list; trust API join fields.
+    return Boolean((row.expCat || '').trim());
+  }
   if (mc.opCategoryId == null || String(mc.opCategoryId).trim() === '') return false;
   const oc = opById.get(String(mc.opCategoryId));
-  return Boolean(oc?.active);
+  return Boolean(oc?.active) || Boolean((row.expCat || '').trim());
 }
 
 /** Label used when Expense Breakdown groups by sub category (must match `expenseBreakdown` useMemo). */
@@ -309,6 +317,35 @@ function tableItemBreakdownLabel(exp: ExpenseRecord, subCategoryName: string): s
     return ((exp.expDesc || exp.expSource || exp.expName || 'Unknown') as string).trim() || 'Unknown';
   }
   return label;
+}
+
+/** Sum Python expense-breakdown rows (same source as Grand Total when analyticsGrandOk). */
+function sumAnalyticsExpenseRows(
+  rows: ApiExpenseCategoryRow[] | null | undefined,
+  branchId: string,
+  options: { opName?: string; subName?: string } = {},
+): number {
+  if (!rows?.length) return 0;
+  const opKey = options.opName?.trim();
+  const subKey = options.subName?.trim();
+  return rows
+    .filter((r) => String(r.branch_id) === String(branchId))
+    .reduce((sum, r) => {
+      if (opKey != null && String(r.exp_cat || '').trim() !== opKey) return sum;
+      if (subKey != null && String(r.exp_name || '').trim() !== subKey) return sum;
+      return sum + (Number(r.total_amount) || 0);
+    }, 0);
+}
+
+/** Match expense line to operation + sub-category using API join fields (oc.NAME, mc.CATEGORY_NAME). */
+function expenseMatchesOperationSubCategory(
+  exp: ExpenseRecord,
+  opName: string,
+  subCategoryName: string,
+): boolean {
+  if ((Number(exp.expAmount) || 0) <= 0) return false;
+  if ((exp.expCat || '').trim() !== opName.trim()) return false;
+  return (exp.expName || '').trim() === subCategoryName.trim();
 }
 
 export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, dateRange }) => {
@@ -1189,17 +1226,35 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
       const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
       let items: ExpenseRecord[] = [];
+      const opName = (selectedOperation?.name || '').trim();
 
       if (selectedCategory) {
         items = rangeEntriesForCategoryAnalytics.filter((exp) => {
           return tableItemBreakdownLabel(exp, selectedCategory.name) === rowName;
         });
+        if (items.length === 0) {
+          items = expensesInRange.filter(
+            (exp) => tableItemBreakdownLabel(exp, selectedCategory.name) === rowName,
+          );
+        }
       } else if (selectedOperationId) {
-        items = expensesInAnalyticsRange.filter((exp) => {
-          const mc = exp.masterCatId != null ? masterById.get(String(exp.masterCatId)) : undefined;
-          if (!mc || String(mc.opCategoryId) !== String(selectedOperationId)) return false;
-          return subCategoryBreakdownLabel(mc, breakdownUsesAnalyticsSubCategoryRows) === rowName;
-        });
+        if (breakdownUsesAnalyticsSubCategoryRows && opName) {
+          items = expensesInRange.filter((exp) =>
+            expenseMatchesOperationSubCategory(exp, opName, rowName),
+          );
+        }
+        if (items.length === 0) {
+          items = expensesInAnalyticsRange.filter((exp) => {
+            const mc = exp.masterCatId != null ? masterById.get(String(exp.masterCatId)) : undefined;
+            if (!mc || String(mc.opCategoryId) !== String(selectedOperationId)) return false;
+            return subCategoryBreakdownLabel(mc, breakdownUsesAnalyticsSubCategoryRows) === rowName;
+          });
+        }
+        if (items.length === 0 && opName) {
+          items = expensesInRange.filter((exp) =>
+            expenseMatchesOperationSubCategory(exp, opName, rowName),
+          );
+        }
       } else {
         return;
       }
@@ -1225,6 +1280,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     [
       breakdownUsesAnalyticsSubCategoryRows,
       expensesInAnalyticsRange,
+      expensesInRange,
       masterCategories,
       rangeEntriesForCategoryAnalytics,
       selectedCategory,
@@ -1241,25 +1297,34 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       return rangeEntriesForCategoryAnalytics.reduce((sum, row) => sum + row.expAmount, 0);
     }
     if (selectedOperationId) {
-      // Sum all expenses whose master category belongs to this operation (any type)
+      const opName = (selectedOperation?.name || '').trim();
       const opMasterIds = new Set(
         masterCategories
           .filter((cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId)
           .map((cat) => cat.id),
       );
-      return expensesInAnalyticsRange.reduce(
+      const localTotal = expensesInAnalyticsRange.reduce(
         (sum, row) => (row.masterCatId != null && opMasterIds.has(row.masterCatId) ? sum + row.expAmount : sum),
         0,
       );
+      if (breakdownUsesAnalyticsSubCategoryRows && branchId && opName) {
+        const analyticsTotal = sumAnalyticsExpenseRows(analyticsExpenseBreakdownRows, branchId, { opName });
+        return analyticsTotal > 0 ? analyticsTotal : localTotal;
+      }
+      return localTotal;
     }
     // Nothing selected → selected total is 0
     return 0;
   }, [
+    analyticsExpenseBreakdownRows,
+    branchId,
+    breakdownUsesAnalyticsSubCategoryRows,
     expensesInAnalyticsRange,
     masterCategories,
     rangeEntriesForCategoryAnalytics,
     selectedCategory,
     selectedCategoryId,
+    selectedOperation,
     selectedOperationId,
   ]);
 
@@ -1268,16 +1333,30 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   // - sub category share vs main category
   const totalForSelectedMainCategory = useMemo(() => {
     if (!selectedOperationId) return 0;
+    const opName = (selectedOperation?.name || '').trim();
     const opMasterIds = new Set(
       masterCategories
         .filter((cat) => cat.opCategoryId != null && cat.opCategoryId === selectedOperationId)
         .map((cat) => cat.id),
     );
-    return expensesInAnalyticsRange.reduce(
+    const localTotal = expensesInAnalyticsRange.reduce(
       (sum, row) => (row.masterCatId != null && opMasterIds.has(row.masterCatId) ? sum + row.expAmount : sum),
       0,
     );
-  }, [expensesInAnalyticsRange, masterCategories, selectedOperationId]);
+    if (breakdownUsesAnalyticsSubCategoryRows && branchId && opName) {
+      const analyticsTotal = sumAnalyticsExpenseRows(analyticsExpenseBreakdownRows, branchId, { opName });
+      return analyticsTotal > 0 ? analyticsTotal : localTotal;
+    }
+    return localTotal;
+  }, [
+    analyticsExpenseBreakdownRows,
+    branchId,
+    breakdownUsesAnalyticsSubCategoryRows,
+    expensesInAnalyticsRange,
+    masterCategories,
+    selectedOperation,
+    selectedOperationId,
+  ]);
 
   /** Inventory toggle ON for selected main category → stock sync. Qty/Unit always shown (standard process). */
   const isInventoryCategory =

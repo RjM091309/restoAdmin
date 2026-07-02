@@ -5,13 +5,7 @@
 // Description: Service for syncing orders from Loyverse API to local database
 // ============================================
 
-const path = require('path');
 const axios = require('axios');
-require('dotenv').config({
-	path: path.resolve(__dirname, '..', '..', '.env.local'),
-	override: true,
-});
-require('dotenv').config({ override: true });
 
 const pool = require('../config/db');
 const OrderModel = require('../models/orderModel');
