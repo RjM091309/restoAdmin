@@ -25,6 +25,12 @@ import {
     History,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+    MANILA_TIMEZONE,
+    formatEncodedDt,
+    isEncodedDtWithinDateRange,
+    parseEncodedDtToUtcMs,
+} from '../../utils/manilaDateTime';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { Select2 } from '../ui/Select2';
@@ -344,7 +350,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setLoading(true);
         setError(null);
         try {
-            const data = await getOrders(branchId);
+            const data = await getOrders(branchId, {
+                startDate: dateRange.start || undefined,
+                endDate: dateRange.end || undefined,
+            });
             const raw = Array.isArray(data) ? data : [];
             // Defensive: backend list must be 1 row per order ID. If billing JOIN ever duplicates again,
             // dedupe by IDNo so React keys stay unique and detail rows stay sane.
@@ -361,7 +370,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         } finally {
             setLoading(false);
         }
-    }, [branchId, t]);
+    }, [branchId, dateRange.start, dateRange.end, t]);
 
     useEffect(() => {
         loadOrders();
@@ -424,10 +433,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     }, [branchId]);
 
     // ==================== Filtering ====================
-    /** Used when formatting full order timestamps (date + time) and parsing naive MySQL datetimes as Manila wall time. */
-    const MANILA_TIMEZONE = 'Asia/Manila';
-    const MANILA_UTC_OFFSET_HOURS = 8; // Asia/Manila is UTC+8 (no DST)
-
     const pad2 = (n: number) => String(n).padStart(2, '0');
     const getManilaTodayYmd = () => {
         const parts = new Intl.DateTimeFormat('en-US', {
@@ -460,106 +465,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return `${yy}-${pad2(mm)}-${pad2(dd)} ${pad2(hour)}:${pad2(minute)}:${pad2(second)}`;
     };
 
-    const parseManilaLocalDateTimeToUtcMs = (value: string): number | null => {
-        // Supports:
-        // - 'YYYY-MM-DD HH:mm:ss'
-        // - 'YYYY-MM-DD HH:mm:ss.SSS' (fractional seconds)
-        const m = value.match(
-            /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(\.\d+)?$/,
-        );
-        if (!m) return null;
-
-        const year = Number(m[1]);
-        const monthIndex = Number(m[2]) - 1;
-        const day = Number(m[3]);
-        const hour = Number(m[4]);
-        const minute = Number(m[5]);
-        const second = Number(m[6]);
-        const ms = m[7] ? Number(m[7].slice(1).padEnd(3, '0').slice(0, 3)) : 0;
-
-        // Convert Manila local -> UTC instant (UTC = local - offset)
-        return Date.UTC(
-            year,
-            monthIndex,
-            day,
-            hour - MANILA_UTC_OFFSET_HOURS,
-            minute,
-            second,
-            ms,
-        );
-    };
-
-    const parseEncodedDtToUtcMs = (encoded: string): number | null => {
-        if (!encoded) return null;
-
-        // If timezone info is present, rely on JS Date parsing.
-        // Examples:
-        // - '...Z'
-        // - '...+08:00'
-        // - '...-05:30'
-        if (/[zZ]$/.test(encoded) || /[+-]\d{2}:?\d{2}$/.test(encoded)) {
-            const d = new Date(encoded);
-            return Number.isNaN(d.getTime()) ? null : d.getTime();
-        }
-
-        // If backend returns MySQL-style without timezone (space) or ISO without timezone (T):
-        // - 'YYYY-MM-DD HH:mm:ss'
-        // - 'YYYY-MM-DDTHH:mm:ss'
-        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(encoded)) {
-            const manilaMs = parseManilaLocalDateTimeToUtcMs(encoded);
-            if (manilaMs != null) return manilaMs;
-        }
-
-        // Fallback: try to parse as ISO by replacing the space with 'T'
-        const d = new Date(encoded.replace(' ', 'T'));
-        return Number.isNaN(d.getTime()) ? null : d.getTime();
-    };
-
-    const formatEncodedDt = (encoded: string | null | undefined) => {
-        if (!encoded) return '—';
-        const utcMs = parseEncodedDtToUtcMs(encoded);
-        if (utcMs == null) return '—';
-
-        return new Intl.DateTimeFormat(undefined, {
-            timeZone: MANILA_TIMEZONE,
-            dateStyle: 'short',
-            timeStyle: 'short',
-        }).format(new Date(utcMs));
-    };
-
-    const isWithinDateRange = useCallback((encoded: string | null | undefined) => {
-        if (!encoded) return true;
-        if (!dateRange.start || !dateRange.end) return true;
-
-        const startMatch = dateRange.start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        const endMatch = dateRange.end.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (!startMatch || !endMatch) return true;
-
-        // Robust fallback: compare by the date portion only (YYYY-MM-DD).
-        // This avoids edge-case exclusions when ENCODED_DT timezone interpretation differs.
-        const encodedDateMatch = String(encoded).match(/^(\d{4}-\d{2}-\d{2})[ T]?/);
-        if (encodedDateMatch?.[1]) {
-            const encodedYmd = encodedDateMatch[1];
-            if (encodedYmd >= dateRange.start && encodedYmd <= dateRange.end) return true;
-        }
-
-        const encodedMs = parseEncodedDtToUtcMs(encoded);
-        if (encodedMs == null) return true;
-
-        const sy = Number(startMatch[1]);
-        const sm = Number(startMatch[2]) - 1;
-        const sd = Number(startMatch[3]);
-
-        const ey = Number(endMatch[1]);
-        const em = Number(endMatch[2]) - 1;
-        const ed = Number(endMatch[3]);
-
-        // Manila local -> UTC instants
-        const startUtcMs = Date.UTC(sy, sm, sd, 0 - MANILA_UTC_OFFSET_HOURS, 0, 0, 0);
-        const endUtcMs = Date.UTC(ey, em, ed, 23 - MANILA_UTC_OFFSET_HOURS, 59, 59, 999);
-
-        return encodedMs >= startUtcMs && encodedMs <= endUtcMs;
-    }, [dateRange.start, dateRange.end]);
+    const isWithinDateRange = useCallback(
+        (encoded: string | null | undefined) => isEncodedDtWithinDateRange(encoded, dateRange),
+        [dateRange.start, dateRange.end],
+    );
 
     const filteredOrders = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();

@@ -56,12 +56,17 @@ class OrderModel {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
+		// Compare calendar dates in Asia/Manila so late-night UTC orders map to the correct PH day.
+		const manilaEncodedDt = `COALESCE(
+			CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
+			DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
+		)`;
 		if (startDate) {
-			query += ` AND DATE(o.ENCODED_DT) >= ?`;
+			query += ` AND DATE(${manilaEncodedDt}) >= ?`;
 			params.push(String(startDate).slice(0, 10));
 		}
 		if (endDate) {
-			query += ` AND DATE(o.ENCODED_DT) <= ?`;
+			query += ` AND DATE(${manilaEncodedDt}) <= ?`;
 			params.push(String(endDate).slice(0, 10));
 		}
 
