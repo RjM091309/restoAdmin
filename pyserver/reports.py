@@ -18,10 +18,12 @@ _ORDERS_ON_BILLING = orders_join_on_billing()
 
 
 def _clean_binary_sql(col: str) -> str:
-    """Strip NBSP byte variants before charset conversion (legacy rows may use non-utf8 bytes)."""
-    return (
-        f"REPLACE(REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xA0, 0x20), 0xC2A0, 0x20)"
-    )
+    """
+    Strip UTF-8 NBSP (0xC2A0) before charset conversion.
+    Do NOT replace bare 0xA0 — that byte appears inside valid UTF-8 Korean
+    sequences (e.g. 베 = EB B2 A0) and corrupts names like 이베리코.
+    """
+    return f"REPLACE(CAST(COALESCE({col}, '') AS BINARY), 0xC2A0, 0x20)"
 
 
 def _norm_text_sql(col: str) -> str:

@@ -191,6 +191,41 @@ const parseExpenseAmount = (value: string): number => Number(String(value || '')
 
 const roundMoney2 = (n: number) => Math.round(n * 100) / 100;
 
+const DREAM_MART_DISCOUNT_BRANCH_ID = '2';
+const DREAM_MART_DISCOUNT_MULTIPLIER = 0.85;
+
+const isDreamMartSubCategoryName = (name: string | null | undefined): boolean => {
+  const normalized = String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return (
+    normalized.includes('dream mart') ||
+    normalized.includes('dreammart') ||
+    normalized.includes('드림마트')
+  );
+};
+
+const dreamMartDiscountApplies = (
+  branchId: string | null | undefined,
+  subCategoryName: string | null | undefined,
+): boolean => String(branchId) === DREAM_MART_DISCOUNT_BRANCH_ID && isDreamMartSubCategoryName(subCategoryName);
+
+const computeDreamMartNetAmount = (grossAmount: number): number =>
+  roundMoney2(grossAmount * DREAM_MART_DISCOUNT_MULTIPLIER);
+
+const dreamMartGrossFromNet = (netAmount: number): number => {
+  if (!Number.isFinite(netAmount) || netAmount <= 0) return 0;
+  return roundMoney2(netAmount / DREAM_MART_DISCOUNT_MULTIPLIER);
+};
+
+const resolveLineAmountForSave = (grossAmount: number, applyDreamMartDiscount: boolean): number => {
+  const gross = roundMoney2(grossAmount);
+  return applyDreamMartDiscount ? computeDreamMartNetAmount(gross) : gross;
+};
+
+const formatExpenseTableAmount = (value: number) =>
+  new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(
+    Math.trunc(Number.isFinite(value) ? value : 0),
+  );
+
 /** Per-expense line quantity (EXP_QTY), shown in table and forms for all categories. */
 const expenseLineQty = (row: ExpenseRecord): number =>
   row.expQty != null && Number.isFinite(Number(row.expQty)) ? Number(row.expQty) : 0;
@@ -860,11 +895,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           const qty = item.qty != null && Number.isFinite(Number(item.qty)) ? Number(item.qty) : 0;
           const masterCatId = resolveCategory(item.category);
           const unit = normalizeReceiptUnit(item.unit);
+          const masterCat = masterCategories.find((mc) => String(mc.id) === String(masterCatId));
+          const receiptGross = Number(item.price || 0);
+          const receiptAmount = dreamMartDiscountApplies(branchId, masterCat?.categoryType || masterCat?.name)
+            ? computeDreamMartNetAmount(receiptGross)
+            : receiptGross;
           const newId = await createExpense({
             branchId,
             masterCatId,
             expDesc: String(item.name || '').trim() || null,
-            expAmount: Number(item.price || 0),
+            expAmount: receiptAmount,
             expQty: qty > 0 ? qty : null,
             expSource: 'Resto_Admin',
             unit: unit ?? null,
@@ -1362,6 +1402,11 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const isInventoryCategory =
     selectedOperationId != null && operationTracksInventory(selectedOperationId, operations);
 
+  const dreamMartDiscountEnabled = useMemo(
+    () => dreamMartDiscountApplies(branchId, selectedCategory?.name),
+    [branchId, selectedCategory?.name],
+  );
+
   const columns: ColumnDef<ExpenseRecord>[] = useMemo(
     () => [
       {
@@ -1394,17 +1439,28 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       {
         header: 'Amount',
         render: (row) => {
-          const safe = Math.trunc(expenseLineAmountStored(row));
-          return (
-            <span>
-              {new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(safe)}
-            </span>
-          );
+          const stored = expenseLineAmountStored(row);
+          const display = dreamMartDiscountEnabled ? dreamMartGrossFromNet(stored) : stored;
+          return <span>{formatExpenseTableAmount(display)}</span>;
         },
         className: 'text-right',
         headerClassName: 'text-right',
         cellClassName: 'text-right',
       },
+      ...(dreamMartDiscountEnabled
+        ? [
+            {
+              header: '15% Off',
+              render: (row: ExpenseRecord) => {
+                const net = expenseLineAmountStored(row);
+                return <span className="font-semibold text-emerald-700">{formatExpenseTableAmount(net)}</span>;
+              },
+              className: 'text-right',
+              headerClassName: 'text-right',
+              cellClassName: 'text-right',
+            } satisfies ColumnDef<ExpenseRecord>,
+          ]
+        : []),
       {
         header: 'Action',
         className: 'text-right',
@@ -1449,18 +1505,25 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                       className="w-[8.5rem] min-w-[8.5rem] shrink-0 mt-0"
                     />
                   ) : null}
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={addingAmountValue}
-                    onChange={(e) => setAddingAmountValue(formatExpenseAmountInput(e.target.value))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveSameItemAmount(row);
-                      if (e.key === 'Escape') handleCancelAddSameItemAmount();
-                    }}
-                    className="min-w-[7rem] w-32 max-w-[10rem] px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
-                    placeholder="Amount"
-                  />
+                  <div className="flex flex-col items-end gap-0.5">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={addingAmountValue}
+                      onChange={(e) => setAddingAmountValue(formatExpenseAmountInput(e.target.value))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveSameItemAmount(row);
+                        if (e.key === 'Escape') handleCancelAddSameItemAmount();
+                      }}
+                      className="min-w-[7rem] w-32 max-w-[10rem] px-2 py-1 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary outline-none"
+                      placeholder={dreamMartDiscountEnabled ? 'Before 15% off' : 'Amount'}
+                    />
+                    {dreamMartDiscountEnabled && addingAmountValue.trim() !== '' && Number.isFinite(parseExpenseAmount(addingAmountValue)) ? (
+                      <span className="text-[10px] text-emerald-700 whitespace-nowrap">
+                        15% off: {formatExpenseTableAmount(computeDreamMartNetAmount(parseExpenseAmount(addingAmountValue)))}
+                      </span>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleSaveSameItemAmount(row)}
@@ -1540,7 +1603,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         },
       },
     ],
-    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, addingUnitValue, itemsForCategory, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId, totalForView],
+    [masterCategories, addingAmountForId, addingAmountValue, addingQtyValue, addingUnitValue, dreamMartDiscountEnabled, itemsForCategory, isSubmitting, isInventoryCategory, editingQtyForId, editingQtyValue, operations, selectedOperationId, totalForView],
   );
 
   const handleSaveQty = async (row: ExpenseRecord) => {
@@ -1652,7 +1715,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const toExpenseFormValues = (row: ExpenseRecord) => {
     const qty = expenseLineQty(row);
     const line = expenseLineAmountStored(row);
-    const amountForForm = line ? formatExpenseAmountInput(String(Math.trunc(line))) : '';
+    const grossLine = dreamMartDiscountEnabled && line > 0 ? dreamMartGrossFromNet(line) : line;
+    const amountForForm = grossLine ? formatExpenseAmountInput(String(Math.trunc(grossLine))) : '';
     return {
       expDesc: row.expDesc ?? '',
       expAmount: amountForForm,
@@ -1711,7 +1775,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     const qtyRaw = expenseForm.stockQty.trim();
     const hasQty = qtyRaw !== '';
     const qty = hasQty ? Number(qtyRaw) : NaN;
-    const lineAmountForSave = roundMoney2(amountForSave);
+    const lineAmountForSave = resolveLineAmountForSave(amountForSave, dreamMartDiscountEnabled);
     const selectedDateStr = expenseForm.encodedDate?.trim() ? expenseForm.encodedDate.trim() : getManilaDateStr(new Date());
     const encodedDt = toManilaDateTimeStr(selectedDateStr);
     setIsSubmitting(true);
@@ -1905,7 +1969,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setIsSubmitting(true);
     try {
       const encodedDt = toManilaDateTimeStr(getManilaDateStr(new Date()));
-      const lineAmountNew = roundMoney2(amount);
+      const lineAmountNew = resolveLineAmountForSave(amount, dreamMartDiscountEnabled);
       const newId = await createExpense({
         branchId,
         masterCatId: row.masterCatId ?? selectedCategory.masterCategoryId,
@@ -3060,7 +3124,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             />
           </div>
           <div className="space-y-3">
-            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Amount *</label>
+            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+              Amount *{dreamMartDiscountEnabled ? ' (before 15% off)' : ''}
+            </label>
             <input
               type="text"
               inputMode={isInventoryCategory ? 'numeric' : 'decimal'}
@@ -3082,8 +3148,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                 setExpenseForm((prev) => ({ ...prev, expAmount: next }));
               }}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-              placeholder={isInventoryCategory ? '0' : '0.00'}
+              placeholder={dreamMartDiscountEnabled ? 'Before 15% off' : isInventoryCategory ? '0' : '0.00'}
             />
+            {dreamMartDiscountEnabled && expenseForm.expAmount.trim() !== '' && Number.isFinite(parseExpenseAmount(expenseForm.expAmount)) ? (
+              <p className="text-xs text-emerald-700 font-medium">
+                After 15% off: {formatExpenseTableAmount(computeDreamMartNetAmount(parseExpenseAmount(expenseForm.expAmount)))}
+              </p>
+            ) : null}
           </div>
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
