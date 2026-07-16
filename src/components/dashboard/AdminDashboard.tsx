@@ -17,7 +17,7 @@ import {
 } from '../../services/analyticsService';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
-import { is3coreBranch, sortBranchesBySidebarOrder } from '../../utils/branchLogo';
+import { isExcludedFromAllBranchesView, sortBranchesBySidebarOrder } from '../../utils/branchLogo';
 import {
   buildAdminDashboardCacheKey,
   hasAdminDashboardCacheData,
@@ -697,9 +697,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [comparePeriodReconAll, setComparePeriodReconAll] = useState(
     () => INITIAL_ADMIN_CACHE.cached?.comparePeriodReconAll ?? 0,
   );
-  const totalRevenueDistribution = useMemo(
-    () => branchRevenueDistribution.reduce((sum, item) => sum + Number(item.value || 0), 0),
+  const visibleBranchRevenueDistribution = useMemo(
+    () => branchRevenueDistribution.filter((entry) => !isExcludedFromAllBranchesView(entry.name)),
     [branchRevenueDistribution],
+  );
+  const totalRevenueDistribution = useMemo(
+    () => visibleBranchRevenueDistribution.reduce((sum, item) => sum + Number(item.value || 0), 0),
+    [visibleBranchRevenueDistribution],
   );
   const topProductsPalette = useMemo(() => getTopProductsPalette(activeBranchId), [activeBranchId]);
   const topProductsChartData = useMemo(
@@ -990,7 +994,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   );
 
   const prefetchAllBranchDashboards = useCallback(async () => {
-    const branches = branchCardsData.filter((b) => !is3coreBranch(b.name));
+    const branches = branchCardsData.filter((b) => !isExcludedFromAllBranchesView(b.name));
     if (branches.length === 0) return;
 
     const queue = [...branches];
@@ -1020,7 +1024,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     if (branchPrefetchStartedKeyRef.current === analyticsCacheKey) return;
 
     const { start, end } = getDateRangeForAnalytics();
-    const allBranches = branchCardsData.filter((b) => !is3coreBranch(b.name));
+    const allBranches = branchCardsData.filter((b) => !isExcludedFromAllBranchesView(b.name));
     const allCached =
       allBranches.length > 0 &&
       allBranches.every((b) => {
@@ -1577,7 +1581,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   const handleBranchCompareToggle = (branchId: number) => {
     const branch = sourceForCompare.find((b) => b.id === branchId);
-    if (branch && is3coreBranch(branch.name)) return;
+    if (branch && isExcludedFromAllBranchesView(branch.name)) return;
     setCompareBranchIds((prev) => {
       if (prev.includes(branchId)) {
         return prev.filter((id) => id !== branchId);
@@ -1606,7 +1610,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     setCompareBranchIds((prev) =>
       prev.filter((id) => {
         const b = sourceForCompare.find((x) => x.id === id);
-        return b && !is3coreBranch(b.name);
+        return b && !isExcludedFromAllBranchesView(b.name);
       }),
     );
   }, [sourceForCompare]);
@@ -2462,18 +2466,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-4">{t('admin_dashboard.revenue_distribution')}</h3>
                 <div className="w-full min-w-0 h-72 min-h-[288px]">
-                  {analyticsLoading && branchRevenueDistribution.length === 0 ? (
+                  {analyticsLoading && visibleBranchRevenueDistribution.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
                       <Skeleton className="h-40 w-40 rounded-full" />
                     </div>
-                  ) : branchRevenueDistribution.length === 0 ? (
+                  ) : visibleBranchRevenueDistribution.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-sm text-slate-500">
                       {t('admin_dashboard.no_revenue_data')}
                     </div>
                   ) : (
                     <div className="h-full flex items-center gap-4">
                       <div className="w-1/2 space-y-3 max-h-full overflow-y-auto pr-2">
-                        {branchRevenueDistribution.map((entry, index) => {
+                        {visibleBranchRevenueDistribution.map((entry, index) => {
                           const percentage = totalRevenueDistribution > 0
                             ? (Number(entry.value || 0) / totalRevenueDistribution) * 100
                             : 0;
@@ -2495,7 +2499,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                           <PieChart>
                             <Pie
-                              data={branchRevenueDistribution}
+                              data={visibleBranchRevenueDistribution}
                               cx="50%"
                               cy="50%"
                               innerRadius={62}
@@ -2505,7 +2509,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                               dataKey="value"
                               stroke="none"
                             >
-                              {branchRevenueDistribution.map((entry, index) => (
+                              {visibleBranchRevenueDistribution.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={REVENUE_DISTRIBUTION_COLORS[index % REVENUE_DISTRIBUTION_COLORS.length]} />
                               ))}
                             </Pie>

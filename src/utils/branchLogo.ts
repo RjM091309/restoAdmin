@@ -29,24 +29,35 @@ export function is3coreBranch(name: string | null | undefined): boolean {
   return n === '3core' || n.includes('3core');
 }
 
-/** All Branches sidebar grid: row1 kim's, Bluemoon, Kumho — row2 PRIME, EESOME, NOIR */
+export function isNoirBranch(name: string | null | undefined): boolean {
+  const n = normalizeBranchName(name || '');
+  return /noir/.test(n);
+}
+
+/** Branches hidden from All Branches sidebar grid, dashboard cards, and compare. */
+export function isExcludedFromAllBranchesView(name: string | null | undefined): boolean {
+  return is3coreBranch(name) || isNoirBranch(name);
+}
+
+/** All Branches sidebar grid: row1 kim's, Bluemoon, Kumho — row2 PRIME, EESOME */
 const ALL_BRANCHES_SIDEBAR_MATCHERS: Array<(name: string) => boolean> = [
   (n) => /kim/.test(n),
   (n) => /blue\s*moon|bluemoon/.test(n),
   (n) => /kumho|kum\s*ho|keumho|keum\s*ho|daraejung/.test(n),
   (n) => /prime/.test(n),
   (n) => /eesome/.test(n) && !/noir/.test(n),
-  (n) => /noir/.test(n),
 ];
 
-/** Fixed branch order (sidebar + dashboard compare). Excludes 3Core by default. */
+/** Fixed branch order (sidebar + dashboard compare). Excludes hidden branches by default. */
 export function sortBranchesBySidebarOrder<T extends { id: number | string; name: string }>(
   branches: T[],
   options?: { exclude3core?: boolean; appendUnmatched?: boolean },
 ): T[] {
   const exclude3core = options?.exclude3core ?? true;
   const appendUnmatched = options?.appendUnmatched ?? true;
-  const pool = exclude3core ? branches.filter((b) => !is3coreBranch(b.name)) : [...branches];
+  const pool = exclude3core
+    ? branches.filter((b) => !isExcludedFromAllBranchesView(b.name))
+    : [...branches];
   const used = new Set<string>();
   const ordered: T[] = [];
 

@@ -173,46 +173,69 @@ const AllBranchesLogoRow: React.FC<{ branches: Branch[] }> = ({ branches }) => {
 
   const iconSize = Math.max(12, Math.round(logoSize * 0.45));
 
+  const logoRows = React.useMemo(() => {
+    const rows: Branch[][] = [];
+    for (let i = 0; i < displayBranches.length; i += ALL_BRANCHES_LOGO_COLS) {
+      rows.push(displayBranches.slice(i, i + ALL_BRANCHES_LOGO_COLS));
+    }
+    return rows;
+  }, [displayBranches]);
+
+  const renderBranchLogo = (branch: Branch) => {
+    const id = String(branch.id);
+    const url = resolveBranchLogoUrl(branch.logo);
+    if (!url || failedIds.has(id)) {
+      return (
+        <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
+          <span className="w-full h-full rounded-full bg-brand-primary/10 flex items-center justify-center">
+            <UtensilsCrossed size={iconSize} className="text-brand-primary" />
+          </span>
+        </AllBranchLogoButton>
+      );
+    }
+    return (
+      <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
+        <img
+          src={url}
+          alt={branch.name}
+          className="w-full h-full object-contain pointer-events-none"
+          onError={() =>
+            setFailedIds((prev) => {
+              const next = new Set(prev);
+              next.add(id);
+              return next;
+            })
+          }
+        />
+      </AllBranchLogoButton>
+    );
+  };
+
   if (displayBranches.length === 0) return null;
 
   return (
     <motion.div
       ref={containerRef}
-      className="grid w-full grid-cols-3 justify-items-center"
-      style={{
-        columnGap: ALL_BRANCHES_LOGO_GAP,
-        rowGap: ALL_BRANCHES_LOGO_GAP,
-      }}
+      className="flex w-full flex-col"
+      style={{ rowGap: ALL_BRANCHES_LOGO_GAP }}
     >
-      {displayBranches.map((branch) => {
-        const id = String(branch.id);
-        const url = resolveBranchLogoUrl(branch.logo);
-        if (!url || failedIds.has(id)) {
-          return (
-            <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
-              <span className="w-full h-full rounded-full bg-brand-primary/10 flex items-center justify-center">
-                <UtensilsCrossed size={iconSize} className="text-brand-primary" />
-              </span>
-            </AllBranchLogoButton>
-          );
-        }
-        return (
-          <AllBranchLogoButton key={id} branch={branch} logoSize={logoSize}>
-            <img
-              src={url}
-              alt={branch.name}
-              className="w-full h-full object-contain pointer-events-none"
-              onError={() =>
-                setFailedIds((prev) => {
-                  const next = new Set(prev);
-                  next.add(id);
-                  return next;
-                })
-              }
-            />
-          </AllBranchLogoButton>
-        );
-      })}
+      {logoRows.map((row, rowIndex) => (
+        <div
+          key={rowIndex}
+          className={cn(
+            'w-full',
+            row.length === ALL_BRANCHES_LOGO_COLS
+              ? 'grid grid-cols-3 justify-items-center'
+              : 'flex justify-center',
+          )}
+          style={{
+            columnGap: ALL_BRANCHES_LOGO_GAP,
+            gap: ALL_BRANCHES_LOGO_GAP,
+          }}
+        >
+          {row.map((branch) => renderBranchLogo(branch))}
+        </div>
+      ))}
     </motion.div>
   );
 };
