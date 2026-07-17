@@ -98,12 +98,12 @@ function normalizeReceiptUnit(raw: string | null | undefined): string | null {
 // Operations, categories, and expenses are loaded from API (operation_category, master_categories, expenses tables).
 
 const formatCurrency = (value: number) => {
-  const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
+  const safe = roundMoney2(Number.isFinite(value) ? value : 0);
   return new Intl.NumberFormat('en-PH', {
     style: 'currency',
     currency: 'PHP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(safe);
 };
 
@@ -180,7 +180,8 @@ const formatExpenseAmountInput = (raw: string): string => {
   if (!cleaned) return '';
   const firstDot = cleaned.indexOf('.');
   const normalized = firstDot === -1 ? cleaned : `${cleaned.slice(0, firstDot + 1)}${cleaned.slice(firstDot + 1).replace(/\./g, '')}`;
-  const [intPartRaw, decPart] = normalized.split('.');
+  const [intPartRaw, decPartRaw] = normalized.split('.');
+  const decPart = decPartRaw !== undefined ? decPartRaw.slice(0, 2) : undefined;
   const intPart = intPartRaw.replace(/^0+(?=\d)/, '');
   const grouped = (intPart || '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (normalized.endsWith('.') && decPart === undefined) return `${grouped}.`;
@@ -222,8 +223,8 @@ const resolveLineAmountForSave = (grossAmount: number, applyDreamMartDiscount: b
 };
 
 const formatExpenseTableAmount = (value: number) =>
-  new Intl.NumberFormat('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(
-    Math.trunc(Number.isFinite(value) ? value : 0),
+  new Intl.NumberFormat('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+    roundMoney2(Number.isFinite(value) ? value : 0),
   );
 
 /** Per-expense line quantity (EXP_QTY), shown in table and forms for all categories. */
@@ -1716,7 +1717,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     const qty = expenseLineQty(row);
     const line = expenseLineAmountStored(row);
     const grossLine = dreamMartDiscountEnabled && line > 0 ? dreamMartGrossFromNet(line) : line;
-    const amountForForm = grossLine ? formatExpenseAmountInput(String(Math.trunc(grossLine))) : '';
+    const amountForForm = grossLine > 0 ? formatExpenseAmountInput(roundMoney2(grossLine).toFixed(2)) : '';
     return {
       expDesc: row.expDesc ?? '',
       expAmount: amountForForm,
@@ -3129,26 +3130,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             </label>
             <input
               type="text"
-              inputMode={isInventoryCategory ? 'numeric' : 'decimal'}
+              inputMode="decimal"
               value={expenseForm.expAmount}
               onChange={(e) => {
-                const formatted = formatExpenseAmountInput(e.target.value);
-                if (!isInventoryCategory) {
-                  setExpenseForm((prev) => ({ ...prev, expAmount: formatted }));
-                  return;
-                }
-                if (formatted.trim() === '') {
-                  setExpenseForm((prev) => ({ ...prev, expAmount: '' }));
-                  return;
-                }
-                const n = parseExpenseAmount(formatted);
-                const next = Number.isFinite(n)
-                  ? formatExpenseAmountInput(String(Math.round(n)))
-                  : formatted;
-                setExpenseForm((prev) => ({ ...prev, expAmount: next }));
+                setExpenseForm((prev) => ({ ...prev, expAmount: formatExpenseAmountInput(e.target.value) }));
               }}
               className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
-              placeholder={dreamMartDiscountEnabled ? 'Before 15% off' : isInventoryCategory ? '0' : '0.00'}
+              placeholder={dreamMartDiscountEnabled ? 'Before 15% off' : '0.00'}
             />
             {dreamMartDiscountEnabled && expenseForm.expAmount.trim() !== '' && Number.isFinite(parseExpenseAmount(expenseForm.expAmount)) ? (
               <p className="text-xs text-emerald-700 font-medium">

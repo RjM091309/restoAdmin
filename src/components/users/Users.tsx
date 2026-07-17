@@ -481,7 +481,12 @@ export const Users: React.FC = () => {
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || !formData.firstName.trim() || !formData.lastName.trim() || !formData.username.trim() || !formData.roleId || (!editingUser && (!formData.password || !formData.confirmPassword)) || (!!formData.password && formData.password !== formData.confirmPassword)}
+              disabled={
+                isSubmitting ||
+                !formData.roleId ||
+                (!editingUser && (!formData.username.trim() || !formData.password || !formData.confirmPassword)) ||
+                (!!formData.password && formData.password !== formData.confirmPassword)
+              }
               className="px-6 py-2.5 rounded-xl font-bold text-white bg-brand-primary shadow-lg shadow-brand-primary/30 hover:bg-brand-primary/90 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center gap-2"
             >
               {isSubmitting && <Loader2 size={16} className="animate-spin" />}
@@ -531,7 +536,6 @@ export const Users: React.FC = () => {
               <div className="relative">
                 <input
                   type="text"
-                  required
                   placeholder={t('manage_users.enter_first_name')}
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.firstName}
@@ -545,7 +549,6 @@ export const Users: React.FC = () => {
               <div className="relative">
                 <input
                   type="text"
-                  required
                   placeholder={t('manage_users.enter_last_name')}
                   className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                   value={formData.lastName}
@@ -561,7 +564,7 @@ export const Users: React.FC = () => {
             <div className="relative">
               <input
                 type="text"
-                required
+                required={!editingUser}
                 placeholder={t('manage_users.enter_username')}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all"
                 value={formData.username}
