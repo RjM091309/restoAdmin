@@ -55,7 +55,6 @@ class TelegramService {
 		report_blue_m: 3, // Blue M
 		report_keum: 9, // Keum
 		report_eesome: 10, // EESOME
-		report_noir_eesome: 11, // NOIR by EESOME
 		report_pre: 12, // Pre
 		report_new: null, // reserved
 	};
@@ -66,7 +65,6 @@ class TelegramService {
 		'report_keum',
 		'report_eesome',
 		'report_pre',
-		'report_noir_eesome',
 	]);
 
 	static buildReportButtons() {
@@ -84,7 +82,6 @@ class TelegramService {
 				{ text: '프리미엄 Pre', callback_data: 'report_pre' },
 			],
 			[
-				{ text: 'NOIR by EESOME', callback_data: 'report_noir_eesome' },
 				{ text: '신규 New', callback_data: 'report_new' },
 			],
 		];
@@ -106,7 +103,6 @@ class TelegramService {
 					{ text: '프리미엄 Pre' },
 				],
 				[
-					{ text: 'NOIR by EESOME' },
 					{ text: '신규 New' },
 				],
 			],
@@ -123,7 +119,6 @@ class TelegramService {
 		'금호반점 Keum': 'report_keum',
 		EESOME: 'report_eesome',
 		'프리미엄 Pre': 'report_pre',
-		'NOIR by EESOME': 'report_noir_eesome',
 		'신규 New': 'report_new',
 	};
 
@@ -282,7 +277,6 @@ class TelegramService {
 			report_keum: '금호반점 Keum',
 			report_eesome: 'EESOME',
 			report_pre: '프리미엄 Pre',
-			report_noir_eesome: 'NOIR by EESOME',
 			report_new: '신규 New',
 		};
 		return titles[callbackData] || 'Report';

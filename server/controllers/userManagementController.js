@@ -278,7 +278,7 @@ class UserManagementController {
             res.json({ success: true, message: 'User updated successfully' });
         } catch (err) {
             console.error('Error updating user:', err);
-            res.status(500).send('Error updating user');
+            res.status(500).json({ success: false, error: 'Error updating user' });
         }
     }
 

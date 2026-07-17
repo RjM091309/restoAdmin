@@ -147,7 +147,7 @@ class UserProfileController {
 			const newHashedPassword = await argon2.hash(new_password);
 
 			// Update password
-			await pool.execute('UPDATE user_info SET PASSWORD = ?, SALT = NULL WHERE IDNo = ?', [newHashedPassword, userId]);
+			await pool.execute('UPDATE user_info SET PASSWORD = ?, SALT = \'\' WHERE IDNo = ?', [newHashedPassword, userId]);
 
 			return ApiResponse.success(res, null, 'Password changed successfully');
 		} catch (error) {

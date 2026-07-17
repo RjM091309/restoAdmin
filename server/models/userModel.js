@@ -66,12 +66,12 @@ class UserModel {
     }
 
     static async updatePassword(id, newPasswordHash) {
-        const query = `UPDATE user_info SET PASSWORD = ?, SALT = NULL, RESET_TOKEN = NULL, RESET_TOKEN_EXPIRY = NULL WHERE IDNo = ?`;
+        const query = `UPDATE user_info SET PASSWORD = ?, SALT = '' WHERE IDNo = ?`;
         await pool.execute(query, [newPasswordHash, id]);
     }
 
     static async updatePasswordAndClearResetToken(id, newPasswordHash) {
-        const query = 'UPDATE user_info SET PASSWORD = ?, SALT = NULL, RESET_TOKEN = NULL, RESET_TOKEN_EXPIRY = NULL WHERE IDNo = ?';
+        const query = 'UPDATE user_info SET PASSWORD = ?, SALT = \'\' WHERE IDNo = ?';
         await pool.execute(query, [newPasswordHash, id]);
     }
 
