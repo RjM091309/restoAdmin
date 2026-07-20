@@ -497,6 +497,7 @@
 		"breakdown_error": "Could not load the breakdown. Try again.",
 		"breakdown_rows_count": "{{count}} lines",
 		"breakdown_loading_hint": "Fetching menu lines…",
+		"open_in_menu": "Open in Menu Management",
 		"columns": {
 			"action": "Action",
 			"category": "Category",
@@ -513,9 +514,11 @@
 	"menu_report": {
 		"search_placeholder": "Search goods or category...",
 		"export": "EXPORT",
+		"open_in_menu": "Open in Menu Management",
 		"columns": {
 			"goods": "Goods",
 			"category": "Category",
+			"main_sub_category": "Main category / Sub category",
 			"sales_quantity": "Sales quantity",
 			"total_sales": "Total sales",
 			"refund_quantity": "Refund quantity",

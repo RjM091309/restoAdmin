@@ -879,7 +879,7 @@ def top_profit_drivers(
 ) -> dict:
     """
     Fast profit drivers for Sales Analytics dashboard.
-    Menu items per branch plus synthetic Room Charge (matches menu-report logic).
+    Menu items per branch plus synthetic Room Charge / Service Charge (matches menu-report logic).
     """
     try:
         from reports import _norm_text_sql
@@ -973,17 +973,43 @@ def top_profit_drivers(
             HAVING SUM(rc.total_sales) > 0
         """
 
+        # Same split as menu-report: order header SERVICE_CHARGE on tables without ROOM_CHARGE.
+        service_charge_query = f"""
+            SELECT
+                -9999 AS id,
+                'Service Charge' AS goods,
+                'Charges' AS category,
+                COALESCE(MAX(br.BRANCH_NAME), 'Unknown Branch') AS branch,
+                b.BRANCH_ID AS branch_id,
+                COUNT(DISTINCT o.IDNo) AS salesQty,
+                COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
+                0 AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON {_BILLING_JOIN}
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+              AND COALESCE(rt.ROOM_CHARGE, 0) = 0
+            {date_filter}
+            {branch_filter}
+            GROUP BY b.BRANCH_ID
+            HAVING COALESCE(SUM(o.SERVICE_CHARGE), 0) > 0
+        """
+
         query = f"""
             SELECT id, goods, category, branch, branch_id, salesQty, totalSales, unitCost
             FROM (
                 {menu_query}
                 UNION ALL
                 {room_charge_query}
+                UNION ALL
+                {service_charge_query}
             ) combined
             ORDER BY (totalSales - unitCost) DESC, salesQty DESC
             LIMIT {effective_limit}
         """
-        exec_params = params + params + params
+        # Params: menu + room (header) + room (category items) + service charge
+        exec_params = params + params + params + params
         cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()

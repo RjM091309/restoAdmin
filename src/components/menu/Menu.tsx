@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search,
@@ -95,6 +96,8 @@ interface MenuProps {
 
 export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const deepLinkCategoryIdRef = useRef<string | null>(searchParams.get('categoryId'));
     const branchId = selectedBranch ? String(selectedBranch.id) : 'all';
     const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
     const [branchCategoryLevel, setBranchCategoryLevel] = useState<1 | 2>(1);
@@ -286,7 +289,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setAvailFilter('all');
     }, [refreshData]);
 
-    // Auto-select category: flat list (level 1) or main then sub (level 2)
+    // Auto-select category: flat list (level 1) or main then sub (level 2).
+    // Prefer deep-link `?categoryId=` from Category Report when present.
     useEffect(() => {
         if (!isSpecificBranch) return;
         if (categories.length === 0) {
@@ -294,6 +298,42 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             setSelectedMainCategoryId(null);
             return;
         }
+
+        const deepLinkId = deepLinkCategoryIdRef.current;
+        if (deepLinkId) {
+            const target = categories.find((c) => normalizeId(c.id) === normalizeId(deepLinkId));
+            if (target) {
+                if (isTwoLevelBranch) {
+                    if (target.parentId) {
+                        setSelectedMainCategoryId(String(target.parentId));
+                        setSelectedCategory(target.id);
+                    } else {
+                        setSelectedMainCategoryId(target.id);
+                        const firstSub = sortMenuCategoriesByName(
+                            categories.filter((c) => normalizeId(c.parentId) === normalizeId(target.id)),
+                        )[0];
+                        setSelectedCategory(firstSub?.id ?? target.id);
+                    }
+                } else {
+                    setSelectedMainCategoryId(null);
+                    setSelectedCategory(target.id);
+                }
+                deepLinkCategoryIdRef.current = null;
+                if (searchParams.has('categoryId')) {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('categoryId');
+                    setSearchParams(next, { replace: true });
+                }
+                return;
+            }
+            deepLinkCategoryIdRef.current = null;
+            if (searchParams.has('categoryId')) {
+                const next = new URLSearchParams(searchParams);
+                next.delete('categoryId');
+                setSearchParams(next, { replace: true });
+            }
+        }
+
         if (!isTwoLevelBranch) {
             setSelectedMainCategoryId(null);
             const first = sortedCategories[0]?.id ?? null;
@@ -308,10 +348,20 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             return;
         }
         setSelectedMainCategoryId((prev) => (prev && sortedMains.some((m) => m.id === prev) ? prev : sortedMains[0].id));
-    }, [categories, isSpecificBranch, isTwoLevelBranch, sortedCategories]);
+    }, [categories, isSpecificBranch, isTwoLevelBranch, sortedCategories, searchParams, setSearchParams]);
 
     useEffect(() => {
         if (!isSpecificBranch || !isTwoLevelBranch || !selectedMainCategoryId) return;
+        // Keep deep-linked subcategory if it belongs under the selected main.
+        if (selectedCategory) {
+            const selected = categories.find((c) => normalizeId(c.id) === normalizeId(selectedCategory));
+            if (selected && normalizeId(selected.parentId) === normalizeId(selectedMainCategoryId)) {
+                return;
+            }
+            if (selected && normalizeId(selected.id) === normalizeId(selectedMainCategoryId)) {
+                return;
+            }
+        }
         const subs = categories.filter((c) => c.parentId === selectedMainCategoryId);
         const sortedSubs = sortMenuCategoriesByName(subs);
         if (sortedSubs.length === 0) {
@@ -319,7 +369,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             return;
         }
         setSelectedCategory((prev) => (prev && sortedSubs.some((s) => s.id === prev) ? prev : sortedSubs[0].id));
-    }, [categories, isSpecificBranch, isTwoLevelBranch, selectedMainCategoryId]);
+    }, [categories, isSpecificBranch, isTwoLevelBranch, selectedMainCategoryId, selectedCategory]);
 
     /** Level 2: may legacy rows na naka-CATEGORY_ID sa main pa rin (flat era). Dapat pa ring makita kapag main/sub ang scope. */
     const menuScopeReady = useMemo(() => {

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AlertCircle, Loader2, Search, Store } from 'lucide-react';
+import { AlertCircle, ExternalLink, Loader2, Search, Store } from 'lucide-react';
 import { Skeleton } from '../ui/Skeleton';
 import {
   BarChart,
@@ -65,10 +66,18 @@ type MenuReportProps = {
 type MenuReportRow = {
   id: string;
   goods: string;
-  branch: string;
+  mainCategory: string;
+  subCategory: string;
+  categoryId: number | null;
   salesQty: number;
   totalSales: number;
   netSales: number;
+};
+
+const formatMenuCategoryLabel = (mainCategory: string, subCategory: string) => {
+  const main = mainCategory.trim() || 'Uncategorized';
+  const sub = subCategory.trim();
+  return sub ? `${main} / ${sub}` : main;
 };
 
 type MenuReportCachePayload = {
@@ -96,6 +105,8 @@ const formatDateLabel = (date: Date) =>
 
 export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<MenuReportRow[]>([]);
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>([]);
@@ -104,6 +115,19 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
   const branchIdForCache =
     selectedBranch && String(selectedBranch.id) !== 'all' ? String(selectedBranch.id) : null;
+
+  const canOpenMenuLanding = Boolean(selectedBranch && String(selectedBranch.id) !== 'all');
+
+  const openMenuLanding = useCallback(
+    (categoryId: number | null | undefined) => {
+      if (!canOpenMenuLanding || !selectedBranch || !categoryId || categoryId <= 0) return;
+      const params = new URLSearchParams(location.search);
+      params.set('branchId', String(selectedBranch.id));
+      params.set('categoryId', String(categoryId));
+      navigate(`/menu-management?${params.toString()}`);
+    },
+    [canOpenMenuLanding, selectedBranch, location.search, navigate],
+  );
 
   const hasMenuCacheData = useCallback(
     (cached: MenuReportCachePayload | null) =>
@@ -122,12 +146,14 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   }, []);
 
   const fetchMenuReportData = useCallback(async (): Promise<MenuReportCachePayload> => {
-    const branchName = selectedBranch?.name || 'All Branches';
     const mapRows = (apiRows: ApiMenuReportRow[]) =>
       apiRows.map((row) => ({
         id: String(row.id),
         goods: row.goods,
-        branch: row.branch || branchName,
+        mainCategory: row.mainCategory ?? row.category ?? 'Uncategorized',
+        subCategory: row.subCategory ?? '',
+        categoryId:
+          row.categoryId != null && Number(row.categoryId) > 0 ? Number(row.categoryId) : null,
         salesQty: row.salesQty,
         totalSales: row.totalSales,
         netSales: row.netSales,
@@ -164,7 +190,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       rows: mapRows(apiRows),
       dailySalesCurrent: dailySales,
     };
-  }, [branchIdForCache, dateRange.end, dateRange.start, selectedBranch?.name]);
+  }, [branchIdForCache, dateRange.end, dateRange.start]);
 
   const { loading: reportLoading } = useAnalyticsReportLoad<MenuReportCachePayload>({
     report: 'menu',
@@ -185,9 +211,10 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return rows;
-    return rows.filter((row) =>
-      row.goods.toLowerCase().includes(keyword) || row.branch.toLowerCase().includes(keyword)
-    );
+    return rows.filter((row) => {
+      const categoryLabel = formatMenuCategoryLabel(row.mainCategory, row.subCategory).toLowerCase();
+      return row.goods.toLowerCase().includes(keyword) || categoryLabel.includes(keyword);
+    });
   }, [rows, searchTerm]);
 
   const columns: ColumnDef<MenuReportRow>[] = [
@@ -197,9 +224,39 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
       className: 'min-w-[180px] border-r border-gray-200',
     },
     {
-      header: 'Branch',
-      accessorKey: 'branch',
+      header: t('menu_report.columns.main_sub_category'),
+      accessorKey: 'mainCategory',
       className: 'min-w-[170px]',
+      render: (item) => {
+        const label = formatMenuCategoryLabel(item.mainCategory, item.subCategory);
+        const clickable = canOpenMenuLanding && item.categoryId != null && item.categoryId > 0;
+        if (!clickable) {
+          return (
+            <span className="inline-flex max-w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+              <span className="truncate">{label}</span>
+            </span>
+          );
+        }
+        return (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              openMenuLanding(item.categoryId);
+            }}
+            className="group inline-flex max-w-full items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1.5 text-left text-xs font-semibold text-indigo-800 transition-colors hover:border-indigo-200 hover:bg-indigo-100/80 hover:text-indigo-950"
+            title={t('menu_report.open_in_menu')}
+          >
+            <span className="truncate">{label}</span>
+            <ExternalLink
+              size={13}
+              strokeWidth={2.25}
+              className="shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
+              aria-hidden
+            />
+          </button>
+        );
+      },
     },
     {
       header: t('menu_report.columns.sales_quantity'),
@@ -219,7 +276,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
   const handleExportCsv = () => {
     const headers = [
       t('menu_report.columns.goods'),
-      'Branch',
+      t('menu_report.columns.main_sub_category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
     ];
@@ -232,7 +289,7 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
     const rowsForCsv = filteredRows.map((row) => [
       row.goods,
-      row.branch,
+      formatMenuCategoryLabel(row.mainCategory, row.subCategory),
       row.salesQty.toString(),
       row.totalSales.toString(),
     ]);
@@ -262,14 +319,14 @@ export const MenuReport: React.FC<MenuReportProps> = ({ selectedBranch, dateRang
 
     const headers = [
       t('menu_report.columns.goods'),
-      'Branch',
+      t('menu_report.columns.main_sub_category'),
       t('menu_report.columns.sales_quantity'),
       t('menu_report.columns.total_sales'),
     ];
 
     const body = filteredRows.map((row) => [
       row.goods,
-      row.branch,
+      formatMenuCategoryLabel(row.mainCategory, row.subCategory),
       row.salesQty.toLocaleString(),
       money(row.totalSales),
     ]);

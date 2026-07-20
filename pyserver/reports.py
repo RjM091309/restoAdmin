@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from main import get_connection
+from main import get_connection, _mysql_column_exists
 from sales_query_filters import billing_join_on, billing_where_clauses, orders_join_on_billing
 
 
@@ -59,6 +59,9 @@ class MenuReportRow(BaseModel):
     id: int
     goods: str
     category: str
+    mainCategory: str
+    subCategory: str = ""
+    categoryId: Optional[int] = None
     branch: str
     salesQty: int
     totalSales: float
@@ -73,6 +76,8 @@ class MenuReportRow(BaseModel):
 class CategoryReportRow(BaseModel):
     id: int
     category: str
+    mainCategory: str
+    subCategory: str = ""
     branch: str
     salesQty: int
     totalSales: float
@@ -176,11 +181,29 @@ def menu_report(
         date_filter_bq = date_filter.replace("b.", "bq.") if date_filter else ""
         branch_filter_bq = branch_filter.replace("b.", "bq.") if branch_filter else ""
 
+        has_parent_cat = _mysql_column_exists(cur, "categories", "PARENT_CAT_ID")
+        parent_join = "LEFT JOIN categories pc ON pc.IDNo = c.PARENT_CAT_ID" if has_parent_cat else ""
+        if has_parent_cat:
+            main_cat_sql = (
+                f"COALESCE(NULLIF({_safe_text_sql('pc.CAT_NAME')}, ''), "
+                f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized'))"
+            )
+            sub_cat_sql = (
+                f"CASE WHEN c.PARENT_CAT_ID IS NOT NULL THEN COALESCE({_safe_text_sql('c.CAT_NAME')}, '') "
+                f"ELSE '' END"
+            )
+        else:
+            main_cat_sql = f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized')"
+            sub_cat_sql = "''"
+
         query = f"""
             SELECT
                 m.IDNo AS id,
                 COALESCE({_safe_text_sql('m.MENU_NAME')}, '') AS goods,
                 COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
+                {main_cat_sql} AS mainCategory,
+                {sub_cat_sql} AS subCategory,
+                COALESCE(c.IDNo, 0) AS categoryId,
                 COALESCE(
                     NULLIF(
                         GROUP_CONCAT(
@@ -203,6 +226,7 @@ def menu_report(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            {parent_join}
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE 1=1
             {date_filter}
@@ -211,7 +235,7 @@ def menu_report(
               AND {_norm_text_sql('m.MENU_NAME')} <> 'ROOM CHARGE'
               -- Also fold any legacy "ROOM CHARGE" category sales into the synthetic Room Charge row.
               AND {_norm_text_sql('c.CAT_NAME')} <> 'ROOM CHARGE'
-            GROUP BY m.IDNo, m.MENU_NAME, c.CAT_NAME
+            GROUP BY m.IDNo, m.MENU_NAME
             HAVING salesQty > 0
 
             UNION ALL
@@ -220,6 +244,9 @@ def menu_report(
                 -9998 AS id,
                 'Room Charge' AS goods,
                 'Charges' AS category,
+                'Charges' AS mainCategory,
+                '' AS subCategory,
+                0 AS categoryId,
                 COALESCE(
                     NULLIF(
                         GROUP_CONCAT(
@@ -283,6 +310,9 @@ def menu_report(
                 -9999 AS id,
                 'Service Charge' AS goods,
                 'Charges' AS category,
+                'Charges' AS mainCategory,
+                '' AS subCategory,
+                0 AS categoryId,
                 COALESCE(
                     NULLIF(
                         GROUP_CONCAT(
@@ -347,6 +377,13 @@ def menu_report(
                 id=int(row.get("id") or 0),
                 goods=str(row.get("goods") or ""),
                 category=str(row.get("category") or "Uncategorized"),
+                mainCategory=str(row.get("mainCategory") or row.get("category") or "Uncategorized"),
+                subCategory=str(row.get("subCategory") or ""),
+                categoryId=(
+                    int(row["categoryId"])
+                    if row.get("categoryId") is not None and int(row.get("categoryId") or 0) > 0
+                    else None
+                ),
                 branch=str(row.get("branch") or "Unknown Branch"),
                 salesQty=int(row.get("salesQty") or 0),
                 totalSales=total_sales,
@@ -403,10 +440,27 @@ def category_report(
         date_filter_bq = date_filter.replace("b.", "bq.") if date_filter else ""
         branch_filter_bq = branch_filter.replace("b.", "bq.") if branch_filter else ""
 
+        has_parent_cat = _mysql_column_exists(cur, "categories", "PARENT_CAT_ID")
+        parent_join = "LEFT JOIN categories pc ON pc.IDNo = c.PARENT_CAT_ID" if has_parent_cat else ""
+        if has_parent_cat:
+            main_cat_sql = (
+                f"COALESCE(NULLIF({_safe_text_sql('pc.CAT_NAME')}, ''), "
+                f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized'))"
+            )
+            sub_cat_sql = (
+                f"CASE WHEN c.PARENT_CAT_ID IS NOT NULL THEN COALESCE({_safe_text_sql('c.CAT_NAME')}, '') "
+                f"ELSE '' END"
+            )
+        else:
+            main_cat_sql = f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized')"
+            sub_cat_sql = "''"
+
         query = f"""
             SELECT
                 COALESCE(c.IDNo, 0) AS id,
                 COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
+                {main_cat_sql} AS mainCategory,
+                {sub_cat_sql} AS subCategory,
                 COALESCE(
                     NULLIF(
                         GROUP_CONCAT(
@@ -429,6 +483,7 @@ def category_report(
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+            {parent_join}
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
             WHERE 1=1
             {date_filter}
@@ -446,6 +501,8 @@ def category_report(
             SELECT
                 -9998 AS id,
                 'Room Charge' AS category,
+                'Charges' AS mainCategory,
+                '' AS subCategory,
                 COALESCE(
                     NULLIF(
                         GROUP_CONCAT(
@@ -502,11 +559,46 @@ def category_report(
             {date_filter}
             {branch_filter}
             HAVING salesQty > 0
+
+            UNION ALL
+
+            SELECT
+                -9999 AS id,
+                'Service Charge' AS category,
+                'Charges' AS mainCategory,
+                '' AS subCategory,
+                COALESCE(
+                    NULLIF(
+                        GROUP_CONCAT(
+                            DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                            ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                            SEPARATOR ', '
+                        ),
+                        ''
+                    ),
+                    'Unknown Branch'
+                ) AS branch,
+                COUNT(DISTINCT o.IDNo) AS salesQty,
+                COALESCE(SUM(o.SERVICE_CHARGE), 0) AS totalSales,
+                0 AS refundQty,
+                0 AS refundAmount,
+                0 AS discounts,
+                0 AS unitCost
+            FROM orders o
+            INNER JOIN billing b ON {_BILLING_JOIN}
+            LEFT JOIN restaurant_tables rt ON rt.IDNo = o.TABLE_ID
+            LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
+            WHERE COALESCE(o.SERVICE_CHARGE, 0) > 0
+              AND COALESCE(rt.ROOM_CHARGE, 0) = 0
+            {date_filter}
+            {branch_filter}
+            HAVING salesQty > 0
+
             ORDER BY totalSales DESC
         """
 
-        # Params are reused across: base + synthetic row + qty subquery + amount subquery.
-        exec_params = params + params + params + params
+        # Params: base + room header + room qty sub + room amount sub + service charge
+        exec_params = params + params + params + params + params
         cur.execute(query, exec_params)
         rows = cur.fetchall()
         cur.close()
@@ -532,6 +624,8 @@ def category_report(
             CategoryReportRow(
                 id=int(row.get("id") or 0),
                 category=str(row.get("category") or "Uncategorized"),
+                mainCategory=str(row.get("mainCategory") or row.get("category") or "Uncategorized"),
+                subCategory=str(row.get("subCategory") or ""),
                 branch=str(row.get("branch") or "Unknown Branch"),
                 salesQty=int(row.get("salesQty") or 0),
                 totalSales=total_sales,

@@ -83,6 +83,9 @@ export type ApiMenuReportRow = {
   id: number;
   goods: string;
   category: string;
+  mainCategory?: string;
+  subCategory?: string;
+  categoryId?: number | null;
   branch: string;
   salesQty: number;
   totalSales: number;
@@ -97,6 +100,8 @@ export type ApiMenuReportRow = {
 export type ApiCategoryReportRow = {
   id: number;
   category: string;
+  mainCategory?: string;
+  subCategory?: string;
   branch: string;
   salesQty: number;
   totalSales: number;

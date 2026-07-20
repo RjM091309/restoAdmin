@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { AlertCircle, ChevronDown, Eye, LayoutList, Loader2, Search } from 'lucide-react';
+import { AlertCircle, ChevronDown, Eye, ExternalLink, LayoutList, Loader2, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { type Branch } from '../partials/Header';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
@@ -29,6 +30,8 @@ type CategoryReportProps = {
 type CategoryReportRow = {
   id: string;
   category: string;
+  mainCategory: string;
+  subCategory: string;
   branch: string;
   salesQty: number;
   totalSales: number;
@@ -38,8 +41,16 @@ type CategoryReportCachePayload = {
   rows: CategoryReportRow[];
 };
 
+const formatCategoryLegend = (mainCategory: string, subCategory: string) => {
+  const main = mainCategory.trim() || 'Uncategorized';
+  const sub = subCategory.trim();
+  return sub ? `${main} / ${sub}` : main;
+};
+
 export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
   const [rows, setRows] = useState<CategoryReportRow[]>([]);
   const [viewRow, setViewRow] = useState<CategoryReportRow | null>(null);
@@ -77,6 +88,8 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
       rows: apiRows.map((row) => ({
         id: String(row.id),
         category: row.category,
+        mainCategory: row.mainCategory ?? row.category ?? 'Uncategorized',
+        subCategory: row.subCategory ?? '',
         branch: row.branch || selectedBranch?.name || 'All Branches',
         salesQty: row.salesQty,
         totalSales: row.totalSales,
@@ -155,8 +168,35 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
   const filteredRows = useMemo(() => {
     const keyword = searchTerm.trim().toLowerCase();
     if (!keyword) return rows;
-    return rows.filter((row) => row.category.toLowerCase().includes(keyword) || row.branch.toLowerCase().includes(keyword));
+    return rows.filter((row) => {
+      const legend = formatCategoryLegend(row.mainCategory, row.subCategory).toLowerCase();
+      return (
+        row.category.toLowerCase().includes(keyword) ||
+        row.branch.toLowerCase().includes(keyword) ||
+        legend.includes(keyword)
+      );
+    });
   }, [rows, searchTerm]);
+
+  const canOpenMenuLanding = useMemo(() => {
+    if (!viewRow) return false;
+    const cid = Number(viewRow.id);
+    if (!Number.isFinite(cid) || cid <= 0) return false;
+    return Boolean(selectedBranch && String(selectedBranch.id) !== 'all');
+  }, [viewRow, selectedBranch]);
+
+  const openMenuLanding = useCallback(() => {
+    if (!viewRow || !canOpenMenuLanding || !selectedBranch) return;
+    const params = new URLSearchParams(location.search);
+    params.set('branchId', String(selectedBranch.id));
+    params.set('categoryId', String(viewRow.id));
+    navigate(`/menu-management?${params.toString()}`);
+  }, [viewRow, canOpenMenuLanding, selectedBranch, location.search, navigate]);
+
+  const categoryLegendLabel = useMemo(() => {
+    if (!viewRow) return '';
+    return formatCategoryLegend(viewRow.mainCategory, viewRow.subCategory);
+  }, [viewRow]);
 
   const breakdownNetSalesTotal = useMemo(() => {
     const sumVisibleRows = breakdownRows.reduce((sum, row) => sum + Number(row.netSales || 0), 0);
@@ -377,6 +417,30 @@ export const CategoryReport: React.FC<CategoryReportProps> = ({ selectedBranch, 
         isOpen={viewRow !== null}
         onClose={() => setViewRow(null)}
         title={viewRow?.category ?? ''}
+        subtitle={
+          viewRow ? (
+            canOpenMenuLanding ? (
+              <button
+                type="button"
+                onClick={openMenuLanding}
+                className="group inline-flex max-w-full items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1.5 text-left text-xs font-semibold text-indigo-800 transition-colors hover:border-indigo-200 hover:bg-indigo-100/80 hover:text-indigo-950"
+                title={t('category_report.open_in_menu')}
+              >
+                <span className="truncate">{categoryLegendLabel}</span>
+                <ExternalLink
+                  size={13}
+                  strokeWidth={2.25}
+                  className="shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
+                  aria-hidden
+                />
+              </button>
+            ) : (
+              <span className="inline-flex max-w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+                <span className="truncate">{categoryLegendLabel}</span>
+              </span>
+            )
+          ) : null
+        }
         maxWidth="3xl"
         containerClassName="items-center justify-center px-3 sm:px-5"
         panelClassName="rounded-[1.35rem] shadow-2xl shadow-indigo-950/10 ring-1 ring-indigo-100/90 border-indigo-50/80 overflow-hidden"

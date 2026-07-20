@@ -454,6 +454,7 @@
 		"breakdown_error": "内訳の読み込みに失敗しました。",
 		"breakdown_rows_count": "{{count}} 件",
 		"breakdown_loading_hint": "読み込み中…",
+		"open_in_menu": "メニュー管理で開く",
 		"columns": {
 			"action": "操作",
 			"category": "カテゴリー",
@@ -470,9 +471,11 @@
 	"menu_report": {
 		"search_placeholder": "商品またはカテゴリーを検索...",
 		"export": "エクスポート",
+		"open_in_menu": "メニュー管理で開く",
 		"columns": {
 			"goods": "商品",
 			"category": "カテゴリー",
+			"main_sub_category": "メインカテゴリー / サブカテゴリー",
 			"sales_quantity": "販売数量",
 			"total_sales": "総売上",
 			"refund_quantity": "返金数量",

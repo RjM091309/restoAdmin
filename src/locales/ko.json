@@ -455,6 +455,7 @@
 		"breakdown_error": "내역을 불러오지 못했습니다.",
 		"breakdown_rows_count": "{{count}}건",
 		"breakdown_loading_hint": "불러오는 중…",
+		"open_in_menu": "메뉴 관리에서 열기",
 		"columns": {
 			"action": "작업",
 			"category": "카테고리",
@@ -471,9 +472,11 @@
 	"menu_report": {
 		"search_placeholder": "상품 또는 카테고리 검색...",
 		"export": "내보내기",
+		"open_in_menu": "메뉴 관리에서 열기",
 		"columns": {
 			"goods": "상품",
 			"category": "카테고리",
+			"main_sub_category": "메인 카테고리 / 서브 카테고리",
 			"sales_quantity": "판매 수량",
 			"total_sales": "총 매출",
 			"refund_quantity": "환불 수량",

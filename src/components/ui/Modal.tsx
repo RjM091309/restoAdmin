@@ -13,6 +13,8 @@ export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  /** Optional content under the title (e.g. breadcrumb / legend). */
+  subtitle?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl';
@@ -29,6 +31,7 @@ export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
   title,
+  subtitle,
   children,
   footer,
   maxWidth = 'md',
@@ -94,14 +97,17 @@ export const Modal: React.FC<ModalProps> = ({
             >
               {/* Header */}
               <div className="flex items-start gap-3 justify-between px-6 py-5 border-b border-gray-100 shrink-0">
-                <h3
-                  className={cn(
-                    'text-xl font-bold text-brand-text tracking-tight pr-2 flex-1 min-w-0',
-                    titleClassName
-                  )}
-                >
-                  {title}
-                </h3>
+                <div className="flex-1 min-w-0 pr-2">
+                  <h3
+                    className={cn(
+                      'text-xl font-bold text-brand-text tracking-tight',
+                      titleClassName
+                    )}
+                  >
+                    {title}
+                  </h3>
+                  {subtitle ? <div className="mt-2">{subtitle}</div> : null}
+                </div>
                 <button
                   type="button"
                   onClick={onClose}
