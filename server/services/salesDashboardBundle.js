@@ -62,13 +62,7 @@ async function fetchDailySalesSeries(startDate, endDate, branchId) {
 	const params = { start_date: startDate, end_date: endDate };
 	if (branchId) params.branch_id = String(branchId);
 
-	const sqlRows = await ReportsModel.getRevenueReport('daily', startDate, endDate, branchId)
-		.then(mapRevenueRowsToDailySales)
-		.catch(() => []);
-
-	const hasSqlSales = (sqlRows || []).some((d) => Number(d.total_sales || 0) > 0);
-	if (hasSqlSales) return sqlRows;
-
+	// Prefer PyServer daily-sales (gross + discount fields). SQL fallback is paid-only.
 	const pyJson = await fetchPyServerOptional('/api/analytics/daily-sales', params);
 	const pyRows = pyJson?.data?.data || [];
 	if (Array.isArray(pyRows) && pyRows.length > 0) {
@@ -77,7 +71,10 @@ async function fetchDailySalesSeries(startDate, endDate, branchId) {
 			sale_date: normalizeSaleDateKey(row?.sale_date ?? row?.date ?? ''),
 		}));
 	}
-	return sqlRows;
+
+	return ReportsModel.getRevenueReport('daily', startDate, endDate, branchId)
+		.then(mapRevenueRowsToDailySales)
+		.catch(() => []);
 }
 
 function getProfitValue(row) {
