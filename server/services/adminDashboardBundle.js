@@ -56,6 +56,31 @@ function buildSummary({ branchId, branchCards, totalExpenses }) {
 	};
 }
 
+function sumDailyGrossSales(rows) {
+	return (rows || []).reduce((sum, row) => sum + (Number(row.total_sales) || 0), 0);
+}
+
+async function buildGrossSalesByBranch(branchIds, start_date, end_date) {
+	const grossByBranch = {};
+	const queue = [...new Set((branchIds || []).filter((id) => id != null))];
+	const workerCount = Math.min(4, Math.max(1, queue.length));
+	await Promise.all(
+		Array.from({ length: workerCount }, async () => {
+			while (queue.length > 0) {
+				const branchId = queue.shift();
+				if (branchId == null) continue;
+				const res = await fetchPyServerOptional('/api/analytics/daily-sales', {
+					start_date,
+					end_date,
+					branch_id: String(branchId),
+				});
+				grossByBranch[branchId] = sumDailyGrossSales(res?.data?.data || []);
+			}
+		}),
+	);
+	return grossByBranch;
+}
+
 function buildMonthlyTrendFromDaily(dailySales, dailyExpenses, byDate, start, end) {
 	const salesByDate = new Map();
 	const expensesByDom = Array(31).fill(0);
@@ -63,9 +88,9 @@ function buildMonthlyTrendFromDaily(dailySales, dailyExpenses, byDate, start, en
 	for (const row of dailySales || []) {
 		const date = String(row.sale_date ?? '').slice(0, 10);
 		if (!date || date < start || date > end) continue;
-		const net = Number(row.net_sales ?? 0);
+		const gross = Number(row.total_sales ?? 0);
 		const recon = Number(byDate?.[date] ?? 0);
-		salesByDate.set(date, (salesByDate.get(date) ?? 0) + net + recon);
+		salesByDate.set(date, (salesByDate.get(date) ?? 0) + gross + recon);
 	}
 
 	for (const [date, amt] of Object.entries(byDate || {})) {
@@ -203,8 +228,19 @@ async function buildAdminDashboardBundle({
 
 	const { expenseMap, expenseByBranch } = buildExpenseMaps(expenseBreakdown);
 
+	// Match Telegram bot: prefer daily-sales gross (paid + discount), fallback to branch-sales.
+	const grossSalesByBranch = await buildGrossSalesByBranch(
+		(branchSales || []).map((b) => b.branch_id),
+		start_date,
+		end_date,
+	);
+
 	const branchCardsData = (branchSales || []).map((b) => {
-		const posBase = Number(b.total_sales || 0);
+		const grossFromDaily = grossSalesByBranch[b.branch_id];
+		const posBase =
+			grossFromDaily != null && grossFromDaily > 0
+				? grossFromDaily
+				: Number(b.total_sales || 0);
 		const reconTotal = Number(reconByBranch[b.branch_id] ?? 0) || 0;
 		return {
 			id: b.branch_id,
@@ -219,7 +255,7 @@ async function buildAdminDashboardBundle({
 
 	const branchRevenueDistribution = (branchSales || []).map((b) => ({
 		name: b.branch_name,
-		value: b.total_sales,
+		value: grossSalesByBranch[b.branch_id] || Number(b.total_sales || 0),
 	}));
 
 	const topProductsData = (topSelling || []).slice(0, 5).map((item) => ({

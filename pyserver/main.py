@@ -317,8 +317,8 @@ def branch_sales(
     branch_id: Optional[int] = None,
 ) -> dict:
     """
-    Total sales per branch based purely on live billing data.
-    Legacy summary table sales_hourly_summary has been removed.
+    Gross sales per branch (Loyverse-aligned): AMOUNT_PAID + DISCOUNT_AMOUNT.
+    Matches daily-sales total_sales summed over the same date range.
     """
     try:
         conn = get_connection()
@@ -347,11 +347,11 @@ def branch_sales(
                 br.IDNo as branch_id,
                 br.BRANCH_NAME as branch_name,
                 br.BRANCH_CODE as branch_code,
-                COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID ELSE 0 END), 0) as total_sales,
+                COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0) ELSE 0 END), 0) as total_sales,
                 COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) as order_count,
                 CASE 
                     WHEN COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) > 0
-                        THEN COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID ELSE 0 END), 0)
+                        THEN COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0) ELSE 0 END), 0)
                              / COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END)
                     ELSE 0
                 END as avg_order_value
@@ -1030,11 +1030,11 @@ def daily_sales(
     branch_id: Optional[int] = None,
 ) -> dict:
     """
-    Daily total sales time series aligned with Loyverse data:
-    - total_sales: SUM of billing.AMOUNT_PAID for paid orders (same base as before)
+    Daily gross sales time series aligned with Loyverse data:
+    - total_sales: AMOUNT_PAID + DISCOUNT_AMOUNT (gross, before refund)
     - refund: SUM of billing.REFUND (synced from Loyverse refunds)
     - discount: SUM of orders.DISCOUNT_AMOUNT for paid orders
-    - net_sales: total_sales - refund - discount
+    - net_sales: total_sales - discount - refund
     - product_cost: SUM(order_items.LINE_COST) from Loyverse sync only (no ingredient/recipe)
     - gross_profit: net_sales - product_cost
     """

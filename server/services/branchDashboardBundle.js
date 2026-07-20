@@ -371,16 +371,11 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 		};
 	}
 
-	const hasSqlSales =
-		Array.isArray(dailySales) &&
-		dailySales.some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0);
-
-	// Phase 2 — batch PyServer calls (avoid overloading analytics service).
+	// Always fetch PyServer daily-sales for gross totals (paid + discount).
+	// Phase-1 SQL uses AMOUNT_PAID only and must not skip the analytics call.
 	const [dailySalesPyRes, dailyOrdersRes, dailyExpensesRes, expenseSummaryRes, branchSalesRes] =
 		await Promise.all([
-			hasSqlSales
-				? Promise.resolve(null)
-				: fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
+			fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
 			fetchPyServerOptional('/api/analytics/daily-orders', pyParams),
 			fetchPyServerOptional('/api/analytics/daily-expenses', pyParams),
 			fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
@@ -400,7 +395,11 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 	const hasPySales =
 		Array.isArray(pyDailySales) &&
 		pyDailySales.some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0);
-	const dailySalesForDashboard = hasPySales ? pyDailySales : hasSqlSales ? dailySales : pyDailySales.length > 0 ? pyDailySales : dailySales;
+	const dailySalesForDashboard = hasPySales
+		? pyDailySales
+		: pyDailySales.length > 0
+			? pyDailySales
+			: dailySales;
 
 	const dashboardData = buildDashboardData({
 		start: start_date,

@@ -1909,20 +1909,21 @@ class ReportsModel {
 			summaryParams.push(branchId);
 		}
 
-		// Get sales from billing table grouped by branch
+		// Get gross sales from billing + orders (Loyverse-aligned: paid + discount)
 		const billingQuery = `
 			SELECT 
 				br.IDNo as branch_id,
 				br.BRANCH_NAME as branch_name,
 				br.BRANCH_CODE as branch_code,
-				COALESCE(SUM(b.AMOUNT_PAID), 0) as total_sales,
+				COALESCE(SUM(b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) as total_sales,
 				COUNT(DISTINCT b.ORDER_ID) as order_count,
 				CASE 
-					WHEN COUNT(DISTINCT b.ORDER_ID) > 0 THEN COALESCE(SUM(b.AMOUNT_PAID), 0) / COUNT(DISTINCT b.ORDER_ID)
+					WHEN COUNT(DISTINCT b.ORDER_ID) > 0 THEN COALESCE(SUM(b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) / COUNT(DISTINCT b.ORDER_ID)
 					ELSE 0
 				END as avg_order_value
 			FROM branches br
 			LEFT JOIN billing b ON b.BRANCH_ID = br.IDNo AND b.STATUS IN (1, 2) ${dateFilterBilling}
+			LEFT JOIN orders o ON o.IDNo = b.ORDER_ID AND o.STATUS NOT IN (-1, -2)
 			WHERE br.ACTIVE = 1 ${branchFilterBilling}
 			GROUP BY br.IDNo, br.BRANCH_NAME, br.BRANCH_CODE
 			ORDER BY total_sales DESC
