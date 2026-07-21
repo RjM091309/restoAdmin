@@ -78,8 +78,8 @@ class TelegramService {
 				{ text: '금호반점 Keum', callback_data: 'report_keum' },
 			],
 			[
+				{ text: '프라임 BBQ', callback_data: 'report_pre' },
 				{ text: 'EESOME', callback_data: 'report_eesome' },
-				{ text: '프리미엄 Pre', callback_data: 'report_pre' },
 			],
 			[
 				{ text: '신규 New', callback_data: 'report_new' },
@@ -99,8 +99,8 @@ class TelegramService {
 					{ text: '금호반점 Keum' },
 				],
 				[
+					{ text: '프라임 BBQ' },
 					{ text: 'EESOME' },
-					{ text: '프리미엄 Pre' },
 				],
 				[
 					{ text: '신규 New' },
@@ -118,6 +118,7 @@ class TelegramService {
 		'블루문 Blue M': 'report_blue_m',
 		'금호반점 Keum': 'report_keum',
 		EESOME: 'report_eesome',
+		'프라임 BBQ': 'report_pre',
 		'프리미엄 Pre': 'report_pre',
 		'신규 New': 'report_new',
 	};
@@ -276,7 +277,7 @@ class TelegramService {
 			report_blue_m: '블루문 Blue M',
 			report_keum: '금호반점 Keum',
 			report_eesome: 'EESOME',
-			report_pre: '프리미엄 Pre',
+			report_pre: '프라임 BBQ',
 			report_new: '신규 New',
 		};
 		return titles[callbackData] || 'Report';
@@ -338,9 +339,9 @@ class TelegramService {
 			{ label: "김형제 Kim's B", branchIds: [2] },
 			{ label: '블루문 Blue M', branchIds: [3] },
 			{ label: '금호반점 Keum', branchIds: [9] },
+			{ label: '프라임 BBQ', branchIds: [12] },
 			// Temporary grouped view: keep EESOME + NOIR combined until separation is requested.
 			{ label: 'EESOME', branchIds: [10, 11] },
-			{ label: '프리미엄 Pre', branchIds: [12] },
 		];
 
 		const groupResults = await Promise.all(
