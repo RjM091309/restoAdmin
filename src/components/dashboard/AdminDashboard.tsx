@@ -71,7 +71,27 @@ type SummaryData = {
   totalExpenses: number;
 };
 
-const SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v2';
+/** Keep header totals equal to the sum of branch cards (matches Telegram grand total). */
+function computeAllBranchesSummary(
+  branchCards: BranchPerformanceData[],
+  expenseCategoryByBranch: Record<number, Record<string, number>>,
+): SummaryData {
+  const totalSales = branchCards.reduce((s, b) => s + (Number(b.totalSales) || 0), 0);
+  const totalExpenses = branchCards.reduce((s, b) => {
+    const branchMap = expenseCategoryByBranch[b.id];
+    const fromBreakdown = branchMap
+      ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
+      : 0;
+    return s + (fromBreakdown > 0 ? fromBreakdown : Number(b.totalExpenses) || 0);
+  }, 0);
+  return {
+    totalSales,
+    totalExpenses,
+    totalRevenue: totalSales - totalExpenses,
+  };
+}
+
+const SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v3';
 const LEGACY_SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v1';
 
 const SummaryCard = ({ title, value, icon: Icon, color }: { title: string, value: string, icon: React.ElementType, color: string }) => (
@@ -1052,7 +1072,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       options: { background?: boolean } = {},
     ) => {
       const { background = false } = options;
-      const summary = payload.summary;
+      const summary =
+        payload.branchCardsData.length > 0
+          ? computeAllBranchesSummary(payload.branchCardsData, payload.expenseCategoryByBranch)
+          : payload.summary;
 
       if (background) {
         setBranchCardsData((prev) =>

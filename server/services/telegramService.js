@@ -2,6 +2,9 @@ const https = require('https');
 const TelegramSettingsModel = require('../models/telegramSettingsModel');
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const pool = require('../config/db');
+const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/analyticsSales');
+const { buildAdminDashboardBundle } = require('./adminDashboardBundle');
+const { buildBranchDashboardBundle } = require('./branchDashboardBundle');
 const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -66,6 +69,45 @@ class TelegramService {
 		'report_eesome',
 		'report_pre',
 	]);
+
+	static TELEGRAM_BRANCH_GROUPS = [
+		{ label: "김형제 Kim's B", branchIds: [2] },
+		{ label: '블루문 Blue M', branchIds: [3] },
+		{ label: '금호반점 Keum', branchIds: [9] },
+		{ label: '프라임 BBQ', branchIds: [12] },
+		// Temporary grouped view: keep EESOME + NOIR combined until separation is requested.
+		{ label: 'EESOME', branchIds: [10, 11] },
+	];
+
+	static aggregateGroupFromCards(branchCards, branchIds) {
+		const idSet = new Set((branchIds || []).map(Number));
+		const cards = (branchCards || []).filter((c) => idSet.has(Number(c.id)));
+		const totalSales = cards.reduce((s, c) => s + (Number(c.totalSales) || 0), 0);
+		const totalExpenses = cards.reduce((s, c) => s + (Number(c.totalExpenses) || 0), 0);
+		return {
+			totalSales,
+			totalExpenses,
+			netProfit: totalSales - totalExpenses,
+		};
+	}
+
+	static sumGroupResults(groupResults) {
+		return (groupResults || []).reduce(
+			(acc, row) => {
+				acc.totalSales += Number(row.monthlyRevenue) || 0;
+				acc.totalExpenses += Number(row.monthlyExpense) || 0;
+				acc.netProfit += Number(row.netProfit) || 0;
+				return acc;
+			},
+			{ totalSales: 0, totalExpenses: 0, netProfit: 0 }
+		);
+	}
+
+	static computeMonthOverMonthPct(currentSales, previousSales) {
+		const cur = Number(currentSales) || 0;
+		const prev = Number(previousSales) || 0;
+		return prev > 0 ? ((cur - prev) / prev) * 100 : 0;
+	}
 
 	static buildReportButtons() {
 		return [
@@ -301,11 +343,11 @@ class TelegramService {
 		const monthlyReconTotal = parseFloat(currentRecon?.total || 0) || 0;
 		const previousReconTotal = parseFloat(previousRecon?.total || 0) || 0;
 
-		const totalSalesFromDaily = monthlyRows.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const totalSalesFromDaily = sumNetSalesFromDailyRows(monthlyRows);
 		const totalSalesFromBranch = monthlyBranchSales.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
 		const monthlyRevenue = (totalSalesFromDaily || totalSalesFromBranch) + monthlyReconTotal;
 
-		const previousSalesFromDaily = previousRows.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
+		const previousSalesFromDaily = sumNetSalesFromDailyRows(previousRows);
 		const previousSalesFromBranch = previousBranchSales.reduce((sum, row) => sum + (parseFloat(row.total_sales) || 0), 0);
 		const previousRevenue = (previousSalesFromDaily || previousSalesFromBranch) + previousReconTotal;
 
@@ -317,7 +359,7 @@ class TelegramService {
 			(sum, row) => sum + (parseFloat(row?.total_amount) || 0),
 			0
 		);
-		const monthlyExpense = totalExpensesFromBreakdown || monthlyExpenseSummary || totalExpensesFromDaily;
+		const monthlyExpense = monthlyExpenseSummary || totalExpensesFromBreakdown || totalExpensesFromDaily;
 		const netProfit = monthlyRevenue - monthlyExpense;
 		const monthOverMonthPct = previousRevenue > 0 ? ((monthlyRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
@@ -335,73 +377,59 @@ class TelegramService {
 		const currentMonth = TelegramService.getDateRangeForMonth(todayDate);
 		const previousMonth = TelegramService.getPreviousMonthRange(todayDate);
 
-		const groups = [
-			{ label: "김형제 Kim's B", branchIds: [2] },
-			{ label: '블루문 Blue M', branchIds: [3] },
-			{ label: '금호반점 Keum', branchIds: [9] },
-			{ label: '프라임 BBQ', branchIds: [12] },
-			// Temporary grouped view: keep EESOME + NOIR combined until separation is requested.
-			{ label: 'EESOME', branchIds: [10, 11] },
-		];
+		const [currentBundle, previousBundle] = await Promise.all([
+			buildAdminDashboardBundle({
+				start_date: currentMonth.start,
+				end_date: currentMonth.end,
+				include_branch_charts: false,
+			}),
+			buildAdminDashboardBundle({
+				start_date: previousMonth.start,
+				end_date: previousMonth.end,
+				include_branch_charts: false,
+			}),
+		]);
 
-		const groupResults = await Promise.all(
-			groups.map(async (group) => {
-				const metricsPerBranch = await Promise.all(
-					group.branchIds.map((branchId) =>
-						TelegramService.calculateMetricsForRange(
-							currentMonth.start,
-							currentMonth.end,
-							previousMonth.start,
-							previousMonth.end,
-							branchId
-						)
-					)
-				);
+		const groupResults = TelegramService.TELEGRAM_BRANCH_GROUPS.map((group) => {
+			const current = TelegramService.aggregateGroupFromCards(
+				currentBundle.branchCardsData,
+				group.branchIds
+			);
+			const previous = TelegramService.aggregateGroupFromCards(
+				previousBundle.branchCardsData,
+				group.branchIds
+			);
+			return {
+				label: group.label,
+				monthlyRevenue: current.totalSales,
+				monthlyExpense: current.totalExpenses,
+				netProfit: current.netProfit,
+				monthOverMonthPct: TelegramService.computeMonthOverMonthPct(
+					current.totalSales,
+					previous.totalSales
+				),
+			};
+		});
 
-				const totals = metricsPerBranch.reduce(
-					(acc, metrics) => {
-						acc.monthlyRevenue += metrics.monthlyRevenue;
-						acc.previousRevenue += metrics.previousRevenue;
-						acc.monthlyExpense += metrics.monthlyExpense;
-						acc.netProfit += metrics.netProfit;
-						return acc;
-					},
-					{ monthlyRevenue: 0, previousRevenue: 0, monthlyExpense: 0, netProfit: 0 }
-				);
-				const monthOverMonthPct = totals.previousRevenue > 0
-					? ((totals.monthlyRevenue - totals.previousRevenue) / totals.previousRevenue) * 100
-					: 0;
+		// Grand total must equal the sum of the branch lines shown (same as AdminDashboard cards sum).
+		const overall = TelegramService.sumGroupResults(groupResults);
 
-				return {
-					label: group.label,
-					monthlyRevenue: totals.monthlyRevenue,
-					previousRevenue: totals.previousRevenue,
-					monthlyExpense: totals.monthlyExpense,
-					netProfit: totals.netProfit,
-					monthOverMonthPct,
-				};
-			})
+		const prevOverallSales = TelegramService.TELEGRAM_BRANCH_GROUPS.reduce((sum, group) => {
+			const previous = TelegramService.aggregateGroupFromCards(
+				previousBundle.branchCardsData,
+				group.branchIds
+			);
+			return sum + (Number(previous.totalSales) || 0);
+		}, 0);
+		const overallMoM = TelegramService.computeMonthOverMonthPct(
+			overall.totalSales,
+			prevOverallSales
 		);
 
-		const overall = groupResults.reduce(
-			(acc, row) => {
-				acc.monthlyRevenue += row.monthlyRevenue;
-				acc.previousRevenue += row.previousRevenue;
-				acc.monthlyExpense += row.monthlyExpense;
-				acc.netProfit += row.netProfit;
-				return acc;
-			},
-			{ monthlyRevenue: 0, previousRevenue: 0, monthlyExpense: 0, netProfit: 0 }
-		);
-		const overallMoM = overall.previousRevenue > 0
-			? ((overall.monthlyRevenue - overall.previousRevenue) / overall.previousRevenue) * 100
-			: 0;
-
-		const latestEncodedDt = await TelegramService.getLatestEncodedDt(null);
 		const lines = [
 			'<b>합계 Total</b>',
 			'',
-			`전체 매출: ${TelegramService.formatNumber(overall.monthlyRevenue)}      지출: ${TelegramService.formatNumber(overall.monthlyExpense)}`,
+			`전체 매출: ${TelegramService.formatNumber(overall.totalSales)}      지출: ${TelegramService.formatNumber(overall.totalExpenses)}`,
 			`순익: ${TelegramService.formatNumber(overall.netProfit)}      전월대비: ${TelegramService.formatMonthIndex(overallMoM)}`,
 			'',
 		];
@@ -483,7 +511,8 @@ class TelegramService {
 
 	static formatNumber(value) {
 		const n = Number(value || 0);
-		return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+		const safe = Number.isFinite(n) ? Math.trunc(n) : 0;
+		return safe.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 	}
 
 	static formatMonthIndex(percentChange) {
@@ -544,6 +573,31 @@ class TelegramService {
 		};
 	}
 
+	static buildWeeklyBucketsFromRevenue(revenueData, calendarStartYmd, weekCount = 5) {
+		const weekly = Array.from({ length: Math.max(1, weekCount) }, () => 0);
+		const calendarStart = TelegramService.parseDateToLocal(calendarStartYmd);
+		if (!calendarStart) return weekly;
+		const dayMs = 24 * 60 * 60 * 1000;
+
+		const getWeekIndex = (dateValue) => {
+			const d = TelegramService.parseDateToLocal(dateValue);
+			if (!d) return -1;
+			const dayDiff = Math.floor((d - calendarStart) / dayMs);
+			if (dayDiff < 0) return -1;
+			const index = Math.floor(dayDiff / 7);
+			if (index < 0 || index >= weekly.length) return -1;
+			return index;
+		};
+
+		for (const point of revenueData || []) {
+			if (!point?.date) continue;
+			const weekIndex = getWeekIndex(point.date);
+			if (weekIndex < 0) continue;
+			weekly[weekIndex] += Number(point.income || 0) || 0;
+		}
+		return weekly;
+	}
+
 	static buildWeeklyBuckets(rows, reconByDate = {}, calendarStartYmd, weekCount = 5) {
 		const weekly = Array.from({ length: Math.max(1, weekCount) }, () => 0);
 		const calendarStart = TelegramService.parseDateToLocal(calendarStartYmd);
@@ -564,7 +618,7 @@ class TelegramService {
 			if (!row?.date) continue;
 			const weekIndex = getWeekIndex(row.date);
 			if (weekIndex < 0) continue;
-			weekly[weekIndex] += parseFloat(row.total_sales || row.revenue || 0) || 0;
+			weekly[weekIndex] += resolveNetSalesFromRow(row);
 		}
 
 		for (const [ymd, reconAmount] of Object.entries(reconByDate || {})) {
@@ -595,6 +649,9 @@ class TelegramService {
 		return rows.map((row) => ({
 			date: row.sale_date,
 			total_sales: parseFloat(row.total_sales || 0) || 0,
+			net_sales: parseFloat(row.net_sales ?? NaN),
+			refund: parseFloat(row.refund || 0) || 0,
+			discount: parseFloat(row.discount || 0) || 0,
 		}));
 	}
 
@@ -685,21 +742,28 @@ class TelegramService {
 		const previousMonth = TelegramService.getPreviousMonthRange(todayDate);
 		const weeklyCalendarRange = TelegramService.getCalendarWeekRangeForMonth(todayDate);
 
-		const metrics = await TelegramService.calculateMetricsForRange(
-			currentMonth.start,
-			currentMonth.end,
-			previousMonth.start,
-			previousMonth.end,
-			branchId
-		);
-		const [weeklyRows, weeklyRecon] = await Promise.all([
-			TelegramService.getDashboardDailySales(weeklyCalendarRange.start, weeklyCalendarRange.end, branchId),
-			CashReconciliationModel.aggregatesForRange(branchId, weeklyCalendarRange.start, weeklyCalendarRange.end),
+		const [currentBundle, previousBundle, latestEncodedDt] = await Promise.all([
+			buildBranchDashboardBundle({
+				branchId,
+				start_date: currentMonth.start,
+				end_date: currentMonth.end,
+			}),
+			buildBranchDashboardBundle({
+				branchId,
+				start_date: previousMonth.start,
+				end_date: previousMonth.end,
+			}),
+			TelegramService.getLatestEncodedDt(branchId),
 		]);
-		const latestEncodedDt = await TelegramService.getLatestEncodedDt(branchId);
-		const weeklyBuckets = TelegramService.buildWeeklyBuckets(
-			weeklyRows,
-			weeklyRecon?.byDate || {},
+
+		const stats = currentBundle.dashboardData?.stats || {};
+		const prevStats = previousBundle.dashboardData?.stats || {};
+		const monthOverMonthPct = TelegramService.computeMonthOverMonthPct(
+			stats.totalSales,
+			prevStats.totalSales
+		);
+		const weeklyBuckets = TelegramService.buildWeeklyBucketsFromRevenue(
+			currentBundle.dashboardData?.revenueData || [],
 			weeklyCalendarRange.start,
 			weeklyCalendarRange.weekCount
 		);
@@ -719,8 +783,8 @@ class TelegramService {
 		return [
 			`<b>${title}</b>`,
 			'',
-			`월매출: ${TelegramService.formatNumber(metrics.monthlyRevenue)}      지출: ${TelegramService.formatNumber(metrics.monthlyExpense)}`,
-			`순익: ${TelegramService.formatNumber(metrics.netProfit)}      전월대비: ${TelegramService.formatMonthIndex(metrics.monthOverMonthPct)}`,
+			`월매출: ${TelegramService.formatNumber(stats.totalSales)}      지출: ${TelegramService.formatNumber(stats.totalExpenses)}`,
+			`순익: ${TelegramService.formatNumber(stats.totalProfit)}      전월대비: ${TelegramService.formatMonthIndex(monthOverMonthPct)}`,
 			'',
 			'주간 매출(Weekly)',
 			...weeklyLines,

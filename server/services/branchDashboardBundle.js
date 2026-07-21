@@ -2,6 +2,7 @@ const OrderModel = require('../models/orderModel');
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const ReportsModel = require('../models/reportsModel');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
+const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/analyticsSales');
 
 /** Per-call cap for dashboard bundle — avoid 15s waits on empty/slow branches. */
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 8000);
@@ -132,10 +133,7 @@ function buildDashboardData({
 
 	const branchItem = (branchSales || []).find((b) => String(b.branch_id) === String(branchId));
 
-	const totalSalesFromDaily = (dailySales || []).reduce(
-		(sum, item) => sum + Number(item.total_sales || 0),
-		0,
-	);
+	const totalSalesFromDaily = sumNetSalesFromDailyRows(dailySales);
 	const totalSalesFromBranch = branchItem ? Number(branchItem.total_sales || 0) : 0;
 
 	const totalExpensesFromSummary = Number(expenseSummary?.total_expense) || 0;
@@ -171,7 +169,7 @@ function buildDashboardData({
 			return {
 				name: Number.isNaN(d.getTime()) ? item.sale_date : String(d.getDate()),
 				date: key,
-				income: Number(item.total_sales || 0) + reconDay,
+				income: resolveNetSalesFromRow(item) + reconDay,
 				expense: dailyExpense,
 			};
 		});
@@ -298,7 +296,7 @@ async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 		recentOrdersResult.status === 'rejected' ||
 		expenseSummaryResult.status === 'rejected';
 
-	const hasSales = (dailySales || []).some((d) => Number(d.total_sales || 0) > 0);
+	const hasSales = (dailySales || []).some((d) => resolveNetSalesFromRow(d) > 0);
 	const hasRecon = Number(reconAgg?.total || 0) > 0;
 	const hasRecentOrders = (recentOrders || []).length > 0;
 	const hasExpenses = Number(expenseSummary?.total_expense || 0) > 0;
