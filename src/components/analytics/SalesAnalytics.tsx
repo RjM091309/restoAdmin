@@ -35,6 +35,7 @@ import {
   type SalesAnalyticsCachePayload,
 } from '../../utils/salesAnalyticsCache';
 import { waitForSalesAnalyticsPrefetch } from '../../utils/prefetchSalesAnalytics';
+import { isExcludedFromAllBranchesView } from '../../utils/branchLogo';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
 function ChartContainer({
@@ -975,29 +976,26 @@ const metricConfig = {
     content: <LoyverseTooltip />,
   };
 
+  const visibleBranchSalesData = useMemo(
+    () => branchSalesData.filter((b) => !isExcludedFromAllBranchesView(b.branch_name)),
+    [branchSalesData],
+  );
+
   // Branch chart data for horizontal bar
   const branchChartData = useMemo(() => {
-    return branchSalesData.map(b => ({
+    return visibleBranchSalesData.map(b => ({
       name: b.branch_name,
       sales: b.total_sales,
     }));
-  }, [branchSalesData]);
+  }, [visibleBranchSalesData]);
 
   const branchColorById = useMemo(() => {
     const map = new Map<number, string>();
-    branchSalesData.forEach((b, i) => {
+    visibleBranchSalesData.forEach((b, i) => {
       map.set(b.branch_id, BRANCH_BAR_COLORS[i % BRANCH_BAR_COLORS.length]);
     });
     return map;
-  }, [branchSalesData]);
-
-  const branchChartHeight = useMemo(() => {
-    // Keep bars readable and ensure all branches are visible.
-    // Uses a row height budget that comfortably fits barSize + category gaps.
-    const rows = branchChartData.length;
-    const rowHeight = 42;
-    return Math.max(192, rows * rowHeight);
-  }, [branchChartData.length]);
+  }, [visibleBranchSalesData]);
 
   const branchXAxisTicks = useMemo(() => {
     const million = 1_000_000;
@@ -1253,46 +1251,45 @@ const metricConfig = {
       </div>
 
       {/* ══ NEW: Two col-6 cards ══════════════════════ */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
         {/* Card 1: Total Sales per Branch */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
             <div className="flex items-center gap-2">
               <Store size={18} className="text-brand-muted" />
               <h4 className="text-base font-semibold text-brand-text">{t('sales_analytics.total_sales_per_branch')}</h4>
             </div>
           </div>
-          <div className="flex-1 px-5 py-4">
-            {branchSalesLoading && branchSalesData.length === 0 ? (
-              <div className="flex items-center justify-center py-16">
+          <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
+            {branchSalesLoading && visibleBranchSalesData.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
             ) : branchSalesError ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex flex-1 flex-col items-center justify-center text-center">
                 <AlertCircle size={32} className="text-red-400 mb-2" />
                 <p className="text-sm text-red-500 font-medium">{branchSalesError}</p>
                 <button onClick={fetchBranchSales} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
               </div>
-            ) : branchSalesData.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
+            ) : visibleBranchSalesData.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center text-center">
                 <Store size={36} className="text-gray-300 mb-2" />
                 <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_branch_sales_data')}</p>
               </div>
             ) : (
               <>
-                {/* Horizontal bar chart */}
-                <div className="w-full min-w-0 max-h-[320px] overflow-y-auto mb-4">
+                {/* Horizontal bar chart — grows to fill card height */}
+                <div className="flex-1 min-h-[180px] mb-4 flex flex-col min-w-0">
                   <ChartContainer
-                    className="w-full min-w-0"
-                    minHeight={192}
-                    style={{ height: branchChartHeight }}
+                    className="w-full min-w-0 flex-1"
+                    minHeight={180}
                     render={({ width, height }) => (
                       <BarChart
                         width={width}
                         height={height}
                         data={branchChartData}
                         layout="vertical"
-                        barCategoryGap={10}
+                        barCategoryGap="18%"
                       >
                         <CartesianGrid stroke="#e5e7eb" horizontal={false} />
                         <XAxis
@@ -1319,7 +1316,7 @@ const metricConfig = {
                           radius={[0, 6, 6, 0]}
                           onClick={(_data, index) => {
                             const i = typeof index === 'number' ? index : -1;
-                            const b = branchSalesData[i];
+                            const b = visibleBranchSalesData[i];
                             if (!b) return;
                             handleSelectDriversBranch(b.branch_id);
                           }}
@@ -1333,7 +1330,7 @@ const metricConfig = {
                   />
                 </div>
                 {/* Data table */}
-                <div className="overflow-x-auto rounded-xl border border-gray-100">
+                <div className="shrink-0 overflow-x-auto rounded-xl border border-gray-100">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100 bg-gray-50">
@@ -1344,7 +1341,7 @@ const metricConfig = {
                       </tr>
                     </thead>
                     <tbody>
-                      {branchSalesData.map((b, i) => (
+                      {visibleBranchSalesData.map((b, i) => (
                         <tr
                           key={b.branch_id}
                           onClick={() => handleSelectDriversBranch(b.branch_id)}
@@ -1372,7 +1369,7 @@ const metricConfig = {
         </div>
 
         {/* Card 2: Top Profit Drivers */}
-        <div ref={profitDriversRef} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+        <div ref={profitDriversRef} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-600">
