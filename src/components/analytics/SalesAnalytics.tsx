@@ -215,16 +215,27 @@ const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
   };
 };
 
-const money = (value: number) =>
-  `₱${Math.trunc(Number(value || 0)).toLocaleString(undefined, {
+/** EESOME CAFE — show pesos with cents; other branches stay whole pesos. */
+const EESOME_BRANCH_ID = '10';
+
+function isEesomeBranchId(branchId: string | number | null | undefined): boolean {
+  return String(branchId ?? '').trim() === EESOME_BRANCH_ID;
+}
+
+const formatSalesMoney = (value: number, withCents = false) => {
+  const n = Number(value || 0);
+  if (withCents) {
+    const cents = Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+    return `₱${cents.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+  return `₱${Math.trunc(Number.isFinite(n) ? n : 0).toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
-const moneyTooltip = (value: number) =>
-  `₱${Math.trunc(Number(value || 0)).toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`;
+};
 const CHART_THEME_COLOR = 'rgb(139, 92, 246)';
 
 const BRANCH_BAR_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -267,6 +278,10 @@ const colorWithAlpha = (color: string, alpha: number) => {
 export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, dateRange }) => {
   const { t } = useTranslation();
   const isAllBranch = !selectedBranch || String(selectedBranch.id) === 'all';
+  /** Cents/decimals only when EESOME CAFE is selected (not All Branches). */
+  const showMoneyCents = !isAllBranch && isEesomeBranchId(selectedBranch?.id);
+  const money = useCallback((value: number) => formatSalesMoney(value, showMoneyCents), [showMoneyCents]);
+  const moneyTooltip = useCallback((value: number) => formatSalesMoney(value, showMoneyCents), [showMoneyCents]);
 
   const initialSalesLoad = useMemo(() => {
     const fallback = getCurrentMonthRange();
@@ -934,7 +949,7 @@ const metricConfig = {
       makeItem('netSales', t('sales_analytics.net_sales')),
       makeItem('grossProfit', t('sales_analytics.gross_profit')),
     ];
-  }, [trendData, previousTrendData, metricConfig, t, reconAdjustPreviousTotal]);
+  }, [trendData, previousTrendData, metricConfig, t, reconAdjustPreviousTotal, money]);
   /** POS / daily-sales net only (no cash reconciliation) — for modal breakdown */
   const reportNetSalesTotal = useMemo(
     () =>
@@ -1108,7 +1123,7 @@ const metricConfig = {
     const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.pdf`;
 
     doc.save(filename);
-  }, [salesTableRows, selectedBranch, dateRange, t]);
+  }, [salesTableRows, selectedBranch, dateRange, t, money]);
 
   const isPageLoading = dailySalesLoading && dailySalesCurrent.length === 0;
 

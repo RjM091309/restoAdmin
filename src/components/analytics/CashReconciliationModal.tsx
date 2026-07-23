@@ -23,11 +23,22 @@ import {
   type CashReconciliationRow,
 } from '../../services/cashReconciliationService';
 
-const formatMoney = (value: number) =>
-  `₱${Math.trunc(Number(value || 0)).toLocaleString(undefined, {
+const EESOME_BRANCH_ID = 10;
+
+const formatMoney = (value: number, withCents = false) => {
+  const n = Number(value || 0);
+  if (withCents) {
+    const cents = Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+    return `₱${cents.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+  return `₱${Math.trunc(Number.isFinite(n) ? n : 0).toLocaleString(undefined, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
+};
 
 const parseAmount = (row: CashReconciliationRow) => {
   const raw = row.AMOUNT;
@@ -121,6 +132,8 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
   reportBasis = 'net',
 }) => {
   const { t } = useTranslation();
+  const showMoneyCents = Number(branchId) === EESOME_BRANCH_ID;
+  const money = useCallback((value: number) => formatMoney(value, showMoneyCents), [showMoneyCents]);
   const [rows, setRows] = useState<CashReconciliationRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,7 +195,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
     return rows.filter((row) => {
       const dateStr = businessDateYmd(row.BUSINESS_DATE).toLowerCase();
       const amtPlain = String(parseAmount(row)).toLowerCase();
-      const amtFmt = formatMoney(parseAmount(row)).toLowerCase();
+      const amtFmt = money(parseAmount(row)).toLowerCase();
       const enc = formatEncodedDt(row.ENCODED_DT).toLowerCase();
       const idStr = String(row.IDNo);
       return (
@@ -193,7 +206,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
         idStr.includes(q)
       );
     });
-  }, [rows, tableSearch]);
+  }, [rows, tableSearch, money]);
 
   const totalFiltered = filteredRows.length;
   const totalTablePages = Math.max(1, Math.ceil(totalFiltered / pageSize));
@@ -520,7 +533,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
                                     aria-required="true"
                                   />
                                 ) : (
-                                  <span className="font-medium tabular-nums">{formatMoney(parseAmount(row))}</span>
+                                  <span className="font-medium tabular-nums">{money(parseAmount(row))}</span>
                                 )}
                               </td>
                               <td className="px-3 py-2.5 align-middle text-xs text-brand-muted">
@@ -666,7 +679,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
                             {formatBusinessDateDisplay(pendingDeleteRow.BUSINESS_DATE)}
                           </span>
                           {' · '}
-                          <span className="font-semibold">{formatMoney(parseAmount(pendingDeleteRow))}</span>
+                          <span className="font-semibold">{money(parseAmount(pendingDeleteRow))}</span>
                         </p>
                       )}
                       <p className="mt-2 text-xs text-brand-muted">{t('cash_reconciliation.delete_dialog_hint')}</p>

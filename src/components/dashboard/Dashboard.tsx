@@ -134,9 +134,26 @@ const getCurrentMonthRange = () => {
   };
 };
 
-const formatCurrency = (value: number) => {
-  const safe = Number.isFinite(value) ? Math.trunc(value) : 0;
-  return `₱${safe.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+/** EESOME CAFE — show pesos with cents; other branches stay whole pesos. */
+const EESOME_BRANCH_ID = '10';
+
+function isEesomeBranchId(branchId: string | number | null | undefined): boolean {
+  return String(branchId ?? '').trim() === EESOME_BRANCH_ID;
+}
+
+const formatCurrency = (value: number, withCents = false) => {
+  const n = Number.isFinite(value) ? value : 0;
+  if (withCents) {
+    const cents = Math.round(n * 100) / 100;
+    return `₱${cents.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+  return `₱${Math.trunc(n).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
 };
 
 const formatDateLabel = (dateStr: string) => {
@@ -195,7 +212,7 @@ type DashboardProps = {
   };
 };
 
-const PieTooltip = ({ active, payload, total }: any) => {
+const PieTooltip = ({ active, payload, total, withCents = false }: any) => {
   if (!active || !payload?.length) return null;
   const p = payload[0];
   const name = p?.name ?? p?.payload?.name ?? '';
@@ -206,7 +223,7 @@ const PieTooltip = ({ active, payload, total }: any) => {
     <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-md">
       <div className="text-sm font-bold text-slate-900 mb-0.5">{name}</div>
       <div className="text-xs text-slate-600">
-        {formatCurrency(value)} • {(percent * 100).toFixed(1)}%
+        {formatCurrency(value, withCents)} • {(percent * 100).toFixed(1)}%
       </div>
     </div>
   );
@@ -290,9 +307,11 @@ const StatCard = ({
 const TrendingMenuItem = ({
   menu,
   netSalesLabel = 'Net sales',
+  withCents = false,
 }: {
   menu: TrendingMenuRow;
   netSalesLabel?: string;
+  withCents?: boolean;
   key?: React.Key;
 }) => (
   <div className="group cursor-pointer">
@@ -305,7 +324,7 @@ const TrendingMenuItem = ({
       />
       <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm">
         <Star size={10} className="text-yellow-500 fill-yellow-500" />
-        <span className="text-[10px] font-bold">{formatCurrency(menu.netSales)}</span>
+        <span className="text-[10px] font-bold">{formatCurrency(menu.netSales, withCents)}</span>
       </div>
     </div>
     <div className="flex items-start justify-between">
@@ -357,9 +376,11 @@ const RevenueClickableDot = ({
 const VerticalCarousel = ({
   items,
   netSalesLabel = 'Net sales',
+  withCents = false,
 }: {
   items: any[];
   netSalesLabel?: string;
+  withCents?: boolean;
 }) => {
   const [index, setIndex] = React.useState(0);
 
@@ -393,6 +414,7 @@ const VerticalCarousel = ({
                 key={`${menu.name}-${index}-${i}`}
                 menu={menu}
                 netSalesLabel={netSalesLabel}
+                withCents={withCents}
               />
             ))}
         </motion.div>
@@ -407,6 +429,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
   const location = useLocation();
   const dashboardReqSeq = React.useRef(0);
   const loadedCacheKeyRef = React.useRef<string | null>(null);
+  const showMoneyCents = isEesomeBranchId(selectedBranch?.id);
+  const money = React.useCallback(
+    (value: number) => formatCurrency(value, showMoneyCents),
+    [showMoneyCents],
+  );
 
   const initialBranchLoad = React.useMemo(() => {
     if (!selectedBranch) {
@@ -649,7 +676,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 <span style={{ width: 8, height: 8, borderRadius: 9999, background: it?.color || '#64748b', display: 'inline-block' }} />
                 <span style={{ fontSize: 12, color: '#475569', minWidth: 70 }}>{rowLabel(String(it?.dataKey))}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
-                  {formatCurrency(rawForKey(String(it?.dataKey)))}
+                  {money(rawForKey(String(it?.dataKey)))}
                 </span>
               </div>
             ))}
@@ -658,7 +685,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       );
     };
     return Content;
-  }, [navigateToBreakdown, t]);
+  }, [money, t]);
 
   const revenueChartData = React.useMemo(() => {
     const base = dashboardData?.revenueData ?? [];
@@ -991,8 +1018,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 label="Total Sales"
                 value={
                   dashboardData
-                    ? formatCurrency(dashboardData.stats.totalSales)
-                    : formatCurrency(0)
+                    ? money(dashboardData.stats.totalSales)
+                    : money(0)
                 }
                 trend=""
                 trendType="up"
@@ -1002,8 +1029,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 label="Total Expenses"
                 value={
                   dashboardData
-                    ? formatCurrency(dashboardData.stats.totalExpenses)
-                    : formatCurrency(0)
+                    ? money(dashboardData.stats.totalExpenses)
+                    : money(0)
                 }
                 trend=""
                 trendType="down"
@@ -1013,8 +1040,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 label="Total Profit"
                 value={
                   dashboardData
-                    ? formatCurrency(dashboardData.stats.totalProfit)
-                    : formatCurrency(0)
+                    ? money(dashboardData.stats.totalProfit)
+                    : money(0)
                 }
                 trend=""
                 trendType="up"
@@ -1162,6 +1189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                               active={active}
                               payload={payload}
                               total={topCategories.reduce((s, it) => s + Number(it.value || 0), 0)}
+                              withCents={showMoneyCents}
                             />
                           )}
                           contentStyle={{
@@ -1358,7 +1386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                           </div>
 
                           <div className="text-sm font-extrabold text-slate-900 whitespace-nowrap text-right">
-                            {formatCurrency(Number(o.GRAND_TOTAL || 0))}
+                            {money(Number(o.GRAND_TOTAL || 0))}
                           </div>
 
                           <div className="flex items-center justify-end">
@@ -1406,6 +1434,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                   <VerticalCarousel
                     items={trendingMenusData}
                     netSalesLabel={t('sales_analytics.net_sales') || 'Net sales'}
+                    withCents={showMoneyCents}
                   />
                 )}
               </div>
@@ -1447,7 +1476,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                         {Number(row.total_quantity || 0).toLocaleString()}
                       </td>
                       <td className="px-3 py-2 text-sm font-bold text-slate-900 text-right tabular-nums">
-                        {formatCurrency(Number(row.total_revenue || 0))}
+                        {money(Number(row.total_revenue || 0))}
                       </td>
                     </tr>
                   ))}
@@ -1459,7 +1488,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                       </td>
                       <td className="px-3 py-2 text-sm text-teal-700 text-right tabular-nums">—</td>
                       <td className="px-3 py-2 text-sm font-bold text-teal-900 text-right tabular-nums">
-                        {formatCurrency(incomeTopReconDay)}
+                        {money(incomeTopReconDay)}
                       </td>
                     </tr>
                   ) : null}
@@ -1471,7 +1500,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 {`Total Income${incomeTopDate ? ` • ${formatDateLabel(incomeTopDate)}` : ''}`}
               </span>
               <span className="text-lg font-black text-slate-900 tabular-nums">
-                {formatCurrency(incomeTopModalTotal)}
+                {money(incomeTopModalTotal)}
               </span>
             </div>
           </div>
