@@ -6,5 +6,10 @@
     "allowJs": true,
     "skipLibCheck": true
   },
-  "exclude": ["node_modules"]
+  "include": [
+    "./**/*.js"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

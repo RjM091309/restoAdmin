@@ -130,8 +130,46 @@ async function ensureTelegramSettingsTable() {
 	}
 }
 
+/**
+ * UI allows BANK; older DBs may only have enum('CASH','GCASH','MAYA','CARD').
+ */
+async function ensureBankPaymentMethodEnum() {
+	const tables = ['billing', 'payment_transactions'];
+	const connection = await pool.getConnection();
+	try {
+		for (const tableName of tables) {
+			const [cols] = await connection.execute(
+				`SELECT COLUMN_TYPE
+				 FROM information_schema.COLUMNS
+				 WHERE TABLE_SCHEMA = DATABASE()
+				   AND TABLE_NAME = ?
+				   AND COLUMN_NAME = 'PAYMENT_METHOD'
+				 LIMIT 1`,
+				[tableName]
+			);
+			if (!cols.length) continue;
+
+			const columnType = String(cols[0].COLUMN_TYPE || '');
+			const match = columnType.match(/^enum\((.*)\)$/i);
+			if (!match || /'BANK'/i.test(columnType)) continue;
+
+			await connection.execute(
+				`ALTER TABLE \`${tableName}\`
+				 MODIFY COLUMN PAYMENT_METHOD enum(${match[1]},'BANK')
+				 CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL`
+			);
+			console.log(`[Schema] ${tableName}.PAYMENT_METHOD now includes BANK`);
+		}
+	} catch (err) {
+		console.error('[Schema] ensure BANK payment method enum failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 module.exports = {
 	ensureOrderItemsLineCostColumn,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
+	ensureBankPaymentMethodEnum,
 };

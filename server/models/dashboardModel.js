@@ -294,6 +294,7 @@ class DashboardModel {
 			else if (method === 'GCASH') method = 'Gcash';
 			else if (method === 'MAYA' || method === 'PAYMAYA') method = 'Paymaya';
 			else if (method === 'CARD' || method === 'CREDIT CARD' || method === 'CREDITCARD') method = 'Credit Card';
+			else if (method === 'BANK') method = 'Bank';
 			else method = row.PAYMENT_METHOD;
 			
 			return {
