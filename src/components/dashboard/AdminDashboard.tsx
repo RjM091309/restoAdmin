@@ -150,7 +150,7 @@ type ComparisonRow = {
     | 'currency_pct'
     | 'rank';
   /** Parallel previous-period values when format is `diff_index` / `diff_percent` / `expense_diff`.
-   *  For `currency_share`, holds total expenses used as the share denominator.
+   *  For `currency_share`, holds the share denominator (e.g. same-period sales).
    *  For `currency_pct`, holds the secondary % shown beside the amount. */
   compareBases?: number[];
   /** When true, increase = bad (red) / decrease = good (green). Used for expense rows. */
@@ -263,16 +263,20 @@ const getSamePeriodWindows = (
 };
 
 /**
- * Same-length window shifted back 1 month (전월 대비, fair MTD compare).
- * Example: Jul 1–23 → Jun 1–23 (not full June).
+ * 전월 대비: current = month-to-date (1st → selected end), previous = full prior calendar month.
+ * Example: end Jul 24 → current Jul 1–24, previous Jun 1–30.
  */
-const getSameLengthPreviousMonth = (start: string, end: string): DateRange | null => {
-  const s = parseLocalYmd(start);
+const getMtdVsFullPreviousMonth = (
+  end: string,
+): { current: DateRange; previous: DateRange } | null => {
   const e = parseLocalYmd(end);
-  if (!s || !e || s > e) return null;
+  if (!e) return null;
+  const currentStart = new Date(e.getFullYear(), e.getMonth(), 1);
+  const previousStart = new Date(e.getFullYear(), e.getMonth() - 1, 1);
+  const previousEnd = new Date(e.getFullYear(), e.getMonth(), 0);
   return {
-    start: toYYYYMMDD(shiftMonthClamped(s, -1)),
-    end: toYYYYMMDD(shiftMonthClamped(e, -1)),
+    current: { start: toYYYYMMDD(currentStart), end: toYYYYMMDD(e) },
+    previous: { start: toYYYYMMDD(previousStart), end: toYYYYMMDD(previousEnd) },
   };
 };
 
@@ -1058,6 +1062,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     useState<CompareMetricMaps>(EMPTY_COMPARE_METRICS);
   const [compareSamePeriodPrev, setCompareSamePeriodPrev] =
     useState<CompareMetricMaps>(EMPTY_COMPARE_METRICS);
+  /** Same-period (3일 전) expense maps for Main Expenses ÷ sales %. */
+  const [compareSamePeriodExpenseCategoryByBranch, setCompareSamePeriodExpenseCategoryByBranch] =
+    useState<Record<number, Record<string, number>>>({});
+  const [compareSamePeriodExpenseRentByBranch, setCompareSamePeriodExpenseRentByBranch] =
+    useState<Record<number, number>>({});
+  const [compareSamePeriodExpenseSalaryByBranch, setCompareSamePeriodExpenseSalaryByBranch] =
+    useState<Record<number, number>>({});
+  /** Month-to-date of selected end (전월 대비 current: 1st → present). */
+  const [compareLastMonthCurrent, setCompareLastMonthCurrent] =
+    useState<CompareMetricMaps>(EMPTY_COMPARE_METRICS);
+  /** Full prior calendar month (전월 대비 previous side). */
   const [compareLastMonthPrev, setCompareLastMonthPrev] =
     useState<CompareMetricMaps>(EMPTY_COMPARE_METRICS);
   /** Per-branch average of previous 3 full months when current is July: (Apr+May+Jun)/3 */
@@ -2058,7 +2073,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     .filter((branch): branch is BranchPerformanceData => Boolean(branch));
   const canCompare = selectedCompareBranches.length >= 2;
 
-  // Fetch same-period (3일 전 기준) + same-length prior month + trailing-3-month avg.
+  // Fetch same-period (3일 전 기준) + MTD vs full prior month + trailing-3-month avg.
   useEffect(() => {
     if (!isComparePanelOpen || !canCompare) return;
 
@@ -2066,9 +2081,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const start = compareDateRange.start || currentRange.start;
     const end = compareDateRange.end || currentRange.end;
     const samePeriodWindows = getSamePeriodWindows(start, end, SAME_PERIOD_LOOKBACK_DAYS);
-    const sameLengthPrevMonth = getSameLengthPreviousMonth(start, end);
+    const mtdVsPrevMonth = getMtdVsFullPreviousMonth(end);
     const prevThreeMonths = getPreviousThreeMonthsRange(end);
-    if (!samePeriodWindows || !sameLengthPrevMonth || !prevThreeMonths) return;
+    if (!samePeriodWindows || !mtdVsPrevMonth || !prevThreeMonths) return;
 
     let cancelled = false;
 
@@ -2083,6 +2098,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     (async () => {
       try {
         const { current: sameCurrent, previous: samePrev } = samePeriodWindows;
+        const { current: mtdCurrent, previous: fullPrevMonth } = mtdVsPrevMonth;
         const rangeKey = (r: DateRange) => `${r.start}|${r.end}`;
         const cache = new Map<string, ReturnType<typeof fetchBundle>>();
 
@@ -2096,13 +2112,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           return promise;
         };
 
-        const [sameCurrentBundle, samePrevBundle, prevMonthBundle, threeMonthBundle] =
-          await Promise.all([
-            getCached(sameCurrent),
-            getCached(samePrev),
-            getCached(sameLengthPrevMonth),
-            getCached(prevThreeMonths),
-          ]);
+        const [
+          sameCurrentBundle,
+          samePrevBundle,
+          mtdCurrentBundle,
+          fullPrevMonthBundle,
+          threeMonthBundle,
+        ] = await Promise.all([
+          getCached(sameCurrent),
+          getCached(samePrev),
+          getCached(mtdCurrent),
+          getCached(fullPrevMonth),
+          getCached(prevThreeMonths),
+        ]);
         if (cancelled) return;
 
         const fromBundle = (bundle: {
@@ -2116,7 +2138,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
         setCompareSamePeriodCurrent(fromBundle(sameCurrentBundle));
         setCompareSamePeriodPrev(fromBundle(samePrevBundle));
-        setCompareLastMonthPrev(fromBundle(prevMonthBundle));
+        setCompareSamePeriodExpenseCategoryByBranch(
+          sameCurrentBundle.expenseCategoryByBranch || {},
+        );
+        setCompareSamePeriodExpenseRentByBranch(sameCurrentBundle.expenseRentByBranch || {});
+        setCompareSamePeriodExpenseSalaryByBranch(sameCurrentBundle.expenseSalaryByBranch || {});
+        setCompareLastMonthCurrent(fromBundle(mtdCurrentBundle));
+        setCompareLastMonthPrev(fromBundle(fullPrevMonthBundle));
         setCompareThreeMonthAvg(
           averageMetricMaps(fromBundle(threeMonthBundle), TRAILING_AVG_MONTHS),
         );
@@ -2125,6 +2153,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         console.warn('[AdminDashboard] Failed to load compare prior-period metrics:', err);
         setCompareSamePeriodCurrent(EMPTY_COMPARE_METRICS);
         setCompareSamePeriodPrev(EMPTY_COMPARE_METRICS);
+        setCompareSamePeriodExpenseCategoryByBranch({});
+        setCompareSamePeriodExpenseRentByBranch({});
+        setCompareSamePeriodExpenseSalaryByBranch({});
+        setCompareLastMonthCurrent(EMPTY_COMPARE_METRICS);
         setCompareLastMonthPrev(EMPTY_COMPARE_METRICS);
         setCompareThreeMonthAvg(EMPTY_COMPARE_METRICS);
       }
@@ -2234,7 +2266,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     };
   };
 
-  /** Absolute amount + share of branch total expenses, e.g. ₱50,000 (20.0%). */
+  /** Absolute amount + share of denominator, e.g. ₱50,000 (20.0%). */
   const formatCurrencyWithShare = (amount: number, total: number) => {
     const amt = Number(amount) || 0;
     const tot = Number(total) || 0;
@@ -2250,12 +2282,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const start = compareDateRange.start || currentRange.start;
     const end = compareDateRange.end || currentRange.end;
     const samePeriod = getSamePeriodWindows(start, end, SAME_PERIOD_LOOKBACK_DAYS);
-    const sameLengthPrevMonth = getSameLengthPreviousMonth(start, end);
+    const mtdVsPrevMonth = getMtdVsFullPreviousMonth(end);
     const prevThreeMonths = getPreviousThreeMonthsRange(end);
     return {
       selected: { start, end },
       samePeriod,
-      sameLengthPrevMonth,
+      mtdVsPrevMonth,
       prevThreeMonths,
     };
   }, [compareDateRange.start, compareDateRange.end]);
@@ -2320,7 +2352,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const popupWidth = 360;
     const { top, left } = placeComparePopup(rect, popupWidth, 360);
 
-    const { selected, samePeriod, sameLengthPrevMonth, prevThreeMonths } = compareWindowMeta;
+    const { selected, samePeriod, mtdVsPrevMonth, prevThreeMonths } = compareWindowMeta;
     const cur = Number(current) || 0;
     const prev = Number(previous) || 0;
     const diff = Math.trunc(cur - prev);
@@ -2359,12 +2391,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       baseTitle = 'Previous (same period)';
       currentRangeLabel = formatRangeLabel(samePeriod.current);
       baseRangeLabel = formatRangeLabel(samePeriod.previous);
-    } else if (kind === 'vs_last_month' && sameLengthPrevMonth) {
-      baseTitle = 'Previous (same length)';
-      baseRangeLabel = formatRangeLabel(sameLengthPrevMonth);
+    } else if (kind === 'vs_last_month' && mtdVsPrevMonth) {
+      currentTitle = 'Current (MTD)';
+      baseTitle = 'Previous (full month)';
+      currentRangeLabel = formatRangeLabel(mtdVsPrevMonth.current);
+      baseRangeLabel = formatRangeLabel(mtdVsPrevMonth.previous);
     } else if (kind === 'vs_average' && prevThreeMonths) {
-      currentTitle = 'Current (selected)';
+      currentTitle = 'Current (MTD)';
       baseTitle = '3-month average';
+      currentRangeLabel = mtdVsPrevMonth
+        ? formatRangeLabel(mtdVsPrevMonth.current)
+        : currentRangeLabel;
       baseRangeLabel = `${formatRangeLabel(prevThreeMonths)} ÷ ${TRAILING_AVG_MONTHS}`;
     }
 
@@ -2560,40 +2597,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const currentPeriodSales = selectedCompareBranches.map((branch) => Number(branch.totalSales) || 0);
   const currentPeriodProfit = currentPeriodSales.map((sales, i) => sales - currentPeriodExpenses[i]);
 
+  /**
+   * Shared period windows for Sales / Expenses / Profit:
+   * 1) 전월 동기 — same-period (3일 전 기준)
+   * 2) 전월 대비 — MTD vs full prior month
+   * 3) 평균 대비 — MTD vs trailing 3 full months ÷ 3
+   * Cell shows previous amount + index % (same as Sales/Profit; expenses invert % colors).
+   */
   const buildCompareMetricRows = (
     prefix: string,
-    metric: 'sales' | 'profit',
-    currentSelected: number[],
+    metric: 'sales' | 'expenses' | 'profit',
   ): ComparisonRow[] => {
+    const isExpense = metric === 'expenses';
     return [
       {
         id: `${prefix}-vs-last-month-same-period`,
         label: COMPARE_METRIC_LABELS.vsSamePeriod,
         values: pickMetric(compareSamePeriodCurrent, metric),
         compareBases: pickMetric(compareSamePeriodPrev, metric),
-        bestMode: 'max',
+        bestMode: isExpense ? 'min' : 'max',
         format: 'diff_index',
         amountSource: 'previous',
+        invertSentiment: isExpense || undefined,
         breakdownKind: 'same_period',
       },
       {
         id: `${prefix}-vs-last-month`,
         label: COMPARE_METRIC_LABELS.vsLastMonth,
-        values: currentSelected,
+        values: pickMetric(compareLastMonthCurrent, metric),
         compareBases: pickMetric(compareLastMonthPrev, metric),
-        bestMode: 'max',
+        bestMode: isExpense ? 'min' : 'max',
         format: 'diff_index',
         amountSource: 'previous',
+        invertSentiment: isExpense || undefined,
         breakdownKind: 'vs_last_month',
       },
       {
         id: `${prefix}-vs-average`,
         label: COMPARE_METRIC_LABELS.vsAverage,
-        values: currentSelected,
+        values: pickMetric(compareLastMonthCurrent, metric),
         compareBases: pickMetric(compareThreeMonthAvg, metric),
-        bestMode: 'max',
+        bestMode: isExpense ? 'min' : 'max',
         format: 'diff_index',
         amountSource: 'previous',
+        invertSentiment: isExpense || undefined,
         breakdownKind: 'vs_average',
       },
     ];
@@ -2632,9 +2679,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return draft.sort((a, b) => a.rank - b.rank);
   })();
 
-  // Exclusive Main Expenses buckets from category map (Labor/Benefits under Food → rent).
+  // Main Expenses: same-period window (3일 전 기준) amounts ÷ same-period sales.
+  const samePeriodSales = pickMetric(compareSamePeriodCurrent, 'sales');
+  const samePeriodExpenses = pickMetric(compareSamePeriodCurrent, 'expenses');
   const mainExpenseBreakdown = selectedCompareBranches.map((branch) => {
-    const map = expenseCategoryByBranch[branch.id];
+    const map = compareSamePeriodExpenseCategoryByBranch[branch.id];
     const hasMap = Boolean(map && Object.keys(map).length > 0);
     if (hasMap) {
       const buckets = sumMainExpenseBuckets(map);
@@ -2642,22 +2691,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
     return {
       food: 0,
-      rent: Number(expenseRentByBranch[branch.id]) || 0,
-      salary: Number(expenseSalaryByBranch[branch.id]) || 0,
+      rent: Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0,
+      salary: Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0,
     };
   });
   const mainFoodValues = mainExpenseBreakdown.map((b) => b.food);
   const mainRentValues = mainExpenseBreakdown.map((b) => b.rent);
   const mainSalaryValues = mainExpenseBreakdown.map((b) => b.salary);
-  // Remainder after food + rent + salary so shares sum to ~100% of total expenses.
-  const mainOthersValues = currentPeriodExpenses.map((total, i) => {
+  // Remainder after food + rent + salary within same-period total expenses.
+  const mainOthersValues = samePeriodExpenses.map((total, i) => {
     const remaining = total - mainFoodValues[i] - mainRentValues[i] - mainSalaryValues[i];
     return remaining > 0 ? remaining : 0;
   });
 
-  const withExpenseShare = (): Pick<ComparisonRow, 'format' | 'compareBases'> => ({
+  /** % of same-period sales (전월 동기 / 3일 전 window). */
+  const withSalesShare = (): Pick<ComparisonRow, 'format' | 'compareBases'> => ({
     format: 'currency_share',
-    compareBases: currentPeriodExpenses,
+    compareBases: samePeriodSales,
   });
 
   // Align BI rows to comparison column order (selectedCompareBranches).
@@ -2715,44 +2765,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   ];
 
   // Match Sales: same-period, vs last month, vs average (share/rate live on totals above).
-  const expenseMetricRows: ComparisonRow[] = [
-    {
-      id: 'expense-vs-last-month-same-period',
-      label: COMPARE_METRIC_LABELS.vsSamePeriod,
-      values: pickMetric(compareSamePeriodCurrent, 'expenses'),
-      compareBases: pickMetric(compareSamePeriodPrev, 'expenses'),
-      bestMode: 'min',
-      format: 'expense_diff',
-      invertSentiment: true,
-      breakdownKind: 'same_period',
-    },
-    {
-      id: 'expense-vs-last-month',
-      label: COMPARE_METRIC_LABELS.vsLastMonth,
-      values: currentPeriodExpenses,
-      compareBases: pickMetric(compareLastMonthPrev, 'expenses'),
-      bestMode: 'min',
-      format: 'expense_diff',
-      invertSentiment: true,
-      breakdownKind: 'vs_last_month',
-    },
-    {
-      id: 'expense-vs-average',
-      label: COMPARE_METRIC_LABELS.vsAverage,
-      values: currentPeriodExpenses,
-      compareBases: pickMetric(compareThreeMonthAvg, 'expenses'),
-      bestMode: 'min',
-      format: 'expense_diff',
-      invertSentiment: true,
-      breakdownKind: 'vs_average',
-    },
-  ];
+  const expenseMetricRows = buildCompareMetricRows('expense', 'expenses');
 
   // Totals → Sales → Expenses → Profit → Main Expenses composition.
   const unifiedComparisonRows: UnifiedComparisonRow[] = [
     ...benchmarkRows,
     { id: 'section-sales', rowType: 'section', label: t('admin_dashboard.sections.sales') },
-    ...buildCompareMetricRows('sales', 'sales', currentPeriodSales),
+    ...buildCompareMetricRows('sales', 'sales'),
     {
       id: 'section-expenses',
       rowType: 'section',
@@ -2760,35 +2779,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     },
     ...expenseMetricRows,
     { id: 'section-profit', rowType: 'section', label: t('admin_dashboard.sections.profit') },
-    ...buildCompareMetricRows('profit', 'profit', currentPeriodProfit),
+    ...buildCompareMetricRows('profit', 'profit'),
     { id: 'section-main-expenses', rowType: 'section', label: t('admin_dashboard.sections.main_expenses') },
     {
       id: 'main-food-supplies',
       label: COMPARE_METRIC_LABELS.foodSupplies,
       values: mainFoodValues,
       bestMode: 'min',
-      ...withExpenseShare(),
+      ...withSalesShare(),
     },
     {
       id: 'main-rent',
       label: COMPARE_METRIC_LABELS.rent,
       values: mainRentValues,
       bestMode: 'min',
-      ...withExpenseShare(),
+      ...withSalesShare(),
     },
     {
       id: 'main-salary',
       label: COMPARE_METRIC_LABELS.salary,
       values: mainSalaryValues,
       bestMode: 'min',
-      ...withExpenseShare(),
+      ...withSalesShare(),
     },
     {
       id: 'main-others',
       label: COMPARE_METRIC_LABELS.others,
       values: mainOthersValues,
       bestMode: 'min',
-      ...withExpenseShare(),
+      ...withSalesShare(),
     },
   ];
 
@@ -3230,7 +3249,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         className="grid sticky top-0 z-40 bg-white border-b border-brand-primary/20"
         style={{ gridTemplateColumns: `280px repeat(${selectedCount}, minmax(180px, 1fr))` }}
       >
-        <div className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-brand-primary border-r border-brand-primary/20">
+        <div className="px-5 py-4 flex items-center justify-center text-center text-base font-bold uppercase tracking-wide text-brand-primary border-r border-brand-primary/20">
           {t('admin_dashboard.comparison_metric')}
         </div>
         {selectedCompareBranches.map((branch) => {
