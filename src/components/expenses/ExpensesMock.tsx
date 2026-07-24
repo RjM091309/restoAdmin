@@ -57,6 +57,14 @@ type Category = {
   masterCategoryId?: string;
 };
 
+type GlobalSearchHit = {
+  itemName: string;
+  operationId: string;
+  operationName: string;
+  subCategoryId: string;
+  subCategoryName: string;
+};
+
 const ITEMS_PER_PAGE = 50;
 const PIE_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'];
 
@@ -401,6 +409,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   const [expenseAnalyticsRefreshKey, setExpenseAnalyticsRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [tableItemsNameFilter, setTableItemsNameFilter] = useState<Set<string> | null>(null);
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 
   const [isOperationPanelOpen, setIsOperationPanelOpen] = useState(false);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
@@ -479,6 +489,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const tableItemsScrollRef = useRef<HTMLDivElement | null>(null);
   const expenseBreakdownRef = useRef<HTMLDivElement | null>(null);
+  const globalSearchWrapRef = useRef<HTMLDivElement | null>(null);
+  /** Skip one auto-nav cycle after an explicit dropdown pick. */
+  const skipGlobalSearchAutoNavRef = useRef(false);
 
   const scrollTableItemsToTop = useCallback(() => {
     requestAnimationFrame(() => {
@@ -1640,6 +1653,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   };
 
   const handleSelectOperation = (opId: string) => {
+    setGlobalSearch('');
+    setGlobalSearchOpen(false);
     setSelectedOperationId(opId);
     setSelectedCategoryId(null);
     scrollTableItemsToTop();
@@ -1647,6 +1662,8 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   };
 
   const handleSelectCategory = (catId: string) => {
+    setGlobalSearch('');
+    setGlobalSearchOpen(false);
     setSelectedCategoryId(catId);
     scrollTableItemsToTop();
     scrollPageToTop();
@@ -2140,6 +2157,115 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const [tableSearch, setTableSearch] = useState('');
 
+  const globalSearchHits = useMemo(() => {
+    const term = globalSearch.trim().toLowerCase();
+    if (!term) return [] as GlobalSearchHit[];
+
+    const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
+    const opById = new Map(operations.map((o) => [String(o.id), o]));
+    const seen = new Set<string>();
+    const hits: GlobalSearchHit[] = [];
+
+    for (const exp of expenses) {
+      const itemName = expenseItemDisplayName(exp);
+      if (!itemName || !itemName.toLowerCase().includes(term)) continue;
+      if (exp.masterCatId == null) continue;
+
+      const mc = masterById.get(String(exp.masterCatId));
+      if (!mc?.opCategoryId) continue;
+
+      const operationId = String(mc.opCategoryId);
+      const op = opById.get(operationId);
+      if (!op) continue;
+
+      const subCategoryId = (mc.categoryType || mc.name || '').trim();
+      if (!subCategoryId) continue;
+
+      const key = `${itemName.toLowerCase()}|${operationId}|${subCategoryId.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      hits.push({
+        itemName,
+        operationId,
+        operationName: op.name,
+        subCategoryId,
+        subCategoryName: subCategoryId,
+      });
+    }
+
+    hits.sort((a, b) => {
+      const aL = a.itemName.toLowerCase();
+      const bL = b.itemName.toLowerCase();
+      const rank = (name: string) => (name === term ? 0 : name.startsWith(term) ? 1 : 2);
+      const ra = rank(aL);
+      const rb = rank(bL);
+      if (ra !== rb) return ra - rb;
+      return a.itemName.localeCompare(b.itemName, undefined, { sensitivity: 'base' });
+    });
+
+    return hits.slice(0, 25);
+  }, [expenses, globalSearch, masterCategories, operations]);
+
+  const selectedOperationIdRef = useRef(selectedOperationId);
+  const selectedCategoryIdRef = useRef(selectedCategoryId);
+  const globalSearchRef = useRef(globalSearch);
+  selectedOperationIdRef.current = selectedOperationId;
+  selectedCategoryIdRef.current = selectedCategoryId;
+  globalSearchRef.current = globalSearch;
+
+  const navigateToSearchHit = useCallback(
+    (hit: GlobalSearchHit, filterTerm?: string, options?: { closeDropdown?: boolean }) => {
+      const term = (filterTerm ?? hit.itemName).trim();
+      const sameCategory =
+        selectedOperationIdRef.current === hit.operationId &&
+        selectedCategoryIdRef.current === hit.subCategoryId;
+
+      setTableSearch(term);
+      setTableItemsNameFilter(null);
+
+      if (!sameCategory) {
+        setSelectedOperationId(hit.operationId);
+        setSelectedCategoryId(hit.subCategoryId);
+      }
+
+      if (options?.closeDropdown !== false) {
+        setGlobalSearchOpen(false);
+      }
+      scrollTableItemsToTop();
+      scrollPageToTop();
+    },
+    [scrollPageToTop, scrollTableItemsToTop],
+  );
+
+  // Auto-select main + sub category of the best match while typing.
+  useEffect(() => {
+    const term = globalSearch.trim();
+    if (!term || globalSearchHits.length === 0) return;
+
+    const hit = globalSearchHits[0];
+    const timer = window.setTimeout(() => {
+      if (skipGlobalSearchAutoNavRef.current) {
+        skipGlobalSearchAutoNavRef.current = false;
+        return;
+      }
+      navigateToSearchHit(hit, term, { closeDropdown: false });
+    }, 280);
+
+    return () => window.clearTimeout(timer);
+  }, [globalSearch, globalSearchHits, navigateToSearchHit]);
+
+  // Close suggestions when clicking outside.
+  useEffect(() => {
+    if (!globalSearchOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      const el = globalSearchWrapRef.current;
+      if (el && !el.contains(e.target as Node)) setGlobalSearchOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [globalSearchOpen]);
+
   const filteredItemsForCategory = useMemo(() => {
     const term = tableSearch.trim().toLowerCase();
     const base = tableRowsForCategory;
@@ -2172,9 +2298,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   React.useEffect(() => {
     setCurrentPage(1);
-    setTableSearch('');
     setTableItemsNameFilter(null);
-  }, [selectedCategoryId]);
+    // Keep table filter when global search is driving the selection.
+    if (!globalSearchRef.current.trim()) {
+      setTableSearch('');
+    }
+  }, [selectedCategoryId, selectedOperationId]);
 
   if (!isSpecificBranch) {
     return (
@@ -2239,6 +2368,88 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       <>
     <div className="pt-6 overflow-x-hidden">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+        <div ref={globalSearchWrapRef} className="relative w-full sm:w-80">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-brand-muted"
+          />
+          <input
+            type="text"
+            value={globalSearch}
+            onChange={(e) => {
+              const v = e.target.value;
+              setGlobalSearch(v);
+              setGlobalSearchOpen(true);
+              if (!v.trim()) {
+                setTableSearch('');
+                setGlobalSearchOpen(false);
+              }
+            }}
+            onFocus={() => {
+              if (globalSearch.trim()) setGlobalSearchOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setGlobalSearchOpen(false);
+                return;
+              }
+              if (e.key === 'Enter' && globalSearchHits.length > 0) {
+                e.preventDefault();
+                skipGlobalSearchAutoNavRef.current = true;
+                const hit = globalSearchHits[0];
+                setGlobalSearch(hit.itemName);
+                navigateToSearchHit(hit, hit.itemName);
+              }
+            }}
+            placeholder="Search expense items..."
+            className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-9 text-sm font-medium text-brand-text outline-none transition-shadow placeholder:text-brand-muted focus:border-brand-primary/40 focus:ring-2 focus:ring-brand-primary/15"
+            aria-label="Global search expense items"
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={globalSearchOpen && Boolean(globalSearch.trim())}
+            aria-autocomplete="list"
+          />
+          {globalSearch ? (
+            <button
+              type="button"
+              onClick={() => {
+                setGlobalSearch('');
+                setTableSearch('');
+                setGlobalSearchOpen(false);
+              }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-brand-muted hover:bg-gray-100 hover:text-brand-text"
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          ) : null}
+          {globalSearchOpen && globalSearch.trim() && (
+            <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 max-h-72 overflow-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
+              {globalSearchHits.length === 0 ? (
+                <div className="px-3 py-2.5 text-xs text-brand-muted">No matching items.</div>
+              ) : (
+                globalSearchHits.map((hit) => (
+                  <button
+                    key={`${hit.operationId}-${hit.subCategoryId}-${hit.itemName}`}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      skipGlobalSearchAutoNavRef.current = true;
+                      setGlobalSearch(hit.itemName);
+                      navigateToSearchHit(hit, hit.itemName);
+                    }}
+                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-brand-bg"
+                  >
+                    <span className="truncate text-sm font-semibold text-brand-text">{hit.itemName}</span>
+                    <span className="truncate text-[11px] text-brand-muted">
+                      {hit.operationName} → {hit.subCategoryName}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={openReceiptModal}
