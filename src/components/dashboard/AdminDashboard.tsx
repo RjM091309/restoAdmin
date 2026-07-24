@@ -400,67 +400,15 @@ const averageMetricMaps = (maps: CompareMetricMaps, divisor: number): CompareMet
   };
 };
 
-/** Sum inventory/food-supply expense keys for a branch (e.g. inventory|meat). */
-const sumFoodSuppliesFromMap = (branchMap?: Record<string, number>): number => {
-  if (!branchMap) return 0;
-  let sum = 0;
-  for (const [key, amount] of Object.entries(branchMap)) {
-    const k = String(key).toLowerCase();
-    if (k.startsWith('inventory|') || k.includes('food')) {
-      sum += Number(amount) || 0;
-    }
-  }
-  return sum;
-};
-
-/**
- * Match expense rows by subcategory (and optionally dedicated salary main).
- * Keys are `exp_cat|exp_name` (lowercased), e.g. `2. 매장운영 / operation|1. 월세`.
- */
-const sumExpensesByNameHints = (
-  branchMap: Record<string, number> | undefined,
-  nameHints: string[],
-  opts?: { includeDedicatedSalaryMain?: boolean },
-): number => {
-  if (!branchMap) return 0;
-  const hints = nameHints.map((h) => h.trim().toLowerCase()).filter(Boolean);
-  if (hints.length === 0) return 0;
-  let sum = 0;
-  for (const [key, amount] of Object.entries(branchMap)) {
-    const full = String(key).trim().toLowerCase();
-    const pipe = full.indexOf('|');
-    const mainPart = (pipe >= 0 ? full.slice(0, pipe) : full).trim();
-    const namePart = (pipe >= 0 ? full.slice(pipe + 1) : full).trim();
-    const amt = Number(amount) || 0;
-
-    if (hints.some((h) => namePart === h || namePart.includes(h))) {
-      sum += amt;
-      continue;
-    }
-
-    // e.g. main `3. 급여 / salary` with sub `가불` — count whole dedicated salary section.
-    // Skip mixed mains like `3. 급여, 세금, 기타 / labor, tax, others`.
-    if (opts?.includeDedicatedSalaryMain) {
-      const mixedMain =
-        /세금|기타|,/.test(mainPart) ||
-        mainPart.includes('labor') ||
-        mainPart.includes('tax') ||
-        mainPart.includes('others') ||
-        mainPart.includes('operation') ||
-        mainPart.includes('매장운영') ||
-        mainPart.includes('식자재') ||
-        mainPart.includes('food');
-      const dedicatedSalaryMain =
-        !mixedMain && (mainPart.includes('급여') || mainPart.includes('salary'));
-      if (dedicatedSalaryMain) sum += amt;
-    }
-  }
-  return sum;
-};
-
-/** DB terms: 월세, 상가 임대료 / Rent (English alone missed Korean 월세). */
+/** DB terms: 월세, 상가 임대료 / Rent. */
 const RENT_NAME_HINTS = ['rent', 'rental', 'lease', '월세', '임대'];
-/** DB terms: 급여 / Salary, SALARY, 급여 및 복지 (not mixed Labor/Tax/Others whole main). */
+/**
+ * Miscategorized under Food Supplies in Expenses UI — user maps these into 임대료
+ * (fixed store costs alongside rent), not 식자재 / 급여.
+ * e.g. `1. 식자재 / food supplies|급여 및 복지 / labor, benefits`
+ */
+const LABOR_BENEFITS_TO_RENT_HINTS = ['labor', 'benefits', '복지'];
+/** Pure salary / payroll (not Labor-Benefits compound under Food Supplies). */
 const SALARY_NAME_HINTS = [
   'salary',
   'salaries',
@@ -470,6 +418,69 @@ const SALARY_NAME_HINTS = [
   '급여',
   '인건',
 ];
+
+const matchesExpenseNameHints = (namePart: string, hints: string[]): boolean => {
+  const name = String(namePart || '').trim().toLowerCase();
+  if (!name) return false;
+  return hints.some((h) => name === h || name.includes(h));
+};
+
+const splitExpenseMapKey = (key: string): { mainPart: string; namePart: string; full: string } => {
+  const full = String(key || '').trim().toLowerCase();
+  const pipe = full.indexOf('|');
+  return {
+    full,
+    mainPart: (pipe >= 0 ? full.slice(0, pipe) : full).trim(),
+    namePart: (pipe >= 0 ? full.slice(pipe + 1) : full).trim(),
+  };
+};
+
+/** True for "급여 및 복지 / Labor, Benefits" style subs (even when parent is Food Supplies). */
+const isLaborBenefitsSub = (namePart: string): boolean => {
+  const name = String(namePart || '').trim().toLowerCase();
+  if (!name) return false;
+  if (matchesExpenseNameHints(name, LABOR_BENEFITS_TO_RENT_HINTS)) return true;
+  // "급여 및 복지" without English — 복지 marks benefits compound, not pure salary.
+  return name.includes('급여') && name.includes('복지');
+};
+
+type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
+
+/** Exclusive bucket so food never double-counts rent/labor/salary. */
+const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
+  const { mainPart, namePart, full } = splitExpenseMapKey(key);
+
+  // Labor/Benefits misfiled under Food → 임대료 (per ops mapping).
+  if (isLaborBenefitsSub(namePart)) return 'rent';
+  if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';
+
+  if (matchesExpenseNameHints(namePart, SALARY_NAME_HINTS)) return 'salary';
+
+  const isFoodMain =
+    mainPart.includes('식자재') ||
+    mainPart.includes('food') ||
+    mainPart.includes('inventory');
+  if (full.startsWith('inventory|') || isFoodMain) return 'food';
+
+  return 'other';
+};
+
+const sumMainExpenseBuckets = (
+  branchMap?: Record<string, number>,
+): Record<MainExpenseBucket, number> => {
+  const out: Record<MainExpenseBucket, number> = {
+    food: 0,
+    rent: 0,
+    salary: 0,
+    other: 0,
+  };
+  if (!branchMap) return out;
+  for (const [key, amount] of Object.entries(branchMap)) {
+    const bucket = classifyMainExpenseKey(key);
+    out[bucket] += Number(amount) || 0;
+  }
+  return out;
+};
 
 /** Branch Comparison metric labels — always Korean, regardless of UI language. */
 const COMPARE_METRIC_LABELS = {
@@ -2621,21 +2632,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return draft.sort((a, b) => a.rank - b.rank);
   })();
 
-  const mainFoodValues = selectedCompareBranches.map((branch) =>
-    sumFoodSuppliesFromMap(expenseCategoryByBranch[branch.id]),
-  );
-  const mainRentValues = selectedCompareBranches.map((branch) => {
-    const fromBucket = expenseRentByBranch[branch.id];
-    if (fromBucket != null && Number(fromBucket) > 0) return Number(fromBucket) || 0;
-    return sumExpensesByNameHints(expenseCategoryByBranch[branch.id], RENT_NAME_HINTS);
+  // Exclusive Main Expenses buckets from category map (Labor/Benefits under Food → rent).
+  const mainExpenseBreakdown = selectedCompareBranches.map((branch) => {
+    const map = expenseCategoryByBranch[branch.id];
+    const hasMap = Boolean(map && Object.keys(map).length > 0);
+    if (hasMap) {
+      const buckets = sumMainExpenseBuckets(map);
+      return { food: buckets.food, rent: buckets.rent, salary: buckets.salary };
+    }
+    return {
+      food: 0,
+      rent: Number(expenseRentByBranch[branch.id]) || 0,
+      salary: Number(expenseSalaryByBranch[branch.id]) || 0,
+    };
   });
-  const mainSalaryValues = selectedCompareBranches.map((branch) => {
-    const fromBucket = expenseSalaryByBranch[branch.id];
-    if (fromBucket != null && Number(fromBucket) > 0) return Number(fromBucket) || 0;
-    return sumExpensesByNameHints(expenseCategoryByBranch[branch.id], SALARY_NAME_HINTS, {
-      includeDedicatedSalaryMain: true,
-    });
-  });
+  const mainFoodValues = mainExpenseBreakdown.map((b) => b.food);
+  const mainRentValues = mainExpenseBreakdown.map((b) => b.rent);
+  const mainSalaryValues = mainExpenseBreakdown.map((b) => b.salary);
   // Remainder after food + rent + salary so shares sum to ~100% of total expenses.
   const mainOthersValues = currentPeriodExpenses.map((total, i) => {
     const remaining = total - mainFoodValues[i] - mainRentValues[i] - mainSalaryValues[i];
