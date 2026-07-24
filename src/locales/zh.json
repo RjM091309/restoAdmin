@@ -352,6 +352,7 @@
 		"top_selling_products": "畅销产品",
 		"compare": "比较",
 		"select_branches_to_compare": "请至少选择两个分店进行比较",
+		"select_all_branches": "全选",
 		"branch_comparison": "分店比较",
 		"comparison_metric": "比较指标",
 		"top": "最佳",
@@ -364,6 +365,49 @@
 		"no_products_data": "所选期间没有畅销产品。",
 		"no_branch_revenue_data": "此期间{{branch}}没有销售或支出数据。",
 		"no_branch_products_data": "此期间{{branch}}没有畅销产品。",
+		"expense_analytics_title": "费用分析",
+		"expense_analytics_subtitle": "关注金额影响、占比与需关注门店，而非误导性的百分比飙升。",
+		"expense_kpi": {
+			"highest": "最高费用",
+			"largest_increase": "最大增幅",
+			"company_total": "公司总费用",
+			"above_avg": "高于平均",
+			"avg_label": "平均 {{amount}}",
+			"of_branches": "共 {{total}} 家门店"
+		},
+		"expense_table": {
+			"branch": "门店",
+			"current": "本期",
+			"previous": "上月",
+			"difference": "较上月变化",
+			"share": "占总费用 %",
+			"of_sales": "占销售额 %",
+			"rank": "排名",
+			"status": "状态"
+		},
+		"expense_status": {
+			"normal": "正常",
+			"above_avg": "高于均值",
+			"needs_review": "需复核"
+		},
+		"expense_diff": {
+			"new": "新增",
+			"significant": "骤增"
+		},
+		"expense_insights": {
+			"title": "洞察",
+			"highest": "{{branch}}本期费用最高，为 {{amount}}。",
+			"increased": "较上月增加 {{amount}}。",
+			"decreased": "较上月减少 {{amount}}。",
+			"share": "该门店占公司总费用的 {{pct}}%。",
+			"review": "建议复核 {{branch}}。",
+			"largest_increase": "{{branch}}增幅最大（+{{amount}}）。",
+			"multiple_review": "{{count}} 家门店需复核。",
+			"summary": "{{branch}}最高 {{amount}}（占比 {{pct}}%）{{change}}。",
+			"change_up": "，增加 {{amount}}",
+			"change_down": "，减少 {{amount}}",
+			"review_list": "需复核：{{branches}}。"
+		},
 		"sections": {
 			"inventory": "库存",
 			"fresh_produce": "生鲜农产品",
@@ -372,6 +416,18 @@
 			"seafood": "海鲜",
 			"dreammart": "梦幻超市",
 			"rice": "大米",
+			"sales": "销售",
+			"expenses": "支出",
+			"profit": "利润",
+			"vs_last_month_same_period": "vs. Last Month (Same Period) → 전월동기 (3일 전 기준) / %",
+			"vs_last_month": "vs. Last Month → 전월 대비 (%)",
+			"vs_average": "vs. Average +/- → 평균대비 증감",
+			"main_expenses": "主要支出",
+			"food_supplies": "食材供应",
+			"food_supplies_vs_last_month": "Food Supplies vs. Last Month +/- → 전월대비 증감 (3일 전 기준)",
+			"salary": "工资",
+			"rent": "房租",
+			"others": "Others",
 			"maintenance": "维护",
 			"kitchen_equipment": "厨房设备",
 			"supplies": "用品",
@@ -382,10 +438,7 @@
 			"internet": "网络费",
 			"gas": "燃气费",
 			"logistic_air_sea": "物流 (空运、海运)",
-			"salary_rent": "工资和房租",
-			"salary": "工资",
-			"rent": "房租",
-			"others": "其他"
+			"salary_rent": "工资和房租"
 		}
 	},
 	"sales_analytics": {

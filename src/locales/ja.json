@@ -184,6 +184,7 @@
 		"top_selling_products": "売れ筋製品",
 		"compare": "比較",
 		"select_branches_to_compare": "比較する店舗を2つ以上選択してください",
+		"select_all_branches": "すべて",
 		"branch_comparison": "店舗比較",
 		"comparison_metric": "比較指標",
 		"top": "トップ",
@@ -196,6 +197,49 @@
 		"no_products_data": "選択した期間の売れ筋商品がありません。",
 		"no_branch_revenue_data": "この期間の{{branch}}の売上または費用データがありません。",
 		"no_branch_products_data": "この期間の{{branch}}の売れ筋商品がありません。",
+		"expense_analytics_title": "経費分析",
+		"expense_analytics_subtitle": "誤解を招く急騰％ではなく、金額影響・構成比・要注意店舗に焦点を当てます。",
+		"expense_kpi": {
+			"highest": "最高経費",
+			"largest_increase": "最大増加",
+			"company_total": "全社経費合計",
+			"above_avg": "平均超過",
+			"avg_label": "平均 {{amount}}",
+			"of_branches": "{{total}}店舗中"
+		},
+		"expense_table": {
+			"branch": "店舗",
+			"current": "当期",
+			"previous": "前月",
+			"difference": "前月比の増減",
+			"share": "全社費用シェア",
+			"of_sales": "売上比 %",
+			"rank": "順位",
+			"status": "状態"
+		},
+		"expense_status": {
+			"normal": "正常",
+			"above_avg": "平均超",
+			"needs_review": "要確認"
+		},
+		"expense_diff": {
+			"new": "新規",
+			"significant": "急増"
+		},
+		"expense_insights": {
+			"title": "インサイト",
+			"highest": "{{branch}}の今期経費が最高です（{{amount}}）。",
+			"increased": "前月比で{{amount}}増加しました。",
+			"decreased": "前月比で{{amount}}減少しました。",
+			"share": "この店舗は全社経費の{{pct}}%を占めています。",
+			"review": "{{branch}}を確認してください。",
+			"largest_increase": "{{branch}}の増加が最大（+{{amount}}）。",
+			"multiple_review": "{{count}}店舗が要確認。",
+			"summary": "{{branch}}が最高 {{amount}}（構成比{{pct}}%）{{change}}。",
+			"change_up": "、{{amount}}増",
+			"change_down": "、{{amount}}減",
+			"review_list": "要確認: {{branches}}。"
+		},
 		"sections": {
 			"inventory": "在庫",
 			"fresh_produce": "生鮮食品",
@@ -204,6 +248,18 @@
 			"seafood": "魚介類",
 			"dreammart": "ドリームマート",
 			"rice": "米",
+			"sales": "売上",
+			"expenses": "経費",
+			"profit": "利益",
+			"vs_last_month_same_period": "vs. Last Month (Same Period) → 전월동기 (3일 전 기준) / %",
+			"vs_last_month": "vs. Last Month → 전월 대비 (%)",
+			"vs_average": "vs. Average +/- → 평균대비 증감",
+			"main_expenses": "主要経費",
+			"food_supplies": "食材",
+			"food_supplies_vs_last_month": "Food Supplies vs. Last Month +/- → 전월대비 증감 (3일 전 기준)",
+			"salary": "給与",
+			"rent": "賃料",
+			"others": "Others",
 			"maintenance": "メンテナンス",
 			"kitchen_equipment": "厨房機器",
 			"supplies": "備品",
@@ -214,10 +270,7 @@
 			"internet": "インターネット",
 			"gas": "ガス代",
 			"logistic_air_sea": "物流（航空・海上）",
-			"salary_rent": "給与・賃料",
-			"salary": "給与",
-			"rent": "賃料",
-			"others": "その他"
+			"salary_rent": "給与・賃料"
 		}
 	},
 	"dashboard": {

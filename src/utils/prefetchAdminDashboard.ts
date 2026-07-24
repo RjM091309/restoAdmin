@@ -80,6 +80,8 @@ export function prefetchAdminDashboardBundle(params?: {
         topProductsData: bundle.topProductsData,
         dailySalesForCards: bundle.dailySalesForCards,
         expenseCategoryByBranch: bundle.expenseCategoryByBranch,
+        expenseRentByBranch: bundle.expenseRentByBranch,
+        expenseSalaryByBranch: bundle.expenseSalaryByBranch,
         comparePeriodReconAll: bundle.comparePeriodReconAll,
         trendByPeriod,
         branchChartsById: bundle.branchChartsById,

@@ -195,6 +195,7 @@
 		"top_selling_products": "Top Selling Products",
 		"compare": "Compare",
 		"select_branches_to_compare": "Select at least 2 branches to compare",
+		"select_all_branches": "All",
 		"branch_comparison": "Branch Comparison",
 		"comparison_metric": "Comparison Metric",
 		"top": "Top",
@@ -207,6 +208,49 @@
 		"no_products_data": "No top selling products for the selected period.",
 		"no_branch_revenue_data": "No sales or expense data for {{branch}} in this period.",
 		"no_branch_products_data": "No top selling products for {{branch}} in this period.",
+		"expense_analytics_title": "Expense Analytics",
+		"expense_analytics_subtitle": "Focus on peso impact, share of total, and branches that need attention — not misleading % spikes.",
+		"expense_kpi": {
+			"highest": "Highest Expense",
+			"largest_increase": "Largest Increase",
+			"company_total": "Total Company Expense",
+			"above_avg": "Above Average",
+			"avg_label": "Avg {{amount}}",
+			"of_branches": "of {{total}} branches"
+		},
+		"expense_table": {
+			"branch": "Branch",
+			"current": "Current",
+			"previous": "Previous",
+			"difference": "Change vs Last Month",
+			"share": "% of Total Expenses",
+			"of_sales": "% of Sales",
+			"rank": "Rank",
+			"status": "Status"
+		},
+		"expense_status": {
+			"normal": "Normal",
+			"above_avg": "Above Avg",
+			"needs_review": "Review"
+		},
+		"expense_diff": {
+			"new": "New",
+			"significant": "Spike"
+		},
+		"expense_insights": {
+			"title": "Insights",
+			"highest": "{{branch}} has the highest expense this period at {{amount}}.",
+			"increased": "It increased by {{amount}} compared to last month.",
+			"decreased": "It decreased by {{amount}} compared to last month.",
+			"share": "This branch contributes {{pct}}% of total company expenses.",
+			"review": "{{branch}} should be reviewed.",
+			"largest_increase": "{{branch}} increased most (+{{amount}}).",
+			"multiple_review": "{{count}} branches need review.",
+			"summary": "{{branch}} leads at {{amount}} ({{pct}}% of total){{change}}.",
+			"change_up": ", up {{amount}}",
+			"change_down": ", down {{amount}}",
+			"review_list": "Review: {{branches}}."
+		},
 		"sections": {
 			"inventory": "Inventory",
 			"fresh_produce": "Fresh Produce",
@@ -215,6 +259,18 @@
 			"seafood": "Seafood",
 			"dreammart": "DreamMart",
 			"rice": "Rice",
+			"sales": "Sales",
+			"expenses": "Expenses",
+			"profit": "Profit",
+			"vs_last_month_same_period": "vs. Last Month (Same Period) → 전월동기 (3일 전 기준) / %",
+			"vs_last_month": "vs. Last Month → 전월 대비 (%)",
+			"vs_average": "vs. Average +/- → 평균대비 증감",
+			"main_expenses": "Main Expenses",
+			"food_supplies": "Food Supplies",
+			"food_supplies_vs_last_month": "Food Supplies vs. Last Month +/- → 전월대비 증감 (3일 전 기준)",
+			"salary": "Salary",
+			"rent": "Rent",
+			"others": "Others",
 			"maintenance": "Maintenance",
 			"kitchen_equipment": "Kitchen Equipment",
 			"supplies": "Supplies",
@@ -225,10 +281,7 @@
 			"internet": "Internet",
 			"gas": "Gas",
 			"logistic_air_sea": "Logistic(Air, Sea)",
-			"salary_rent": "Salary & Rent",
-			"salary": "Salary",
-			"rent": "Rent",
-			"others": "Others"
+			"salary_rent": "Salary & Rent"
 		}
 	},
 	"dashboard": {

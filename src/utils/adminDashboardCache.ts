@@ -26,6 +26,8 @@ export type AdminDashboardCachePayload = {
   topProductsData: { name: string; sales: number }[];
   dailySalesForCards: ApiDailySalesItem[];
   expenseCategoryByBranch: Record<number, Record<string, number>>;
+  expenseRentByBranch?: Record<number, number>;
+  expenseSalaryByBranch?: Record<number, number>;
   comparePeriodReconAll: number;
   trendByPeriod: Partial<Record<AdminDashboardTrendPeriod, AdminDashboardTrendPoint[]>>;
   /** Per-branch monthly trend + top products for instant branch-card focus. */
@@ -209,6 +211,14 @@ export function patchAdminDashboardCache(
       patch.expenseCategoryByBranch && Object.keys(patch.expenseCategoryByBranch).length > 0
         ? patch.expenseCategoryByBranch
         : base.expenseCategoryByBranch,
+    expenseRentByBranch:
+      patch.expenseRentByBranch && Object.keys(patch.expenseRentByBranch).length > 0
+        ? patch.expenseRentByBranch
+        : base.expenseRentByBranch,
+    expenseSalaryByBranch:
+      patch.expenseSalaryByBranch && Object.keys(patch.expenseSalaryByBranch).length > 0
+        ? patch.expenseSalaryByBranch
+        : base.expenseSalaryByBranch,
     trendByPeriod: {
       ...base.trendByPeriod,
       ...(patch.trendByPeriod ?? {}),

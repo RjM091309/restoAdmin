@@ -177,13 +177,14 @@
 	},
 	"admin_dashboard": {
 		"total_revenue": "총 수익",
-		"total_sales": "총 매출",
-		"total_expenses": "총 비용",
+		"total_sales": "매출액",
+		"total_expenses": "비용",
 		"performance_trend": "전체 실적 추이 (12개월)",
 		"revenue_distribution": "수익 분포",
 		"top_selling_products": "최다 판매 제품",
 		"compare": "비교",
 		"select_branches_to_compare": "비교할 지점을 2개 이상 선택하세요",
+		"select_all_branches": "전체",
 		"branch_comparison": "지점 비교",
 		"comparison_metric": "비교 지표",
 		"top": "최고",
@@ -196,6 +197,49 @@
 		"no_products_data": "선택한 기간에 최다 판매 제품이 없습니다.",
 		"no_branch_revenue_data": "이 기간에 {{branch}}의 매출 또는 비용 데이터가 없습니다.",
 		"no_branch_products_data": "이 기간에 {{branch}}의 최다 판매 제품이 없습니다.",
+		"expense_analytics_title": "지출 분석",
+		"expense_analytics_subtitle": "오해의 소지가 있는 % 급등보다 금액 영향, 비중, 점검이 필요한 지점에 집중합니다.",
+		"expense_kpi": {
+			"highest": "최고 지출",
+			"largest_increase": "최대 증가",
+			"company_total": "전체 지출",
+			"above_avg": "평균 초과",
+			"avg_label": "평균 {{amount}}",
+			"of_branches": "{{total}}개 지점 중"
+		},
+		"expense_table": {
+			"branch": "지점",
+			"current": "현재",
+			"previous": "전월",
+			"difference": "전월 대비 증감",
+			"share": "전체 비용 비중",
+			"of_sales": "매출 대비 %",
+			"rank": "순위",
+			"status": "상태"
+		},
+		"expense_status": {
+			"normal": "정상",
+			"above_avg": "평균 초과",
+			"needs_review": "점검"
+		},
+		"expense_diff": {
+			"new": "신규",
+			"significant": "급증"
+		},
+		"expense_insights": {
+			"title": "인사이트",
+			"highest": "{{branch}}의 이번 기간 지출이 가장 높습니다 ({{amount}}).",
+			"increased": "전월 대비 {{amount}} 증가했습니다.",
+			"decreased": "전월 대비 {{amount}} 감소했습니다.",
+			"share": "이 지점이 전체 지출의 {{pct}}%를 차지합니다.",
+			"review": "{{branch}}를 점검하세요.",
+			"largest_increase": "{{branch}} 증가폭 최대 (+{{amount}}).",
+			"multiple_review": "{{count}}개 지점 점검 필요.",
+			"summary": "{{branch}} 최고 {{amount}} (전체 {{pct}}%){{change}}.",
+			"change_up": ", {{amount}} 증가",
+			"change_down": ", {{amount}} 감소",
+			"review_list": "점검: {{branches}}."
+		},
 		"sections": {
 			"inventory": "재고",
 			"fresh_produce": "신선 농산물",
@@ -204,6 +248,18 @@
 			"seafood": "해산물",
 			"dreammart": "드림마트",
 			"rice": "쌀",
+			"sales": "매출",
+			"expenses": "지출",
+			"profit": "순익",
+			"vs_last_month_same_period": "전월 동기 대비(3일전 기준)",
+			"vs_last_month": "전월 대비",
+			"vs_average": "평균 대비",
+			"main_expenses": "주요 지출",
+			"food_supplies": "식자재 및 주류",
+			"food_supplies_vs_last_month": "Food Supplies vs. Last Month +/- → 전월대비 증감 (3일 전 기준)",
+			"salary": "급여",
+			"rent": "임대료",
+			"others": "그밖에",
 			"maintenance": "유지보수",
 			"kitchen_equipment": "주방 기기",
 			"supplies": "소모품",
@@ -214,10 +270,7 @@
 			"internet": "인터넷",
 			"gas": "가스비",
 			"logistic_air_sea": "물류(항공, 해상)",
-			"salary_rent": "급여 및 임대료",
-			"salary": "급여",
-			"rent": "임대료",
-			"others": "기타"
+			"salary_rent": "급여 및 임대료"
 		}
 	},
 	"dashboard": {

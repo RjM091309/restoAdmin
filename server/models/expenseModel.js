@@ -562,6 +562,146 @@ class ExpenseModel {
 		);
 		return rows;
 	}
+
+	/**
+	 * Per-branch expense totals in PH local date (+08:00).
+	 * Used when py expense-breakdown is incomplete/empty so Profit ≠ Sales − tiny expenses.
+	 */
+	static async getTotalsByBranch(startDate, endDate) {
+		await ExpenseModel.ensureSchema();
+		const localDt = `COALESCE(
+			CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+			DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+		)`;
+		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1'];
+		const params = [];
+		if (startDate) {
+			where.push(`DATE(${localDt}) >= ?`);
+			params.push(String(startDate));
+		}
+		if (endDate) {
+			where.push(`DATE(${localDt}) <= ?`);
+			params.push(String(endDate));
+		}
+
+		const [rows] = await pool.execute(
+			`
+			SELECT
+				e.BRANCH_ID AS branch_id,
+				COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_amount
+			FROM expenses e
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			WHERE ${where.join(' AND ')}
+			GROUP BY e.BRANCH_ID
+			`,
+			params,
+		);
+
+		const totals = {};
+		for (const row of rows || []) {
+			const bid = Number(row.branch_id);
+			if (!Number.isFinite(bid)) continue;
+			totals[bid] = Number(row.total_amount) || 0;
+		}
+		return totals;
+	}
+
+	/**
+	 * Per-branch rent / salary totals using category names AND item descriptions (EXP_DESC).
+	 * Needed because some branches log rent as items like "Shop Rental" under Fixed Costs,
+	 * not under a rent subcategory.
+	 *
+	 * Each expense row is counted at most once per bucket (no double-count if both cat + desc match).
+	 */
+	static async getRentSalaryByBranch(startDate, endDate) {
+		await ExpenseModel.ensureSchema();
+		const localDt = `COALESCE(
+			CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+			DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+		)`;
+		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1'];
+		const params = [];
+		if (startDate) {
+			where.push(`DATE(${localDt}) >= ?`);
+			params.push(String(startDate));
+		}
+		if (endDate) {
+			where.push(`DATE(${localDt}) <= ?`);
+			params.push(String(endDate));
+		}
+
+		const [rows] = await pool.execute(
+			`
+			SELECT
+				e.BRANCH_ID AS branch_id,
+				COALESCE(SUM(
+					CASE
+						WHEN (
+							LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rent%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rental%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%lease%'
+							OR mc.CATEGORY_NAME LIKE '%월세%'
+							OR mc.CATEGORY_NAME LIKE '%임대%'
+							OR (
+								(
+									LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%rent%'
+									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%rental%'
+									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%lease%'
+									OR e.EXP_DESC LIKE '%월세%'
+									OR e.EXP_DESC LIKE '%임대%'
+								)
+								AND LOWER(COALESCE(e.EXP_DESC, '')) NOT LIKE '%grinder%'
+								AND LOWER(COALESCE(e.EXP_DESC, '')) NOT LIKE '%fusion%'
+								AND COALESCE(e.EXP_DESC, '') NOT LIKE '%그라인더%'
+								AND NOT (
+									COALESCE(e.EXP_DESC, '') LIKE '%대여%'
+									AND COALESCE(e.EXP_DESC, '') NOT LIKE '%임대%'
+								)
+							)
+						) THEN e.EXP_AMOUNT
+						ELSE 0
+					END
+				), 0) AS rent_amount,
+				COALESCE(SUM(
+					CASE
+						WHEN (
+							LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%salary%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%wage%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%payroll%'
+							OR mc.CATEGORY_NAME LIKE '%급여%'
+							OR mc.CATEGORY_NAME LIKE '%인건%'
+							OR (
+								(oc.NAME LIKE '%급여 / Salary%' OR oc.NAME LIKE '%급여 / salary%' OR UPPER(TRIM(oc.NAME)) = 'SALARY')
+								AND oc.NAME NOT LIKE '%,%'
+							)
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%salary%'
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%wage%'
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%payroll%'
+							OR e.EXP_DESC LIKE '%급여%'
+						) THEN e.EXP_AMOUNT
+						ELSE 0
+					END
+				), 0) AS salary_amount
+			FROM expenses e
+			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
+			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
+			WHERE ${where.join(' AND ')}
+			GROUP BY e.BRANCH_ID
+			`,
+			params,
+		);
+
+		const rent = {};
+		const salary = {};
+		for (const row of rows || []) {
+			const bid = Number(row.branch_id);
+			if (!Number.isFinite(bid)) continue;
+			rent[bid] = Number(row.rent_amount) || 0;
+			salary[bid] = Number(row.salary_amount) || 0;
+		}
+		return { rent, salary };
+	}
 }
 
 module.exports = ExpenseModel;

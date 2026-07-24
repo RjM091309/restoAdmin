@@ -615,6 +615,10 @@ export type AdminDashboardBundlePayload = {
   topProductsData: { name: string; sales: number }[];
   dailySalesForCards: ApiDailySalesItem[];
   expenseCategoryByBranch: Record<number, Record<string, number>>;
+  /** Rent totals (category + item desc e.g. Shop Rental). */
+  expenseRentByBranch: Record<number, number>;
+  /** Salary totals (category + dedicated salary main + item desc). */
+  expenseSalaryByBranch: Record<number, number>;
   comparePeriodReconAll: number;
   trendData: Array<{
     name: string;
@@ -678,6 +682,8 @@ export async function fetchAdminDashboardBundleApi(params: {
     topProductsData: data.topProductsData || [],
     dailySalesForCards: data.dailySalesForCards || [],
     expenseCategoryByBranch: data.expenseCategoryByBranch || {},
+    expenseRentByBranch: data.expenseRentByBranch || {},
+    expenseSalaryByBranch: data.expenseSalaryByBranch || {},
     comparePeriodReconAll: Number(data.comparePeriodReconAll) || 0,
     trendData: Array.isArray(data.trendData) ? data.trendData : [],
     trendPeriod: String(data.trendPeriod || params.period || 'monthly'),

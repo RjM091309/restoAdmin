@@ -1,4 +1,5 @@
 const CashReconciliationModel = require('../models/cashReconciliationModel');
+const ExpenseModel = require('../models/expenseModel');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/analyticsSales');
 
@@ -208,6 +209,8 @@ async function buildAdminDashboardBundle({
 		trendRes,
 		reconByBranch,
 		reconAll,
+		rentSalaryByBranch,
+		nodeExpenseByBranch,
 	] = await Promise.all([
 		fetchPyServerOptional('/api/analytics/branch-sales', branchSalesParams),
 		fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
@@ -220,6 +223,14 @@ async function buildAdminDashboardBundle({
 			total: 0,
 			byDate: {},
 		})),
+		ExpenseModel.getRentSalaryByBranch(start_date, end_date).catch((err) => {
+			console.warn('[adminDashboardBundle] getRentSalaryByBranch failed:', err?.message || err);
+			return { rent: {}, salary: {} };
+		}),
+		ExpenseModel.getTotalsByBranch(start_date, end_date).catch((err) => {
+			console.warn('[adminDashboardBundle] getTotalsByBranch failed:', err?.message || err);
+			return {};
+		}),
 	]);
 
 	const branchSales = branchSalesRes?.data?.data || [];
@@ -244,13 +255,17 @@ async function buildAdminDashboardBundle({
 				? netFromDaily
 				: Number(b.total_sales || 0);
 		const reconTotal = Number(reconByBranch[b.branch_id] ?? 0) || 0;
+		const fromPy = Number(expenseByBranch[b.branch_id]) || 0;
+		const fromNode = Number(nodeExpenseByBranch?.[b.branch_id]) || 0;
+		// Prefer the fuller total — py breakdown can be partial/empty for some ranges.
+		const totalExpenses = Math.max(fromPy, fromNode);
 		return {
 			id: b.branch_id,
 			name: b.branch_name,
 			totalSales: posBase + reconTotal,
 			reportSalesPos: posBase,
 			reconTotal,
-			totalExpenses: expenseByBranch[b.branch_id] || 0,
+			totalExpenses,
 			totalOrders: b.order_count,
 		};
 	});
@@ -309,6 +324,8 @@ async function buildAdminDashboardBundle({
 		topProductsData,
 		dailySalesForCards: dailySales,
 		expenseCategoryByBranch: expenseMap,
+		expenseRentByBranch: rentSalaryByBranch?.rent || {},
+		expenseSalaryByBranch: rentSalaryByBranch?.salary || {},
 		comparePeriodReconAll,
 		trendData: finalTrendData,
 		trendPeriod: String(period || 'monthly'),
