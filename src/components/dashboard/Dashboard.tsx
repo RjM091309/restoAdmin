@@ -47,6 +47,7 @@ import {
   clearKnownEmptyBranch,
   hasBranchDashboardCacheData,
   isBranchDashboardPayloadEmpty,
+  isBranchDashboardPayloadIncomplete,
   isKnownEmptyBranch,
   markKnownEmptyBranch,
   readBranchDashboardCacheIncludingStale,
@@ -747,10 +748,37 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         dashboardData: bundle.dashboardData ?? EMPTY_BRANCH_DASHBOARD,
       };
       const hasStats = hasDashboardPayloadStats(payload);
+      const incomplete = isBranchDashboardPayloadIncomplete(payload);
+
+      const mergeDashboardData = (
+        prev: NonNullable<typeof dashboardData>,
+        incoming: NonNullable<typeof payload.dashboardData>,
+      ) => ({
+        ...incoming,
+        stats: {
+          totalOrders:
+            incoming.stats.totalOrders > 0 ? incoming.stats.totalOrders : prev.stats.totalOrders,
+          totalSales:
+            incoming.stats.totalSales > 0 ? incoming.stats.totalSales : prev.stats.totalSales,
+          totalExpenses:
+            incoming.stats.totalExpenses > 0
+              ? incoming.stats.totalExpenses
+              : prev.stats.totalExpenses,
+          totalProfit:
+            incoming.stats.totalProfit > 0 ? incoming.stats.totalProfit : prev.stats.totalProfit,
+        },
+        ordersOverview:
+          incoming.ordersOverview.length > 0 ? incoming.ordersOverview : prev.ordersOverview,
+        revenueData: incoming.revenueData.length > 0 ? incoming.revenueData : prev.revenueData,
+      });
 
       if (background) {
-        if (hasStats && payload.dashboardData) {
+        if (hasStats && payload.dashboardData && !incomplete) {
           setDashboardData(payload.dashboardData);
+        } else if (incomplete && payload.dashboardData) {
+          setDashboardData((prev) =>
+            prev ? mergeDashboardData(prev, payload.dashboardData!) : payload.dashboardData!,
+          );
         }
         setTopCategories((prev) => (payload.topCategories.length > 0 ? payload.topCategories : prev));
         setTrendingMenusData((prev) =>
@@ -763,9 +791,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
             : prev,
         );
       } else {
-        setDashboardData((prev) =>
-          hasStats && payload.dashboardData ? payload.dashboardData : (prev ?? EMPTY_BRANCH_DASHBOARD),
-        );
+        setDashboardData((prev) => {
+          if (!hasStats || !payload.dashboardData) {
+            return prev ?? EMPTY_BRANCH_DASHBOARD;
+          }
+          if (incomplete && prev) {
+            return mergeDashboardData(prev, payload.dashboardData);
+          }
+          return payload.dashboardData;
+        });
         setTopCategories((prev) => (payload.topCategories.length > 0 ? payload.topCategories : prev));
         setTrendingMenusData((prev) =>
           payload.trendingMenusData.length > 0 ? payload.trendingMenusData : prev,
@@ -786,7 +820,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         if (!background) {
           markKnownEmptyBranch(cacheKey);
         }
-      } else {
+      } else if (!isBranchDashboardPayloadIncomplete(payload)) {
         clearKnownEmptyBranch(cacheKey);
         writeBranchDashboardCache(cacheKey, payload);
       }
@@ -815,13 +849,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         });
         if (reqId !== dashboardReqSeq.current) return;
 
-        applyBundle(
-          {
-            ...bundle,
-            recentOrders: bundle.recentOrders as OrderRecord[],
-          },
-          { background },
-        );
+        const payload = {
+          ...bundle,
+          recentOrders: bundle.recentOrders as OrderRecord[],
+        };
+
+        if (isBranchDashboardPayloadIncomplete(payload) && !background) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (reqId !== dashboardReqSeq.current) return;
+          const retryBundle = await fetchBranchDashboardBundleApi({
+            branchId: String(selectedBranch.id),
+            start,
+            end,
+          });
+          if (reqId !== dashboardReqSeq.current) return;
+          applyBundle(
+            {
+              ...retryBundle,
+              recentOrders: retryBundle.recentOrders as OrderRecord[],
+            },
+            { background: false },
+          );
+          return;
+        }
+
+        applyBundle(payload, { background });
       } catch (error) {
         if (reqId !== dashboardReqSeq.current) return;
         console.error('Failed to load branch dashboard bundle:', error);

@@ -202,6 +202,8 @@ class BranchSalesItem(BaseModel):
     total_sales: float
     order_count: int
     avg_order_value: float
+    # Same formula as daily-sales net (paid + discount - discount - refund = paid - refund).
+    net_sales: float = 0.0
 
 
 class LeastSellingItem(BaseModel):
@@ -319,6 +321,7 @@ def branch_sales(
     """
     Gross sales per branch (Loyverse-aligned): AMOUNT_PAID + DISCOUNT_AMOUNT.
     Matches daily-sales total_sales summed over the same date range.
+    Also returns net_sales (= paid - refund) so admin dashboard can avoid N× daily-sales calls.
     """
     try:
         conn = get_connection()
@@ -342,12 +345,16 @@ def branch_sales(
             branch_filter_billing = "AND br.IDNo = %s"
             billing_params.append(branch_id)
 
+        # amount_paid + refund let us derive daily-sales-equivalent net in one query:
+        # net_sales = paid + discount - discount - refund = paid - refund
         billing_query = f"""
             SELECT 
                 br.IDNo as branch_id,
                 br.BRANCH_NAME as branch_name,
                 br.BRANCH_CODE as branch_code,
                 COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0) ELSE 0 END), 0) as total_sales,
+                COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN b.AMOUNT_PAID ELSE 0 END), 0) as amount_paid,
+                COALESCE(SUM(CASE WHEN o.IDNo IS NOT NULL THEN COALESCE(b.REFUND, 0) ELSE 0 END), 0) as refund_total,
                 COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) as order_count,
                 CASE 
                     WHEN COUNT(DISTINCT CASE WHEN o.IDNo IS NOT NULL THEN b.ORDER_ID END) > 0
@@ -380,8 +387,11 @@ def branch_sales(
     for row in billing_rows:
         bid = int(row["branch_id"])
         total_sales = float(row.get("total_sales") or 0)
+        amount_paid = float(row.get("amount_paid") or 0)
+        refund_total = float(row.get("refund_total") or 0)
         order_count = int(row.get("order_count") or 0)
         avg_order_value = float(row.get("avg_order_value") or 0)
+        net_sales = max(0.0, amount_paid - refund_total)
 
         result.append(
             BranchSalesItem(
@@ -391,6 +401,7 @@ def branch_sales(
                 total_sales=total_sales,
                 order_count=order_count,
                 avg_order_value=avg_order_value,
+                net_sales=net_sales,
             )
         )
 
@@ -1481,6 +1492,12 @@ def performance_trend(
         # Ensure start <= end
         if effective_start and effective_end and effective_start > effective_end:
             effective_start, effective_end = effective_end, effective_start
+
+        # Narrow Optional[date] for type checker; same runtime fallback as yearly ref below.
+        if effective_start is None or effective_end is None:
+            today = datetime.now().date()
+            effective_start = effective_start or today
+            effective_end = effective_end or today
 
         # Yearly: ignore the day-range from the header — show all months of that year (same as user expectation for "yearly")
         if period == "yearly":

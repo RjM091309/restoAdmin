@@ -117,7 +117,7 @@ let warmInFlight = null;
 
 async function warmAnalyticsReports(opts = {}) {
 	const enabled =
-		String(process.env.ANALYTICS_REPORT_WARM_ON_BOOT ?? 'true').toLowerCase() !== 'false';
+		String(process.env.ANALYTICS_REPORT_WARM_ON_BOOT ?? 'false').toLowerCase() === 'true';
 	if (!enabled && !opts.force) return;
 
 	if (warmInFlight) return warmInFlight;

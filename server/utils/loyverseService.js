@@ -7,6 +7,9 @@
 
 const axios = require('axios');
 
+// Direct HTTPS to api.loyverse.com — ignore inherited IDE/sandbox HTTP_PROXY.
+axios.defaults.proxy = false;
+
 const pool = require('../config/db');
 const OrderModel = require('../models/orderModel');
 const OrderItemsModel = require('../models/orderItemsModel');

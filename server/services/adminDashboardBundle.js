@@ -1,7 +1,7 @@
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const ExpenseModel = require('../models/expenseModel');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
-const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/analyticsSales');
+const { resolveNetSalesFromRow } = require('../utils/analyticsSales');
 
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 15000);
 
@@ -60,28 +60,16 @@ function buildSummary({ branchId, branchCards, totalExpenses }) {
 	};
 }
 
-function sumDailyNetSales(rows) {
-	return sumNetSalesFromDailyRows(rows);
-}
-
-async function buildNetSalesByBranch(branchIds, start_date, end_date) {
+/** Prefer branch-sales.net_sales (same paid−refund formula as daily-sales); no N× Py calls. */
+function buildNetSalesByBranchFromSales(branchSales) {
 	const netByBranch = {};
-	const queue = [...new Set((branchIds || []).filter((id) => id != null))];
-	const workerCount = Math.min(4, Math.max(1, queue.length));
-	await Promise.all(
-		Array.from({ length: workerCount }, async () => {
-			while (queue.length > 0) {
-				const branchId = queue.shift();
-				if (branchId == null) continue;
-				const res = await fetchPyServerOptional('/api/analytics/daily-sales', {
-					start_date,
-					end_date,
-					branch_id: String(branchId),
-				});
-				netByBranch[branchId] = sumDailyNetSales(res?.data?.data || []);
-			}
-		}),
-	);
+	for (const b of branchSales || []) {
+		const bid = b.branch_id;
+		if (bid == null) continue;
+		if (b.net_sales != null && Number.isFinite(Number(b.net_sales))) {
+			netByBranch[bid] = Math.max(0, Number(b.net_sales));
+		}
+	}
 	return netByBranch;
 }
 
@@ -241,18 +229,14 @@ async function buildAdminDashboardBundle({
 
 	const { expenseMap, expenseByBranch } = buildExpenseMaps(expenseBreakdown);
 
-	// Prefer daily-sales net (paid after discount), fallback to branch-sales gross.
-	const netSalesByBranch = await buildNetSalesByBranch(
-		(branchSales || []).map((b) => b.branch_id),
-		start_date,
-		end_date,
-	);
+	// Prefer branch-sales net_sales (paid − refund); fallback to gross total_sales.
+	const netSalesByBranch = buildNetSalesByBranchFromSales(branchSales);
 
 	const branchCardsData = (branchSales || []).map((b) => {
-		const netFromDaily = netSalesByBranch[b.branch_id];
+		const netFromBranch = netSalesByBranch[b.branch_id];
 		const posBase =
-			netFromDaily != null && netFromDaily > 0
-				? netFromDaily
+			netFromBranch != null && netFromBranch > 0
+				? netFromBranch
 				: Number(b.total_sales || 0);
 		const reconTotal = Number(reconByBranch[b.branch_id] ?? 0) || 0;
 		const fromPy = Number(expenseByBranch[b.branch_id]) || 0;

@@ -111,7 +111,7 @@ async function warmSalesDashboardBundleForScope({ start_date, end_date, branchId
 
 async function warmSalesDashboardBundles(opts = {}) {
 	const enabled =
-		String(process.env.SALES_DASHBOARD_WARM_ON_BOOT ?? 'true').toLowerCase() !== 'false';
+		String(process.env.SALES_DASHBOARD_WARM_ON_BOOT ?? 'false').toLowerCase() === 'true';
 	if (!enabled && !opts.force) return;
 
 	if (warmInFlight) return warmInFlight;

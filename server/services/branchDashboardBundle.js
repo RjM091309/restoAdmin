@@ -371,23 +371,28 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 
 	// Always fetch PyServer daily-sales for gross totals (paid + discount).
 	// Phase-1 SQL uses AMOUNT_PAID only and must not skip the analytics call.
-	const [dailySalesPyRes, dailyOrdersRes, dailyExpensesRes, expenseSummaryRes, branchSalesRes] =
-		await Promise.all([
-			fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
-			fetchPyServerOptional('/api/analytics/daily-orders', pyParams),
-			fetchPyServerOptional('/api/analytics/daily-expenses', pyParams),
-			fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
-			fetchPyServerOptional('/api/analytics/branch-sales', pyParams),
-		]);
-
-	const [categoryRes, topSellingRes] = await Promise.all([
+	// Single wave (incl. category/top-selling) — same data, less wall-clock wait.
+	const [
+		dailySalesPyRes,
+		dailyOrdersRes,
+		dailyExpensesRes,
+		expenseSummaryRes,
+		branchSalesRes,
+		categoryRes,
+		topSellingRes,
+	] = await Promise.all([
+		fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
+		fetchPyServerOptional('/api/analytics/daily-orders', pyParams),
+		fetchPyServerOptional('/api/analytics/daily-expenses', pyParams),
+		fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
+		fetchPyServerOptional('/api/analytics/branch-sales', pyParams),
 		fetchPyServerOptional('/api/analytics/category-report', pyParams),
 		fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: 5 }),
 	]);
 
 	const dailyOrders = dailyOrdersRes?.data?.data || [];
-	const dailyExpenses = dailyExpensesRes?.data?.data || [];
-	const expenseSummary = expenseSummaryRes?.data || { total_expense: 0 };
+	let dailyExpenses = dailyExpensesRes?.data?.data || [];
+	let expenseSummary = expenseSummaryRes?.data || { total_expense: 0 };
 	const branchSales = branchSalesRes?.data?.data || [];
 	const pyDailySales = dailySalesPyRes?.data?.data || [];
 	const hasPySales =
@@ -399,25 +404,92 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 			? pyDailySales
 			: dailySales;
 
+	let categoryRows = categoryRes?.data?.data || [];
+	let topSellingRows = topSellingRes?.data?.data || [];
+	let finalDailyOrders = dailyOrders;
+
+	// Sales present but companion endpoints timed out under load — retry missing ones once.
+	const hasSalesSignal =
+		(dailySalesForDashboard || []).some((d) => Number(d.total_sales ?? d.net_sales ?? 0) > 0) ||
+		(branchSales || []).some((b) => Number(b.total_sales ?? b.net_sales ?? 0) > 0);
+	if (hasSalesSignal) {
+		const retryMs = BUNDLE_PYSERVER_TIMEOUT_MS * 2;
+		const retries = [];
+		if (!finalDailyOrders.length) {
+			retries.push(
+				fetchPyServerOptional('/api/analytics/daily-orders', pyParams, retryMs).then((res) => {
+					finalDailyOrders = res?.data?.data || finalDailyOrders;
+				}),
+			);
+		}
+		if (
+			!(Number(expenseSummary?.total_expense) > 0) &&
+			!(dailyExpenses || []).some((e) => Number(e.total_expense) > 0)
+		) {
+			retries.push(
+				Promise.all([
+					fetchPyServerOptional('/api/analytics/expense-summary', pyParams, retryMs),
+					fetchPyServerOptional('/api/analytics/daily-expenses', pyParams, retryMs),
+				]).then(([sumRes, dayRes]) => {
+					expenseSummary = sumRes?.data || expenseSummary;
+					dailyExpenses = dayRes?.data?.data || dailyExpenses;
+				}),
+			);
+		}
+		if (!categoryRows.length) {
+			retries.push(
+				fetchPyServerOptional('/api/analytics/category-report', pyParams, retryMs).then((res) => {
+					categoryRows = res?.data?.data || categoryRows;
+				}),
+			);
+		}
+		if (!topSellingRows.length) {
+			retries.push(
+				fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: 5 }, retryMs).then(
+					(res) => {
+						topSellingRows = res?.data?.data || topSellingRows;
+					},
+				),
+			);
+		}
+		if (retries.length) await Promise.all(retries);
+	}
+
+	// Orders still missing after retry — branch-sales carries order_count aggregate.
+	if (
+		hasSalesSignal &&
+		!(finalDailyOrders || []).some((d) => Number(d.order_count) > 0) &&
+		!(branchSales || []).some((b) => Number(b.order_count) > 0)
+	) {
+		const branchSalesRetry = await fetchPyServerOptional(
+			'/api/analytics/branch-sales',
+			pyParams,
+			BUNDLE_PYSERVER_TIMEOUT_MS * 2,
+		);
+		if (branchSalesRetry?.data?.data?.length) {
+			branchSales.splice(0, branchSales.length, ...branchSalesRetry.data.data);
+		}
+	}
+
 	const dashboardData = buildDashboardData({
 		start: start_date,
 		end: end_date,
 		branchId: branchParam,
 		dailySales: dailySalesForDashboard,
-		dailyOrders,
+		dailyOrders: finalDailyOrders,
 		dailyExpenses,
 		expenseSummary,
 		branchSales,
 		reconAgg,
 	});
 
-	const topCategories = (categoryRes?.data?.data || []).slice(0, 5).map((row, i) => ({
+	const topCategories = (categoryRows || []).slice(0, 5).map((row, i) => ({
 		name: row.category || 'Uncategorized',
 		value: row.netSales ?? 0,
 		color: TOP_CATEGORY_COLORS[i % TOP_CATEGORY_COLORS.length],
 	}));
 
-	const trendingMenusData = (topSellingRes?.data?.data || []).slice(0, 5).map((r, idx) => ({
+	const trendingMenusData = (topSellingRows || []).slice(0, 5).map((r, idx) => ({
 		key: String(r.IDNo ?? idx),
 		name: r.MENU_NAME || '',
 		category: r.category || 'Uncategorized',

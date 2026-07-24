@@ -98,6 +98,7 @@ export function hasBranchDashboardCacheData(
   cached: BranchDashboardCachePayload | null,
 ): cached is BranchDashboardCachePayload {
   if (!cached) return false;
+  if (isBranchDashboardPayloadIncomplete(cached)) return false;
   const stats = cached.dashboardData?.stats;
   const hasStats =
     !!stats &&
@@ -111,6 +112,26 @@ export function hasBranchDashboardCacheData(
     cached.trendingMenusData.length > 0 ||
     cached.recentOrders.length > 0
   );
+}
+
+/**
+ * Sales present but companion widgets empty — usually Py timeouts under load.
+ * Do not treat as a valid cache hit (would stick Total Orders / Expenses at 0).
+ */
+export function isBranchDashboardPayloadIncomplete(
+  payload: BranchDashboardCachePayload | null,
+): boolean {
+  if (!payload) return false;
+  const stats = payload.dashboardData?.stats;
+  const totalSales = Number(stats?.totalSales) || 0;
+  const hasRevenue = (payload.dashboardData?.revenueData?.length ?? 0) > 0;
+  if (totalSales <= 0 && !hasRevenue) return false;
+
+  const totalOrders = Number(stats?.totalOrders) || 0;
+  const totalExpenses = Number(stats?.totalExpenses) || 0;
+  if (totalOrders <= 0) return true;
+  if (totalExpenses <= 0) return true;
+  return false;
 }
 
 export function isBranchDashboardPayloadEmpty(payload: BranchDashboardCachePayload): boolean {
@@ -173,7 +194,8 @@ export function readBranchDashboardCache(key: string): BranchDashboardCachePaylo
     const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
     const sessionEntry = sessionStore?.[key];
     if (sessionEntry?.data) {
-      return payloadFromEntry(sessionEntry.data);
+      const payload = payloadFromEntry(sessionEntry.data);
+      if (payload && !isBranchDashboardPayloadIncomplete(payload)) return payload;
     }
   } catch {
     // sessionStorage unavailable — fall through to localStorage
@@ -184,7 +206,9 @@ export function readBranchDashboardCache(key: string): BranchDashboardCachePaylo
     const localEntry = localStore?.[key];
     if (!localEntry?.data) return null;
     if (now - localEntry.at > LOCAL_CACHE_TTL_MS) return null;
-    return payloadFromEntry(localEntry.data);
+    const payload = payloadFromEntry(localEntry.data);
+    if (!payload || isBranchDashboardPayloadIncomplete(payload)) return null;
+    return payload;
   } catch {
     return null;
   }
@@ -200,7 +224,8 @@ export function readBranchDashboardCacheIncludingStale(
     const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
     const sessionEntry = sessionStore?.[key];
     if (sessionEntry?.data) {
-      return payloadFromEntry(sessionEntry.data);
+      const payload = payloadFromEntry(sessionEntry.data);
+      if (payload && !isBranchDashboardPayloadIncomplete(payload)) return payload;
     }
   } catch {
     // sessionStorage unavailable — fall through to localStorage
@@ -211,7 +236,9 @@ export function readBranchDashboardCacheIncludingStale(
     const localEntry = localStore?.[key];
     if (!localEntry?.data) return null;
     if (now - localEntry.at > STALE_LOCAL_CACHE_TTL_MS) return null;
-    return payloadFromEntry(localEntry.data);
+    const payload = payloadFromEntry(localEntry.data);
+    if (!payload || isBranchDashboardPayloadIncomplete(payload)) return null;
+    return payload;
   } catch {
     return null;
   }

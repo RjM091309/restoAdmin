@@ -113,9 +113,6 @@ async function warmAdminDashboardBundle(opts = {}) {
 				}
 
 				if (attempt < WARM_ATTEMPTS) {
-					console.warn(
-						`[AdminDashboardCache] Warm attempt ${attempt}/${WARM_ATTEMPTS} returned no data — retrying in ${WARM_RETRY_MS}ms`,
-					);
 					await delay(WARM_RETRY_MS);
 				}
 			}

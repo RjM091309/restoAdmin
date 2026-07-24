@@ -248,24 +248,23 @@ app.use((err, req, res, next) => {
 		console.log('API Server running at http://localhost:' + app.get('port'));
 		console.log('Root endpoint: http://localhost:' + app.get('port') + '/');
 
-		// Warm admin dashboard bundle (current month) so first client request is fast after restart.
-		const { warmAdminDashboardBundle } = require('./services/adminDashboardBundleCache');
+		// Warm only the admin landing cache after PyServer is ready.
+		// Branch/sales/menu-category boot warms stampeded PyServer and slowed first loads;
+		// those pages still build on demand when opened (same logic, no warm required).
 		setImmediate(() => {
-			void warmAdminDashboardBundle().catch((err) => {
-				console.warn('[AdminDashboardCache] Background warm error:', err?.message || err);
-			});
-			const { warmBranchDashboardBundles } = require('./services/branchDashboardBundleCache');
-			void warmBranchDashboardBundles().catch((err) => {
-				console.warn('[BranchDashboardCache] Background warm error:', err?.message || err);
-			});
-			const { warmSalesDashboardBundles } = require('./services/salesDashboardBundleCache');
-			void warmSalesDashboardBundles().catch((err) => {
-				console.warn('[SalesDashboardCache] Background warm error:', err?.message || err);
-			});
-			const { warmAnalyticsReports } = require('./services/analyticsReportBundleCache');
-			void warmAnalyticsReports().catch((err) => {
-				console.warn('[AnalyticsReportCache] Background warm error:', err?.message || err);
-			});
+			void (async () => {
+				const { waitForPyServerReady } = require('./services/pyServerReady');
+				const ready = await waitForPyServerReady();
+				if (!ready) {
+					console.warn('[PyServer] Not ready after boot wait — skipping dashboard cache warm');
+					return;
+				}
+
+				const { warmAdminDashboardBundle } = require('./services/adminDashboardBundleCache');
+				await warmAdminDashboardBundle().catch((err) => {
+					console.warn('[AdminDashboardCache] Background warm error:', err?.message || err);
+				});
+			})();
 		});
 
 		const telegramPollingEnabled = String(process.env.TELEGRAM_POLLING_ENABLED || 'true').toLowerCase() !== 'false';
@@ -324,38 +323,44 @@ app.use((err, req, res, next) => {
 			pingPyServer();
 		}
 
-		// Optional: auto-start Loyverse polling sync on boot
+		// Defer Loyverse auto-sync so it does not contend with PyServer on first dashboard warm.
 		const autoSyncEnabled = String(process.env.LOYVERSE_AUTO_SYNC || '').toLowerCase() === 'true';
 		if (autoSyncEnabled) {
-			try {
-				const intervalRaw = process.env.LOYVERSE_SYNC_INTERVAL;
-				const interval = intervalRaw ? parseInt(intervalRaw, 10) : null;
-				const intervalArg = Number.isFinite(interval) ? interval : null;
-				const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
-				if (multiRaw) {
-					const multiIds = multiRaw
-						.split(',')
-						.map((s) => parseInt(s.trim(), 10))
-						.filter((n) => Number.isFinite(n));
-					if (multiIds.length) {
-						loyverseService.startAutoSyncMulti(multiIds, intervalArg);
-						console.log('[Loyverse Sync] Auto-sync enabled on boot (branches: %s)', multiIds.join(', '));
+			const syncBootDelayMs = Math.max(
+				0,
+				Number(process.env.LOYVERSE_AUTO_SYNC_BOOT_DELAY_MS || 20000),
+			);
+			setTimeout(() => {
+				try {
+					const intervalRaw = process.env.LOYVERSE_SYNC_INTERVAL;
+					const interval = intervalRaw ? parseInt(intervalRaw, 10) : null;
+					const intervalArg = Number.isFinite(interval) ? interval : null;
+					const multiRaw = (process.env.LOYVERSE_AUTO_SYNC_BRANCH_IDS || '').trim();
+					if (multiRaw) {
+						const multiIds = multiRaw
+							.split(',')
+							.map((s) => parseInt(s.trim(), 10))
+							.filter((n) => Number.isFinite(n));
+						if (multiIds.length) {
+							loyverseService.startAutoSyncMulti(multiIds, intervalArg);
+							console.log('[Loyverse Sync] Auto-sync enabled on boot (branches: %s)', multiIds.join(', '));
+						} else {
+							console.warn('[Loyverse Sync] LOYVERSE_AUTO_SYNC_BRANCH_IDS set but no valid ids; using default branch only.');
+							const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
+							const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
+							loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
+							console.log('[Loyverse Sync] Auto-sync enabled on boot');
+						}
 					} else {
-						console.warn('[Loyverse Sync] LOYVERSE_AUTO_SYNC_BRANCH_IDS set but no valid ids; using default branch only.');
 						const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
 						const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
 						loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
 						console.log('[Loyverse Sync] Auto-sync enabled on boot');
 					}
-				} else {
-					const branchIdRaw = process.env.LOYVERSE_DEFAULT_BRANCH_ID;
-					const branchId = branchIdRaw ? parseInt(branchIdRaw, 10) : null;
-					loyverseService.startAutoSync(Number.isFinite(branchId) ? branchId : null, intervalArg);
-					console.log('[Loyverse Sync] Auto-sync enabled on boot');
+				} catch (e) {
+					console.error('[Loyverse Sync] Failed to start auto-sync on boot:', e?.message || e);
 				}
-			} catch (e) {
-				console.error('[Loyverse Sync] Failed to start auto-sync on boot:', e?.message || e);
-			}
+			}, syncBootDelayMs);
 		}
 	});
 

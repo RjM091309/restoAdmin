@@ -5,6 +5,7 @@ import {
   clearKnownEmptyBranch,
   hasBranchDashboardCacheData,
   isBranchDashboardPayloadEmpty,
+  isBranchDashboardPayloadIncomplete,
   readBranchDashboardCacheIncludingStale,
   writeBranchDashboardCache,
 } from './branchDashboardCache';
@@ -75,6 +76,7 @@ export function prefetchBranchDashboardBundle(params: {
       };
 
       if (isBranchDashboardPayloadEmpty(payload)) return;
+      if (isBranchDashboardPayloadIncomplete(payload)) return;
 
       clearKnownEmptyBranch(key);
       writeBranchDashboardCache(key, payload);

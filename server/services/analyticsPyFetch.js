@@ -4,10 +4,34 @@ const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://127.0.0.1:210
 const PYSERVER_TIMEOUT_MS = Number(process.env.ANALYTICS_PYSERVER_TIMEOUT_MS || 15000);
 const CACHE_TTL_MS = Number(process.env.ANALYTICS_PY_CACHE_TTL_MS || 120000);
 const CACHE_MAX = Number(process.env.ANALYTICS_PY_CACHE_MAX || 64);
+/** Cap concurrent in-flight PyServer requests to avoid timeout stampedes. */
+const PY_CONCURRENCY = Math.max(1, Number(process.env.ANALYTICS_PY_CONCURRENCY || 6));
 
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 const pyCache = new LRUCache({ max: CACHE_MAX, ttl: CACHE_TTL_MS });
+
+let pyInFlight = 0;
+const pyWaitQueue = [];
+
+function acquirePySlot() {
+  if (pyInFlight < PY_CONCURRENCY) {
+    pyInFlight += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    pyWaitQueue.push(resolve);
+  });
+}
+
+function releasePySlot() {
+  const next = pyWaitQueue.shift();
+  if (next) {
+    next();
+    return;
+  }
+  pyInFlight = Math.max(0, pyInFlight - 1);
+}
 
 function cacheKey(path, params) {
   const sorted = Object.entries(params || {})
@@ -47,6 +71,7 @@ async function fetchPyCached(path, params, opts = {}) {
     if (v != null && v !== '') url.searchParams.set(k, String(v));
   }
 
+  await acquirePySlot();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? PYSERVER_TIMEOUT_MS);
   try {
@@ -65,23 +90,28 @@ async function fetchPyCached(path, params, opts = {}) {
     return json;
   } finally {
     clearTimeout(timer);
+    releasePySlot();
   }
 }
 
 /**
  * Like fetchPyCached but returns null on failure (timeouts, PyServer down).
  * Used by dashboard bundles so one slow endpoint does not fail the whole payload.
+ * Connection errors during boot are silent — warm path waits for PyServer first.
  */
+function isPyConnectionError(msg) {
+  return /ECONNREFUSED|ENOTFOUND|ECONNRESET|fetch failed|EAI_AGAIN/i.test(String(msg || ''));
+}
+
 async function fetchPyCachedOptional(path, params, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? PYSERVER_TIMEOUT_MS;
   try {
     return await fetchPyCached(path, params, { ...opts, timeoutMs });
   } catch (err) {
     const msg = err?.message || String(err);
-    if (/aborted/i.test(msg)) {
-      console.warn(`[analyticsPyFetch] PyServer slow (>${timeoutMs}ms): ${path}`);
-    } else {
-      console.warn(`[analyticsPyFetch] ${path}:`, msg);
+    // Expected during brief restart race or when Py is down — no error log spam.
+    if (isPyConnectionError(msg) || /aborted/i.test(msg)) {
+      return null;
     }
     return null;
   }

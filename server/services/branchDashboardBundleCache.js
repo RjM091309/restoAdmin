@@ -9,8 +9,23 @@ const WARM_INITIAL_DELAY_MS = Number(process.env.BRANCH_DASHBOARD_WARM_DELAY_MS 
 
 const bundleCache = new LRUCache({ max: CACHE_MAX, ttl: CACHE_TTL_MS });
 
+function isBranchDashboardBundleIncomplete(bundle) {
+	if (!bundle) return false;
+	const stats = bundle.dashboardData?.stats;
+	const totalSales = Number(stats?.totalSales) || 0;
+	const hasRevenue = (bundle.dashboardData?.revenueData?.length ?? 0) > 0;
+	if (totalSales <= 0 && !hasRevenue) return false;
+
+	const totalOrders = Number(stats?.totalOrders) || 0;
+	const totalExpenses = Number(stats?.totalExpenses) || 0;
+	if (totalOrders <= 0) return true;
+	if (totalExpenses <= 0 && totalSales > 0) return true;
+	return false;
+}
+
 function hasBranchDashboardBundleData(bundle) {
 	if (!bundle) return false;
+	if (isBranchDashboardBundleIncomplete(bundle)) return false;
 	const stats = bundle.dashboardData?.stats;
 	const hasStats =
 		!!stats &&
@@ -42,7 +57,7 @@ function getCachedBranchDashboardBundle(key) {
 }
 
 function setCachedBranchDashboardBundle(key, bundle) {
-	if (!hasBranchDashboardBundleData(bundle)) return;
+	if (!hasBranchDashboardBundleData(bundle) || isBranchDashboardBundleIncomplete(bundle)) return;
 	bundleCache.set(key, bundle);
 }
 
@@ -89,7 +104,7 @@ async function warmBranchDashboardBundleForId(branchId, opts = {}) {
 			end_date,
 		});
 
-		if (hasBranchDashboardBundleData(bundle)) {
+		if (hasBranchDashboardBundleData(bundle) && !isBranchDashboardBundleIncomplete(bundle)) {
 			setCachedBranchDashboardBundle(key, bundle);
 			return bundle;
 		}
@@ -107,7 +122,7 @@ async function warmBranchDashboardBundleForId(branchId, opts = {}) {
  */
 async function warmBranchDashboardBundles(opts = {}) {
 	const enabled =
-		String(process.env.BRANCH_DASHBOARD_WARM_ON_BOOT ?? 'true').toLowerCase() !== 'false';
+		String(process.env.BRANCH_DASHBOARD_WARM_ON_BOOT ?? 'false').toLowerCase() === 'true';
 	if (!enabled && !opts.force) return;
 
 	const branchIds = getWarmBranchIds();
@@ -147,6 +162,7 @@ module.exports = {
 	getCachedBranchDashboardBundle,
 	setCachedBranchDashboardBundle,
 	hasBranchDashboardBundleData,
+	isBranchDashboardBundleIncomplete,
 	warmBranchDashboardBundles,
 	getCurrentMonthRange,
 };

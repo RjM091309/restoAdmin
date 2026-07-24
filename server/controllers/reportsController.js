@@ -21,6 +21,7 @@ const {
 	buildBranchDashboardBundleCacheKey,
 	getCachedBranchDashboardBundle,
 	setCachedBranchDashboardBundle,
+	isBranchDashboardBundleIncomplete,
 } = require('../services/branchDashboardBundleCache');
 const { buildBranchDashboardBundle, probeBranchDashboardActivity } = require('../services/branchDashboardBundle');
 const { buildAdminDashboardBundle } = require('../services/adminDashboardBundle');
@@ -1220,11 +1221,17 @@ class ReportsController {
 
 			let bundle = getCachedBranchDashboardBundle(cacheKey);
 			if (!bundle) {
-				bundle = await buildBranchDashboardBundle({
-					branchId,
-					start_date,
-					end_date,
-				});
+				for (let attempt = 1; attempt <= 2; attempt++) {
+					bundle = await buildBranchDashboardBundle({
+						branchId,
+						start_date,
+						end_date,
+					});
+					if (!isBranchDashboardBundleIncomplete(bundle)) break;
+					if (attempt < 2) {
+						await new Promise((r) => setTimeout(r, 2500));
+					}
+				}
 				setCachedBranchDashboardBundle(cacheKey, bundle);
 			}
 

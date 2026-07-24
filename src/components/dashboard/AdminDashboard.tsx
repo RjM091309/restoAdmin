@@ -870,7 +870,16 @@ async function fetchBranchPerformanceTrend(
     branch_id: String(branchId),
   });
 
-  const rows = await fetchPerformanceTrendApi(params);
+  const reconRange = getPerformanceTrendReconRange(period, start, end);
+  const [rows, recon] = await Promise.all([
+    fetchPerformanceTrendApi(params),
+    fetchCashReconciliationAggregates({
+      start: reconRange.start,
+      end: reconRange.end,
+      branchId: String(branchId),
+    }).catch(() => ({ byDate: {} as Record<string, number>, total: 0 })),
+  ]);
+
   let chartData: AdminDashboardTrendPoint[] = rows.map((r) => ({
     name: r.name,
     totalSales: Number(r.totalSales || 0),
@@ -878,23 +887,13 @@ async function fetchBranchPerformanceTrend(
     ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
   }));
 
-  const reconRange = getPerformanceTrendReconRange(period, start, end);
-  try {
-    const recon = await fetchCashReconciliationAggregates({
-      start: reconRange.start,
-      end: reconRange.end,
-      branchId: String(branchId),
-    });
-    chartData = applyReconToPerformanceTrend(
-      chartData,
-      period,
-      recon.byDate ?? {},
-      reconRange.start,
-      reconRange.end,
-    );
-  } catch {
-    // keep API rows
-  }
+  chartData = applyReconToPerformanceTrend(
+    chartData,
+    period,
+    recon.byDate ?? {},
+    reconRange.start,
+    reconRange.end,
+  );
 
   if (period === 'weekly') {
     chartData = applyWeeklyTodayLabel(chartData);
@@ -1399,6 +1398,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           topProducts: snapshot.topProducts,
         });
 
+        if (period === 'monthly') {
+          patchAdminDashboardCache(analyticsCacheKey, {
+            branchChartsById: {
+              [String(branchId)]: {
+                trendMonthly: snapshot.trend,
+                topProducts: snapshot.topProducts,
+              },
+            },
+          });
+        }
+
         if (activeBranchIdRef.current === branchId && trendPeriod === period) {
           setMonthlyData(snapshot.trend);
           setTopProductsData(snapshot.topProducts);
@@ -1409,11 +1419,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         branchPrefetchInFlightRef.current.delete(inflightKey);
       }
     },
-    [branchCardsData, expenseCategoryByBranch, getDateRangeForAnalytics, trendPeriod, writeBranchPrefetchEntry],
+    [analyticsCacheKey, branchCardsData, expenseCategoryByBranch, getDateRangeForAnalytics, trendPeriod, writeBranchPrefetchEntry],
   );
 
   const prefetchAllBranchDashboards = useCallback(async () => {
-    const branches = branchCardsData.filter((b) => !isExcludedFromAllBranchesView(b.name));
+    const branches = branchCardsData.filter(
+      (b) =>
+        !isExcludedFromAllBranchesView(b.name) &&
+        ((Number(b.totalSales) || 0) > 0 || (Number(b.totalExpenses) || 0) > 0),
+    );
     if (branches.length === 0) return;
 
     const queue = [...branches];
@@ -1423,7 +1437,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         while (queue.length > 0) {
           const branch = queue.shift();
           if (!branch) break;
-          // Prefetch monthly only — weekly/yearly load on demand via tab switch.
           await prefetchBranchDashboardData(branch.id, 'monthly');
         }
       }),
@@ -1438,15 +1451,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     branchPrefetchStartedKeyRef.current = null;
   }, [analyticsCacheKey]);
 
+  // Warm branch chart cache in background after cards load — instant click when cache hit.
   useEffect(() => {
     if (branchCardsData.length === 0) return;
     if (branchPrefetchStartedKeyRef.current === analyticsCacheKey) return;
 
     const { start, end } = getDateRangeForAnalytics();
-    const allBranches = branchCardsData.filter((b) => !isExcludedFromAllBranchesView(b.name));
+    const activeBranches = branchCardsData.filter(
+      (b) =>
+        !isExcludedFromAllBranchesView(b.name) &&
+        ((Number(b.totalSales) || 0) > 0 || (Number(b.totalExpenses) || 0) > 0),
+    );
     const allCached =
-      allBranches.length > 0 &&
-      allBranches.every((b) => {
+      activeBranches.length > 0 &&
+      activeBranches.every((b) => {
         const key = buildBranchPrefetchKey(b.id, start, end);
         return branchPrefetchCacheRef.current.get(key)?.trendByPeriod.monthly !== undefined;
       });
@@ -1454,7 +1472,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     branchPrefetchStartedKeyRef.current = analyticsCacheKey;
     if (allCached) return;
 
-    void prefetchAllBranchDashboardsRef.current?.();
+    const timer = window.setTimeout(() => {
+      void prefetchAllBranchDashboardsRef.current?.();
+    }, 150);
+    return () => window.clearTimeout(timer);
   }, [analyticsCacheKey, branchCardsData, getDateRangeForAnalytics]);
 
   const applyAdminBundlePayload = useCallback(
@@ -1539,6 +1560,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const hydrateFromCache = useCallback((cached: AdminDashboardCachePayload) => {
     const branchFocused = activeBranchIdRef.current != null;
 
+    if (cached.branchChartsById) {
+      const { start, end } = getDateRangeForAnalytics();
+      seedBranchPrefetchFromChartsById(cached.branchChartsById, start, end);
+    }
+
     if (cached.summary && !branchFocused) {
       setSummaryData(cached.summary);
       setExpenseSummaryTotal(cached.summary.totalExpenses);
@@ -1562,7 +1588,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       { background: true },
     );
     setAnalyticsLoading(false);
-  }, [applyAdminBundlePayload, trendPeriod]);
+  }, [applyAdminBundlePayload, getDateRangeForAnalytics, seedBranchPrefetchFromChartsById, trendPeriod]);
 
   const loadTrend = useCallback(
     async (background: boolean) => {
@@ -2037,6 +2063,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       setActiveBranchId(null);
       return;
     }
+
+    const period = trendPeriodRef.current;
+    const { entry } = getBranchPrefetchEntry(branch.id);
+    const cachedTrend = entry?.trendByPeriod[period];
+    if (cachedTrend !== undefined) {
+      setMonthlyData(cachedTrend);
+      setTopProductsData(entry!.topProducts);
+      setBranchChartsLoading(false);
+      setTrendLoading(false);
+      setTopProductsLoading(false);
+    }
+
     setActiveBranchId(branch.id);
   };
 
