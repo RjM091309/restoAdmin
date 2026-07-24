@@ -18,6 +18,7 @@ import {
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
 import { isExcludedFromAllBranchesView, sortBranchesBySidebarOrder, resolveBranchLogoUrl } from '../../utils/branchLogo';
+import { navigateToBranch } from '../../utils/branchNavigation';
 import {
   buildAdminDashboardCacheKey,
   hasAdminDashboardCacheData,
@@ -3227,7 +3228,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               key={`head-${branch.id}`}
               className="px-3 py-3 border-l border-brand-primary/15 flex items-center justify-center gap-3 min-w-0 w-full"
             >
-              <div className="w-14 h-14 rounded-full bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center">
+              <button
+                type="button"
+                title={branch.name}
+                aria-label={branch.name}
+                onClick={() => navigateToBranch(branch, { newTab: true })}
+                className="w-14 h-14 rounded-full bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer transition-transform hover:scale-105 hover:ring-2 hover:ring-brand-primary/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+              >
                 {showLogo ? (
                   <img
                     src={logoUrl!}
@@ -3246,7 +3253,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     {String(branch.name || '?').trim().charAt(0) || '?'}
                   </span>
                 )}
-              </div>
+              </button>
               <p className="text-base font-bold text-slate-800 leading-tight break-words min-w-0">
                 {branch.name}
               </p>
