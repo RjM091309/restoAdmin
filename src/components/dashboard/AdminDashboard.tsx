@@ -407,12 +407,11 @@ const averageMetricMaps = (maps: CompareMetricMaps, divisor: number): CompareMet
 /** DB terms: 월세, 상가 임대료 / Rent. */
 const RENT_NAME_HINTS = ['rent', 'rental', 'lease', '월세', '임대'];
 /**
- * Miscategorized under Food Supplies in Expenses UI — user maps these into 임대료
- * (fixed store costs alongside rent), not 식자재 / 급여.
- * e.g. `1. 식자재 / food supplies|급여 및 복지 / labor, benefits`
+ * "Labor, Benefits" / "급여 및 복지" subcategory hints.
+ * Under Food Supplies → 임대료 (ops misfile). Under Operation → 급여.
  */
 const LABOR_BENEFITS_TO_RENT_HINTS = ['labor', 'benefits', '복지'];
-/** Pure salary / payroll (not Labor-Benefits compound under Food Supplies). */
+/** Pure salary / payroll names (e.g. Salary, 급여) — not the Labor-Benefits compound. */
 const SALARY_NAME_HINTS = [
   'salary',
   'salaries',
@@ -454,16 +453,18 @@ type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
 const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
   const { mainPart, namePart, full } = splitExpenseMapKey(key);
 
-  // Labor/Benefits misfiled under Food → 임대료 (per ops mapping).
-  if (isLaborBenefitsSub(namePart)) return 'rent';
-  if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';
-
-  if (matchesExpenseNameHints(namePart, SALARY_NAME_HINTS)) return 'salary';
-
   const isFoodMain =
     mainPart.includes('식자재') ||
     mainPart.includes('food') ||
     mainPart.includes('inventory');
+
+  // Labor/Benefits misfiled under Food → 임대료 (per ops mapping).
+  // Correct path (e.g. Operation → Labor, Benefits) → 급여.
+  if (isLaborBenefitsSub(namePart)) return isFoodMain ? 'rent' : 'salary';
+  if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';
+
+  if (matchesExpenseNameHints(namePart, SALARY_NAME_HINTS)) return 'salary';
+
   if (full.startsWith('inventory|') || isFoodMain) return 'food';
 
   return 'other';
