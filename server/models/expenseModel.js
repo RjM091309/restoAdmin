@@ -631,13 +631,7 @@ class ExpenseModel {
 			params.push(String(endDate));
 		}
 
-		// Food parent (식자재 / Food Supplies) — Labor/Benefits misfiled here counts as rent.
-		const isFoodParent = `(
-			LOWER(COALESCE(oc.NAME, '')) LIKE '%food%'
-			OR LOWER(COALESCE(oc.NAME, '')) LIKE '%inventory%'
-			OR oc.NAME LIKE '%식자재%'
-		)`;
-		// "Labor, Benefits" / "급여 및 복지" compound subcategory.
+		// "Labor, Benefits" / "급여 및 복지" — always salary (Food Supplies + Operation).
 		const isLaborBenefits = `(
 			LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%labor%'
 			OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%benefits%'
@@ -660,11 +654,6 @@ class ExpenseModel {
 							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%lease%'
 							OR mc.CATEGORY_NAME LIKE '%월세%'
 							OR mc.CATEGORY_NAME LIKE '%임대%'
-							-- Labor/Benefits misfiled under Food Supplies → rent (fixed store cost).
-							OR (
-								${isLaborBenefits}
-								AND ${isFoodParent}
-							)
 							OR (
 								(
 									LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%rent%'
@@ -688,30 +677,21 @@ class ExpenseModel {
 				COALESCE(SUM(
 					CASE
 						WHEN (
-							-- Operation (etc.) Labor/Benefits → salary.
-							(
-								${isLaborBenefits}
-								AND NOT ${isFoodParent}
-							)
+							-- Labor/Benefits under any main category → salary.
+							${isLaborBenefits}
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%salary%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%wage%'
+							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%payroll%'
+							OR mc.CATEGORY_NAME LIKE '%급여%'
+							OR mc.CATEGORY_NAME LIKE '%인건%'
 							OR (
-								-- Pure salary / payroll (Labor-Benefits under Food already in rent).
-								NOT ${isLaborBenefits}
-								AND (
-									LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%salary%'
-									OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%wage%'
-									OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%payroll%'
-									OR mc.CATEGORY_NAME LIKE '%급여%'
-									OR mc.CATEGORY_NAME LIKE '%인건%'
-									OR (
-										(oc.NAME LIKE '%급여 / Salary%' OR oc.NAME LIKE '%급여 / salary%' OR UPPER(TRIM(oc.NAME)) = 'SALARY')
-										AND oc.NAME NOT LIKE '%,%'
-									)
-									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%salary%'
-									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%wage%'
-									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%payroll%'
-									OR e.EXP_DESC LIKE '%급여%'
-								)
+								(oc.NAME LIKE '%급여 / Salary%' OR oc.NAME LIKE '%급여 / salary%' OR UPPER(TRIM(oc.NAME)) = 'SALARY')
+								AND oc.NAME NOT LIKE '%,%'
 							)
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%salary%'
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%wage%'
+							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%payroll%'
+							OR e.EXP_DESC LIKE '%급여%'
 						) THEN e.EXP_AMOUNT
 						ELSE 0
 					END

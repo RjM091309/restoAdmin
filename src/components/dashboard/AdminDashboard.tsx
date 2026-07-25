@@ -408,10 +408,10 @@ const averageMetricMaps = (maps: CompareMetricMaps, divisor: number): CompareMet
 const RENT_NAME_HINTS = ['rent', 'rental', 'lease', '월세', '임대'];
 /**
  * "Labor, Benefits" / "급여 및 복지" subcategory hints.
- * Under Food Supplies → 임대료 (ops misfile). Under Operation → 급여.
+ * Always → 급여, whether parent is Food Supplies or Operation.
  */
-const LABOR_BENEFITS_TO_RENT_HINTS = ['labor', 'benefits', '복지'];
-/** Pure salary / payroll names (e.g. Salary, 급여) — not the Labor-Benefits compound. */
+const LABOR_BENEFITS_NAME_HINTS = ['labor', 'benefits', '복지'];
+/** Pure salary / payroll names (e.g. Salary, 급여). */
 const SALARY_NAME_HINTS = [
   'salary',
   'salaries',
@@ -438,11 +438,11 @@ const splitExpenseMapKey = (key: string): { mainPart: string; namePart: string; 
   };
 };
 
-/** True for "급여 및 복지 / Labor, Benefits" style subs (even when parent is Food Supplies). */
+/** True for "급여 및 복지 / Labor, Benefits" style subs (any main category). */
 const isLaborBenefitsSub = (namePart: string): boolean => {
   const name = String(namePart || '').trim().toLowerCase();
   if (!name) return false;
-  if (matchesExpenseNameHints(name, LABOR_BENEFITS_TO_RENT_HINTS)) return true;
+  if (matchesExpenseNameHints(name, LABOR_BENEFITS_NAME_HINTS)) return true;
   // "급여 및 복지" without English — 복지 marks benefits compound, not pure salary.
   return name.includes('급여') && name.includes('복지');
 };
@@ -453,18 +453,16 @@ type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
 const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
   const { mainPart, namePart, full } = splitExpenseMapKey(key);
 
-  const isFoodMain =
-    mainPart.includes('식자재') ||
-    mainPart.includes('food') ||
-    mainPart.includes('inventory');
-
-  // Labor/Benefits misfiled under Food → 임대료 (per ops mapping).
-  // Correct path (e.g. Operation → Labor, Benefits) → 급여.
-  if (isLaborBenefitsSub(namePart)) return isFoodMain ? 'rent' : 'salary';
+  // Labor/Benefits under Food Supplies OR Operation → 급여 (sum both).
+  if (isLaborBenefitsSub(namePart)) return 'salary';
   if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';
 
   if (matchesExpenseNameHints(namePart, SALARY_NAME_HINTS)) return 'salary';
 
+  const isFoodMain =
+    mainPart.includes('식자재') ||
+    mainPart.includes('food') ||
+    mainPart.includes('inventory');
   if (full.startsWith('inventory|') || isFoodMain) return 'food';
 
   return 'other';
@@ -2724,15 +2722,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const mainExpenseBreakdown = selectedCompareBranches.map((branch) => {
     const map = compareSamePeriodExpenseCategoryByBranch[branch.id];
     const hasMap = Boolean(map && Object.keys(map).length > 0);
-    if (hasMap) {
-      const buckets = sumMainExpenseBuckets(map);
-      return { food: buckets.food, rent: buckets.rent, salary: buckets.salary };
+    const backendRent = Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0;
+    const backendSalary = Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0;
+
+    if (!hasMap) {
+      return { food: 0, rent: backendRent, salary: backendSalary };
     }
-    return {
-      food: 0,
-      rent: Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0,
-      salary: Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0,
-    };
+
+    const buckets = sumMainExpenseBuckets(map);
+    let food = buckets.food;
+    let rent = buckets.rent;
+    let salary = buckets.salary;
+
+    // Rent often filed under Utilities/Bills via EXP_DESC (e.g. Blue Moon "Shop Rental").
+    // Category map misses those; backend getRentSalaryByBranch scans EXP_DESC.
+    if (backendRent > rent) {
+      const extraRent = backendRent - rent;
+      rent = backendRent;
+      // Those rows were usually counted under Food Supplies → pull out of food.
+      if (food >= extraRent) food -= extraRent;
+    }
+
+    // Category map found no salary row, but backend matched salary/labor names.
+    if (salary === 0 && backendSalary > 0) {
+      salary = backendSalary;
+    }
+
+    return { food, rent, salary };
   });
   const mainFoodValues = mainExpenseBreakdown.map((b) => b.food);
   const mainRentValues = mainExpenseBreakdown.map((b) => b.rent);
