@@ -177,6 +177,44 @@ const toSaleDateKey = (value: string) => {
 const formatDateLabel = (date: Date) =>
   date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 
+/** Match Admin Dashboard Total Profit — Sat red, Sun green. */
+const weekendStyleForDay = (jsDay: number): { fill: string } | null => {
+  if (jsDay === 6) return { fill: '#ef4444' };
+  if (jsDay === 0) return { fill: '#22c55e' };
+  return null;
+};
+
+const makeWeekendXAxisTick = (
+  saleDateByLabel: Map<string, string>,
+  options: { dy: number; textAnchor: 'middle' | 'end'; angle: number },
+) => {
+  const Tick = (props: { x?: string | number; y?: string | number; payload?: { value?: string } }) => {
+    const x = Number(props.x) || 0;
+    const y = Number(props.y) || 0;
+    const label = String(props.payload?.value ?? '');
+    const parsed = parseDateSafe(saleDateByLabel.get(label) || '');
+    const weekend = parsed ? weekendStyleForDay(parsed.getDay()) : null;
+    const fill = weekend?.fill ?? '#64748b';
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text
+          x={0}
+          y={0}
+          dy={options.dy}
+          textAnchor={options.textAnchor}
+          fill={fill}
+          fontSize={11}
+          fontWeight={weekend ? 800 : 500}
+          transform={options.angle ? `rotate(${options.angle})` : undefined}
+        >
+          {label}
+        </text>
+      </g>
+    );
+  };
+  return Tick;
+};
+
 const getCurrentMonthRange = () => {
   const today = new Date();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -885,16 +923,34 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     return '18%';
   }, [chartPointCount]);
   const responsiveXAxisInterval = useMemo(() => {
-    if (chartPointCount <= 14) return 0;
-    if (chartPointCount <= 31) return 1;
-    if (chartPointCount <= 62) return 3;
-    return 6;
+    // Show every date label (no 1,3,5,7 skip) for typical month ranges.
+    if (chartPointCount <= 62) return 0;
+    if (chartPointCount <= 90) return 1;
+    return 3;
   }, [chartPointCount]);
-  const useSlantedXAxisLabels = chartPointCount > 31;
+  const useSlantedXAxisLabels = chartPointCount > 20;
   const responsiveXAxisAngle: 0 | -35 = useSlantedXAxisLabels ? -35 : 0;
   const responsiveXAxisTextAnchor: 'middle' | 'end' = useSlantedXAxisLabels ? 'end' : 'middle';
   const responsiveXAxisHeight = useSlantedXAxisLabels ? 72 : 48;
   const responsiveXAxisTickMargin = useSlantedXAxisLabels ? 12 : 8;
+
+  const saleDateByChartLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of trendData) {
+      map.set(row.label, row.saleDate);
+    }
+    return map;
+  }, [trendData]);
+
+  const salesChartXAxisTick = useMemo(
+    () =>
+      makeWeekendXAxisTick(saleDateByChartLabel, {
+        dy: responsiveXAxisTickMargin,
+        textAnchor: responsiveXAxisTextAnchor,
+        angle: responsiveXAxisAngle,
+      }),
+    [saleDateByChartLabel, responsiveXAxisTickMargin, responsiveXAxisTextAnchor, responsiveXAxisAngle],
+  );
 
   const salesTableRows = useMemo(
     () =>
@@ -1294,7 +1350,7 @@ const metricConfig = {
               chartType === 'bar chart' ? (
                 <BarChart width={width} height={height} data={trendData} barCategoryGap={responsiveBarCategoryGap} barGap={0}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="label" tick={salesChartXAxisTick} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
                   <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={responsiveBarSize} />
@@ -1302,7 +1358,7 @@ const metricConfig = {
               ) : (
                 <AreaChart width={width} height={height} data={trendData}>
                   <CartesianGrid stroke="#e5e7eb" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="label" tick={salesChartXAxisTick} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
                   <Area type="linear" dataKey={activeMetric} stroke={CHART_THEME_COLOR} strokeWidth={2} fill={CHART_THEME_COLOR} fillOpacity={0.2} dot={true} activeDot={true} />
