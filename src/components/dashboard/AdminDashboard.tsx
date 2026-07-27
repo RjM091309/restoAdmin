@@ -407,11 +407,19 @@ const averageMetricMaps = (maps: CompareMetricMaps, divisor: number): CompareMet
 /** DB terms: 월세, 상가 임대료 / Rent. */
 const RENT_NAME_HINTS = ['rent', 'rental', 'lease', '월세', '임대'];
 /**
+<<<<<<< Updated upstream
  * "Labor, Benefits" / "급여 및 복지" subcategory hints.
  * Always → 급여, whether parent is Food Supplies or Operation.
  */
 const LABOR_BENEFITS_NAME_HINTS = ['labor', 'benefits', '복지'];
 /** Pure salary / payroll names (e.g. Salary, 급여). */
+=======
+ * "급여 및 복지 / Labor, Benefits" — Blue Moon files this under Food Supplies AND Operation.
+ * Both paths count as 급여 in Branch Comparison (not 식자재 / 임대료).
+ */
+const LABOR_BENEFITS_HINTS = ['labor', 'benefits', '복지'];
+/** Pure salary / payroll + C.A. + Labor/Benefits compounds. */
+>>>>>>> Stashed changes
 const SALARY_NAME_HINTS = [
   'salary',
   'salaries',
@@ -420,6 +428,14 @@ const SALARY_NAME_HINTS = [
   'wages',
   '급여',
   '인건',
+  // Cash advance (가불 / C.A.) is filed under Salary main for Kim's Brothers etc.
+  '가불',
+  'c.a',
+  'cash advance',
+  'cashadvance',
+  // Essome: DJ + PROMOTER under Labor/Tax/Others count as salary.
+  'dj',
+  'promoter',
 ];
 
 const matchesExpenseNameHints = (namePart: string, hints: string[]): boolean => {
@@ -438,13 +454,42 @@ const splitExpenseMapKey = (key: string): { mainPart: string; namePart: string; 
   };
 };
 
+<<<<<<< Updated upstream
 /** True for "급여 및 복지 / Labor, Benefits" style subs (any main category). */
 const isLaborBenefitsSub = (namePart: string): boolean => {
   const name = String(namePart || '').trim().toLowerCase();
   if (!name) return false;
   if (matchesExpenseNameHints(name, LABOR_BENEFITS_NAME_HINTS)) return true;
   // "급여 및 복지" without English — 복지 marks benefits compound, not pure salary.
+=======
+/** True for "급여 및 복지 / Labor, Benefits" (any parent main category). */
+const isLaborBenefitsSub = (namePart: string): boolean => {
+  const name = String(namePart || '').trim().toLowerCase();
+  if (!name) return false;
+  if (matchesExpenseNameHints(name, LABOR_BENEFITS_HINTS)) return true;
+  // "급여 및 복지" without English — 복지 marks benefits compound.
+>>>>>>> Stashed changes
   return name.includes('급여') && name.includes('복지');
+};
+
+/**
+ * Pure salary main only (e.g. Kim's "급여 / Salary" → includes C.A.).
+ * Essome "급여, 세금, 기타 / Labor, Tax, Others" mixes rent+salary+others — use subs only.
+ */
+const isPureSalaryMain = (mainPart: string): boolean => {
+  const main = String(mainPart || '').trim().toLowerCase();
+  if (!main) return false;
+  if (
+    main.includes(',') ||
+    main.includes('세금') ||
+    main.includes('tax') ||
+    main.includes('기타') ||
+    main.includes('others') ||
+    /\bother\b/.test(main)
+  ) {
+    return false;
+  }
+  return matchesExpenseNameHints(main, SALARY_NAME_HINTS);
 };
 
 type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
@@ -453,11 +498,19 @@ type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
 const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
   const { mainPart, namePart, full } = splitExpenseMapKey(key);
 
+<<<<<<< Updated upstream
   // Labor/Benefits under Food Supplies OR Operation → 급여 (sum both).
   if (isLaborBenefitsSub(namePart)) return 'salary';
+=======
+  // Labor/Benefits under 식자재 OR 매장운영 → 급여 (sum both Blue Moon paths).
+  if (isLaborBenefitsSub(namePart)) return 'salary';
+  // Essome: "상가 임대료 / Rent" under Labor/Tax/Others compound main.
+>>>>>>> Stashed changes
   if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';
 
+  // Sub: SALARY, 가불 / C.A., etc. Pure salary main (not Essome compound) includes all its subs.
   if (matchesExpenseNameHints(namePart, SALARY_NAME_HINTS)) return 'salary';
+  if (isPureSalaryMain(mainPart)) return 'salary';
 
   const isFoodMain =
     mainPart.includes('식자재') ||
@@ -2722,6 +2775,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const mainExpenseBreakdown = selectedCompareBranches.map((branch) => {
     const map = compareSamePeriodExpenseCategoryByBranch[branch.id];
     const hasMap = Boolean(map && Object.keys(map).length > 0);
+<<<<<<< Updated upstream
     const backendRent = Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0;
     const backendSalary = Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0;
 
@@ -2749,6 +2803,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
 
     return { food, rent, salary };
+=======
+    // Item-level rent (e.g. KumHo 월세 under Fixed Costs) lives in EXP_DESC — category
+    // map alone misses it. Same for salary fallback. Take the richer of the two sources.
+    const backendRent = Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0;
+    const backendSalary = Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0;
+    if (hasMap) {
+      const buckets = sumMainExpenseBuckets(map);
+      return {
+        food: buckets.food,
+        rent: Math.max(buckets.rent, backendRent),
+        salary: Math.max(buckets.salary, backendSalary),
+      };
+    }
+    return {
+      food: 0,
+      rent: backendRent,
+      salary: backendSalary,
+    };
+>>>>>>> Stashed changes
   });
   const mainFoodValues = mainExpenseBreakdown.map((b) => b.food);
   const mainRentValues = mainExpenseBreakdown.map((b) => b.rent);
