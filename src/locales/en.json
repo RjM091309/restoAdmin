@@ -470,6 +470,8 @@
 		"top_menu": "Top Menu",
 		"sold": "sold",
 		"total_sales_per_branch": "Total Sales per Branch",
+		"branch_sales_summary": "Branch Sales Summary",
+		"orders_label": "Orders",
 		"no_branch_sales_data": "No branch sales data available",
 		"avg_order": "Avg/Order",
 		"top_least_selling_products": "Top 5 Least Selling Products",
@@ -496,7 +498,17 @@
 		"network_error": "Network error",
 		"view_more": "View more",
 		"view_less": "View less",
-		"unit": "unit"
+		"unit": "unit",
+		"item_analytics_title": "Menu Item Analytics",
+		"item_analytics_comparison": "Comparison",
+		"item_analytics_metric": "Comparison metric",
+		"item_analytics_amount": "Total sales",
+		"item_analytics_sold_qty": "Qty sold",
+		"item_analytics_monthly_trend": "Monthly trend (6 months)",
+		"item_analytics_vs_same_period": "전월 동기 대비 (3일전 기준)",
+		"item_analytics_vs_last_month": "전월 대비",
+		"item_analytics_vs_average": "평균 대비",
+		"item_analytics_pick_item": "Select a menu item to view analytics"
 	},
 	"cash_reconciliation": {
 		"title": "Cash reconciliation",

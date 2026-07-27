@@ -461,6 +461,8 @@
 		"top_menu": "인기 메뉴",
 		"sold": "판매",
 		"total_sales_per_branch": "지점별 총 매출",
+		"branch_sales_summary": "지점 매출 요약",
+		"orders_label": "주문 수",
 		"no_branch_sales_data": "지점 매출 데이터가 없습니다",
 		"avg_order": "평균/주문",
 		"top_least_selling_products": "판매량이 가장 적은 5개 제품",
@@ -487,7 +489,17 @@
 		"network_error": "네트워크 오류",
 		"view_more": "더 보기",
 		"view_less": "접기",
-		"unit": "단위"
+		"unit": "단위",
+		"item_analytics_title": "메뉴 아이템 분석",
+		"item_analytics_comparison": "비교",
+		"item_analytics_metric": "비교 지표",
+		"item_analytics_amount": "총 매출",
+		"item_analytics_sold_qty": "판매 수량",
+		"item_analytics_monthly_trend": "월별 추이 (6개월)",
+		"item_analytics_vs_same_period": "전월 동기 대비 (3일전 기준)",
+		"item_analytics_vs_last_month": "전월 대비",
+		"item_analytics_vs_average": "평균 대비",
+		"item_analytics_pick_item": "메뉴 아이템을 선택하세요"
 	},
 	"category_report": {
 		"search_placeholder": "카테고리 검색...",

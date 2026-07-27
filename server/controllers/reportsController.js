@@ -161,6 +161,41 @@ class ReportsController {
 		}
 	}
 
+	/** Fast menu-item trend/comparison (Node SQL — avoids N× PyServer menu-report). */
+	static async getAnalyticsMenuItemTrend(req, res) {
+		try {
+			const goods = String(req.query.goods || '').trim();
+			const start_date = String(req.query.start_date || '').trim();
+			const end_date = String(req.query.end_date || '').trim();
+			if (!goods || !start_date || !end_date) {
+				return ApiResponse.badRequest(res, 'goods, start_date and end_date are required');
+			}
+
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+			const result = await ReportsModel.getMenuItemAnalytics({
+				goods,
+				branchId,
+				rangeStart: start_date,
+				rangeEnd: end_date,
+			});
+
+			return ApiResponse.success(
+				res,
+				{
+					goods,
+					start_date,
+					end_date,
+					branch_id: branchId,
+					daily: result.daily || [],
+				},
+				'Menu item trend retrieved'
+			);
+		} catch (error) {
+			console.error('Error fetching menu item trend:', error);
+			return ApiResponse.error(res, 'Failed to fetch menu item trend', 500, error.message);
+		}
+	}
+
 	// Get table utilization report
 	static async getTableUtilizationReport(req, res) {
 		try {

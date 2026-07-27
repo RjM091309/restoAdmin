@@ -142,6 +142,7 @@ type ComparisonRow = {
     | 'currency'
     | 'percent'
     | 'diff_index'
+    | 'diff_index_stack'
     | 'diff_percent'
     | 'currency_share'
     | 'expense_diff'
@@ -149,13 +150,13 @@ type ComparisonRow = {
     | 'expense_rate'
     | 'currency_pct'
     | 'rank';
-  /** Parallel previous-period values when format is `diff_index` / `diff_percent` / `expense_diff`.
+  /** Parallel previous-period values when format is `diff_index` / `diff_index_stack` / `diff_percent` / `expense_diff`.
    *  For `currency_share`, holds the share denominator (e.g. same-period sales).
    *  For `currency_pct`, holds the secondary % shown beside the amount. */
   compareBases?: number[];
   /** When true, increase = bad (red) / decrease = good (green). Used for expense rows. */
   invertSentiment?: boolean;
-  /** For `diff_index`: show current (expenses) or previous baseline amount. Default previous. */
+  /** For `diff_index` / `diff_index_stack`: show current (expenses) or previous baseline amount. Default previous. */
   amountSource?: 'current' | 'previous';
   /** Enables cell click popup with date ranges + values used in the formula. */
   breakdownKind?: CompareBreakdownKind;
@@ -2313,6 +2314,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     current: number,
     previous: number,
     amountSource: 'current' | 'previous' = 'previous',
+    stackedTrend = false,
   ) => {
     const cur = Number(current) || 0;
     const prev = Number(previous) || 0;
@@ -2320,9 +2322,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     if (isUnreliableCompareBase(prev)) {
       return {
         amount: formatSignedCurrency(Math.trunc(amountValue)),
-        percent: '(—)',
+        percent: stackedTrend ? '—' : '(—)',
         sentiment: 'flat' as const,
         unreliable: true,
+        showTrendIcon: stackedTrend,
       };
     }
     const index = monthIndexFromPct(pctChange(cur, prev));
@@ -2331,6 +2334,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       percent: `(${index.toFixed(1)}%)`,
       sentiment: (index >= 100 ? 'up' : 'down') as 'up' | 'down' | 'flat',
       unreliable: false,
+      showTrendIcon: stackedTrend,
     };
   };
 
@@ -2849,13 +2853,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   ];
 
   // Match Sales: same-period, vs last month, vs average (share/rate live on totals above).
-  const expenseMetricRows = buildCompareMetricRows('expense', 'expenses');
+  const withStackedIndex = (rows: ComparisonRow[]): ComparisonRow[] =>
+    rows.map((row) => ({ ...row, format: 'diff_index_stack' as const }));
+
+  const expenseMetricRows = withStackedIndex(buildCompareMetricRows('expense', 'expenses'));
 
   // Totals → Sales → Expenses → Profit → Main Expenses composition.
   const unifiedComparisonRows: UnifiedComparisonRow[] = [
     ...benchmarkRows,
     { id: 'section-sales', rowType: 'section', label: t('admin_dashboard.sections.sales') },
-    ...buildCompareMetricRows('sales', 'sales'),
+    ...withStackedIndex(buildCompareMetricRows('sales', 'sales')),
     {
       id: 'section-expenses',
       rowType: 'section',
@@ -2863,7 +2870,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     },
     ...expenseMetricRows,
     { id: 'section-profit', rowType: 'section', label: t('admin_dashboard.sections.profit') },
-    ...buildCompareMetricRows('profit', 'profit'),
+    ...withStackedIndex(buildCompareMetricRows('profit', 'profit')),
     { id: 'section-main-expenses', rowType: 'section', label: t('admin_dashboard.sections.main_expenses') },
     {
       id: 'main-food-supplies',
@@ -3403,6 +3410,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             const usesCompareBase =
               row.format === 'diff_index' ||
               row.format === 'diff_percent' ||
+              row.format === 'diff_index_stack' ||
               row.format === 'expense_diff';
             const rankValues = usesCompareBase
               ? row.values.map((v, i) => {
@@ -3457,9 +3465,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   const prevBase = row.compareBases?.[index] ?? 0;
 
                   const indexDisplay =
-                    row.format === 'diff_index' || row.format === 'diff_percent'
-                      ? formatDiffIndexDisplay(value, prevBase, row.amountSource ?? 'previous')
-                      : null;
+                    row.format === 'diff_index_stack'
+                      ? formatDiffIndexDisplay(value, prevBase, row.amountSource ?? 'previous', true)
+                      : row.format === 'diff_index' || row.format === 'diff_percent'
+                        ? formatDiffIndexDisplay(value, prevBase, row.amountSource ?? 'previous')
+                        : null;
                   const shareDisplay =
                     row.format === 'currency_share'
                       ? formatCurrencyWithShare(value, prevBase)
@@ -3514,6 +3524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         ? `${(Number.isFinite(value) ? value : 0).toFixed(1)}%`
                         : row.format === 'diff_index' ||
                             row.format === 'diff_percent' ||
+                            row.format === 'diff_index_stack' ||
                             row.format === 'currency_share' ||
                             row.format === 'expense_share' ||
                             row.format === 'expense_rate'
@@ -3545,6 +3556,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     Boolean(row.breakdownKind) &&
                     (row.format === 'diff_index' ||
                       row.format === 'diff_percent' ||
+                      row.format === 'diff_index_stack' ||
                       row.format === 'expense_diff');
                   const canBreakDownExpensePct =
                     row.format === 'expense_share' ||
@@ -3555,6 +3567,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
                   const valueContent = customContent ? (
                     customContent
+                  ) : splitDisplay && indexDisplay?.showTrendIcon ? (
+                    <div className="flex flex-col items-start gap-0.5">
+                      <span className="text-sm font-semibold text-slate-700 tabular-nums tracking-tight">
+                        {splitDisplay.amount}
+                      </span>
+                      {indexDisplay.unreliable ? (
+                        <span className="text-[11px] font-medium text-slate-400">—</span>
+                      ) : (
+                        <span
+                          className={`inline-flex items-center gap-0.5 text-[11px] font-medium ${percentColorClass}`}
+                        >
+                          {sentiment === 'up' ? (
+                            <TrendingUp size={11} />
+                          ) : sentiment === 'down' ? (
+                            <TrendingDown size={11} />
+                          ) : null}
+                          {splitDisplay.percent}
+                        </span>
+                      )}
+                    </div>
                   ) : splitDisplay ? (
                     <span className="text-sm font-semibold">
                       <span className="text-slate-700">{splitDisplay.amount}</span>

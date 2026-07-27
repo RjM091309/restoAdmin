@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from './CashReconciliationModal';
+import { MenuItemAnalyticsModal, MenuItemAnalyticsPanel, type MenuItemAnalyticsTarget } from './MenuItemAnalyticsModal';
 import {
   buildSalesAnalyticsCacheKey,
   hasSalesAnalyticsCacheData,
@@ -330,6 +331,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const [profitDriversError, setProfitDriversError] = useState<string | null>(null);
   const [profitDriversBranchId, setProfitDriversBranchId] = useState<number | null>(null);
   const [profitDriversModalOpen, setProfitDriversModalOpen] = useState(false);
+  const [itemAnalyticsTarget, setItemAnalyticsTarget] = useState<MenuItemAnalyticsTarget | null>(null);
+  const [itemAnalyticsOpen, setItemAnalyticsOpen] = useState(false);
 
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>(
     () => initialSalesLoad.cached?.dailySalesCurrent ?? [],
@@ -698,6 +701,22 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     setTimeout(() => profitDriversRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 0);
   }, []);
 
+  const openItemAnalytics = useCallback(
+    (item: { row: ApiMenuReportRow; profit: number; branchId: number | null; branchName: string }) => {
+      const next: MenuItemAnalyticsTarget = {
+        goods: String(item.row.goods || '').trim(),
+        branchId: item.branchId,
+        branchName: item.branchName,
+        amount: item.profit,
+        qty: Number((item.row as any).salesQty) || 0,
+      };
+      setItemAnalyticsTarget(next);
+      // All-branches: keep popup. Single-branch: inline panel only.
+      if (isAllBranch) setItemAnalyticsOpen(true);
+    },
+    [isAllBranch],
+  );
+
   const loadDashboardDataRef = useRef(loadDashboardData);
   loadDashboardDataRef.current = loadDashboardData;
 
@@ -810,14 +829,43 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   ]);
 
   // UI rule:
-  // - When header dropdown is "All branches": show Top 7 (even if user clicked a branch row in the table).
-  // - When header dropdown is a specific branch: show Top 5.
-  const topProfitDriversLimit = isAllBranch ? 7 : 5;
+  // - All branches: Top 7 (unchanged comparison card).
+  // - Single branch: Top 10, no in-card scroll.
+  const topProfitDriversLimit = isAllBranch ? 7 : 10;
   const topProfitDrivers = useMemo(
     () => profitDriversData.slice(0, topProfitDriversLimit),
     [profitDriversData, topProfitDriversLimit]
   );
   const modalProfitDrivers = useMemo(() => profitDriversData.slice(0, 20), [profitDriversData]);
+
+  // Single-branch: auto-show analytics for the #1 Top Revenue item.
+  useEffect(() => {
+    if (isAllBranch) return;
+    if (topProfitDrivers.length === 0) {
+      setItemAnalyticsTarget(null);
+      return;
+    }
+    const first = topProfitDrivers[0];
+    setItemAnalyticsTarget((prev) => {
+      if (
+        prev &&
+        topProfitDrivers.some(
+          (x) =>
+            String(x.row.goods || '').trim() === prev.goods &&
+            x.branchId === prev.branchId,
+        )
+      ) {
+        return prev;
+      }
+      return {
+        goods: String(first.row.goods || '').trim(),
+        branchId: first.branchId,
+        branchName: first.branchName,
+        amount: first.profit,
+        qty: Number((first.row as any).salesQty) || 0,
+      };
+    });
+  }, [isAllBranch, topProfitDrivers]);
 
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
@@ -1265,14 +1313,23 @@ const metricConfig = {
         </div>
       </div>
 
-      {/* ══ NEW: Two col-6 cards ══════════════════════ */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-        {/* Card 1: Total Sales per Branch */}
+      {/* ══ Branch sales (all) / Top Revenue + Item Analytics (single) ══════════════════════ */}
+      <div
+        className={`grid grid-cols-1 gap-6 items-stretch ${
+          isAllBranch
+            ? 'xl:grid-cols-2'
+            : 'xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.45fr)]'
+        }`}
+      >
+        {/* Card 1: Total Sales per Branch — all-branches comparison only */}
+        {isAllBranch ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
             <div className="flex items-center gap-2">
               <Store size={18} className="text-brand-muted" />
-              <h4 className="text-base font-semibold text-brand-text">{t('sales_analytics.total_sales_per_branch')}</h4>
+              <h4 className="text-base font-semibold text-brand-text">
+                {t('sales_analytics.total_sales_per_branch')}
+              </h4>
             </div>
           </div>
           <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
@@ -1293,7 +1350,6 @@ const metricConfig = {
               </div>
             ) : (
               <>
-                {/* Horizontal bar chart — grows to fill card height */}
                 <div className="flex-1 min-h-[180px] mb-4 flex flex-col min-w-0">
                   <ChartContainer
                     className="w-full min-w-0 flex-1"
@@ -1344,7 +1400,6 @@ const metricConfig = {
                     )}
                   />
                 </div>
-                {/* Data table */}
                 <div className="shrink-0 overflow-x-auto rounded-xl border border-gray-100">
                   <table className="w-full text-sm">
                     <thead>
@@ -1382,16 +1437,34 @@ const metricConfig = {
             )}
           </div>
         </div>
+        ) : null}
 
-        {/* Card 2: Top Profit Drivers */}
-        <div ref={profitDriversRef} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60">
+        {/* Card 2: Top Revenue Items */}
+        <div
+          ref={profitDriversRef}
+          className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full"
+        >
+          <div
+            className={`flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60 ${
+              isAllBranch ? 'px-5 py-4' : 'px-4 py-2.5'
+            }`}
+          >
             <div className="flex items-center gap-2">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-100 text-violet-600">
-                <TrendingUp size={18} />
+              <span
+                className={`inline-flex items-center justify-center rounded-full bg-violet-100 text-violet-600 ${
+                  isAllBranch ? 'h-8 w-8' : 'h-7 w-7'
+                }`}
+              >
+                <TrendingUp size={isAllBranch ? 18 : 15} />
               </span>
               <div className="flex flex-col">
-                <h4 className="text-base font-semibold text-slate-900">{t('sales_analytics.top_revenue_items')}</h4>
+                <h4
+                  className={`font-semibold text-slate-900 ${
+                    isAllBranch ? 'text-base' : 'text-sm'
+                  }`}
+                >
+                  {t('sales_analytics.top_revenue_items')}
+                </h4>
                 <p className="text-[11px] font-medium text-slate-500">
                   {t('sales_analytics.high_revenue')} · {profitDriversBranchLabel}
                 </p>
@@ -1428,7 +1501,7 @@ const metricConfig = {
               ) : null}
             </div>
           </div>
-          <div className="flex-1 px-5 py-4">
+          <div className={isAllBranch ? 'flex-1 px-5 py-4' : 'flex-1 px-3 py-2'}>
             {profitDriversLoading && profitDriversData.length === 0 ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
@@ -1445,18 +1518,42 @@ const metricConfig = {
                 <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_data_available')}</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {topProfitDrivers.map((item, idx) => (
-                  <div
+              <div className={isAllBranch ? 'space-y-3' : 'space-y-1'}>
+                {topProfitDrivers.map((item, idx) => {
+                  const isSelected =
+                    !isAllBranch &&
+                    itemAnalyticsTarget != null &&
+                    String(item.row.goods || '').trim() === itemAnalyticsTarget.goods &&
+                    item.branchId === itemAnalyticsTarget.branchId;
+                  return (
+                  <button
+                    type="button"
                     key={`${item.row.id}-${item.branchId ?? 'all'}-${idx}`}
-                    className="flex items-center justify-between p-3.5 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:shadow-sm hover:border-violet-100 transition-all"
+                    onClick={() => openItemAnalytics(item)}
+                    className={`w-full text-left flex items-center justify-between rounded-lg border transition-all cursor-pointer ${
+                      isAllBranch ? 'p-3.5 rounded-xl' : 'px-2.5 py-1.5'
+                    } ${
+                      isSelected
+                        ? 'border-violet-300 bg-violet-50 shadow-sm'
+                        : 'border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:shadow-sm hover:border-violet-200 hover:bg-violet-50/30'
+                    }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-violet-100 text-violet-700">
+                    <div className={`flex items-center min-w-0 flex-1 ${isAllBranch ? 'gap-3' : 'gap-2'}`}>
+                      <div
+                        className={`rounded-md flex items-center justify-center font-bold shrink-0 bg-violet-100 text-violet-700 ${
+                          isAllBranch ? 'w-8 h-8 text-sm rounded-lg' : 'w-5 h-5 text-[10px]'
+                        }`}
+                      >
                         {idx + 1}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{item.row.goods}</p>
+                        <p
+                          className={`font-semibold text-slate-900 truncate ${
+                            isAllBranch ? 'text-sm' : 'text-[13px] leading-tight'
+                          }`}
+                        >
+                          {item.row.goods}
+                        </p>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
                           {profitDriversEffectiveBranchId ? null : (
                             <span
@@ -1478,18 +1575,42 @@ const metricConfig = {
                         </div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
-                      <div className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                      <div className="text-right">
+                        {isAllBranch ? (
+                          <>
+                            <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
+                            <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                              {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="leading-tight">
+                            <span className="text-[13px] font-semibold text-slate-900">{money(item.profit)}</span>
+                            <div className="text-[10px] text-slate-500 font-medium">
+                              {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                            </div>
+                          </div>
+                        )}
                       </div>
+                      <ChevronRight size={14} className="text-slate-300 shrink-0" />
                     </div>
-                  </div>
-                ))}
+                  </button>
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
+
+        {/* Single-branch: item analytics panel (red-box area) */}
+        {!isAllBranch ? (
+          <MenuItemAnalyticsPanel
+            target={itemAnalyticsTarget}
+            dateRange={dateRange}
+            active={!isAllBranch}
+          />
+        ) : null}
       </div>
 
       <Modal
@@ -1506,9 +1627,14 @@ const metricConfig = {
         ) : (
           <div className="space-y-2">
             {modalProfitDrivers.map((item, idx) => (
-              <div
+              <button
+                type="button"
                 key={`modal-${item.row.id}-${item.branchId ?? 'all'}-${idx}`}
-                className="flex items-center justify-between p-3 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40"
+                onClick={() => {
+                  openItemAnalytics(item);
+                  if (!isAllBranch) setProfitDriversModalOpen(false);
+                }}
+                className="w-full text-left flex items-center justify-between p-3 rounded-xl border border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:border-violet-200 hover:bg-violet-50/40 cursor-pointer transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 bg-violet-100 text-violet-700">
@@ -1537,17 +1663,29 @@ const metricConfig = {
                     </div>
                   </div>
                 </div>
-                <div className="text-right shrink-0 ml-3">
-                  <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
-                  <div className="text-[11px] text-slate-500 font-medium mt-0.5">
-                    {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <div className="text-right">
+                    <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
+                    <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
+                    </div>
                   </div>
+                  <ChevronRight size={16} className="text-slate-300" />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </Modal>
+
+      <MenuItemAnalyticsModal
+        isOpen={isAllBranch && itemAnalyticsOpen}
+        onClose={() => {
+          setItemAnalyticsOpen(false);
+        }}
+        target={itemAnalyticsTarget}
+        dateRange={dateRange}
+      />
 
       {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">

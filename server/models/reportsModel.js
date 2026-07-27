@@ -342,6 +342,83 @@ class ReportsModel {
 		return rows;
 	}
 
+	/**
+	 * Fast single-item analytics (Node SQL — not PyServer menu-report).
+	 * One daily series query covering all comparison windows + 6-month chart.
+	 */
+	static async getMenuItemAnalytics({ goods, branchId = null, rangeStart, rangeEnd }) {
+		const goodsName = String(goods || '').trim();
+		if (!goodsName || !rangeStart || !rangeEnd) {
+			return { daily: [] };
+		}
+
+		const localDt = `COALESCE(
+			CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+			DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+		)`;
+
+		const isRoomCharge = /^room\s*charge$/i.test(goodsName);
+		const hasBranch = branchId != null && branchId !== '' && String(branchId) !== 'all';
+		const branchSql = hasBranch ? ' AND b.BRANCH_ID = ?' : '';
+
+		let query;
+		let execParams;
+
+		if (isRoomCharge) {
+			query = `
+				SELECT
+					DATE_FORMAT(${localDt}, '%Y-%m-%d') AS sale_date,
+					COUNT(DISTINCT o.IDNo) AS qty,
+					COALESCE(SUM(o.SERVICE_CHARGE), 0) AS amount
+				FROM orders o
+				INNER JOIN billing b
+					ON b.ORDER_ID = o.IDNo
+					AND b.STATUS IN (1, 2)
+					AND b.STATUS NOT IN (-1, -2)
+					AND o.STATUS NOT IN (-1, -2)
+				WHERE DATE(${localDt}) BETWEEN DATE(?) AND DATE(?)
+				${branchSql}
+				GROUP BY DATE_FORMAT(${localDt}, '%Y-%m-%d')
+				ORDER BY sale_date ASC
+			`;
+			execParams = hasBranch
+				? [rangeStart, rangeEnd, Number(branchId)]
+				: [rangeStart, rangeEnd];
+		} else {
+			query = `
+				SELECT
+					DATE_FORMAT(${localDt}, '%Y-%m-%d') AS sale_date,
+					COALESCE(SUM(oi.QTY), 0) AS qty,
+					COALESCE(SUM(oi.LINE_TOTAL), 0) AS amount
+				FROM orders o
+				INNER JOIN billing b
+					ON b.ORDER_ID = o.IDNo
+					AND b.STATUS IN (1, 2)
+					AND b.STATUS NOT IN (-1, -2)
+					AND o.STATUS NOT IN (-1, -2)
+				INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+				INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+				WHERE DATE(${localDt}) BETWEEN DATE(?) AND DATE(?)
+				  AND LOWER(TRIM(m.MENU_NAME)) = LOWER(TRIM(?))
+				${branchSql}
+				GROUP BY DATE_FORMAT(${localDt}, '%Y-%m-%d')
+				ORDER BY sale_date ASC
+			`;
+			execParams = hasBranch
+				? [rangeStart, rangeEnd, goodsName, Number(branchId)]
+				: [rangeStart, rangeEnd, goodsName];
+		}
+
+		const [rows] = await pool.execute(query, execParams);
+		return {
+			daily: (rows || []).map((r) => ({
+				sale_date: String(r.sale_date).slice(0, 10),
+				qty: Number(r.qty) || 0,
+				amount: Number(r.amount) || 0,
+			})),
+		};
+	}
+
 	// Get table utilization report
 	static async getTableUtilizationReport(startDate = null, endDate = null, branchId = null) {
 		let dateFilter = '';

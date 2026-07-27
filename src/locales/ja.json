@@ -460,6 +460,8 @@
 		"top_menu": "人気メニュー",
 		"sold": "販売",
 		"total_sales_per_branch": "店舗ごとの総売上",
+		"branch_sales_summary": "店舗売上サマリー",
+		"orders_label": "注文数",
 		"no_branch_sales_data": "店舗の売上データがありません",
 		"avg_order": "平均/注文",
 		"top_least_selling_products": "売上の少ない商品 トップ5",
@@ -486,7 +488,17 @@
 		"network_error": "ネットワークエラー",
 		"view_more": "もっと見る",
 		"view_less": "閉じる",
-		"unit": "単位"
+		"unit": "単位",
+		"item_analytics_title": "メニュー分析",
+		"item_analytics_comparison": "比較",
+		"item_analytics_metric": "比較指標",
+		"item_analytics_amount": "総売上",
+		"item_analytics_sold_qty": "販売数",
+		"item_analytics_monthly_trend": "月次トレンド（6ヶ月）",
+		"item_analytics_vs_same_period": "전월 동기 대비 (3일전 기준)",
+		"item_analytics_vs_last_month": "전월 대비",
+		"item_analytics_vs_average": "평균 대비",
+		"item_analytics_pick_item": "メニューを選択してください"
 	},
 	"category_report": {
 		"search_placeholder": "カテゴリーを検索...",

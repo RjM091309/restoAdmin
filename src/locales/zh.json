@@ -461,6 +461,8 @@
 		"top_menu": "热门菜单",
 		"sold": "已售",
 		"total_sales_per_branch": "各分店总销售额",
+		"branch_sales_summary": "分店销售摘要",
+		"orders_label": "订单数",
 		"no_branch_sales_data": "无分店销售数据",
 		"avg_order": "平均/订单",
 		"top_least_selling_products": "销量最少的5款产品",
@@ -487,7 +489,17 @@
 		"network_error": "网络错误",
 		"view_more": "查看更多",
 		"view_less": "收起",
-		"unit": "单位"
+		"unit": "单位",
+		"item_analytics_title": "菜单商品分析",
+		"item_analytics_comparison": "对比",
+		"item_analytics_metric": "对比指标",
+		"item_analytics_amount": "总销售额",
+		"item_analytics_sold_qty": "销量",
+		"item_analytics_monthly_trend": "月度趋势（6个月）",
+		"item_analytics_vs_same_period": "전월 동기 대비 (3일전 기준)",
+		"item_analytics_vs_last_month": "전월 대비",
+		"item_analytics_vs_average": "평균 대비",
+		"item_analytics_pick_item": "请选择菜单商品"
 	},
 	"category_report": {
 		"search_placeholder": "搜索类别...",

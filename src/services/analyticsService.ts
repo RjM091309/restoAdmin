@@ -317,6 +317,38 @@ export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMe
   return [];
 }
 
+export type ApiMenuItemDailyPoint = {
+  sale_date: string;
+  qty: number;
+  amount: number;
+};
+
+/** Fast Node SQL path — one round-trip for item analytics (not PyServer menu-report). */
+export async function fetchMenuItemTrendApi(params: {
+  goods: string;
+  start: string;
+  end: string;
+  branchId?: string | number | null;
+}): Promise<ApiMenuItemDailyPoint[]> {
+  const qs = new URLSearchParams();
+  qs.set('goods', params.goods);
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+  if (params.branchId != null && String(params.branchId) !== '' && String(params.branchId) !== 'all') {
+    qs.set('branch_id', String(params.branchId));
+  } else {
+    qs.set('branch_id', 'all');
+  }
+
+  const url = `/api/analytics/menu-item-trend?${qs.toString()}`;
+  const { res, json } = await fetchJson(url);
+  if (!res.ok) throw new Error(`Analytics menu-item-trend failed with status ${res.status}`);
+  if (!json?.success) {
+    throw new Error(json?.message || 'Analytics menu-item-trend returned an error');
+  }
+  return (json.data?.daily || []) as ApiMenuItemDailyPoint[];
+}
+
 export async function fetchMenuReportBundleApi(params: {
   start: string;
   end: string;
