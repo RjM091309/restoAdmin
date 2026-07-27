@@ -408,7 +408,7 @@ const averageMetricMaps = (maps: CompareMetricMaps, divisor: number): CompareMet
 const RENT_NAME_HINTS = ['rent', 'rental', 'lease', '월세', '임대'];
 /**
  * "Labor, Benefits" / "급여 및 복지" subcategory hints.
- * Always → 급여, whether parent is Food Supplies or Operation (Blue Moon has both).
+ * Always → 급여 (e.g. Blue Moon under Operation).
  */
 const LABOR_BENEFITS_NAME_HINTS = ['labor', 'benefits', '복지'];
 /** Pure salary / payroll + C.A. + Essome DJ/PROMOTER. */
@@ -481,7 +481,7 @@ type MainExpenseBucket = 'food' | 'rent' | 'salary' | 'other';
 const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
   const { mainPart, namePart, full } = splitExpenseMapKey(key);
 
-  // Labor/Benefits under Food Supplies OR Operation → 급여 (sum both Blue Moon paths).
+  // Labor/Benefits subcategory → 급여 (regardless of main category parent).
   if (isLaborBenefitsSub(namePart)) return 'salary';
   // Essome: "상가 임대료 / Rent" under Labor/Tax/Others compound main.
   if (matchesExpenseNameHints(namePart, RENT_NAME_HINTS)) return 'rent';

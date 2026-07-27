@@ -631,7 +631,7 @@ class ExpenseModel {
 			params.push(String(endDate));
 		}
 
-		// "Labor, Benefits" / "급여 및 복지" — always salary (Food Supplies + Operation).
+		// "Labor, Benefits" / "급여 및 복지" — always salary (any parent main category).
 		const isLaborBenefits = `(
 			LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%labor%'
 			OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%benefits%'
