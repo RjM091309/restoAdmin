@@ -4,6 +4,7 @@ const {
   buildManagementBriefCharts,
 } = require('./managementReportBuilder');
 const { fetchPyCached } = require('./analyticsPyFetch');
+const { sendStreamDeltaIfChanged } = require('../utils/streamingJson');
 
 const VERTEX_PROJECT_ID = 'core-api-495501';
 const VERTEX_LOCATION_PRIMARY = process.env.VERTEX_LOCATION || 'us-central1';
@@ -200,6 +201,83 @@ CONTEXT (JSON):
 ${JSON.stringify(context)}
 
 Return JSON with summary (2-3 sentences), bullets (3-5), suggestedReplies (3-4).`;
+}
+
+function buildAnalyticsPlainStreamPrompt(locale, message, context) {
+  if (locale === 'ko') {
+    return `당신은 레스토랑 매출 분석 AI입니다.
+한국어로 2~4문장 plain text 요약만 작성하세요. JSON, bullet, markdown 금지.
+CONTEXT에 있는 숫자만 사용하세요.
+
+질문: ${message}
+
+CONTEXT:
+${JSON.stringify(context)}`;
+  }
+  if (locale === 'fil') {
+    return `You are a restaurant sales analyst. Write a 2-4 sentence plain text summary in Filipino (Tagalog) only. No JSON or bullets.
+Use ONLY numbers from CONTEXT.
+
+Question: ${message}
+
+CONTEXT:
+${JSON.stringify(context)}`;
+  }
+  return `You are a restaurant sales analyst. Write a 2-4 sentence plain text summary only. No JSON or bullets.
+Use ONLY numbers from CONTEXT.
+
+Question: ${message}
+
+CONTEXT:
+${JSON.stringify(context)}`;
+}
+
+function buildInstantPreviewLine({ cur, pctChange, period, locale }) {
+  const pctSign = pctChange >= 0 ? '+' : '';
+  if (locale === 'ko') {
+    return `순매출 ₱${Math.round(cur.net_sales).toLocaleString()} (${pctSign}${pctChange}% vs 이전 기간). `;
+  }
+  if (locale === 'fil') {
+    return `Net sales ₱${Math.round(cur.net_sales).toLocaleString()} (${pctSign}${pctChange}% vs nakaraang period). `;
+  }
+  return `Net sales ₱${Math.round(cur.net_sales).toLocaleString()} (${pctSign}${pctChange}% vs previous period). `;
+}
+
+function buildBriefInstantLine(ctx, locale) {
+  const k = ctx.kpi;
+  if (locale === 'ko') {
+    return `순매출 ₱${Math.round(k.revenue_net_sales).toLocaleString()} · 비용 ₱${Math.round(k.expenses).toLocaleString()} · 순이익 ₱${Math.round(k.net_profit).toLocaleString()}. `;
+  }
+  if (locale === 'fil') {
+    return `Net sales ₱${Math.round(k.revenue_net_sales).toLocaleString()} · Gastos ₱${Math.round(k.expenses).toLocaleString()} · Net profit ₱${Math.round(k.net_profit).toLocaleString()}. `;
+  }
+  return `Net sales ₱${Math.round(k.revenue_net_sales).toLocaleString()} · Expenses ₱${Math.round(k.expenses).toLocaleString()} · Net profit ₱${Math.round(k.net_profit).toLocaleString()}. `;
+}
+
+async function fetchAnalyticsChatData(focus, params, prevParams) {
+  const needBranch = focus === 'branches' || focus === 'overview';
+  const needMenu = focus === 'menu' || focus === 'overview';
+  const needCategory = focus === 'category';
+  const needPayment = focus === 'payment';
+
+  const [dailyRes, dailyPrevRes, branchRes, menuRes, categoryRes, paymentRes] = await Promise.all([
+    fetchPy('/api/analytics/daily-sales', params),
+    fetchPy('/api/analytics/daily-sales', prevParams),
+    needBranch
+      ? fetchPy('/api/analytics/branch-sales', params).catch(() => ({ data: { data: [] } }))
+      : Promise.resolve({ data: { data: [] } }),
+    needMenu
+      ? fetchPy('/api/analytics/menu-report', params)
+      : Promise.resolve({ data: { data: [] } }),
+    needCategory
+      ? fetchPy('/api/analytics/category-report', params)
+      : Promise.resolve({ data: { data: [] } }),
+    needPayment
+      ? fetchPy('/api/analytics/payment-report', params)
+      : Promise.resolve({ data: { data: [] } }),
+  ]);
+
+  return { dailyRes, dailyPrevRes, branchRes, menuRes, categoryRes, paymentRes };
 }
 
 function chartTitles(locale) {
@@ -584,6 +662,122 @@ async function vertexGenerateJson(prompt, opts = {}) {
   throw lastErr || new Error('Vertex generation failed');
 }
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    const err = new Error('Aborted');
+    err.name = 'AbortError';
+    throw err;
+  }
+}
+
+async function vertexGeneratePlainStream(prompt, onAccumulated, signal, maxOutputTokens = 1024) {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+  }
+  const { VertexAI } = await import('@google-cloud/vertexai');
+  const locationOrder =
+    process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
+      ? [String(process.env.VERTEX_LOCATION).trim()]
+      : [VERTEX_LOCATION_PRIMARY, VERTEX_LOCATION_FALLBACK].filter((loc, i, arr) => arr.indexOf(loc) === i);
+
+  let lastErr = null;
+  for (const location of locationOrder) {
+    throwIfAborted(signal);
+    const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
+    for (const modelId of MODEL_CANDIDATES) {
+      try {
+        const model = vertex.getGenerativeModel({
+          model: modelId,
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens,
+          },
+        });
+        const streamingResp = await model.generateContentStream({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+
+        let fullText = '';
+        for await (const item of streamingResp.stream) {
+          throwIfAborted(signal);
+          const chunk =
+            item?.candidates?.[0]?.content?.parts
+              ?.map((p) => p?.text)
+              .filter(Boolean)
+              .join('') ?? '';
+          if (!chunk) continue;
+          fullText += chunk;
+          await onAccumulated(fullText);
+        }
+
+        if (!fullText.trim()) throw new Error('Empty Vertex plain stream response');
+        return fullText.trim();
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        lastErr = e;
+        if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
+      }
+    }
+  }
+  throw lastErr || new Error('Vertex plain stream generation failed');
+}
+
+async function vertexGenerateJsonStream(prompt, opts, onAccumulated, signal) {
+  const schemaBuilder = opts.schemaBuilder || buildAnalyticsResponseSchema;
+  const maxOutputTokens = opts.maxOutputTokens ?? 2048;
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+  }
+  const { VertexAI, SchemaType } = await import('@google-cloud/vertexai');
+  const locationOrder =
+    process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
+      ? [String(process.env.VERTEX_LOCATION).trim()]
+      : [VERTEX_LOCATION_PRIMARY, VERTEX_LOCATION_FALLBACK].filter((loc, i, arr) => arr.indexOf(loc) === i);
+
+  let lastErr = null;
+  for (const location of locationOrder) {
+    throwIfAborted(signal);
+    const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
+    for (const modelId of MODEL_CANDIDATES) {
+      try {
+        const model = vertex.getGenerativeModel({
+          model: modelId,
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens,
+            responseMimeType: 'application/json',
+            responseSchema: schemaBuilder(SchemaType),
+          },
+        });
+        const streamingResp = await model.generateContentStream({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+
+        let fullText = '';
+        for await (const item of streamingResp.stream) {
+          throwIfAborted(signal);
+          const chunk =
+            item?.candidates?.[0]?.content?.parts
+              ?.map((p) => p?.text)
+              .filter(Boolean)
+              .join('') ?? '';
+          if (!chunk) continue;
+          fullText += chunk;
+          await onAccumulated(fullText);
+        }
+
+        if (!fullText) throw new Error('Empty Vertex stream response');
+        return fullText;
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        lastErr = e;
+        if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
+      }
+    }
+  }
+  throw lastErr || new Error('Vertex stream generation failed');
+}
+
 function fallbackNarrative({ cur, prev, pctChange, menuTop, branchRows, period, locale }) {
   const loc = String(locale || 'en').toLowerCase();
   const fil = loc.startsWith('fil');
@@ -936,4 +1130,231 @@ async function runManagementBrief(input) {
   };
 }
 
-module.exports = { runAnalyticsChat, runManagementBrief };
+/**
+ * @param {{ message: string, start_date: string, end_date: string, locale?: string }} input
+ * @param {{ send: (event: string, data: unknown) => void, signal?: AbortSignal }} io
+ */
+async function runAnalyticsChatStream(input, io) {
+  const send = io.send;
+  const signal = io.signal;
+  const message = String(input.message || '').trim();
+  const start_date = String(input.start_date || '').trim();
+  const end_date = String(input.end_date || '').trim();
+  const locale = resolveResponseLocale(input.locale, message);
+  if (!message) throw new Error('Message is required');
+  if (!start_date || !end_date) throw new Error('start_date and end_date are required');
+
+  throwIfAborted(signal);
+  send('status', { phase: 'preparing' });
+
+  if (isConversationalMessage(message)) {
+    const greeting = buildGreetingResponse(locale, { start: start_date, end: end_date, message });
+    send('meta', { charts: greeting.charts || [] });
+    send('delta', { mode: 'chat', summary: greeting.summary });
+    send('done', { data: greeting });
+    return;
+  }
+
+  const prev = previousPeriod(start_date, end_date);
+  const focus = detectFocus(message);
+  const params = { start_date, end_date };
+  const prevParams = { start_date: prev.start, end_date: prev.end };
+
+  const { dailyRes, dailyPrevRes, branchRes, menuRes, categoryRes, paymentRes } =
+    await fetchAnalyticsChatData(focus, params, prevParams);
+
+  throwIfAborted(signal);
+
+  const dailyCurrent = dailyRes?.data?.data || [];
+  const dailyPrevious = dailyPrevRes?.data?.data || [];
+  const branchRows = branchRes?.data?.data || [];
+  const menuRows = menuRes?.data?.data || [];
+  const categoryRows = categoryRes?.data?.data || [];
+  const paymentRows = paymentRes?.data?.data || [];
+  const menuTop = topMenuByNet(menuRows, 10);
+
+  const { charts, cur, prev: prevTotals, pctChange } = buildCharts(focus, {
+    dailyCurrent,
+    dailyPrevious,
+    branchRows,
+    menuTop,
+    categoryRows,
+    paymentRows,
+    locale,
+  });
+
+  send('meta', { charts, focus, mode: 'chat' });
+  send('status', { phase: 'generating' });
+  send('delta', {
+    mode: 'chat',
+    summary: buildInstantPreviewLine({
+      cur,
+      pctChange,
+      period: { start: start_date, end: end_date },
+      locale,
+    }),
+  });
+
+  const context = {
+    period: { start: start_date, end: end_date },
+    previous_period: prev,
+    focus,
+    totals_current: cur,
+    totals_previous: prevTotals,
+    net_sales_pct_change: pctChange,
+    top_menu: menuTop,
+    branches: (branchRows || []).slice(0, 12).map((b) => ({
+      name: b.branch_name,
+      total_sales: Number(b.total_sales) || 0,
+      orders: Number(b.order_count) || 0,
+    })),
+    categories: (categoryRows || []).slice(0, 10),
+    payments: (paymentRows || []).slice(0, 8),
+  };
+
+  const fallbackPayload = {
+    cur,
+    prev: prevTotals,
+    pctChange,
+    menuTop,
+    branchRows,
+    period: { start: start_date, end: end_date },
+    locale,
+  };
+
+  const streamPrompt = buildAnalyticsPlainStreamPrompt(locale, message, context);
+  let narrative;
+
+  try {
+    const summary = await vertexGeneratePlainStream(
+      streamPrompt,
+      (accumulated) => {
+        send('delta', { mode: 'chat', summary: accumulated.trim() });
+      },
+      signal,
+    );
+    const fallback = fallbackNarrative(fallbackPayload);
+    narrative = {
+      summary,
+      bullets: fallback.bullets,
+      suggestedReplies: fallback.suggestedReplies,
+    };
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    console.warn('[AnalyticsAI] Vertex plain stream failed, using fallback:', err?.message || err);
+    narrative = fallbackNarrative(fallbackPayload);
+    send('delta', { mode: 'chat', summary: narrative.summary });
+  }
+
+  if (!narrative.summary || !narrativeMatchesLocale(narrative, locale)) {
+    narrative = fallbackNarrative(fallbackPayload);
+    send('delta', { mode: 'chat', summary: narrative.summary });
+  }
+
+  send('done', {
+    data: {
+      ...narrative,
+      charts,
+      contextMeta: { focus, period: { start: start_date, end: end_date }, locale },
+    },
+  });
+}
+
+/**
+ * @param {{ start_date: string, end_date: string, locale?: string }} input
+ * @param {{ send: (event: string, data: unknown) => void, signal?: AbortSignal }} io
+ */
+async function runManagementBriefStream(input, io) {
+  const send = io.send;
+  const signal = io.signal;
+  const start_date = String(input.start_date || '').trim();
+  const end_date = String(input.end_date || '').trim();
+  const locale = resolveResponseLocale(input.locale, '');
+  if (!start_date || !end_date) throw new Error('start_date and end_date are required');
+
+  throwIfAborted(signal);
+  send('status', { phase: 'preparing' });
+
+  const ctx = await buildManagementContext(start_date, end_date);
+  const charts = buildManagementBriefCharts(ctx, locale);
+
+  throwIfAborted(signal);
+  send('meta', { charts, mode: 'management_brief' });
+  send('status', { phase: 'generating' });
+  send('delta', {
+    mode: 'management_brief',
+    executive_summary: buildBriefInstantLine(ctx, locale),
+  });
+
+  const prompt = buildManagementBriefPrompt(locale, ctx);
+  const lastDeltaRef = { value: '' };
+  let brief;
+
+  try {
+    const raw = await vertexGenerateJsonStream(
+      prompt,
+      {
+        schemaBuilder: buildManagementBriefResponseSchema,
+        maxOutputTokens: 4096,
+      },
+      (accumulated) => {
+        sendStreamDeltaIfChanged(send, 'management_brief', accumulated, lastDeltaRef);
+      },
+      signal,
+    );
+    const parsed = parseModelJson(raw);
+    brief = parseBriefFromModel(parsed);
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    console.warn('[AnalyticsAI] Management brief stream failed:', err?.message || err);
+    brief = fallbackManagementBrief(ctx, locale);
+    send('delta', {
+      mode: 'management_brief',
+      executive_summary: brief.executive_summary,
+      sales_analysis: brief.sales_analysis,
+      expense_analysis: brief.expense_analysis,
+    });
+  }
+
+  if (!brief.executive_summary || !briefMatchesLocale(brief, locale)) {
+    brief = fallbackManagementBrief(ctx, locale);
+    send('delta', {
+      mode: 'management_brief',
+      executive_summary: brief.executive_summary,
+      sales_analysis: brief.sales_analysis,
+      expense_analysis: brief.expense_analysis,
+    });
+  }
+
+  const summary = [brief.executive_summary, brief.sales_analysis, brief.expense_analysis]
+    .filter(Boolean)
+    .join('\n\n');
+
+  send('done', {
+    data: {
+      mode: 'management_brief',
+      executive_summary: brief.executive_summary,
+      sales_analysis: brief.sales_analysis,
+      expense_analysis: brief.expense_analysis,
+      recommendations: brief.recommendations,
+      suggestedReplies: brief.suggestedReplies,
+      summary,
+      bullets: brief.recommendations,
+      charts,
+      contextMeta: {
+        mode: 'management_brief',
+        period: { start: start_date, end: end_date },
+        locale,
+        kpi: ctx.kpi,
+        comparisons: ctx.comparisons,
+      },
+    },
+  });
+}
+
+module.exports = {
+  runAnalyticsChat,
+  runManagementBrief,
+  runAnalyticsChatStream,
+  runManagementBriefStream,
+};

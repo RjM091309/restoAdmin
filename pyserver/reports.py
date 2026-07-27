@@ -1059,8 +1059,9 @@ def receipt_report(
 ) -> dict:
     """
     Receipt-level list based on orders + billing.
+    Excludes cancelled/void rows: order STATUS and billing STATUS must not be -1 or -2.
     type filter:
-      - sale: STATUS in (1,2) and REFUND IS NULL/0
+      - sale: REFUND IS NULL/0
       - refund: REFUND > 0
     """
     try:
@@ -1111,6 +1112,7 @@ def receipt_report(
             FROM orders o
             INNER JOIN billing b ON {_BILLING_JOIN}
             WHERE 1=1
+              AND o.STATUS NOT IN (-1, -2)
             {date_filter}
             {branch_filter}
             {type_filter}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import {
@@ -20,6 +20,7 @@ import {
   Send,
   Sparkles,
   AlertCircle,
+  MessageSquarePlus,
   User,
   TrendingUp,
   TrendingDown,
@@ -29,20 +30,21 @@ import {
 import { type Branch } from '../partials/Header';
 import { useUser } from '../../context/UserContext';
 import {
-  postAnalyticsAiChat,
-  postManagementBrief,
+  streamAnalyticsAiChat,
+  streamManagementBrief,
   type AnalyticsAiChart,
   type AnalyticsAiChatHistoryItem,
   type AnalyticsAiChatResponse,
+  type AnalyticsAiStreamDelta,
 } from '../../services/analyticsAiService';
 import { fetchSalesDashboardBundleApi, type ApiDailySalesItem } from '../../services/analyticsService';
+import { cn } from '../../lib/utils';
 import {
   buildAnalyticsAiSessionKey,
   clearAnalyticsAiSession,
   loadAnalyticsAiSession,
   saveAnalyticsAiSession,
 } from '../../lib/analyticsAiSession';
-import { cn } from '../../lib/utils';
 
 type AnalyticsAiAssistantProps = {
   selectedBranch: Branch | null;
@@ -55,7 +57,65 @@ type ChatMessage = {
   text: string;
   response?: AnalyticsAiChatResponse;
   error?: string;
+  /** Typewriter reveal for freshly received assistant replies (restored sessions) */
+  animateReveal?: boolean;
+  /** Cursor-style thinking state before answer text appears */
+  isThinking?: boolean;
+  /** True while SSE tokens are arriving from the server */
+  isStreaming?: boolean;
 };
+
+function emptyAssistantResponse(mode?: AnalyticsAiChatResponse['mode']): AnalyticsAiChatResponse {
+  return {
+    mode,
+    summary: '',
+    bullets: [],
+    suggestedReplies: [],
+    charts: [],
+  };
+}
+
+function deltaHasVisibleText(delta: AnalyticsAiStreamDelta) {
+  if (delta.mode === 'chat') return Boolean(delta.summary?.trim());
+  return Boolean(
+    delta.executive_summary?.trim() ||
+      delta.sales_analysis?.trim() ||
+      delta.expense_analysis?.trim(),
+  );
+}
+
+function assistantHasVisibleContent(msg: ChatMessage) {
+  if (msg.role !== 'assistant' || msg.error || !msg.response) return false;
+  const r = msg.response;
+  if (r.summary?.trim()) return true;
+  if (r.executive_summary?.trim()) return true;
+  if (r.sales_analysis?.trim()) return true;
+  if (r.expense_analysis?.trim()) return true;
+  return false;
+}
+
+function applyStreamDelta(
+  response: AnalyticsAiChatResponse,
+  delta: AnalyticsAiStreamDelta,
+): AnalyticsAiChatResponse {
+  if (delta.mode === 'management_brief') {
+    return {
+      ...response,
+      mode: 'management_brief',
+      executive_summary: delta.executive_summary ?? response.executive_summary,
+      sales_analysis: delta.sales_analysis ?? response.sales_analysis,
+      expense_analysis: delta.expense_analysis ?? response.expense_analysis,
+      summary: [delta.executive_summary, delta.sales_analysis, delta.expense_analysis]
+        .filter(Boolean)
+        .join('\n\n'),
+    };
+  }
+  return {
+    ...response,
+    mode: 'chat',
+    summary: delta.summary ?? response.summary,
+  };
+}
 
 const BAR_PALETTE = ['#6366f1', '#818cf8', '#10b981', '#34d399', '#f59e0b', '#fbbf24', '#ec4899', '#8b5cf6'];
 const LINE_COLOR = '#6366f1';
@@ -174,6 +234,103 @@ function logAiError(err: unknown) {
   if (err instanceof Error) {
     console.error('[AnalyticsAiAssistant]', err);
   }
+}
+
+function revealStepSize(length: number) {
+  if (length > 1500) return 14;
+  if (length > 600) return 7;
+  if (length > 200) return 3;
+  return 1;
+}
+
+function useSequentialReveal(
+  parts: string[],
+  enabled: boolean,
+  options?: { onProgress?: () => void; onComplete?: () => void },
+) {
+  const partsKey = parts.join('\x1e');
+  const [revealed, setRevealed] = useState<string[]>(() => (enabled ? parts.map(() => '') : parts));
+  const [done, setDone] = useState(!enabled);
+  const onProgressRef = useRef(options?.onProgress);
+  const onCompleteRef = useRef(options?.onComplete);
+  onProgressRef.current = options?.onProgress;
+  onCompleteRef.current = options?.onComplete;
+
+  useEffect(() => {
+    if (!enabled) {
+      setRevealed(parts);
+      setDone(true);
+      return;
+    }
+
+    setRevealed(parts.map(() => ''));
+    setDone(false);
+
+    let cancelled = false;
+    let partIndex = 0;
+    let charIndex = 0;
+    let timer = 0;
+
+    const tick = () => {
+      if (cancelled) return;
+
+      if (partIndex >= parts.length) {
+        setDone(true);
+        onCompleteRef.current?.();
+        return;
+      }
+
+      const full = parts[partIndex] || '';
+      const step = revealStepSize(full.length);
+      charIndex = Math.min(charIndex + step, full.length);
+
+      setRevealed((prev) => {
+        const next = [...prev];
+        next[partIndex] = full.slice(0, charIndex);
+        return next;
+      });
+      onProgressRef.current?.();
+
+      if (charIndex >= full.length) {
+        partIndex += 1;
+        charIndex = 0;
+      }
+
+      timer = window.setTimeout(tick, charIndex === 0 && partIndex > 0 ? 28 : 16);
+    };
+
+    timer = window.setTimeout(tick, 48);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [enabled, partsKey]);
+
+  return { revealed, done };
+}
+
+function useAutoGrowTextarea(
+  ref: React.RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  minRows = 2,
+  maxRows = 6,
+) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    el.style.height = '0px';
+    const style = getComputedStyle(el);
+    const lineHeight = parseFloat(style.lineHeight) || 20;
+    const paddingY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    const minHeight = lineHeight * minRows + paddingY + borderY;
+    const maxHeight = lineHeight * maxRows + paddingY + borderY;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [ref, value, minRows, maxRows]);
 }
 
 function useChartSize(minHeight = 280) {
@@ -370,12 +527,58 @@ function AiChartBlock({
   );
 }
 
-function BriefSection({ title, body }: { title: string; body: string }) {
-  if (!body) return null;
+function StreamingCursor({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <motion.span
+      className="inline-block w-0.5 h-[1em] ml-0.5 align-middle bg-brand-primary/70"
+      animate={{ opacity: [1, 0.2, 1] }}
+      transition={{ duration: 0.85, repeat: Infinity }}
+      aria-hidden
+    />
+  );
+}
+
+function ThinkingBlock() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2.5 py-1" role="status" aria-live="polite">
+      <motion.div
+        animate={{ rotate: [0, 8, -8, 0] }}
+        transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+        className="shrink-0"
+      >
+        <Sparkles size={15} className="text-brand-primary/80" />
+      </motion.div>
+      <motion.span
+        className="text-sm font-medium text-brand-muted"
+        animate={{ opacity: [0.4, 1, 0.4] }}
+        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+      >
+        {t('analytics_ai.thinking_label')}
+      </motion.span>
+      <TypingIndicator />
+    </div>
+  );
+}
+
+function BriefSection({
+  title,
+  body,
+  showCursor = false,
+}: {
+  title: string;
+  body: string;
+  showCursor?: boolean;
+}) {
+  if (!body && !showCursor) return null;
   return (
     <div className="space-y-1">
       <p className="text-[11px] font-bold uppercase tracking-wide text-brand-primary/80">{title}</p>
-      <p className="text-[13px] leading-relaxed text-brand-text">{formatNumbersInText(body)}</p>
+      <p className="text-[13px] leading-relaxed text-brand-text">
+        {formatNumbersInText(body)}
+        <StreamingCursor active={showCursor} />
+      </p>
     </div>
   );
 }
@@ -385,49 +588,153 @@ function AssistantReplyBody({
   loading,
   onSuggest,
   messageId,
+  animateReveal = false,
+  isLiveStreaming = false,
+  onRevealProgress,
+  onRevealComplete,
 }: {
   response: AnalyticsAiChatResponse;
   loading: boolean;
   onSuggest: (text: string) => void;
   messageId: string;
+  animateReveal?: boolean;
+  isLiveStreaming?: boolean;
+  onRevealProgress?: () => void;
+  onRevealComplete?: () => void;
 }) {
   const { t } = useTranslation();
   const charts = response.charts?.filter((c) => c.labels?.length > 0) ?? [];
   const hasCharts = charts.length > 0;
   const isBrief = response.mode === 'management_brief';
+  const recommendations = response.recommendations ?? [];
+  const bullets = response.bullets ?? [];
+  const useTypewriter = animateReveal && !isLiveStreaming;
+
+  const revealParts = useMemo(() => {
+    if (isBrief) {
+      return [
+        response.executive_summary || '',
+        response.sales_analysis || '',
+        response.expense_analysis || '',
+        ...recommendations,
+      ];
+    }
+    return [response.summary || '', ...bullets];
+  }, [
+    bullets,
+    isBrief,
+    recommendations,
+    response.executive_summary,
+    response.expense_analysis,
+    response.sales_analysis,
+    response.summary,
+  ]);
+
+  const { revealed, done } = useSequentialReveal(revealParts, useTypewriter, {
+    onProgress: onRevealProgress,
+    onComplete: onRevealComplete,
+  });
+
+  useEffect(() => {
+    if (isLiveStreaming) onRevealProgress?.();
+  }, [
+    isLiveStreaming,
+    onRevealProgress,
+    response.summary,
+    response.executive_summary,
+    response.sales_analysis,
+    response.expense_analysis,
+  ]);
+
+  const display = useTypewriter
+    ? revealed
+    : isBrief
+      ? [
+          response.executive_summary || '',
+          response.sales_analysis || '',
+          response.expense_analysis || '',
+          ...recommendations,
+        ]
+      : [response.summary || '', ...bullets];
+
+  const showChartsNow = hasCharts && !isLiveStreaming && (!useTypewriter || done);
+  const showReplyExtras = !isLiveStreaming && (!useTypewriter || done);
+  const streaming = isLiveStreaming || (useTypewriter && !done);
+  const activePartIndex = useTypewriter
+    ? revealed.findIndex((part, i) => part.length < (revealParts[i]?.length || 0))
+    : isLiveStreaming
+      ? (() => {
+          for (let i = display.length - 1; i >= 0; i -= 1) {
+            if (display[i]) return i;
+          }
+          return 0;
+        })()
+      : -1;
+  const cursorAtIndex = activePartIndex >= 0 ? activePartIndex : display.length - 1;
 
   const textColumn = isBrief ? (
     <div className="space-y-4 min-w-0">
-      <BriefSection title={t('analytics_ai.section_executive')} body={response.executive_summary || ''} />
-      <BriefSection title={t('analytics_ai.section_sales')} body={response.sales_analysis || ''} />
-      <BriefSection title={t('analytics_ai.section_expenses')} body={response.expense_analysis || ''} />
-      {(response.recommendations?.length ?? 0) > 0 && (
+      <BriefSection
+        title={t('analytics_ai.section_executive')}
+        body={display[0] || ''}
+        showCursor={streaming && cursorAtIndex === 0}
+      />
+      <BriefSection
+        title={t('analytics_ai.section_sales')}
+        body={display[1] || ''}
+        showCursor={streaming && cursorAtIndex === 1}
+      />
+      <BriefSection
+        title={t('analytics_ai.section_expenses')}
+        body={display[2] || ''}
+        showCursor={streaming && cursorAtIndex === 2}
+      />
+      {recommendations.length > 0 && (showReplyExtras || display.slice(3).some(Boolean)) && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-bold uppercase tracking-wide text-brand-primary/80">
             {t('analytics_ai.section_recommendations')}
           </p>
           <ul className="space-y-1.5">
-            {response.recommendations!.map((b, i) => (
-              <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
-                <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
-                {formatNumbersInText(b)}
-              </li>
-            ))}
+            {recommendations.map((_, i) => {
+              const text = display[3 + i];
+              if (!text) return null;
+              return (
+                <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
+                  <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
+                  <span>
+                    {formatNumbersInText(text)}
+                    <StreamingCursor active={streaming && cursorAtIndex === 3 + i} />
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
     </div>
   ) : (
     <div className="space-y-3 min-w-0">
-      <p className="font-medium leading-relaxed text-brand-text">{formatNumbersInText(response.summary)}</p>
-      {response.bullets?.length > 0 && (
+      {(isLiveStreaming || display[0]) ? (
+        <p className="font-medium leading-relaxed text-brand-text">
+          {formatNumbersInText(display[0])}
+          <StreamingCursor active={isLiveStreaming || (streaming && cursorAtIndex === 0)} />
+        </p>
+      ) : null}
+      {bullets.length > 0 && (showReplyExtras || display.slice(1).some(Boolean)) && (
         <ul className="space-y-1.5">
-          {response.bullets.map((b, i) => (
-            <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
-              <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
-              {formatNumbersInText(b)}
-            </li>
-          ))}
+          {bullets.map((_, i) => {
+            const text = display[i + 1];
+            if (!text) return null;
+            return (
+              <li key={i} className="flex gap-2 text-brand-muted text-[13px] leading-relaxed">
+                <span className="text-brand-primary mt-1.5 w-1.5 h-1.5 rounded-full bg-brand-primary shrink-0" />
+                <span>
+                  {formatNumbersInText(text)}
+                  <StreamingCursor active={streaming && cursorAtIndex === i + 1} />
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -437,12 +744,13 @@ function AssistantReplyBody({
     <div className="space-y-3">
       <div
         className={cn(
-          hasCharts && 'grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,42%)] gap-4 md:gap-5 items-start',
+          showChartsNow &&
+            'grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,42%)] gap-4 md:gap-5 items-start',
         )}
       >
         {textColumn}
 
-        {hasCharts && (
+        {showChartsNow && (
           <motion.div
             initial={{ opacity: 0, x: 28, scale: 0.98 }}
             animate={{ opacity: 1, x: 0, scale: 1 }}
@@ -462,7 +770,7 @@ function AssistantReplyBody({
         )}
       </div>
 
-      {response.suggestedReplies?.length > 0 && (
+      {showReplyExtras && response.suggestedReplies?.length > 0 && (
         <div className="flex flex-wrap gap-2 pt-1 border-t border-gray-100/80">
           {response.suggestedReplies.map((s) => (
             <button
@@ -605,17 +913,24 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
   const [kpis, setKpis] = useState<PeriodKpis | null>(null);
   const [kpisLoading, setKpisLoading] = useState(false);
   const [restoredHint, setRestoredHint] = useState(false);
+  const [sessionHydrated, setSessionHydrated] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingStreamMetaRef = useRef<{
+    charts?: AnalyticsAiChart[];
+    mode?: string;
+  } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const prevMessageCountRef = useRef(0);
-  const skipSaveRef = useRef(true);
+  const prevLoadingRef = useRef(false);
 
   const sessionKey = useMemo(() => {
     if (!user?.user_id || !dateRange.start || !dateRange.end) return null;
     return buildAnalyticsAiSessionKey(user.user_id, dateRange.start, dateRange.end);
   }, [user?.user_id, dateRange.start, dateRange.end]);
+
+  useAutoGrowTextarea(inputRef, input);
 
   const suggestions = useMemo(
     () => [
@@ -638,10 +953,13 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
   }, []);
 
   const clearConversation = useCallback(() => {
+    abortRef.current?.abort();
+    requestIdRef.current += 1;
+    setLoading(false);
+    pendingStreamMetaRef.current = null;
     setMessages([]);
     setRestoredHint(false);
     if (sessionKey) clearAnalyticsAiSession(sessionKey);
-    skipSaveRef.current = false;
     inputRef.current?.focus();
   }, [sessionKey]);
 
@@ -652,20 +970,25 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!sessionKey) return;
-    skipSaveRef.current = true;
-    const loaded = loadAnalyticsAiSession(sessionKey);
-    setMessages(loaded ?? []);
-    setRestoredHint(Boolean(loaded?.length));
+    if (!sessionKey) {
+      setMessages([]);
+      setRestoredHint(false);
+      setSessionHydrated(true);
+      return;
+    }
+    const stored = loadAnalyticsAiSession(sessionKey);
+    setMessages(stored ?? []);
+    setRestoredHint(Boolean(stored?.length));
+    setSessionHydrated(true);
   }, [sessionKey]);
 
   useEffect(() => {
-    if (!sessionKey || skipSaveRef.current) {
-      skipSaveRef.current = false;
-      return;
-    }
-    saveAnalyticsAiSession(sessionKey, messages);
-  }, [messages, sessionKey]);
+    if (!sessionHydrated || !sessionKey) return;
+    const persistable = messages
+      .filter((m) => !m.isStreaming)
+      .map(({ animateReveal: _animateReveal, isStreaming: _isStreaming, ...rest }) => rest);
+    saveAnalyticsAiSession(sessionKey, persistable);
+  }, [messages, sessionHydrated, sessionKey]);
 
   useEffect(() => {
     if (!dateRange.start || !dateRange.end || !isAllBranches) {
@@ -709,12 +1032,153 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
     };
   }, [dateRange.end, dateRange.start, isAllBranches]);
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const handleRevealProgress = useCallback(() => {
+    scrollToBottom('auto');
+  }, [scrollToBottom]);
+
+  const markRevealComplete = useCallback((messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, animateReveal: false } : m)),
+    );
+    requestAnimationFrame(() => scrollToBottom('smooth'));
+  }, [scrollToBottom]);
+
+  const upsertStreamingAssistant = useCallback(
+    (
+      assistantId: string,
+      updater: (current: AnalyticsAiChatResponse) => AnalyticsAiChatResponse,
+      mode?: AnalyticsAiChatResponse['mode'],
+    ) => {
+      setMessages((prev) => {
+        const existing = prev.find((m) => m.id === assistantId);
+        if (!existing) {
+          const response = updater(emptyAssistantResponse(mode));
+          return [
+            ...prev,
+            {
+              id: assistantId,
+              role: 'assistant',
+              text: response.summary || '',
+              response,
+              isThinking: false,
+              isStreaming: true,
+            },
+          ];
+        }
+        if (!existing.response) return prev;
+        const response = updater(existing.response);
+        return prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                text: response.summary || m.text,
+                response,
+                isThinking: false,
+                isStreaming: true,
+              }
+            : m,
+        );
+      });
+      requestAnimationFrame(() => scrollToBottom('auto'));
+    },
+    [scrollToBottom],
+  );
+
+  const finalizeStreamingAssistant = useCallback(
+    (assistantId: string, data: AnalyticsAiChatResponse) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                text: data.summary,
+                response: data,
+                isThinking: false,
+                isStreaming: false,
+                animateReveal: false,
+              }
+            : m,
+        ),
+      );
+      requestAnimationFrame(() => scrollToBottom('smooth'));
+    },
+    [scrollToBottom],
+  );
+
+  const startNewChat = useCallback(() => {
+    abortRef.current?.abort();
+    requestIdRef.current += 1;
+    setLoading(false);
+    pendingStreamMetaRef.current = null;
+    setMessages([]);
+    setRestoredHint(false);
+    if (sessionKey) clearAnalyticsAiSession(sessionKey);
+    inputRef.current?.focus();
+  }, [sessionKey]);
+
+  const buildStreamHandlers = useCallback(
+    (assistantId: string, requestId: number) => ({
+      onStatus: () => {
+        if (requestId !== requestIdRef.current) return;
+      },
+      onMeta: (meta: { charts?: AnalyticsAiChart[]; mode?: string }) => {
+        if (requestId !== requestIdRef.current) return;
+        pendingStreamMetaRef.current = meta;
+      },
+      onDelta: (delta: AnalyticsAiStreamDelta) => {
+        if (requestId !== requestIdRef.current) return;
+        if (!deltaHasVisibleText(delta)) return;
+        const pending = pendingStreamMetaRef.current;
+        pendingStreamMetaRef.current = null;
+        upsertStreamingAssistant(
+          assistantId,
+          (current) => {
+            const withMeta = pending
+              ? {
+                  ...current,
+                  charts: pending.charts ?? current.charts,
+                  mode:
+                    pending.mode === 'management_brief'
+                      ? ('management_brief' as const)
+                      : current.mode,
+                }
+              : current;
+            return applyStreamDelta(withMeta, delta);
+          },
+          delta.mode === 'management_brief' ? 'management_brief' : 'chat',
+        );
+      },
+      onDone: (data: AnalyticsAiChatResponse) => {
+        if (requestId !== requestIdRef.current) return;
+        pendingStreamMetaRef.current = null;
+        finalizeStreamingAssistant(assistantId, data);
+      },
+      onError: (message: string) => {
+        throw new Error(message);
+      },
+    }),
+    [finalizeStreamingAssistant, upsertStreamingAssistant],
+  );
+
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+      scrollToBottom('smooth');
     }
     prevMessageCountRef.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
+
+  useEffect(() => {
+    if (prevLoadingRef.current && !loading) {
+      requestAnimationFrame(() => scrollToBottom('smooth'));
+    }
+    prevLoadingRef.current = loading;
+  }, [loading, scrollToBottom]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -725,16 +1189,26 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
       const { controller, requestId } = beginRequest();
       const history = buildChatHistory(messages);
 
+      const assistantId = newMessageId('a');
+
       setMessages((prev) => [
         ...prev,
         { id: newMessageId('u'), role: 'user', text: trimmed },
+        {
+          id: assistantId,
+          role: 'assistant',
+          isThinking: true,
+          text: '',
+          response: emptyAssistantResponse('chat'),
+        },
       ]);
       setInput('');
       setLoading(true);
       setRestoredHint(false);
+      pendingStreamMetaRef.current = null;
 
       try {
-        const data = await postAnalyticsAiChat(
+        await streamAnalyticsAiChat(
           {
             message: trimmed,
             start_date: dateRange.start,
@@ -742,38 +1216,33 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
             locale: resolveLocale(i18n.language, trimmed),
             history,
           },
+          buildStreamHandlers(assistantId, requestId),
           controller.signal,
         );
-        if (requestId !== requestIdRef.current) return;
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: newMessageId('a'),
-            role: 'assistant',
-            text: data.summary,
-            response: data,
-          },
-        ]);
       } catch (err) {
         if (isAbortError(err) || requestId !== requestIdRef.current) return;
         logAiError(err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: newMessageId('e'),
-            role: 'assistant',
-            text: '',
-            error: t('analytics_ai.error_generic'),
-          },
-        ]);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  isThinking: false,
+                  isStreaming: false,
+                  error: t('analytics_ai.error_generic'),
+                }
+              : m,
+          ),
+        );
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false);
+          pendingStreamMetaRef.current = null;
           inputRef.current?.focus();
         }
       }
     },
-    [beginRequest, dateRange.end, dateRange.start, i18n.language, loading, messages, t],
+    [beginRequest, buildStreamHandlers, dateRange.end, dateRange.start, i18n.language, loading, messages, t],
   );
 
   const generateManagementBrief = useCallback(async () => {
@@ -786,49 +1255,54 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
 
     const { controller, requestId } = beginRequest();
 
+    const assistantId = newMessageId('a-brief');
+
     setMessages((prev) => [
       ...prev,
       { id: newMessageId('u-brief'), role: 'user', text: userLabel },
+      {
+        id: assistantId,
+        role: 'assistant',
+        isThinking: true,
+        text: '',
+        response: emptyAssistantResponse('management_brief'),
+      },
     ]);
     setLoading(true);
+    pendingStreamMetaRef.current = null;
 
     try {
-      const data = await postManagementBrief(
+      await streamManagementBrief(
         {
           start_date: dateRange.start,
           end_date: dateRange.end,
           locale,
         },
+        buildStreamHandlers(assistantId, requestId),
         controller.signal,
       );
-      if (requestId !== requestIdRef.current) return;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: newMessageId('a-brief'),
-          role: 'assistant',
-          text: data.summary,
-          response: data,
-        },
-      ]);
     } catch (err) {
       if (isAbortError(err) || requestId !== requestIdRef.current) return;
       logAiError(err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: newMessageId('e-brief'),
-          role: 'assistant',
-          text: '',
-          error: t('analytics_ai.error_generic'),
-        },
-      ]);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                isThinking: false,
+                isStreaming: false,
+                error: t('analytics_ai.error_generic'),
+              }
+            : m,
+        ),
+      );
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false);
+        pendingStreamMetaRef.current = null;
       }
     }
-  }, [beginRequest, dateRange.end, dateRange.start, i18n.language, loading, t]);
+  }, [beginRequest, buildStreamHandlers, dateRange.end, dateRange.start, i18n.language, loading, t]);
 
   if (!isAdmin) {
     return (
@@ -867,16 +1341,30 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
             </p>
           </div>
         </div>
-        <motion.button
-          type="button"
-          disabled={loading}
-          whileTap={{ scale: 0.98 }}
-          onClick={generateManagementBrief}
-          className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-primary text-white text-sm font-semibold shadow-md shadow-brand-primary/20 hover:opacity-95 disabled:opacity-50 transition-opacity"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
-          {t('analytics_ai.management_brief_btn')}
-        </motion.button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {messages.length > 0 && (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.98 }}
+              onClick={startNewChat}
+              aria-label={t('analytics_ai.new_chat_btn')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-brand-text text-sm font-semibold hover:border-brand-primary/30 hover:text-brand-primary transition-colors"
+            >
+              <MessageSquarePlus size={16} />
+              {t('analytics_ai.new_chat_btn')}
+            </motion.button>
+          )}
+          <motion.button
+            type="button"
+            disabled={loading}
+            whileTap={{ scale: 0.98 }}
+            onClick={generateManagementBrief}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-primary text-white text-sm font-semibold shadow-md shadow-brand-primary/20 hover:opacity-95 disabled:opacity-50 transition-opacity"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+            {t('analytics_ai.management_brief_btn')}
+          </motion.button>
+        </div>
       </motion.div>
 
       <KpiSnapshotCards kpis={kpis} loading={kpisLoading} />
@@ -948,9 +1436,19 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
               </motion.div>
             )}
             {messages.map((msg) => {
+              if (
+                msg.role === 'assistant' &&
+                !msg.error &&
+                !msg.isThinking &&
+                !msg.isStreaming &&
+                !assistantHasVisibleContent(msg)
+              ) {
+                return null;
+              }
               const hasInlineCharts =
                 msg.role === 'assistant' &&
                 !msg.error &&
+                !msg.isStreaming &&
                 ((msg.response?.charts?.filter((c) => c.labels?.length > 0).length ?? 0) > 0 ||
                   msg.response?.mode === 'management_brief');
               return (
@@ -992,31 +1490,31 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
                       {msg.error}
                     </p>
                   )}
-                  {msg.role === 'assistant' && !msg.error && msg.response && (
+                  {msg.role === 'assistant' && msg.isThinking && <ThinkingBlock />}
+                  {msg.role === 'assistant' &&
+                    !msg.error &&
+                    !msg.isThinking &&
+                    msg.response &&
+                    (assistantHasVisibleContent(msg) || msg.isStreaming) && (
                     <AssistantReplyBody
                       response={msg.response}
                       loading={loading}
                       onSuggest={sendMessage}
                       messageId={msg.id}
+                      animateReveal={msg.animateReveal}
+                      isLiveStreaming={msg.isStreaming}
+                      onRevealProgress={
+                        msg.animateReveal || msg.isStreaming ? handleRevealProgress : undefined
+                      }
+                      onRevealComplete={
+                        msg.animateReveal ? () => markRevealComplete(msg.id) : undefined
+                      }
                     />
                   )}
                 </div>
               </motion.div>
             );
             })}
-            {loading && (
-              <motion.div
-                role="status"
-                aria-live="polite"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="flex items-center gap-3 text-brand-muted text-sm pl-12"
-              >
-                <Loader2 size={16} className="animate-spin text-brand-primary" />
-                <span>{t('analytics_ai.thinking')}</span>
-                <TypingIndicator />
-              </motion.div>
-            )}
           </div>
 
           <div className="border-t border-gray-100 p-4 space-y-3 bg-gradient-to-t from-gray-50/80 to-white">
@@ -1038,7 +1536,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
             <div className="flex gap-2 items-end">
               <textarea
                 ref={inputRef}
-                rows={2}
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1049,7 +1547,7 @@ export const AnalyticsAiAssistant: React.FC<AnalyticsAiAssistantProps> = ({
                 }}
                 placeholder={t('analytics_ai.input_placeholder')}
                 aria-label={t('analytics_ai.input_placeholder')}
-                className="flex-1 resize-none rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-primary/25 focus:border-brand-primary/30 transition-shadow"
+                className="flex-1 resize-none rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm leading-5 min-h-[2.75rem] max-h-36 focus:outline-none focus:ring-2 focus:ring-brand-primary/25 focus:border-brand-primary/30 transition-shadow"
                 disabled={loading}
               />
               <motion.button

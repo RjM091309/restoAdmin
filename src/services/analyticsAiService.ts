@@ -44,6 +44,23 @@ export type AnalyticsAiChatRequest = {
   history?: AnalyticsAiChatHistoryItem[];
 };
 
+export type AnalyticsAiStreamDelta =
+  | { mode: 'chat'; summary?: string }
+  | {
+      mode: 'management_brief';
+      executive_summary?: string;
+      sales_analysis?: string;
+      expense_analysis?: string;
+    };
+
+export type AnalyticsAiStreamHandlers = {
+  onStatus?: (data: { phase: string }) => void;
+  onMeta?: (data: { charts?: AnalyticsAiChart[]; focus?: string; mode?: string }) => void;
+  onDelta?: (data: AnalyticsAiStreamDelta) => void;
+  onDone?: (data: AnalyticsAiChatResponse) => void;
+  onError?: (message: string) => void;
+};
+
 function getAuthHeaders(): Record<string, string> {
   try {
     const token = (localStorage.getItem('token') || '').trim();
@@ -96,4 +113,88 @@ export async function postManagementBrief(
     throw new Error(msg);
   }
   return json.data as AnalyticsAiChatResponse;
+}
+
+async function consumeAnalyticsAiSse(
+  url: string,
+  body: unknown,
+  handlers: AnalyticsAiStreamHandlers,
+  signal?: AbortSignal,
+) {
+  const { readSseResponse } = await import('../lib/sseClient');
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!res.ok && !contentType.includes('text/event-stream')) {
+    const json = await res.json().catch(() => null);
+    const msg =
+      (typeof json?.error === 'string' && json.error) ||
+      (typeof json?.message === 'string' && json.message) ||
+      `AI stream failed (${res.status})`;
+    throw new Error(msg);
+  }
+
+  let streamError: string | null = null;
+  let completed = false;
+
+  await readSseResponse(
+    res,
+    (event, data) => {
+      if (event === 'status') {
+        handlers.onStatus?.(data as { phase: string });
+        return;
+      }
+      if (event === 'meta') {
+        handlers.onMeta?.(data as { charts?: AnalyticsAiChart[]; focus?: string; mode?: string });
+        return;
+      }
+      if (event === 'delta') {
+        handlers.onDelta?.(data as AnalyticsAiStreamDelta);
+        return;
+      }
+      if (event === 'done') {
+        const payload = data as { data?: AnalyticsAiChatResponse };
+        if (payload?.data) {
+          completed = true;
+          handlers.onDone?.(payload.data);
+        }
+        return;
+      }
+      if (event === 'error') {
+        const payload = data as { message?: string };
+        streamError = payload?.message || 'Stream failed';
+        handlers.onError?.(streamError);
+      }
+    },
+    signal,
+  );
+
+  if (streamError) {
+    throw new Error(streamError);
+  }
+  if (!completed && !signal?.aborted) {
+    throw new Error('AI stream ended before completion');
+  }
+}
+
+export async function streamAnalyticsAiChat(
+  body: AnalyticsAiChatRequest,
+  handlers: AnalyticsAiStreamHandlers,
+  signal?: AbortSignal,
+) {
+  return consumeAnalyticsAiSse('/api/analytics/ai-chat/stream', body, handlers, signal);
+}
+
+export async function streamManagementBrief(
+  body: ManagementBriefRequest,
+  handlers: AnalyticsAiStreamHandlers,
+  signal?: AbortSignal,
+) {
+  return consumeAnalyticsAiSse('/api/analytics/management-brief/stream', body, handlers, signal);
 }
