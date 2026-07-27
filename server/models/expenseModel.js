@@ -649,56 +649,8 @@ class ExpenseModel {
 				COALESCE(SUM(
 					CASE
 						WHEN (
-<<<<<<< Updated upstream
-							LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rent%'
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rental%'
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%lease%'
-							OR mc.CATEGORY_NAME LIKE '%월세%'
-							OR mc.CATEGORY_NAME LIKE '%임대%'
-							OR (
-								(
-									LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%rent%'
-									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%rental%'
-									OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%lease%'
-									OR e.EXP_DESC LIKE '%월세%'
-									OR e.EXP_DESC LIKE '%임대%'
-								)
-								AND LOWER(COALESCE(e.EXP_DESC, '')) NOT LIKE '%grinder%'
-								AND LOWER(COALESCE(e.EXP_DESC, '')) NOT LIKE '%fusion%'
-								AND COALESCE(e.EXP_DESC, '') NOT LIKE '%그라인더%'
-								AND NOT (
-									COALESCE(e.EXP_DESC, '') LIKE '%대여%'
-									AND COALESCE(e.EXP_DESC, '') NOT LIKE '%임대%'
-								)
-							)
-						) THEN e.EXP_AMOUNT
-						ELSE 0
-					END
-				), 0) AS rent_amount,
-				COALESCE(SUM(
-					CASE
-						WHEN (
-							-- Labor/Benefits under any main category → salary.
-							${isLaborBenefits}
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%salary%'
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%wage%'
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%payroll%'
-							OR mc.CATEGORY_NAME LIKE '%급여%'
-							OR mc.CATEGORY_NAME LIKE '%인건%'
-							OR (
-								(oc.NAME LIKE '%급여 / Salary%' OR oc.NAME LIKE '%급여 / salary%' OR UPPER(TRIM(oc.NAME)) = 'SALARY')
-								AND oc.NAME NOT LIKE '%,%'
-=======
-							-- Exclude Labor/Benefits (counted in salary below — Blue Moon has two paths).
-							NOT (
-								LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%labor%'
-								OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%benefits%'
-								OR mc.CATEGORY_NAME LIKE '%복지%'
-								OR (
-									mc.CATEGORY_NAME LIKE '%급여%'
-									AND mc.CATEGORY_NAME LIKE '%복지%'
-								)
-							)
+							-- Exclude Labor/Benefits (counted in salary below).
+							NOT ${isLaborBenefits}
 							AND (
 								LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rent%'
 								OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%rental%'
@@ -721,12 +673,7 @@ class ExpenseModel {
 										AND COALESCE(e.EXP_DESC, '') NOT LIKE '%임대%'
 									)
 								)
->>>>>>> Stashed changes
 							)
-							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%salary%'
-							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%wage%'
-							OR LOWER(COALESCE(e.EXP_DESC, '')) LIKE '%payroll%'
-							OR e.EXP_DESC LIKE '%급여%'
 						) THEN e.EXP_AMOUNT
 						ELSE 0
 					END
@@ -734,14 +681,8 @@ class ExpenseModel {
 				COALESCE(SUM(
 					CASE
 						WHEN (
-							-- Labor/Benefits under 식자재 OR 매장운영 (Blue Moon has both) → salary.
-							LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%labor%'
-							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%benefits%'
-							OR mc.CATEGORY_NAME LIKE '%복지%'
-							OR (
-								mc.CATEGORY_NAME LIKE '%급여%'
-								AND mc.CATEGORY_NAME LIKE '%복지%'
-							)
+							-- Labor/Benefits under any main category → salary.
+							${isLaborBenefits}
 							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%salary%'
 							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%wage%'
 							OR LOWER(COALESCE(mc.CATEGORY_NAME, '')) LIKE '%payroll%'
