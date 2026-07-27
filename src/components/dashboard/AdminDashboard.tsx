@@ -3443,7 +3443,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 className="grid border-b border-brand-primary/10 last:border-b-0 hover:bg-brand-primary/5 transition-colors duration-200"
                 style={{ gridTemplateColumns: `280px repeat(${selectedCount}, minmax(180px, 1fr))` }}
               >
-                <div className="px-5 py-4 flex items-center text-sm font-semibold text-slate-700 bg-brand-primary/5 border-r border-brand-primary/10">
+                <div
+                  className={`px-5 py-4 flex items-center text-sm font-semibold bg-brand-primary/5 border-r border-brand-primary/10 ${
+                    row.id === 'totalExpenses' ? 'text-red-600' : 'text-slate-700'
+                  }`}
+                >
                   {row.label}
                 </div>
                 {row.values.map((value, index) => {
@@ -3466,7 +3470,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     row.format === 'currency_pct'
                       ? (
                           <span className="inline-flex items-center gap-2 flex-wrap">
-                            <span className={`text-sm font-semibold ${isTop ? 'text-brand-primary' : 'text-slate-700'}`}>
+                            <span
+                              className={`text-sm font-semibold ${
+                                row.id === 'totalExpenses'
+                                  ? 'text-red-600'
+                                  : isTop
+                                    ? 'text-brand-primary'
+                                    : 'text-slate-700'
+                              }`}
+                            >
                               {formatCurrency(value)}
                             </span>
                             {renderInlinePctBadge(
