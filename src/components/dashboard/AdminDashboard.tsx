@@ -2551,6 +2551,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     resultPct: number,
     /** Per-branch amounts that sum to company/selected total (share only). */
     shareParts?: Array<{ name: string; amount: number }>,
+    /** Label for numerator when kind is expense_rate (Expenses / Profit). */
+    numeratorLabel?: string,
   ) => {
     e.stopPropagation();
     if (compareBreakdownPopup?.key === key) {
@@ -2572,7 +2574,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const rangeLabel = formatRangeLabel(selected);
     const num = Number(numerator) || 0;
     const den = Number(denominator) || 0;
-    const pct = Number.isFinite(resultPct) ? resultPct : den > 0 ? (num / den) * 100 : 0;
+    // Always derive % from amounts so Rate matches the formula (ignore stale/wrong resultPct).
+    const pct = den >= 1 ? (num / den) * 100 : Number.isFinite(resultPct) ? resultPct : 0;
     const missingDenom = den < 1;
 
     const rows: CompareBreakdownPopup['rows'] = [];
@@ -2596,7 +2599,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     } else {
       rows.push(
         {
-          label: 'Expenses',
+          label: numeratorLabel || 'Expenses',
           sub: rangeLabel,
           value: formatCurrency(num),
           tone: 'neutral',
@@ -2626,7 +2629,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             `≈ ${pct.toFixed(1)}%`,
           ].join('\n')
         : [
-            `Rate = Expenses ÷ Sales × 100`,
+            `Rate = ${numeratorLabel || 'Expenses'} ÷ Sales × 100`,
             `= ${formatCurrency(num)} ÷ ${formatCurrency(den)} × 100`,
             `≈ ${pct.toFixed(1)}%`,
           ].join('\n');
@@ -2751,14 +2754,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return draft.sort((a, b) => a.rank - b.rank);
   })();
 
-  // Main Expenses: same-period window (3일 전 기준) amounts ÷ same-period sales.
-  const samePeriodSales = pickMetric(compareSamePeriodCurrent, 'sales');
-  const samePeriodExpenses = pickMetric(compareSamePeriodCurrent, 'expenses');
+  // Main Expenses: selected-period amounts ÷ that branch's total sales (매출액).
   const mainExpenseBreakdown = selectedCompareBranches.map((branch) => {
-    const map = compareSamePeriodExpenseCategoryByBranch[branch.id];
+    const map = expenseCategoryByBranch[branch.id];
     const hasMap = Boolean(map && Object.keys(map).length > 0);
-    const backendRent = Number(compareSamePeriodExpenseRentByBranch[branch.id]) || 0;
-    const backendSalary = Number(compareSamePeriodExpenseSalaryByBranch[branch.id]) || 0;
+    const backendRent = Number(expenseRentByBranch[branch.id]) || 0;
+    const backendSalary = Number(expenseSalaryByBranch[branch.id]) || 0;
 
     if (!hasMap) {
       return { food: 0, rent: backendRent, salary: backendSalary };
@@ -2786,16 +2787,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const mainFoodValues = mainExpenseBreakdown.map((b) => b.food);
   const mainRentValues = mainExpenseBreakdown.map((b) => b.rent);
   const mainSalaryValues = mainExpenseBreakdown.map((b) => b.salary);
-  // Remainder after food + rent + salary within same-period total expenses.
-  const mainOthersValues = samePeriodExpenses.map((total, i) => {
+  // Remainder after food + rent + salary within selected-period total expenses.
+  const mainOthersValues = currentPeriodExpenses.map((total, i) => {
     const remaining = total - mainFoodValues[i] - mainRentValues[i] - mainSalaryValues[i];
     return remaining > 0 ? remaining : 0;
   });
 
-  /** % of same-period sales (전월 동기 / 3일 전 window). */
+  /** % of branch total sales (매출액). */
   const withSalesShare = (): Pick<ComparisonRow, 'format' | 'compareBases'> => ({
     format: 'currency_share',
-    compareBases: samePeriodSales,
+    compareBases: currentPeriodSales,
   });
 
   // Align BI rows to comparison column order (selectedCompareBranches).
@@ -2824,7 +2825,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return (expenses / sales) * 100;
   });
 
-  // Share % beside Total Expenses; expense÷sales % beside Total Profit.
+  /** Net profit ÷ branch sales (margin %). */
+  const profitRateValues = selectedCompareBranches.map((_, i) => {
+    const sales = Number(currentPeriodSales[i]) || 0;
+    const profit = Number(currentPeriodProfit[i]) || 0;
+    if (sales < 1) return 0;
+    return (profit / sales) * 100;
+  });
+
+  // Expenses % and Profit % = share of that branch's total sales.
   const benchmarkRows: ComparisonRow[] = [
     {
       id: 'totalSales',
@@ -2838,8 +2847,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       values: currentPeriodExpenses,
       bestMode: 'min' as const,
       format: 'currency_pct',
-      compareBases: expenseOrdered.map((r) => r.sharePct),
-      pctBreakdown: 'expense_share',
+      compareBases: expenseRateValues,
+      pctBreakdown: 'expense_rate',
     },
     {
       id: 'totalRevenue',
@@ -2847,7 +2856,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       values: currentPeriodProfit,
       bestMode: 'max' as const,
       format: 'currency_pct',
-      compareBases: expenseRateValues,
+      compareBases: profitRateValues,
       pctBreakdown: 'expense_rate',
     },
   ];
@@ -3238,28 +3247,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     );
   };
 
-  /** Compact % pill shown beside Total Expenses / Total Profit amounts. */
+  /** Compact % pill beside Total Expenses / Total Profit — green if ≥ peers' avg, else yellow. */
   const renderInlinePctBadge = (
     pct: number,
     kind: 'expense_share' | 'expense_rate',
+    peers?: number[],
   ) => {
     const safe = Number.isFinite(pct) ? Math.max(0, pct) : 0;
     const isShare = kind === 'expense_share';
-    const isReview = isShare
-      ? safe >= EXPENSE_SHARE_REVIEW_PCT
-      : safe >= EXPENSE_RATE_REVIEW_PCT;
-    const isElevated = isShare
-      ? safe >= EXPENSE_SHARE_REVIEW_PCT * 0.7
-      : safe >= EXPENSE_RATE_ELEVATED_PCT;
-    const tone = isReview
-      ? 'bg-red-100 text-red-700'
-      : isElevated
-        ? isShare
+
+    let tone: string;
+    if (!isShare && peers && peers.length > 0) {
+      const valid = peers.map((n) => Number(n)).filter((n) => Number.isFinite(n));
+      const avg = valid.length > 0 ? valid.reduce((s, n) => s + n, 0) / valid.length : safe;
+      tone =
+        safe >= avg
+          ? 'bg-emerald-100 text-emerald-700'
+          : 'bg-amber-100 text-amber-700';
+    } else if (isShare) {
+      const isReview = safe >= EXPENSE_SHARE_REVIEW_PCT;
+      const isElevated = safe >= EXPENSE_SHARE_REVIEW_PCT * 0.7;
+      tone = isReview
+        ? 'bg-red-100 text-red-700'
+        : isElevated
           ? 'bg-indigo-100 text-indigo-700'
-          : 'bg-amber-100 text-amber-700'
-        : isShare
-          ? 'bg-slate-100 text-slate-700'
-          : 'bg-emerald-100 text-emerald-700';
+          : 'bg-slate-100 text-slate-700';
+    } else {
+      tone =
+        safe >= EXPENSE_RATE_REVIEW_PCT
+          ? 'bg-red-100 text-red-700'
+          : safe >= EXPENSE_RATE_ELEVATED_PCT
+            ? 'bg-amber-100 text-amber-700'
+            : 'bg-emerald-100 text-emerald-700';
+    }
+
     const title = isShare
       ? t('admin_dashboard.expense_table.share')
       : t('admin_dashboard.expense_table.of_sales');
@@ -3494,6 +3515,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                             {renderInlinePctBadge(
                               Number(prevBase) || 0,
                               row.pctBreakdown === 'expense_rate' ? 'expense_rate' : 'expense_share',
+                              row.compareBases,
                             )}
                           </span>
                         )
@@ -3561,6 +3583,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   const canBreakDownExpensePct =
                     row.format === 'expense_share' ||
                     row.format === 'expense_rate' ||
+                    row.format === 'currency_share' ||
                     (row.format === 'currency_pct' && Boolean(row.pctBreakdown));
                   const canBreakDown = canBreakDownCompare || canBreakDownExpensePct;
                   const isBreakdownOpen = compareBreakdownPopup?.key === cellKey;
@@ -3615,6 +3638,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                             onClick={(e) => {
                               if (canBreakDownExpensePct) {
                                 const branchExpenses = currentPeriodExpenses[index] ?? 0;
+                                const branchSales = Number(currentPeriodSales[index]) || 0;
+                                const isMainExpenseRow = String(row.id || '').startsWith('main-');
+
+                                // Main Expenses: category amount ÷ this branch's total sales.
+                                if (row.format === 'currency_share' || isMainExpenseRow) {
+                                  const categoryAmount = Number(value) || 0;
+                                  const salesBase = Number(prevBase) > 0 ? Number(prevBase) : branchSales;
+                                  openExpensePctBreakdown(
+                                    e,
+                                    cellKey,
+                                    branch.name,
+                                    t('admin_dashboard.expense_table.of_sales'),
+                                    'expense_rate',
+                                    categoryAmount,
+                                    salesBase,
+                                    salesBase > 0 ? (categoryAmount / salesBase) * 100 : 0,
+                                    undefined,
+                                    row.label,
+                                  );
+                                  return;
+                                }
+
                                 const pctKind =
                                   row.format === 'currency_pct'
                                     ? row.pctBreakdown!
@@ -3624,7 +3669,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                                 const resultPct =
                                   row.format === 'currency_pct'
                                     ? Number(prevBase) || 0
-                                    : value;
+                                    : Number(value) || 0;
                                 const metricLabel =
                                   pctKind === 'expense_share'
                                     ? t('admin_dashboard.expense_table.share')
@@ -3645,15 +3690,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                                     })),
                                   );
                                 } else {
+                                  const isProfitRow = row.id === 'totalRevenue';
+                                  const numerator = isProfitRow
+                                    ? Number(currentPeriodProfit[index]) || 0
+                                    : branchExpenses;
                                   openExpensePctBreakdown(
                                     e,
                                     cellKey,
                                     branch.name,
                                     metricLabel,
                                     'expense_rate',
-                                    branchExpenses,
-                                    currentPeriodSales[index] ?? 0,
-                                    resultPct,
+                                    numerator,
+                                    branchSales,
+                                    branchSales > 0 ? (numerator / branchSales) * 100 : 0,
+                                    undefined,
+                                    isProfitRow
+                                      ? COMPARE_METRIC_LABELS.totalProfit
+                                      : COMPARE_METRIC_LABELS.totalExpenses,
                                   );
                                 }
                                 return;
