@@ -113,7 +113,7 @@ const getMtdVsFullPreviousMonth = (end: string): { current: DateRange; previous:
 const monthLabel = (ym: string): string => {
   const [y, m] = ym.split('-').map(Number);
   if (!y || !m) return ym;
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' });
 };
 
 const money = (n: number): string =>
@@ -167,6 +167,7 @@ function useMenuItemAnalytics(
   const [error, setError] = useState<string | null>(null);
   const [compareRows, setCompareRows] = useState<CompareRow[]>([]);
   const [monthly, setMonthly] = useState<Array<{ label: string; amount: number; qty: number }>>([]);
+  const [trendYear, setTrendYear] = useState<string>('');
 
   useEffect(() => {
     if (!active || !target) return;
@@ -236,8 +237,10 @@ function useMenuItemAnalytics(
         ]);
 
         const monthRows: Array<{ label: string; amount: number; qty: number }> = [];
+        const years = new Set<number>();
         for (let i = 5; i >= 0; i -= 1) {
           const start = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1);
+          years.add(start.getFullYear());
           const isCurrent =
             start.getFullYear() === endDate.getFullYear() && start.getMonth() === endDate.getMonth();
           const end = isCurrent
@@ -254,6 +257,10 @@ function useMenuItemAnalytics(
             qty: totals.qty,
           });
         }
+        const yearList = [...years].sort((a, b) => a - b);
+        setTrendYear(
+          yearList.length <= 1 ? String(yearList[0] ?? endDate.getFullYear()) : `${yearList[0]}–${yearList[yearList.length - 1]}`,
+        );
         setMonthly(monthRows);
       } catch (err) {
         if (cancelled) return;
@@ -261,6 +268,7 @@ function useMenuItemAnalytics(
         setError(t('sales_analytics.network_error'));
         setCompareRows([]);
         setMonthly([]);
+        setTrendYear('');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -272,7 +280,7 @@ function useMenuItemAnalytics(
     };
   }, [active, target?.goods, target?.branchId, target?.branchName, dateRange.start, dateRange.end, t]);
 
-  return { loading, error, compareRows, monthly, t };
+  return { loading, error, compareRows, monthly, trendYear, t };
 }
 
 const CompareValue: React.FC<{
@@ -314,7 +322,7 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
   className = '',
   bare = false,
 }) => {
-  const { loading, error, compareRows, monthly, t } = useMenuItemAnalytics(target, dateRange, active);
+  const { loading, error, compareRows, monthly, trendYear, t } = useMenuItemAnalytics(target, dateRange, active);
 
   const emptyMonthly = monthly.every((m) => m.amount === 0 && m.qty === 0);
 
@@ -374,9 +382,11 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
             </div>
 
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                {t('sales_analytics.item_analytics_monthly_trend')}
-              </p>
+              <div className="mb-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  {t('sales_analytics.item_analytics_monthly_trend')}
+                </p>
+              </div>
               {emptyMonthly ? (
                 <div className="py-8 text-center text-sm text-slate-500">
                   {t('sales_analytics.no_data_available')}
@@ -385,11 +395,14 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {/* Qty sold — bars */}
                   <div className="rounded-xl border border-violet-100 bg-gradient-to-b from-violet-50/80 to-white p-2.5">
-                    <div className="flex items-center justify-between mb-1 px-0.5">
-                      <span className="text-[11px] font-semibold text-violet-800">
+                    <div className="grid grid-cols-3 items-center mb-1 px-0.5 gap-1">
+                      <span className="text-[11px] font-semibold text-violet-800 truncate">
                         {t('sales_analytics.item_analytics_sold_qty')}
                       </span>
-                      <span className="text-[10px] font-medium text-violet-500 tabular-nums">
+                      <span className="text-center text-xs font-bold tabular-nums text-violet-700">
+                        {trendYear || '—'}
+                      </span>
+                      <span className="text-right text-xs font-semibold text-violet-600 tabular-nums">
                         {Math.round(
                           monthly.reduce((s, m) => s + m.qty, 0) / Math.max(monthly.length, 1),
                         ).toLocaleString()}{' '}
@@ -402,7 +415,7 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
                           <CartesianGrid stroke="#ede9fe" vertical={false} strokeDasharray="3 3" />
                           <XAxis
                             dataKey="label"
-                            tick={{ fill: '#64748b', fontSize: 9 }}
+                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
                             axisLine={false}
                             tickLine={false}
                             interval={0}
@@ -439,11 +452,14 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
 
                   {/* Total sales — soft area */}
                   <div className="rounded-xl border border-emerald-100 bg-gradient-to-b from-emerald-50/80 to-white p-2.5">
-                    <div className="flex items-center justify-between mb-1 px-0.5">
-                      <span className="text-[11px] font-semibold text-emerald-800">
+                    <div className="grid grid-cols-3 items-center mb-1 px-0.5 gap-1">
+                      <span className="text-[11px] font-semibold text-emerald-800 truncate">
                         {t('sales_analytics.item_analytics_amount')}
                       </span>
-                      <span className="text-[10px] font-medium text-emerald-600 tabular-nums">
+                      <span className="text-center text-xs font-bold tabular-nums text-emerald-700">
+                        {trendYear || '—'}
+                      </span>
+                      <span className="text-right text-xs font-semibold text-emerald-600 tabular-nums">
                         {money(
                           monthly.reduce((s, m) => s + m.amount, 0) / Math.max(monthly.length, 1),
                         )}{' '}
@@ -462,7 +478,7 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
                           <CartesianGrid stroke="#d1fae5" vertical={false} strokeDasharray="3 3" />
                           <XAxis
                             dataKey="label"
-                            tick={{ fill: '#64748b', fontSize: 9 }}
+                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
                             axisLine={false}
                             tickLine={false}
                             interval={0}
