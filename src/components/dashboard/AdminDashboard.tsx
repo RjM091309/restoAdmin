@@ -3578,10 +3578,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         <span
                           className={`inline-flex items-center gap-0.5 text-[11px] font-medium ${percentColorClass}`}
                         >
-                          {sentiment === 'up' ? (
-                            <TrendingUp size={11} />
-                          ) : sentiment === 'down' ? (
-                            <TrendingDown size={11} />
+                          {/* Arrows only for 전월 동기 (same_period); 전월 대비 / 평균 대비 = % only */}
+                          {row.breakdownKind === 'same_period' ? (
+                            sentiment === 'up' ? (
+                              <TrendingUp size={11} />
+                            ) : sentiment === 'down' ? (
+                              <TrendingDown size={11} />
+                            ) : null
                           ) : null}
                           {splitDisplay.percent}
                         </span>
