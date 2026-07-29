@@ -60,7 +60,12 @@ class ExpenseController {
 	static async getAll(req, res) {
 		try {
 			const branchId = ExpenseController._resolveBranchId(req);
-			const rows = await ExpenseModel.getAll(branchId);
+			const startDate = req.query.start_date || req.query.date_from || null;
+			const endDate = req.query.end_date || req.query.date_to || null;
+			const rows = await ExpenseModel.getAll(branchId, {
+				start_date: startDate,
+				end_date: endDate,
+			});
 			return ApiResponse.success(res, rows, 'Expenses retrieved successfully');
 		} catch (error) {
 			console.error('[ExpenseController.getAll] error:', error);

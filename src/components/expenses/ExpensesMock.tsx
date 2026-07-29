@@ -597,10 +597,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           setBranchId(resolvedBranchId);
         }
 
+        const rangeStart = dateRange?.start || getCurrentManilaRange().start;
+        const rangeEnd = dateRange?.end || getCurrentManilaRange().end;
+
         const [apiOps, apiCats, apiExpenses] = await Promise.all([
           getOperationCategories(resolvedBranchId),
           getAllMasterCategories(resolvedBranchId),
-          getExpenses(resolvedBranchId),
+          getExpenses(resolvedBranchId, { startDate: rangeStart, endDate: rangeEnd }),
         ]);
         if (!isMounted) return;
 
@@ -654,7 +657,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     return () => {
       isMounted = false;
     };
-  }, [isSpecificBranch, selectedBranch?.id]);
+  }, [isSpecificBranch, selectedBranch?.id, dateRange?.start, dateRange?.end]);
 
   const selectedOperation = useMemo(() => {
     if (!selectedOperationId) return null;
@@ -716,6 +719,16 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       end: dateRange.end || fallback.end,
     };
   }, [dateRange.end, dateRange.start]);
+
+  const loadExpenseList = useCallback(
+    (bid?: string) =>
+      getExpenses(bid, {
+        startDate: effectiveDateRange.start,
+        endDate: effectiveDateRange.end,
+      }),
+    [effectiveDateRange.end, effectiveDateRange.start],
+  );
+
   const dateRangeLabel = useMemo(
     () => `${formatYmdForLabel(effectiveDateRange.start)} - ${formatYmdForLabel(effectiveDateRange.end)}`,
     [effectiveDateRange.end, effectiveDateRange.start],
@@ -838,7 +851,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setReceiptHistoryError(null);
     void (async () => {
       try {
-        const list = await getExpenses(String(branchId));
+        const list = await loadExpenseList(String(branchId));
         const scoped = list.filter((e) => String(e.branchId) === String(branchId));
         if (!cancelled) setReceiptHistoryRows(expenseRecordsToReceiptHistoryRows(scoped));
       } catch (e) {
@@ -942,7 +955,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
         // non-fatal
       }
 
-      const list = await getExpenses(branchId);
+      const list = await loadExpenseList(branchId);
       setExpenses(list.filter((e) => String(e.branchId) === String(branchId)));
       toast.success('Receipt items saved to Expenses');
       setReceiptSaveConfirmOpen(false);
@@ -1633,7 +1646,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setIsSubmitting(true);
     try {
       await updateInventoryStock(row.id, qty, branchId);
-      const list = await getExpenses(branchId);
+      const list = await loadExpenseList(branchId);
       const filtered = list.filter((e) => String(e.branchId) === branchId);
       setExpenses(filtered);
       setEditingQtyForId(null);
@@ -1824,7 +1837,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
             toast.error('Expense saved, but failed to update inventory stock.');
           }
         }
-        const list = await getExpenses(branchId);
+        const list = await loadExpenseList(branchId);
         const filtered = list.filter((e) => String(e.branchId) === branchId);
         setExpenses(filtered);
         refreshExpenseAnalyticsFromServer();
@@ -1850,13 +1863,13 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           unit: canonicalUomValue(expenseForm.unit),
           encodedDt,
         });
-        const list = await getExpenses(branchId);
+        const list = await loadExpenseList(branchId);
         const filtered = list.filter((e) => String(e.branchId) === branchId);
         setExpenses(filtered);
         if (isInventoryCategory && hasQty && Number.isFinite(qty) && qty >= 0 && newId) {
           try {
             await updateInventoryStock(String(newId), qty, branchId, true, canonicalUomValue(expenseForm.unit));
-            const refreshed = await getExpenses(branchId);
+            const refreshed = await loadExpenseList(branchId);
             setExpenses(refreshed.filter((e) => String(e.branchId) === branchId));
           } catch (error) {
             console.error('Failed to update inventory qty after creating expense:', error);
@@ -1889,7 +1902,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     setIsSubmitting(true);
     try {
       await deleteExpense(expenseToDelete.id);
-      const list = await getExpenses(branchId || undefined);
+      const list = await loadExpenseList(branchId || undefined);
       const filtered = branchId ? list.filter((e) => String(e.branchId) === branchId) : list;
       setExpenses(filtered);
       refreshExpenseAnalyticsFromServer();
@@ -1940,7 +1953,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
       setIsSubmitting(true);
       try {
         await updateInventoryStock(String(row.id), qty, branchId, true);
-        const list = await getExpenses(branchId);
+        const list = await loadExpenseList(branchId);
         setExpenses(list.filter((e) => String(e.branchId) === branchId));
         setAddingAmountForId(null);
         setAddingAmountValue('');
@@ -2006,7 +2019,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
           toast.error('Amount saved, but failed to update inventory stock.');
         }
       }
-      const list = await getExpenses(branchId);
+      const list = await loadExpenseList(branchId);
       const filtered = list.filter((e) => String(e.branchId) === branchId);
       setExpenses(filtered);
       refreshExpenseAnalyticsFromServer();

@@ -139,12 +139,30 @@ export type GetOrdersOptions = {
     endDate?: string;
     limit?: number;
     includeItemMeta?: boolean;
+    includeStats?: boolean;
+};
+
+export type OrderListStats = {
+    total: number;
+    pending: number;
+    confirmed: number;
+    settled: number;
+    cancelled: number;
+    totalRevenue: number;
 };
 
 export async function getOrders(
     branchId: string | null,
     options: GetOrdersOptions = {},
 ): Promise<OrderRecord[]> {
+    const result = await getOrdersWithMeta(branchId, { ...options, includeStats: false });
+    return result.orders;
+}
+
+export async function getOrdersWithMeta(
+    branchId: string | null,
+    options: GetOrdersOptions = {},
+): Promise<{ orders: OrderRecord[]; stats: OrderListStats | null }> {
     const params: Record<string, string> = {
         branch_id: branchId && branchId !== 'all' ? branchId : 'all',
     };
@@ -152,11 +170,21 @@ export async function getOrders(
     if (options.endDate) params.end_date = options.endDate;
     if (options.limit != null && options.limit > 0) params.limit = String(options.limit);
     if (options.includeItemMeta) params.include_item_meta = '1';
+    if (options.includeStats !== false) params.include_stats = '1';
     const response = await fetch(buildUrl('/orders/data', params), {
         credentials: 'include',
         headers: authHeaders(),
     });
-    return handleResponse<OrderRecord[]>(response);
+    const json = (await response.json()) as ApiResponse<OrderRecord[]> & {
+        meta?: { stats?: OrderListStats };
+    };
+    if (!response.ok || !json.success) {
+        throw new Error(json.error || 'Request failed');
+    }
+    return {
+        orders: Array.isArray(json.data) ? json.data : [],
+        stats: json.meta?.stats ?? null,
+    };
 }
 
 export async function getOrderById(id: string): Promise<OrderRecord | null> {

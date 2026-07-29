@@ -4,14 +4,13 @@ import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
 import { BranchPerformanceCard, type BranchPerformanceData } from './BranchPerformanceCard';
 import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import DatePicker from 'react-datepicker';
 import {
   fetchAdminDashboardBundleApi,
   fetchTopSellingApi,
   fetchExpenseCategoryBreakdownApi,
   fetchPerformanceTrendApi,
-  type ApiDailySalesItem,
   type ApiPerformanceTrendRow,
   type ApiExpenseCategoryRow,
 } from '../../services/analyticsService';
@@ -22,6 +21,7 @@ import { navigateToBranch } from '../../utils/branchNavigation';
 import {
   buildAdminDashboardCacheKey,
   hasAdminDashboardCacheData,
+  isAdminDashboardCacheFresh,
   patchAdminDashboardCache,
   readAdminDashboardCacheIncludingStale,
   type AdminDashboardCachePayload,
@@ -29,7 +29,6 @@ import {
 } from '../../utils/adminDashboardCache';
 import { waitForAdminDashboardPrefetch } from '../../utils/prefetchAdminDashboard';
 
-const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const REVENUE_DISTRIBUTION_COLORS = [
   '#3b82f6',
   '#f97316',
@@ -959,8 +958,6 @@ const readSummaryCache = (key: string): SummaryData | null => {
   }
 };
 
-/** Gross POS total per day — same basis as Sales Analytics “Total sales” KPI (sum of `total_sales`). */
-
 const formatModalMoney = (n: number) =>
   `₱${Math.trunc(Number.isFinite(n) ? n : 0).toLocaleString(undefined, {
     minimumFractionDigits: 0,
@@ -994,16 +991,6 @@ const preferNonEmptyRecord = <T,>(
   prev: Record<number, T>,
 ): Record<number, T> => (Object.keys(next).length > 0 ? next : prev);
 
-const expenseByBranchFromMap = (expenseMap: Record<number, Record<string, number>>) => {
-  const expenseByBranch: Record<number, number> = {};
-  for (const [bid, cats] of Object.entries(expenseMap)) {
-    const id = Number(bid);
-    if (!Number.isFinite(id)) continue;
-    expenseByBranch[id] = Object.values(cats).reduce((s, v) => s + (Number(v) || 0), 0);
-  }
-  return expenseByBranch;
-};
-
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange, onDateRangeChange }) => {
   const { t } = useTranslation();
   const analyticsReqIdRef = useRef(0);
@@ -1016,14 +1003,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const topProductsReqIdRef = useRef(0);
   const branchPrefetchCacheRef = useRef<Map<string, BranchDashboardPrefetchEntry>>(new Map());
   const branchPrefetchInFlightRef = useRef<Set<string>>(new Set());
-  const branchPrefetchStartedKeyRef = useRef<string | null>(null);
-  const prefetchAllBranchDashboardsRef = useRef<(() => Promise<void>) | null>(null);
   const refreshBranchDashboardChartsRef = useRef<
     ((branchId: number, period: TrendPeriod) => Promise<void>) | null
   >(null);
   const allBranchesTopProductsRef = useRef<{ name: string; sales: number }[]>([]);
   const initialMonthRange = getCurrentMonthRange();
-  const [performanceData] = useState<BranchPerformanceData[]>([]);
   const [branchCardsData, setBranchCardsData] = useState<BranchPerformanceData[]>(
     () => INITIAL_ADMIN_CACHE.cached?.branchCardsData ?? [],
   );
@@ -1063,12 +1047,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     () => INITIAL_ADMIN_CACHE.cached?.topProductsData ?? [],
   );
   const [topProductsLoading, setTopProductsLoading] = useState(false);
-  const [dailySalesForCards, setDailySalesForCards] = useState<ApiDailySalesItem[]>(
-    () => INITIAL_ADMIN_CACHE.cached?.dailySalesForCards ?? [],
-  );
-  const [expenseSummaryTotal, setExpenseSummaryTotal] = useState<number | null>(() =>
-    INITIAL_ADMIN_CACHE.cached?.summary ? INITIAL_ADMIN_CACHE.cached.summary.totalExpenses : null,
-  );
   const [analyticsLoading, setAnalyticsLoading] = useState(() => !INITIAL_ADMIN_CACHE.cached);
   const [expenseCategoryByBranch, setExpenseCategoryByBranch] = useState<
     Record<number, Record<string, number>>
@@ -1083,10 +1061,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [cashReconModalOpen, setCashReconModalOpen] = useState(false);
   const [cashReconModalBranch, setCashReconModalBranch] = useState<BranchPerformanceData | null>(null);
   const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
-  /** Recon sum for all branches in compare range (used when daily-sales is unscoped) */
-  const [comparePeriodReconAll, setComparePeriodReconAll] = useState(
-    () => INITIAL_ADMIN_CACHE.cached?.comparePeriodReconAll ?? 0,
-  );
   /** Period metric maps (sales/expenses/profit) for Branch Comparison rows */
   const [compareSamePeriodCurrent, setCompareSamePeriodCurrent] =
     useState<CompareMetricMaps>(EMPTY_COMPARE_METRICS);
@@ -1217,13 +1191,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   // Keep internal compareDateRange in sync with global dateRange from Header
   useEffect(() => {
-    if (dateRange.start || dateRange.end) {
-      setCompareDateRange({
-        start: dateRange.start,
-        end: dateRange.end,
-      });
-    }
+    if (!(dateRange.start || dateRange.end)) return;
+    const nextStart = dateRange.start;
+    const nextEnd = dateRange.end;
+    setCompareDateRange((prev) => {
+      if (prev.start === nextStart && prev.end === nextEnd) return prev;
+      return { start: nextStart, end: nextEnd };
+    });
   }, [dateRange.start, dateRange.end]);
+
+  // Header date change while comparison panel is open → show skeleton until reload finishes
+  useEffect(() => {
+    if (!isComparePanelOpen) return;
+    if (!dateRange.start || !dateRange.end) return;
+    setIsComparePanelLoading(true);
+  }, [dateRange.start, dateRange.end, isComparePanelOpen]);
 
   const getDateRangeForAnalytics = useCallback(() => {
     const currentRange = getCurrentMonthRange();
@@ -1257,6 +1239,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   useEffect(() => {
     const { start, end } = getDateRangeForAnalytics();
+    // Reset only when the date/branch key changes, then re-seed from durable cache.
+    branchPrefetchInFlightRef.current.clear();
     const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
     if (cached?.branchChartsById) {
       seedBranchPrefetchFromChartsById(cached.branchChartsById, start, end);
@@ -1382,7 +1366,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       }
       branchPrefetchCacheRef.current.clear();
       branchPrefetchInFlightRef.current.clear();
-      branchPrefetchStartedKeyRef.current = null;
     },
     [getDateRangeForAnalytics],
   );
@@ -1453,61 +1436,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     [analyticsCacheKey, branchCardsData, expenseCategoryByBranch, getDateRangeForAnalytics, trendPeriod, writeBranchPrefetchEntry],
   );
 
-  const prefetchAllBranchDashboards = useCallback(async () => {
-    const branches = branchCardsData.filter(
-      (b) =>
-        !isExcludedFromAllBranchesView(b.name) &&
-        ((Number(b.totalSales) || 0) > 0 || (Number(b.totalExpenses) || 0) > 0),
-    );
-    if (branches.length === 0) return;
-
-    const queue = [...branches];
-    const workerCount = Math.min(3, branches.length);
-    await Promise.all(
-      Array.from({ length: workerCount }, async () => {
-        while (queue.length > 0) {
-          const branch = queue.shift();
-          if (!branch) break;
-          await prefetchBranchDashboardData(branch.id, 'monthly');
-        }
-      }),
-    );
-  }, [branchCardsData, prefetchBranchDashboardData]);
-
-  prefetchAllBranchDashboardsRef.current = prefetchAllBranchDashboards;
-
-  useEffect(() => {
-    branchPrefetchCacheRef.current.clear();
-    branchPrefetchInFlightRef.current.clear();
-    branchPrefetchStartedKeyRef.current = null;
-  }, [analyticsCacheKey]);
-
-  // Warm branch chart cache in background after cards load — instant click when cache hit.
-  useEffect(() => {
-    if (branchCardsData.length === 0) return;
-    if (branchPrefetchStartedKeyRef.current === analyticsCacheKey) return;
-
-    const { start, end } = getDateRangeForAnalytics();
-    const activeBranches = branchCardsData.filter(
-      (b) =>
-        !isExcludedFromAllBranchesView(b.name) &&
-        ((Number(b.totalSales) || 0) > 0 || (Number(b.totalExpenses) || 0) > 0),
-    );
-    const allCached =
-      activeBranches.length > 0 &&
-      activeBranches.every((b) => {
-        const key = buildBranchPrefetchKey(b.id, start, end);
-        return branchPrefetchCacheRef.current.get(key)?.trendByPeriod.monthly !== undefined;
-      });
-
-    branchPrefetchStartedKeyRef.current = analyticsCacheKey;
-    if (allCached) return;
-
-    const timer = window.setTimeout(() => {
-      void prefetchAllBranchDashboardsRef.current?.();
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [analyticsCacheKey, branchCardsData, getDateRangeForAnalytics]);
+  // Hover-only branch chart warm — do not fan out N× Py calls after every admin load.
+  // Prefetch cache is cleared/reseeded in the analyticsCacheKey effect above.
 
   const applyAdminBundlePayload = useCallback(
     (
@@ -1516,11 +1446,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         branchCardsData: BranchPerformanceData[];
         branchRevenueDistribution: { name: string; value: number }[];
         topProductsData: { name: string; sales: number }[];
-        dailySalesForCards: ApiDailySalesItem[];
         expenseCategoryByBranch: Record<number, Record<string, number>>;
         expenseRentByBranch?: Record<number, number>;
         expenseSalaryByBranch?: Record<number, number>;
-        comparePeriodReconAll: number;
       },
       options: { background?: boolean } = {},
     ) => {
@@ -1540,7 +1468,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         if (!activeBranchIdRef.current) {
           setTopProductsData((prev) => preferNonEmptyArray(payload.topProductsData, prev));
         }
-        setDailySalesForCards((prev) => preferNonEmptyArray(payload.dailySalesForCards, prev));
         setExpenseCategoryByBranch((prev) =>
           preferNonEmptyRecord(payload.expenseCategoryByBranch, prev),
         );
@@ -1563,26 +1490,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         if (!activeBranchIdRef.current) {
           setTopProductsData(payload.topProductsData);
         }
-        setDailySalesForCards(payload.dailySalesForCards);
         setExpenseCategoryByBranch(payload.expenseCategoryByBranch);
         setExpenseRentByBranch(payload.expenseRentByBranch || {});
         setExpenseSalaryByBranch(payload.expenseSalaryByBranch || {});
         setSummaryData(summary);
       }
 
-      setComparePeriodReconAll(payload.comparePeriodReconAll);
-      setExpenseSummaryTotal(summary.totalExpenses);
-
       patchAdminDashboardCache(analyticsCacheKey, {
         summary,
         branchCardsData: payload.branchCardsData,
         branchRevenueDistribution: payload.branchRevenueDistribution,
         topProductsData: payload.topProductsData,
-        dailySalesForCards: payload.dailySalesForCards,
         expenseCategoryByBranch: payload.expenseCategoryByBranch,
         expenseRentByBranch: payload.expenseRentByBranch,
         expenseSalaryByBranch: payload.expenseSalaryByBranch,
-        comparePeriodReconAll: payload.comparePeriodReconAll,
       });
     },
     [analyticsCacheKey],
@@ -1598,7 +1519,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
     if (cached.summary && !branchFocused) {
       setSummaryData(cached.summary);
-      setExpenseSummaryTotal(cached.summary.totalExpenses);
     }
     const cachedTrend = cached.trendByPeriod?.[trendPeriod];
     if (!branchFocused && cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
@@ -1610,11 +1530,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         branchCardsData: cached.branchCardsData,
         branchRevenueDistribution: cached.branchRevenueDistribution,
         topProductsData: cached.topProductsData,
-        dailySalesForCards: cached.dailySalesForCards,
         expenseCategoryByBranch: cached.expenseCategoryByBranch,
         expenseRentByBranch: cached.expenseRentByBranch,
         expenseSalaryByBranch: cached.expenseSalaryByBranch,
-        comparePeriodReconAll: cached.comparePeriodReconAll,
       },
       { background: true },
     );
@@ -1802,11 +1720,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             branchCardsData: bundle.branchCardsData,
             branchRevenueDistribution: bundle.branchRevenueDistribution,
             topProductsData: bundle.topProductsData,
-            dailySalesForCards: bundle.dailySalesForCards,
             expenseCategoryByBranch: bundle.expenseCategoryByBranch,
             expenseRentByBranch: bundle.expenseRentByBranch,
             expenseSalaryByBranch: bundle.expenseSalaryByBranch,
-            comparePeriodReconAll: bundle.comparePeriodReconAll,
           },
           { background },
         );
@@ -1894,12 +1810,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 branchCardsData: branchCards,
                 branchRevenueDistribution: bundle.branchRevenueDistribution,
                 topProductsData: topProducts,
-                dailySalesForCards: bundle.dailySalesForCards,
-                expenseCategoryByBranch: expenseMap,
+                    expenseCategoryByBranch: expenseMap,
                 expenseRentByBranch: bundle.expenseRentByBranch,
                 expenseSalaryByBranch: bundle.expenseSalaryByBranch,
-                comparePeriodReconAll: bundle.comparePeriodReconAll,
-              },
+                  },
               { background },
             );
           } catch (error) {
@@ -1937,7 +1851,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(cached)) {
         hydrateFromCache(cached);
-        void loadAdminBundle(true);
+        // Skip background refresh when cache is still fresh (warm/prefetch/recent visit).
+        if (!isAdminDashboardCacheFresh(analyticsCacheKey)) {
+          void loadAdminBundle(true);
+        }
         return;
       }
 
@@ -1947,7 +1864,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const afterPrefetch = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(afterPrefetch)) {
         hydrateFromCache(afterPrefetch);
-        void loadAdminBundle(true);
+        if (!isAdminDashboardCacheFresh(analyticsCacheKey)) {
+          void loadAdminBundle(true);
+        }
         return;
       }
 
@@ -2003,7 +1922,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     if (cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
       setMonthlyData(cachedTrend);
       setTrendLoading(false);
-      void loadTrend(true);
+      // Monthly trend already comes from the admin bundle — avoid a redundant Py round-trip.
+      if (trendPeriod !== 'monthly' || !isAdminDashboardCacheFresh(analyticsCacheKey)) {
+        void loadTrend(true);
+      }
       return;
     }
     void loadTrend(true);
@@ -2030,7 +1952,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         setTopProductsData(allBranchesTopProductsRef.current);
       }
       setTopProductsLoading(false);
-      void loadTrend(prev != null);
+      if (prev != null) {
+        const period = trendPeriodRef.current;
+        const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
+        const cachedTrend = cached?.trendByPeriod?.[period];
+        if (cachedTrend?.length && hasNonZeroTrendRows(cachedTrend)) {
+          setMonthlyData(cachedTrend);
+          setTrendLoading(false);
+          if (period !== 'monthly' || !isAdminDashboardCacheFresh(analyticsCacheKey)) {
+            void loadTrend(true);
+          }
+        } else {
+          void loadTrend(true);
+        }
+      }
       return;
     }
 
@@ -2065,15 +2000,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   useEffect(() => {
     if (!isComparePanelOpen) {
       setIsCompareDateOpen(false);
-      return;
-    }
-
-    setIsComparePanelLoading(true);
-    const timer = window.setTimeout(() => {
       setIsComparePanelLoading(false);
-    }, 500);
-
-    return () => window.clearTimeout(timer);
+    }
   }, [isComparePanelOpen]);
 
   const handleBranchCompareToggle = (branchId: number) => {
@@ -2109,7 +2037,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     setActiveBranchId(branch.id);
   };
 
-  const sourceForCompare = branchCardsData.length > 0 ? branchCardsData : performanceData;
+  const sourceForCompare = branchCardsData;
   const branchesForCompareList = useMemo(
     () => sortBranchesBySidebarOrder(sourceForCompare, { exclude3core: true }),
     [sourceForCompare],
@@ -2144,7 +2072,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
 
   // Fetch same-period (3일 전 기준) + MTD vs full prior month + trailing-3-month avg.
   useEffect(() => {
-    if (!isComparePanelOpen || !canCompare) return;
+    if (!isComparePanelOpen || !canCompare) {
+      setIsComparePanelLoading(false);
+      return;
+    }
 
     const currentRange = getCurrentMonthRange();
     const start = compareDateRange.start || currentRange.start;
@@ -2152,9 +2083,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     const samePeriodWindows = getSamePeriodWindows(start, end, SAME_PERIOD_LOOKBACK_DAYS);
     const mtdVsPrevMonth = getMtdVsFullPreviousMonth(end);
     const prevThreeMonths = getPreviousThreeMonthsRange(end);
-    if (!samePeriodWindows || !mtdVsPrevMonth || !prevThreeMonths) return;
+    if (!samePeriodWindows || !mtdVsPrevMonth || !prevThreeMonths) {
+      setIsComparePanelLoading(false);
+      return;
+    }
 
     let cancelled = false;
+    setIsComparePanelLoading(true);
 
     const fetchBundle = (range: DateRange) =>
       fetchAdminDashboardBundleApi({
@@ -2162,6 +2097,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         end: range.end,
         branchId: 'all',
         includeBranchCharts: false,
+        mode: 'compare',
       });
 
     (async () => {
@@ -2228,6 +2164,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         setCompareLastMonthCurrent(EMPTY_COMPARE_METRICS);
         setCompareLastMonthPrev(EMPTY_COMPARE_METRICS);
         setCompareThreeMonthAvg(EMPTY_COMPARE_METRICS);
+      } finally {
+        if (!cancelled) setIsComparePanelLoading(false);
       }
     })();
 
@@ -2273,8 +2211,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   // Persist latest computed summary for fast subsequent loads.
   useEffect(() => {
     if (!summaryData) return;
-    const hasAuthoritativeSource = branchCardsData.length > 0 || dailySalesForCards.length > 0;
-    if (!hasAuthoritativeSource) return;
+    if (branchCardsData.length === 0) return;
     try {
       localStorage.setItem(summaryCacheKey, JSON.stringify(summaryData));
     } catch {
@@ -2283,8 +2220,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   }, [
     activeBranchId,
     branchCardsData.length,
-    dailySalesForCards.length,
-    performanceData.length,
     summaryCacheKey,
     summaryData,
   ]);
@@ -2924,6 +2859,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       start: s ? toYYYYMMDD(s) : '',
       end: e ? toYYYYMMDD(e) : '',
     };
+    // Show comparison skeleton as soon as a full range is picked so values don't
+    // flash stale numbers while prior-period bundles reload.
+    if (isComparePanelOpen && nextRange.start && nextRange.end) {
+      setIsComparePanelLoading(true);
+    }
     setCompareDateRange(nextRange);
     onDateRangeChange(nextRange);
     if (s && e) setIsCompareDateOpen(false);
@@ -4087,6 +4027,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                     type="button"
                     disabled={!canCompare}
                     onClick={() => {
+                      setIsComparePanelLoading(true);
                       setIsComparePanelOpen(true);
                     }}
                     className="min-w-0 flex-1 rounded-xl bg-brand-primary text-white font-semibold py-2.5 px-4 transition-all duration-200 hover:bg-brand-primary/90 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer"
@@ -4116,8 +4057,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             )}
             {(() => {
               const hasAnalytics = branchCardsData.length > 0;
-              const canUseLegacy = !analyticsLoading && !hasAnalytics && performanceData.length > 0;
-              const list = hasAnalytics ? branchCardsData : canUseLegacy ? performanceData : [];
+              const list = hasAnalytics ? branchCardsData : [];
               const orderedList = sortBranchesBySidebarOrder(list, { exclude3core: true });
 
               if (orderedList.length === 0 && isPageLoading) {
@@ -4224,14 +4164,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 </div>
 
                 <div className="px-6 pb-6 overflow-auto custom-scrollbar space-y-4">
-                  {isComparePanelLoading ? (
-                    <div className="mt-6 space-y-4">
+                  {isComparePanelLoading || (isComparePanelOpen && analyticsLoading) ? (
+                    <div className="mt-6 space-y-4" aria-busy="true" aria-label="Loading comparison">
                       <Skeleton className="h-12 rounded-2xl" />
-                      <div className="rounded-2xl border border-brand-primary/15 bg-white p-4 space-y-3">
-                        <Skeleton className="h-12 rounded-xl" />
-                        {Array.from({ length: 8 }).map((_, i) => (
-                          <Skeleton key={i} className="h-12 rounded-lg" />
-                        ))}
+                      <div className="rounded-2xl border border-brand-primary/15 bg-white overflow-hidden">
+                        <div className="grid gap-3 px-4 py-3 border-b border-brand-primary/10 bg-brand-primary/[0.03]"
+                          style={{ gridTemplateColumns: `minmax(9rem,1.2fr) repeat(${Math.max(selectedCompareBranches.length, 2)}, minmax(5rem,1fr))` }}
+                        >
+                          <Skeleton className="h-8 rounded-lg" />
+                          {Array.from({ length: Math.max(selectedCompareBranches.length, 2) }).map((_, i) => (
+                            <div key={i} className="flex flex-col items-center gap-2">
+                              <Skeleton className="h-10 w-10 rounded-full" />
+                              <Skeleton className="h-3 w-16 rounded" />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="p-4 space-y-3">
+                          {Array.from({ length: 10 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="grid gap-3 items-center"
+                              style={{ gridTemplateColumns: `minmax(9rem,1.2fr) repeat(${Math.max(selectedCompareBranches.length, 2)}, minmax(5rem,1fr))` }}
+                            >
+                              <Skeleton className="h-5 w-28 rounded" />
+                              {Array.from({ length: Math.max(selectedCompareBranches.length, 2) }).map((__, j) => (
+                                <Skeleton key={j} className="h-8 w-full max-w-[7rem] mx-auto rounded-lg" />
+                              ))}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ) : (

@@ -120,6 +120,35 @@ export async function getInventoryItems(branchId?: string, categoryId?: string |
 	return data.map(mapItemRecord);
 }
 
+export type InventoryCategoryMetric = {
+	categoryId: string;
+	itemCount: number;
+	totalValue: number;
+	needsAttention: number;
+};
+
+export type InventoryCategoryMetricsResponse = {
+	byCategory: InventoryCategoryMetric[];
+	totals: {
+		totalItems: number;
+		totalValue: number;
+		needsAttention: number;
+	};
+};
+
+export async function getInventoryCategoryMetrics(
+	branchId?: string,
+): Promise<InventoryCategoryMetricsResponse> {
+	const params: Record<string, string> = {
+		branch_id: branchId && branchId !== 'all' ? branchId : '',
+	};
+	const response = await fetch(buildUrl('/inventory/category-metrics', params), {
+		credentials: 'include',
+		headers: authHeaders(),
+	});
+	return handleResponse<InventoryCategoryMetricsResponse>(response);
+}
+
 export async function createInventoryItem(payload: SaveInventoryItemPayload): Promise<number> {
 	const response = await fetch(buildUrl('/inventory/items'), {
 		method: 'POST',

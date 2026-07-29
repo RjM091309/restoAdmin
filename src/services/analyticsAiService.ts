@@ -61,6 +61,23 @@ export type AnalyticsAiStreamHandlers = {
   onError?: (message: string) => void;
 };
 
+export type AnalyticsAiStreamDelta =
+  | { mode: 'chat'; summary?: string }
+  | {
+      mode: 'management_brief';
+      executive_summary?: string;
+      sales_analysis?: string;
+      expense_analysis?: string;
+    };
+
+export type AnalyticsAiStreamHandlers = {
+  onStatus?: (data: { phase: string }) => void;
+  onMeta?: (data: { charts?: AnalyticsAiChart[]; focus?: string; mode?: string }) => void;
+  onDelta?: (data: AnalyticsAiStreamDelta) => void;
+  onDone?: (data: AnalyticsAiChatResponse) => void;
+  onError?: (message: string) => void;
+};
+
 function getAuthHeaders(): Record<string, string> {
   try {
     const token = (localStorage.getItem('token') || '').trim();

@@ -139,6 +139,7 @@ async function buildSalesDashboardBundle({
 		branchSalesRes,
 		reconCurrent,
 		reconPrevious,
+		profitRowsRes,
 	] = await Promise.all([
 		fetchDailySalesSeries(start_date, end_date, branchParam),
 		fetchDailySalesSeries(prev.start, prev.end, branchParam),
@@ -155,10 +156,8 @@ async function buildSalesDashboardBundle({
 					total: 0,
 				}))
 			: Promise.resolve({ byDate: {}, total: 0 }),
+		fetchPyServerOptional('/api/analytics/top-profit-drivers', profitParams),
 	]);
-
-	// Run after core fetches — avoids PyServer overload (parallel calls were hitting 4s abort).
-	const profitRowsRes = await fetchPyServerOptional('/api/analytics/top-profit-drivers', profitParams);
 
 	const branchSalesPy = branchSalesRes?.data?.data || [];
 	let branchSalesData = Array.isArray(branchSalesPy) ? branchSalesPy : [];
@@ -195,5 +194,4 @@ async function buildSalesDashboardBundle({
 
 module.exports = {
 	buildSalesDashboardBundle,
-	previousPeriod,
 };

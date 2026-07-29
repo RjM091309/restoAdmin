@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const BranchModel = require('./branchModel');
 const MasterCategoryModel = require('./masterCategoryModel');
+const { phLocalDayRangeFilter } = require('../utils/phDateRange');
 
 class ExpenseModel {
 	static _schemaReady = false;
@@ -100,10 +101,16 @@ class ExpenseModel {
 		return ExpenseModel._schemaPromise;
 	}
 
-	static async getAll(branchId = null) {
+	static async getAll(branchId = null, options = {}) {
 		await ExpenseModel.ensureSchema();
-		// Use JOIN: get oc.NAME as EXP_CAT, mc.CATEGORY_NAME as EXP_NAME (no redundant CATEGORY_TYPE)
-		// INNER JOIN operation_category so we only include expenses with ACTIVE operation_category
+		const {
+			start_date: startDate = null,
+			end_date: endDate = null,
+			includeInventory = true,
+		} = options;
+
+		// Slim list query: categories only. Inventory stock is attached in a second
+		// branch-scoped query (avoids global inventory GROUP BY + TRIM name matching).
 		let query = `
 			SELECT
 				e.IDNo,
@@ -126,16 +133,14 @@ class ExpenseModel {
 				mc.CATEGORY_NAME AS EXP_NAME,
 				mc.ICON AS MASTER_CATEGORY_ICON,
 				mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
-				inv.IDNo AS INVENTORY_ID,
-				COALESCE(inv.STOCK_QTY, 0) AS STOCK_QTY,
+				NULL AS INVENTORY_ID,
+				0 AS STOCK_QTY,
 				NULLIF(TRIM(e.UNIT), '') AS UNIT,
 				oc.STATE AS OP_CAT_STATE
 			FROM expenses e
 			LEFT JOIN branches b ON b.IDNo = e.BRANCH_ID
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
 			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
-			LEFT JOIN ingredients ing ON ing.ACTIVE = 1 AND ((e.INGREDIENT_ID IS NOT NULL AND ing.IDNo = e.INGREDIENT_ID) OR (e.INGREDIENT_ID IS NULL AND ing.BRANCH_ID = e.BRANCH_ID AND TRIM(ing.NAME) = TRIM(e.EXP_DESC) AND ing.MASTER_CAT_ID <=> e.MASTER_CAT_ID))
-			LEFT JOIN (SELECT INGREDIENT_ID, BRANCH_ID, MAX(IDNo) AS IDNo, SUM(STOCK_QTY) AS STOCK_QTY FROM inventory WHERE ACTIVE = 1 AND INGREDIENT_ID IS NOT NULL GROUP BY INGREDIENT_ID, BRANCH_ID) inv ON inv.INGREDIENT_ID = ing.IDNo AND inv.BRANCH_ID = ing.BRANCH_ID
 			WHERE e.ACTIVE = 1
 		`;
 		const params = [];
@@ -144,14 +149,24 @@ class ExpenseModel {
 			query += ` AND e.BRANCH_ID = ?`;
 			params.push(Number(branchId));
 		}
+		const range = phLocalDayRangeFilter('e.ENCODED_DT', startDate, endDate);
+		if (range.sql) {
+			query += range.sql;
+			params.push(...range.params);
+		}
 
 		query += ` ORDER BY e.IDNo DESC`;
+		if (range.sql) {
+			query += ` LIMIT 500`;
+		} else {
+			query += ` LIMIT 2000`;
+		}
+
+		let rows;
 		try {
-			const [rows] = await pool.execute(query, params);
-			return rows;
+			[rows] = await pool.execute(query, params);
 		} catch (err) {
 			if (err.message && (err.message.includes('EXPENSES_ID') || err.message.includes('INGREDIENT_ID') || err.message.includes('ingredients') || err.message.includes('EXP_QTY') || err.message.includes('Unknown column'))) {
-				// Fallback without inventory join
 				let fb = `SELECT e.*, b.BRANCH_NAME, mc.IDNo AS MASTER_CATEGORY_ID, oc.NAME AS EXP_CAT, mc.CATEGORY_NAME AS EXP_NAME,
 					mc.ICON AS MASTER_CATEGORY_ICON, mc.DESCRIPTION AS MASTER_CATEGORY_DESCRIPTION,
 					NULL AS INVENTORY_ID, 0 AS STOCK_QTY,
@@ -162,10 +177,66 @@ class ExpenseModel {
 					LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
 					INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 					WHERE e.ACTIVE = 1`;
-				const [fbRows] = await pool.execute(fb + (branchId != null ? ' AND e.BRANCH_ID = ?' : '') + ' ORDER BY e.IDNo DESC', params);
-				return fbRows;
+				const fbParams = [];
+				if (branchId != null) {
+					fb += ` AND e.BRANCH_ID = ?`;
+					fbParams.push(Number(branchId));
+				}
+				if (range.sql) {
+					fb += range.sql;
+					fbParams.push(...range.params);
+				}
+				fb += ` ORDER BY e.IDNo DESC`;
+				if (range.sql) fb += ` LIMIT 500`;
+				else fb += ` LIMIT 2000`;
+				[rows] = await pool.execute(fb, fbParams);
+			} else {
+				throw err;
 			}
-			throw err;
+		}
+
+		if (!includeInventory || !rows.length) return rows;
+
+		try {
+			const ingredientIds = [
+				...new Set(
+					rows
+						.map((r) => (r.INGREDIENT_ID != null ? Number(r.INGREDIENT_ID) : null))
+						.filter((id) => Number.isFinite(id) && id > 0),
+				),
+			];
+			if (!ingredientIds.length) return rows;
+
+			const placeholders = ingredientIds.map(() => '?').join(',');
+			const invParams = [...ingredientIds];
+			let invSql = `
+				SELECT INGREDIENT_ID, BRANCH_ID, MAX(IDNo) AS IDNo, SUM(STOCK_QTY) AS STOCK_QTY
+				FROM inventory
+				WHERE ACTIVE = 1 AND INGREDIENT_ID IN (${placeholders})
+			`;
+			if (branchId != null) {
+				invSql += ` AND BRANCH_ID = ?`;
+				invParams.push(Number(branchId));
+			}
+			invSql += ` GROUP BY INGREDIENT_ID, BRANCH_ID`;
+			const [invRows] = await pool.execute(invSql, invParams);
+			const stockByKey = new Map();
+			for (const inv of invRows) {
+				stockByKey.set(`${inv.INGREDIENT_ID}:${inv.BRANCH_ID}`, inv);
+			}
+			return rows.map((r) => {
+				const key = `${r.INGREDIENT_ID}:${r.BRANCH_ID}`;
+				const inv = stockByKey.get(key);
+				if (!inv) return r;
+				return {
+					...r,
+					INVENTORY_ID: inv.IDNo,
+					STOCK_QTY: Number(inv.STOCK_QTY) || 0,
+				};
+			});
+		} catch (invErr) {
+			console.warn('[ExpenseModel.getAll] inventory attach skipped:', invErr?.message || invErr);
+			return rows;
 		}
 	}
 
@@ -452,14 +523,16 @@ class ExpenseModel {
 			params.push(String(filters.categoryName));
 		}
 
-		if (filters.dateFrom) {
-			where.push('DATE(e.ENCODED_DT) >= ?');
-			params.push(String(filters.dateFrom));
-		}
-
-		if (filters.dateTo) {
-			where.push('DATE(e.ENCODED_DT) <= ?');
-			params.push(String(filters.dateTo));
+		if (filters.dateFrom || filters.dateTo) {
+			const range = phLocalDayRangeFilter(
+				'e.ENCODED_DT',
+				filters.dateFrom || '1970-01-01',
+				filters.dateTo || '2999-12-31',
+			);
+			if (range.sql) {
+				where.push(range.sql.replace(/^\s*AND\s+/i, ''));
+				params.push(...range.params);
+			}
 		}
 
 		if (filters.search && String(filters.search).trim()) {
@@ -474,17 +547,28 @@ class ExpenseModel {
 	static async getSummary(filters = {}) {
 		await ExpenseModel.ensureSchema();
 		const { whereSql, params } = ExpenseModel._buildReportFilters(filters);
+		const ph = new Date(Date.now() + 8 * 60 * 60 * 1000);
+		const py = ph.getUTCFullYear();
+		const pm = ph.getUTCMonth() + 1;
+		const monthStart = `${py}-${String(pm).padStart(2, '0')}-01`;
+		const nextMonth =
+			pm === 12 ? `${py + 1}-01-01` : `${py}-${String(pm + 1).padStart(2, '0')}-01`;
+		const monthEndDate = new Date(`${nextMonth}T00:00:00+08:00`);
+		monthEndDate.setDate(monthEndDate.getDate() - 1);
+		const monthEnd = monthEndDate.toISOString().slice(0, 10);
+		const monthRange = phLocalDayRangeFilter('e.ENCODED_DT', monthStart, monthEnd);
+		const monthPred = monthRange.sql.replace(/^\s*AND\s+/i, '');
 		const [rows] = await pool.execute(
 			`
 			SELECT
 				COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense,
-				COALESCE(SUM(CASE WHEN DATE_FORMAT(e.ENCODED_DT, '%Y-%m') = DATE_FORMAT(CURDATE(), '%Y-%m') THEN e.EXP_AMOUNT ELSE 0 END), 0) AS current_month_expense
+				COALESCE(SUM(CASE WHEN (${monthPred}) THEN e.EXP_AMOUNT ELSE 0 END), 0) AS current_month_expense
 			FROM expenses e
 			LEFT JOIN master_categories mc ON mc.ACTIVE = 1 AND mc.IDNo = e.MASTER_CAT_ID
 			INNER JOIN operation_category oc ON oc.IDNo = mc.OP_CAT_ID AND oc.ACTIVE = 1
 			WHERE ${whereSql}
 			`,
-			params
+			[...monthRange.params, ...params],
 		);
 		return rows[0] || { total_expense: 0, current_month_expense: 0 };
 	}
@@ -569,17 +653,31 @@ class ExpenseModel {
 	 */
 	static async getTotalsByBranch(startDate, endDate) {
 		await ExpenseModel.ensureSchema();
-		const localDt = `COALESCE(
-			CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
-			DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
-		)`;
 		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1'];
 		const params = [];
-		if (startDate) {
+		if (startDate && endDate) {
+			// Sargable PH(+08:00) day range — CONVERT_TZ applied to bounds only
+			where.push(`e.ENCODED_DT >= COALESCE(
+				CONVERT_TZ(CONCAT(?, ' 00:00:00'), '+08:00', @@session.time_zone),
+				DATE_SUB(CONCAT(?, ' 00:00:00'), INTERVAL 8 HOUR)
+			)`);
+			where.push(`e.ENCODED_DT < COALESCE(
+				CONVERT_TZ(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), '+08:00', @@session.time_zone),
+				DATE_SUB(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), INTERVAL 8 HOUR)
+			)`);
+			params.push(String(startDate), String(startDate), String(endDate), String(endDate));
+		} else if (startDate) {
+			const localDt = `COALESCE(
+				CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+				DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+			)`;
 			where.push(`DATE(${localDt}) >= ?`);
 			params.push(String(startDate));
-		}
-		if (endDate) {
+		} else if (endDate) {
+			const localDt = `COALESCE(
+				CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+				DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+			)`;
 			where.push(`DATE(${localDt}) <= ?`);
 			params.push(String(endDate));
 		}
@@ -616,17 +714,30 @@ class ExpenseModel {
 	 */
 	static async getRentSalaryByBranch(startDate, endDate) {
 		await ExpenseModel.ensureSchema();
-		const localDt = `COALESCE(
-			CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
-			DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
-		)`;
 		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1'];
 		const params = [];
-		if (startDate) {
+		if (startDate && endDate) {
+			where.push(`e.ENCODED_DT >= COALESCE(
+				CONVERT_TZ(CONCAT(?, ' 00:00:00'), '+08:00', @@session.time_zone),
+				DATE_SUB(CONCAT(?, ' 00:00:00'), INTERVAL 8 HOUR)
+			)`);
+			where.push(`e.ENCODED_DT < COALESCE(
+				CONVERT_TZ(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), '+08:00', @@session.time_zone),
+				DATE_SUB(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), INTERVAL 8 HOUR)
+			)`);
+			params.push(String(startDate), String(startDate), String(endDate), String(endDate));
+		} else if (startDate) {
+			const localDt = `COALESCE(
+				CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+				DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+			)`;
 			where.push(`DATE(${localDt}) >= ?`);
 			params.push(String(startDate));
-		}
-		if (endDate) {
+		} else if (endDate) {
+			const localDt = `COALESCE(
+				CONVERT_TZ(e.ENCODED_DT, @@session.time_zone, '+08:00'),
+				DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
+			)`;
 			where.push(`DATE(${localDt}) <= ?`);
 			params.push(String(endDate));
 		}

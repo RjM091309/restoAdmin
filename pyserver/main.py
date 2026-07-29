@@ -12,7 +12,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from sales_query_filters import billing_join_on, billing_where_clauses, orders_join_on_billing
+from sales_query_filters import (
+    billing_join_on,
+    billing_where_clauses,
+    orders_join_on_billing,
+    ph_local_day_range_filter,
+    ph_local_day_range_predicate,
+    ph_local_day_range_params,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -338,8 +345,10 @@ def branch_sales(
         billing_params: List[object] = []
 
         if start_date and end_date:
-            date_filter_billing = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            billing_params.extend([start_date, end_date])
+            date_filter_billing, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            billing_params.extend(range_params)
 
         if branch_id:
             branch_filter_billing = "AND br.IDNo = %s"
@@ -444,8 +453,10 @@ def least_selling(
         order_params: List[object] = []
 
         if start_date and end_date:
-            order_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            order_params.extend([start_date, end_date])
+            order_date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            order_params.extend(range_params)
         if branch_id:
             order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
@@ -467,7 +478,10 @@ def least_selling(
             {order_branch_filter}
             GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
             HAVING total_quantity > 0
+            ORDER BY total_quantity ASC, total_revenue ASC
+            LIMIT %s
         """
+        order_params.append(effective_limit)
 
         cur.execute(orders_query, order_params)
         order_rows = cur.fetchall()
@@ -572,13 +586,16 @@ def top_selling(
             CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
             DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
         )"""
+        _ = billing_local_dt  # display/day bucketing elsewhere; filter is sargable on raw column
         order_date_filter = ""
         order_branch_filter = ""
         order_params: List[object] = []
 
         if start_date and end_date:
-            order_date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            order_params.extend([start_date, end_date])
+            order_date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            order_params.extend(range_params)
         if branch_id:
             order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
@@ -590,17 +607,20 @@ def top_selling(
                 COALESCE(SUM(oi.QTY), 0) as total_quantity,
                 COALESCE(SUM(oi.LINE_TOTAL), 0) as total_revenue,
                 m.MENU_PRICE
-            FROM orders o
-            INNER JOIN billing b ON b.ORDER_ID = o.IDNo
+            FROM billing b
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
-            WHERE b.STATUS IN (1, 2)
+            WHERE {_BILLING_WHERE}
             {order_date_filter}
             {order_branch_filter}
             GROUP BY m.IDNo, m.MENU_NAME, m.MENU_PRICE, c.CAT_NAME
             HAVING total_quantity > 0
+            ORDER BY total_quantity DESC, total_revenue DESC
+            LIMIT %s
         """
+        order_params.append(effective_limit)
 
         cur.execute(orders_query, order_params)
         order_rows = cur.fetchall()
@@ -702,13 +722,16 @@ def _daily_sales_date_branch_filters(
     branch_id: Optional[int],
     *,
     branch_col: str = "b.BRANCH_ID",
+    encoded_dt_col: str = "b.ENCODED_DT",
 ) -> Tuple[str, str, List[object]]:
+    # billing_local_dt kept for GROUP BY / SELECT display; filter uses sargable raw column.
+    _ = billing_local_dt
     date_filter = ""
     branch_filter = ""
     params: List[object] = []
     if start_date and end_date:
-        date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-        params.extend([start_date, end_date])
+        date_filter, range_params = ph_local_day_range_filter(encoded_dt_col, start_date, end_date)
+        params.extend(range_params)
     if branch_id:
         branch_filter = f"AND {branch_col} = %s"
         params.append(branch_id)
@@ -904,8 +927,10 @@ def top_profit_drivers(
         branch_filter = ""
         params: List[object] = []
         if start_date and end_date:
-            date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            params.extend(range_params)
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
@@ -1065,6 +1090,7 @@ def daily_sales(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[int] = None,
+    lightweight: bool = False,
 ) -> dict:
     """
     Daily gross sales time series aligned with Loyverse data:
@@ -1074,8 +1100,61 @@ def daily_sales(
     - net_sales: total_sales - discount - refund
     - product_cost: SUM(order_items.LINE_COST) from Loyverse sync only (no ingredient/recipe)
     - gross_profit: net_sales - product_cost
+
+    ``lightweight=true`` (dashboard charts): one SQL for paid+discount+billing.REFUND, skip COGS.
     """
     try:
+        if lightweight:
+            billing_local_dt = _daily_sales_billing_local_dt()
+            date_filter, branch_filter, params = _daily_sales_date_branch_filters(
+                billing_local_dt, start_date, end_date, branch_id
+            )
+            query = f"""
+                SELECT
+                    DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
+                    COALESCE(SUM(b.AMOUNT_PAID), 0) AS paid_total,
+                    COALESCE(SUM(COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS discount,
+                    COALESCE(SUM(COALESCE(b.REFUND, 0)), 0) AS refund
+                FROM billing b
+                INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+                WHERE {_BILLING_WHERE}
+                {date_filter}
+                {branch_filter}
+                GROUP BY DATE({billing_local_dt})
+                ORDER BY sale_date
+            """
+            conn = get_connection()
+            cur = conn.cursor(dictionary=True)
+            try:
+                cur.execute(query, params)
+                rows = cast(List[Dict[str, Any]], cur.fetchall() or [])
+            finally:
+                cur.close()
+                conn.close()
+
+            items: List[DailySalesItem] = []
+            for row in rows:
+                sale_date = row.get("sale_date")
+                if sale_date is None:
+                    continue
+                paid_total = float(row.get("paid_total") or 0.0)
+                discount = float(row.get("discount") or 0.0)
+                refund = float(row.get("refund") or 0.0)
+                total_sales = paid_total + discount
+                net_sales = total_sales - discount - refund
+                items.append(
+                    DailySalesItem(
+                        sale_date=str(sale_date),
+                        total_sales=total_sales,
+                        refund=refund,
+                        discount=discount,
+                        net_sales=net_sales,
+                        product_cost=0.0,
+                        gross_profit=max(0.0, net_sales),
+                    )
+                )
+            return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
         meta_conn = get_connection()
         meta_cur = meta_conn.cursor(dictionary=True)
         has_line_cost = _mysql_column_exists(meta_cur, "order_items", "LINE_COST")
@@ -1136,7 +1215,7 @@ def daily_sales(
         cogs_map[key] = float(row.get("product_cost") or 0.0)
 
     # Merge into final daily series
-    items: List[DailySalesItem] = []
+    items = []
     billing_map = {}
     for row in billing_rows:
         sale_date = row.get("sale_date")
@@ -1177,7 +1256,6 @@ def daily_sales(
 
     # Sort by date
     items.sort(key=lambda x: x.sale_date)
-
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
 
 
@@ -1206,8 +1284,10 @@ def daily_orders(
         params: List[object] = []
 
         if start_date and end_date:
-            date_filter = f"AND DATE({billing_local_dt}) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            params.extend(range_params)
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
@@ -1279,10 +1359,13 @@ def expense_summary(
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
 
-        if start_date:
+        if start_date and end_date:
+            where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
+            params.extend(ph_local_day_range_params(start_date, end_date))
+        elif start_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
-        if end_date:
+        elif end_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
@@ -1334,10 +1417,13 @@ def daily_expenses(
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
 
-        if start_date:
+        if start_date and end_date:
+            where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
+            params.extend(ph_local_day_range_params(start_date, end_date))
+        elif start_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
-        if end_date:
+        elif end_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
@@ -1406,10 +1492,13 @@ def expense_breakdown(
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
 
-        if start_date:
+        if start_date and end_date:
+            where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
+            params.extend(ph_local_day_range_params(start_date, end_date))
+        elif start_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             params.append(start_date)
-        if end_date:
+        elif end_date:
             where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             params.append(end_date)
 
@@ -1523,8 +1612,8 @@ def performance_trend(
             w_start_s = window_start.strftime("%Y-%m-%d")
             w_end_s = window_end.strftime("%Y-%m-%d")
 
-            sales_where_w = ["b.STATUS IN (1, 2)", f"DATE({billing_local_dt}) BETWEEN %s AND %s"]
-            sales_params_w: List[object] = [w_start_s, w_end_s]
+            sales_where_w = ["b.STATUS IN (1, 2)", ph_local_day_range_predicate("b.ENCODED_DT")]
+            sales_params_w: List[object] = list(ph_local_day_range_params(w_start_s, w_end_s))
             if branch_id:
                 sales_where_w.append("b.BRANCH_ID = %s")
                 sales_params_w.append(branch_id)
@@ -1538,8 +1627,8 @@ def performance_trend(
             cur.execute(paid_sql, sales_params_w)
             paid_rows = cur.fetchall() or []
 
-            disc_where_w = [f"DATE({billing_local_dt}) BETWEEN %s AND %s"]
-            disc_params_w: List[object] = [w_start_s, w_end_s]
+            disc_where_w = [ph_local_day_range_predicate("b.ENCODED_DT")]
+            disc_params_w: List[object] = list(ph_local_day_range_params(w_start_s, w_end_s))
             if branch_id:
                 disc_where_w.append("o.BRANCH_ID = %s")
                 disc_params_w.append(branch_id)
@@ -1554,8 +1643,8 @@ def performance_trend(
             cur.execute(disc_sql, disc_params_w)
             disc_rows_w = cur.fetchall() or []
 
-            exp_where_w = ["e.ACTIVE = 1", "oc.ACTIVE = 1", f"DATE({_EXPENSE_LOCAL_DT_SQL}) BETWEEN %s AND %s"]
-            exp_params_w: List[object] = [w_start_s, w_end_s]
+            exp_where_w = ["e.ACTIVE = 1", "oc.ACTIVE = 1", ph_local_day_range_predicate("e.ENCODED_DT")]
+            exp_params_w: List[object] = list(ph_local_day_range_params(w_start_s, w_end_s))
             if branch_id:
                 exp_where_w.append("e.BRANCH_ID = %s")
                 exp_params_w.append(branch_id)
@@ -1626,8 +1715,10 @@ def performance_trend(
         sales_where = ["b.STATUS IN (1, 2)"]
         sales_params: List[object] = []
         if effective_start and effective_end:
-            sales_where.append(f"DATE({billing_local_dt}) BETWEEN %s AND %s")
-            sales_params.extend([effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")])
+            sales_where.append(ph_local_day_range_predicate("b.ENCODED_DT"))
+            sales_params.extend(ph_local_day_range_params(
+                effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")
+            ))
         if branch_id:
             sales_where.append("b.BRANCH_ID = %s")
             sales_params.append(branch_id)
@@ -1647,8 +1738,10 @@ def performance_trend(
         disc_where = ["1=1"]
         disc_params: List[object] = []
         if effective_start and effective_end:
-            disc_where.append(f"DATE({billing_local_dt}) BETWEEN %s AND %s")
-            disc_params.extend([effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")])
+            disc_where.append(ph_local_day_range_predicate("b.ENCODED_DT"))
+            disc_params.extend(ph_local_day_range_params(
+                effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")
+            ))
         if branch_id:
             disc_where.append("o.BRANCH_ID = %s")
             disc_params.append(branch_id)
@@ -1671,10 +1764,15 @@ def performance_trend(
         if branch_id:
             exp_where.append("e.BRANCH_ID = %s")
             exp_params.append(branch_id)
-        if effective_start:
+        if effective_start and effective_end:
+            exp_where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
+            exp_params.extend(ph_local_day_range_params(
+                effective_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d")
+            ))
+        elif effective_start:
             exp_where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) >= %s")
             exp_params.append(effective_start.strftime("%Y-%m-%d"))
-        if effective_end:
+        elif effective_end:
             exp_where.append(f"DATE({_EXPENSE_LOCAL_DT_SQL}) <= %s")
             exp_params.append(effective_end.strftime("%Y-%m-%d"))
 

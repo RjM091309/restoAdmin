@@ -24,19 +24,39 @@ class BillingController {
 			// but respect explicit branch_id when provided.
 			const isAdmin = req.user?.permissions === 1 || req.session?.permissions === 1;
 			if (isAdmin) {
-				branchId = req.query.branch_id || req.body.branch_id || null;
+				const raw = req.query.branch_id || req.body.branch_id || null;
+				branchId = raw === 'all' || raw === '' ? null : raw;
 			} else {
 				// Non-admin: always scoped to their branch (session/user),
 				// optionally narrowed further by explicit branch_id if provided.
-				branchId =
+				const raw =
 					req.query.branch_id ||
 					req.body.branch_id ||
 					req.session?.branch_id ||
 					req.user?.branch_id ||
 					null;
+				branchId = raw === 'all' || raw === '' ? null : raw;
 			}
 
-			const billings = await BillingModel.getAll(branchId);
+			const { start_date, end_date, limit, include_stats } = req.query;
+			const opts = {
+				start_date: start_date || null,
+				end_date: end_date || null,
+				limit: limit || null,
+			};
+			const wantStats = include_stats === '1' || include_stats === 'true';
+			const [billings, stats] = await Promise.all([
+				BillingModel.getAll(branchId, opts),
+				wantStats ? BillingModel.getListStats(branchId, opts) : Promise.resolve(null),
+			]);
+			if (wantStats) {
+				return res.status(200).json({
+					success: true,
+					message: 'Billing records retrieved successfully',
+					data: billings,
+					meta: { stats, limit: billings.length },
+				});
+			}
 			return ApiResponse.success(res, billings, 'Billing records retrieved successfully');
 		} catch (error) {
 			console.error('Error fetching billing records:', error);

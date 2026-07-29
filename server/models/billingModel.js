@@ -6,6 +6,7 @@
 // ============================================
 
 const pool = require('../config/db');
+const { phLocalDayRangeFilter } = require('../utils/phDateRange');
 
 class BillingModel {
 	static _loyverseRefundsSchemaReady = false;
@@ -115,7 +116,13 @@ class BillingModel {
 			params
 		);
 	}
-	static async getAll(branchId = null) {
+	static async getAll(branchId = null, options = {}) {
+		const {
+			start_date: startDate = null,
+			end_date: endDate = null,
+			limit = null,
+		} = options;
+
 		let query = `
 			SELECT 
 				b.IDNo,
@@ -125,6 +132,8 @@ class BillingModel {
 				br.BRANCH_NAME AS BRANCH_LABEL,
 				b.ORDER_ID,
 				o.ORDER_NO,
+				o.TABLE_ID,
+				t.TABLE_NUMBER,
 				b.PAYMENT_METHOD,
 				b.AMOUNT_DUE,
 				b.AMOUNT_PAID,
@@ -132,24 +141,73 @@ class BillingModel {
 				b.STATUS,
 				b.ENCODED_BY,
 				ui.FIRSTNAME AS ENCODED_BY_NAME,
+				ui.FIRSTNAME AS ENCODED_BY_USERNAME,
 				b.ENCODED_DT
 			FROM billing b
 			LEFT JOIN orders o ON o.IDNo = b.ORDER_ID
+			LEFT JOIN restaurant_tables t ON t.IDNo = o.TABLE_ID
 			LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
 			LEFT JOIN user_info ui ON ui.IDNo = b.ENCODED_BY
 			WHERE o.STATUS IN (2, 1)
 		`;
 
 		const params = [];
-		if (branchId) {
+		if (branchId != null && branchId !== '' && String(branchId) !== 'all') {
 			query += ` AND b.BRANCH_ID = ?`;
 			params.push(branchId);
+		}
+		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate);
+		if (range.sql) {
+			query += range.sql;
+			params.push(...range.params);
 		}
 
 		query += ` ORDER BY b.ENCODED_DT DESC, b.IDNo DESC`;
 
+		const parsedLimit = limit != null ? parseInt(String(limit), 10) : 0;
+		if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+			query += ` LIMIT ${Math.min(parsedLimit, 2000)}`;
+		} else {
+			// Always cap list payloads so growth cannot unbounded-scan the table.
+			query += ` LIMIT 500`;
+		}
+
 		const [rows] = await pool.execute(query, params);
 		return rows;
+	}
+
+	static async getListStats(branchId = null, options = {}) {
+		const { start_date: startDate = null, end_date: endDate = null } = options;
+		let query = `
+			SELECT
+				COALESCE(SUM(GREATEST(COALESCE(b.AMOUNT_DUE, 0) - COALESCE(b.AMOUNT_PAID, 0), 0)), 0) AS totalDue,
+				COALESCE(SUM(b.AMOUNT_PAID), 0) AS totalPaid,
+				COALESCE(SUM(b.STATUS = 1), 0) AS paidCount,
+				COALESCE(SUM(b.STATUS = 2), 0) AS partialCount,
+				COALESCE(SUM(b.STATUS = 3), 0) AS unpaidCount
+			FROM billing b
+			INNER JOIN orders o ON o.IDNo = b.ORDER_ID AND o.STATUS IN (2, 1)
+			WHERE 1=1
+		`;
+		const params = [];
+		if (branchId) {
+			query += ` AND b.BRANCH_ID = ?`;
+			params.push(branchId);
+		}
+		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate);
+		if (range.sql) {
+			query += range.sql;
+			params.push(...range.params);
+		}
+		const [rows] = await pool.execute(query, params);
+		const r = rows[0] || {};
+		return {
+			totalDue: Number(r.totalDue) || 0,
+			totalPaid: Number(r.totalPaid) || 0,
+			paidCount: Number(r.paidCount) || 0,
+			partialCount: Number(r.partialCount) || 0,
+			unpaidCount: Number(r.unpaidCount) || 0,
+		};
 	}
 
 	static async getByOrderId(orderId) {

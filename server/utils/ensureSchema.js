@@ -167,9 +167,101 @@ async function ensureBankPaymentMethodEnum() {
 	}
 }
 
+/**
+ * Critical analytics indexes — without these, category/top-selling scan all order_items.
+ * Also covering indexes so list pages stay fast as order/billing/inventory grow.
+ */
+async function ensureAnalyticsPerformanceIndexes() {
+	const connection = await pool.getConnection();
+	const indexes = [
+		{
+			table: 'orders',
+			name: 'idx_orders_branch_encoded',
+			ddl: 'CREATE INDEX idx_orders_branch_encoded ON orders (BRANCH_ID, ENCODED_DT)',
+		},
+		{
+			table: 'orders',
+			name: 'idx_orders_branch_status_encoded',
+			ddl: 'CREATE INDEX idx_orders_branch_status_encoded ON orders (BRANCH_ID, STATUS, ENCODED_DT)',
+		},
+		{
+			table: 'menu',
+			name: 'idx_menu_branch_active',
+			ddl: 'CREATE INDEX idx_menu_branch_active ON menu (BRANCH_ID, ACTIVE)',
+		},
+		{
+			table: 'order_items',
+			name: 'idx_order_items_order_id',
+			ddl: 'CREATE INDEX idx_order_items_order_id ON order_items (ORDER_ID)',
+		},
+		{
+			table: 'order_items',
+			name: 'idx_order_items_menu_id',
+			ddl: 'CREATE INDEX idx_order_items_menu_id ON order_items (MENU_ID)',
+		},
+		{
+			table: 'billing',
+			name: 'idx_billing_branch_encoded',
+			ddl: 'CREATE INDEX idx_billing_branch_encoded ON billing (BRANCH_ID, ENCODED_DT)',
+		},
+		{
+			table: 'billing',
+			name: 'idx_billing_status_encoded',
+			ddl: 'CREATE INDEX idx_billing_status_encoded ON billing (STATUS, ENCODED_DT)',
+		},
+		{
+			table: 'billing',
+			name: 'idx_billing_order_idno',
+			ddl: 'CREATE INDEX idx_billing_order_idno ON billing (ORDER_ID, IDNo)',
+		},
+		{
+			table: 'expenses',
+			name: 'idx_expenses_branch_encoded',
+			ddl: 'CREATE INDEX idx_expenses_branch_encoded ON expenses (BRANCH_ID, ENCODED_DT)',
+		},
+		{
+			table: 'inventory',
+			name: 'idx_inventory_branch_active_ing',
+			ddl: 'CREATE INDEX idx_inventory_branch_active_ing ON inventory (BRANCH_ID, ACTIVE, INGREDIENT_ID)',
+		},
+		{
+			table: 'ingredients',
+			name: 'idx_ingredients_branch_active_cat',
+			ddl: 'CREATE INDEX idx_ingredients_branch_active_cat ON ingredients (BRANCH_ID, ACTIVE, MASTER_CAT_ID)',
+		},
+		{
+			table: 'master_categories',
+			name: 'idx_master_categories_branch_active_op',
+			ddl: 'CREATE INDEX idx_master_categories_branch_active_op ON master_categories (BRANCH_ID, ACTIVE, OP_CAT_ID)',
+		},
+	];
+	try {
+		for (const idx of indexes) {
+			const [rows] = await connection.execute(
+				`SELECT 1 FROM information_schema.STATISTICS
+				 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?
+				 LIMIT 1`,
+				[idx.table, idx.name],
+			);
+			if (rows.length > 0) continue;
+			try {
+				await connection.query(idx.ddl);
+				console.log(`[Schema] ${idx.name} created on ${idx.table}`);
+			} catch (err) {
+				console.warn(`[Schema] ${idx.name} skipped:`, err.message || err);
+			}
+		}
+	} catch (err) {
+		console.error('[Schema] ensureAnalyticsPerformanceIndexes failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 module.exports = {
 	ensureOrderItemsLineCostColumn,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
+	ensureAnalyticsPerformanceIndexes,
 };

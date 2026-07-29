@@ -26,6 +26,7 @@ const {
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
+	ensureAnalyticsPerformanceIndexes,
 } = require('./utils/ensureSchema');
 const app = express();
 app.use(compression());
@@ -236,6 +237,7 @@ app.use((err, req, res, next) => {
 		await ensureReceiptScanHistoryTable();
 		await ensureTelegramSettingsTable();
 		await ensureBankPaymentMethodEnum();
+		await ensureAnalyticsPerformanceIndexes();
 		const BillingModel = require('./models/billingModel');
 		await BillingModel.ensureLoyverseRefundsTable();
 		console.log('[BillingModel] Refund tracker ready on boot');

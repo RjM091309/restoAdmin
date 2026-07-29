@@ -18,9 +18,9 @@ class ReportsModel {
 
 		if (period === 'daily') {
 			if (startDate && endDate) {
-				// Use <= for endDate to ensure it includes the full end date
-				dateFilter = 'AND DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?';
-				dateFilterSummary = 'AND DATE(s.sale_datetime) >= ? AND DATE(s.sale_datetime) <= ?';
+				// Sargable range (index-friendly) — inclusive end day via < end+1 day
+				dateFilter = 'AND b.ENCODED_DT >= ? AND b.ENCODED_DT < DATE_ADD(?, INTERVAL 1 DAY)';
+				dateFilterSummary = 'AND s.sale_datetime >= ? AND s.sale_datetime < DATE_ADD(?, INTERVAL 1 DAY)';
 				params.push(startDate, endDate);
 				summaryParams.push(startDate, endDate);
 			} else {
@@ -29,8 +29,8 @@ class ReportsModel {
 			}
 		} else if (period === 'weekly') {
 			if (startDate && endDate) {
-				dateFilter = 'AND DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?';
-				dateFilterSummary = 'AND DATE(s.sale_datetime) >= ? AND DATE(s.sale_datetime) <= ?';
+				dateFilter = 'AND b.ENCODED_DT >= ? AND b.ENCODED_DT < DATE_ADD(?, INTERVAL 1 DAY)';
+				dateFilterSummary = 'AND s.sale_datetime >= ? AND s.sale_datetime < DATE_ADD(?, INTERVAL 1 DAY)';
 				params.push(startDate, endDate);
 				summaryParams.push(startDate, endDate);
 			} else {
@@ -39,8 +39,8 @@ class ReportsModel {
 			}
 		} else if (period === 'monthly') {
 			if (startDate && endDate) {
-				dateFilter = 'AND DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?';
-				dateFilterSummary = 'AND DATE(s.sale_datetime) >= ? AND DATE(s.sale_datetime) <= ?';
+				dateFilter = 'AND b.ENCODED_DT >= ? AND b.ENCODED_DT < DATE_ADD(?, INTERVAL 1 DAY)';
+				dateFilterSummary = 'AND s.sale_datetime >= ? AND s.sale_datetime < DATE_ADD(?, INTERVAL 1 DAY)';
 				params.push(startDate, endDate);
 				summaryParams.push(startDate, endDate);
 			} else {

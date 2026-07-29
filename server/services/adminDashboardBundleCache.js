@@ -20,7 +20,6 @@ function hasAdminDashboardBundleData(bundle) {
 		(bundle.branchCardsData?.length ?? 0) > 0 ||
 		(bundle.branchRevenueDistribution?.length ?? 0) > 0 ||
 		(bundle.topProductsData?.length ?? 0) > 0 ||
-		(bundle.dailySalesForCards?.length ?? 0) > 0 ||
 		hasTrend
 	);
 }
@@ -31,10 +30,14 @@ function buildAdminDashboardBundleCacheKey({
 	branchId,
 	period,
 	include_branch_charts,
+	mode = 'full',
 }) {
 	const bid =
 		branchId != null && String(branchId).trim() !== '' ? String(branchId) : 'all';
-	return `${start_date}|${end_date}|${bid}|${period || 'monthly'}|${include_branch_charts ? '1' : '0'}`;
+	const modeKey = String(mode || 'full').toLowerCase() === 'compare' || String(mode || '').toLowerCase() === 'slim'
+		? 'compare'
+		: 'full';
+	return `${start_date}|${end_date}|${bid}|${period || 'monthly'}|${include_branch_charts ? '1' : '0'}|${modeKey}`;
 }
 
 function getCachedAdminDashboardBundle(key) {

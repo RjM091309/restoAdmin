@@ -38,6 +38,7 @@ import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skel
 import { toast } from 'sonner';
 import {
     getOrders,
+    getOrdersWithMeta,
     getOrderItems,
     getOrderById,
     createOrder,
@@ -50,6 +51,7 @@ import {
     ORDER_STATUS,
     type OrderRecord,
     type OrderItemRecord,
+    type OrderListStats,
     type CreateOrderItemPayload,
 } from '../../services/orderService';
 import { getMenus, type MenuRecord } from '../../services/menuService';
@@ -174,6 +176,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // ----- Data -----
     const [orders, setOrders] = useState<OrderRecord[]>([]);
+    const [serverStats, setServerStats] = useState<OrderListStats | null>(null);
+    const loadOrdersReqIdRef = useRef(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -347,13 +351,17 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // ==================== Data fetching ====================
     const loadOrders = useCallback(async () => {
+        const reqId = ++loadOrdersReqIdRef.current;
         setLoading(true);
         setError(null);
         try {
-            const data = await getOrders(branchId, {
+            const { orders: data, stats: nextStats } = await getOrdersWithMeta(branchId, {
                 startDate: dateRange.start || undefined,
                 endDate: dateRange.end || undefined,
+                limit: 500,
+                includeStats: true,
             });
+            if (reqId !== loadOrdersReqIdRef.current) return;
             const raw = Array.isArray(data) ? data : [];
             // Defensive: backend list must be 1 row per order ID. If billing JOIN ever duplicates again,
             // dedupe by IDNo so React keys stay unique and detail rows stay sane.
@@ -364,11 +372,14 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 if (!seen.has(id)) seen.set(id, o);
             }
             setOrders([...seen.values()]);
+            setServerStats(nextStats);
         } catch (e) {
+            if (reqId !== loadOrdersReqIdRef.current) return;
             setError(e instanceof Error ? e.message : t('orders.failed_to_load'));
             setOrders([]);
+            setServerStats(null);
         } finally {
-            setLoading(false);
+            if (reqId === loadOrdersReqIdRef.current) setLoading(false);
         }
     }, [branchId, dateRange.start, dateRange.end, t]);
 
@@ -529,6 +540,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // ==================== Stats ====================
     const stats = useMemo(() => {
+        if (serverStats) return serverStats;
         const scoped = orders.filter((o) => isWithinDateRange(o.ENCODED_DT));
         const pending = scoped.filter((o) => o.STATUS === ORDER_STATUS.PENDING).length;
         const confirmed = scoped.filter((o) => o.STATUS === ORDER_STATUS.CONFIRMED).length;
@@ -538,7 +550,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             .filter((o) => o.STATUS === ORDER_STATUS.SETTLED)
             .reduce((s, o) => s + Number(o.GRAND_TOTAL || 0), 0);
         return { total: scoped.length, pending, confirmed, settled, cancelled, totalRevenue };
-    }, [orders, isWithinDateRange]);
+    }, [orders, isWithinDateRange, serverStats]);
 
     // ==================== Detail ====================
     const openDetail = async (order: OrderRecord) => {

@@ -1,11 +1,12 @@
 const OrderModel = require('../models/orderModel');
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const ReportsModel = require('../models/reportsModel');
+const ExpenseModel = require('../models/expenseModel');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/analyticsSales');
 
-/** Per-call cap for dashboard bundle — avoid 15s waits on empty/slow branches. */
-const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 8000);
+/** Per-call cap for dashboard bundle — keep under client timeout; retries use 2×. */
+const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 12000);
 
 function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
 	return fetchPyCachedOptional(path, params, { timeoutMs });
@@ -43,14 +44,6 @@ function eachDateKeyInclusive(startYmd, endYmd) {
 		cur.setDate(cur.getDate() + 1);
 	}
 	return keys;
-}
-
-async function fetchPyServer(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
-	const json = await fetchPyServerOptional(path, params, timeoutMs);
-	if (!json) {
-		throw new Error(`PyServer ${path} unavailable`);
-	}
-	return json;
 }
 
 function fillRevenueDataGaps(points, startYmd, endYmd, expenseByDate, reconByDate) {
@@ -104,14 +97,17 @@ async function fetchDailySalesSeries(startDate, endDate, branchId, options = {})
 	const params = { start_date: startDate, end_date: endDate };
 	if (branchId) params.branch_id = String(branchId);
 
-	const sqlRows = await ReportsModel.getRevenueReport('daily', startDate, endDate, branchId)
+	const sqlPromise = ReportsModel.getRevenueReport('daily', startDate, endDate, branchId)
 		.then(mapRevenueRowsToDailySales)
 		.catch(() => []);
 
-	if (sqlOnly) return sqlRows;
+	if (sqlOnly) return sqlPromise;
 
-	// Run Node SQL in parallel with PyServer when full series may come from analytics service.
-	const pyJson = await fetchPyServerOptional('/api/analytics/daily-sales', params);
+	// True parallel: SQL fallback + PyServer analytics in one wave.
+	const [sqlRows, pyJson] = await Promise.all([
+		sqlPromise,
+		fetchPyServerOptional('/api/analytics/daily-sales', params),
+	]);
 	const pyRows = pyJson?.data?.data || [];
 	if (Array.isArray(pyRows) && pyRows.length > 0) return pyRows;
 	return sqlRows;
@@ -257,10 +253,8 @@ function buildDashboardData({
 /** Phase 1 — SQL-only probes (~100–300ms). Used for fast empty detection before PyServer. */
 async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 	const branchParam = branchId ? String(branchId) : null;
-	const pyParams = { start_date, end_date };
-	if (branchParam) pyParams.branch_id = branchParam;
 
-	const [dailySalesResult, reconResult, recentOrdersResult, expenseSummaryResult] =
+	const [dailySalesResult, reconResult, recentOrdersResult, expenseTotalResult] =
 		await Promise.allSettled([
 			fetchDailySalesSeries(start_date, end_date, branchParam, { sqlOnly: true }),
 			branchParam
@@ -274,7 +268,8 @@ async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 						includeItemMeta: true,
 					})
 				: Promise.resolve([]),
-			fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
+			// SQL probe only — avoid burning a PyServer slot before phase 2.
+			ExpenseModel.getTotalsByBranch(start_date, end_date).catch(() => ({})),
 		]);
 
 	const dailySales =
@@ -285,21 +280,23 @@ async function fetchBranchDashboardPhase1({ branchId, start_date, end_date }) {
 			: { byDate: {}, total: 0 };
 	const recentOrders =
 		recentOrdersResult.status === 'fulfilled' ? recentOrdersResult.value : [];
-	const expenseSummary =
-		expenseSummaryResult.status === 'fulfilled'
-			? expenseSummaryResult.value?.data || { total_expense: 0 }
-			: { total_expense: 0 };
+	const expenseByBranch =
+		expenseTotalResult.status === 'fulfilled' ? expenseTotalResult.value || {} : {};
+	const expenseTotal = branchParam
+		? Number(expenseByBranch[Number(branchParam)] ?? expenseByBranch[branchParam] ?? 0) || 0
+		: Object.values(expenseByBranch).reduce((s, v) => s + (Number(v) || 0), 0);
+	const expenseSummary = { total_expense: expenseTotal };
 
 	const phase1HadErrors =
 		dailySalesResult.status === 'rejected' ||
 		reconResult.status === 'rejected' ||
 		recentOrdersResult.status === 'rejected' ||
-		expenseSummaryResult.status === 'rejected';
+		expenseTotalResult.status === 'rejected';
 
 	const hasSales = (dailySales || []).some((d) => resolveNetSalesFromRow(d) > 0);
 	const hasRecon = Number(reconAgg?.total || 0) > 0;
 	const hasRecentOrders = (recentOrders || []).length > 0;
-	const hasExpenses = Number(expenseSummary?.total_expense || 0) > 0;
+	const hasExpenses = expenseTotal > 0;
 	const hasActivity = hasSales || hasRecon || hasRecentOrders || hasExpenses;
 
 	return {
@@ -331,6 +328,7 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 		dailySales,
 		reconAgg,
 		recentOrders,
+		expenseSummary: phase1ExpenseSummary,
 		phase1HadErrors,
 		hasActivity,
 	} = phase1;
@@ -371,28 +369,33 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 
 	// Always fetch PyServer daily-sales for gross totals (paid + discount).
 	// Phase-1 SQL uses AMOUNT_PAID only and must not skip the analytics call.
-	// Single wave (incl. category/top-selling) — same data, less wall-clock wait.
+	// Skip expense-summary — derive from daily-expenses (or phase-1 SQL totals).
 	const [
 		dailySalesPyRes,
 		dailyOrdersRes,
 		dailyExpensesRes,
-		expenseSummaryRes,
 		branchSalesRes,
 		categoryRes,
 		topSellingRes,
 	] = await Promise.all([
-		fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
+		fetchPyServerOptional('/api/analytics/daily-sales', { ...pyParams, lightweight: '1' }),
 		fetchPyServerOptional('/api/analytics/daily-orders', pyParams),
 		fetchPyServerOptional('/api/analytics/daily-expenses', pyParams),
-		fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
 		fetchPyServerOptional('/api/analytics/branch-sales', pyParams),
-		fetchPyServerOptional('/api/analytics/category-report', pyParams),
+		fetchPyServerOptional('/api/analytics/category-report', { ...pyParams, limit: 5 }),
 		fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: 5 }),
 	]);
 
 	const dailyOrders = dailyOrdersRes?.data?.data || [];
 	let dailyExpenses = dailyExpensesRes?.data?.data || [];
-	let expenseSummary = expenseSummaryRes?.data || { total_expense: 0 };
+	const expenseFromDaily = (dailyExpenses || []).reduce(
+		(sum, item) => sum + (Number(item.total_expense) || 0),
+		0,
+	);
+	let expenseSummary =
+		expenseFromDaily > 0
+			? { total_expense: expenseFromDaily }
+			: phase1ExpenseSummary || { total_expense: 0 };
 	const branchSales = branchSalesRes?.data?.data || [];
 	const pyDailySales = dailySalesPyRes?.data?.data || [];
 	const hasPySales =
@@ -427,12 +430,13 @@ async function buildBranchDashboardBundle({ branchId, start_date, end_date }) {
 			!(dailyExpenses || []).some((e) => Number(e.total_expense) > 0)
 		) {
 			retries.push(
-				Promise.all([
-					fetchPyServerOptional('/api/analytics/expense-summary', pyParams, retryMs),
-					fetchPyServerOptional('/api/analytics/daily-expenses', pyParams, retryMs),
-				]).then(([sumRes, dayRes]) => {
-					expenseSummary = sumRes?.data || expenseSummary;
+				fetchPyServerOptional('/api/analytics/daily-expenses', pyParams, retryMs).then((dayRes) => {
 					dailyExpenses = dayRes?.data?.data || dailyExpenses;
+					const fromDaily = (dailyExpenses || []).reduce(
+						(sum, item) => sum + (Number(item.total_expense) || 0),
+						0,
+					);
+					if (fromDaily > 0) expenseSummary = { total_expense: fromDaily };
 				}),
 			);
 		}

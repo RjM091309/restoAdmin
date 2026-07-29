@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Search, Filter, Package, Droplets, Leaf, Beef, Wheat, Fish, Flame, Shell, Coffee } from 'lucide-react';
 import { DataTable, ColumnDef } from '../ui/DataTable';
@@ -7,7 +7,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { type Branch } from '../partials/Header';
 import { getInventoryCategories, type InventoryCategory } from '../../services/inventoryService';
-import { getInventoryItems, type InventoryItem } from '../../services/inventoryItemService';
+import {
+  getInventoryCategoryMetrics,
+  type InventoryCategoryMetric,
+} from '../../services/inventoryItemService';
 import { toast } from 'sonner';
 
 
@@ -41,17 +44,6 @@ const getIconFromKey = (icon: string | null | undefined) => {
   return map[String(icon || '').toLowerCase()] || null;
 };
 
-const categoryData = [
-  { id: 'CAT001', name: 'Meat', description: 'Fresh cuts, poultry, and processed meats', items: 24, value: 4500, status: 'Healthy' as const },
-  { id: 'CAT002', name: 'Seafood', description: 'Fish, shellfish, and frozen seafood', items: 15, value: 3200, status: 'Low Stock' as const },
-  { id: 'CAT003', name: 'Vegetables', description: 'Fresh produce, roots, and leafy greens', items: 45, value: 1200, status: 'Healthy' as const },
-  { id: 'CAT004', name: 'Dairy', description: 'Milk, cheese, butter, and cream', items: 18, value: 2100, status: 'Healthy' as const },
-  { id: 'CAT005', name: 'Grains', description: 'Rice, quinoa, oats, and cereals', items: 12, value: 850, status: 'Healthy' as const },
-  { id: 'CAT006', name: 'Oils', description: 'Cooking oils, vinegar, and dressings', items: 8, value: 950, status: 'Critical' as const },
-  { id: 'CAT007', name: 'Pasta', description: 'Dried pasta, noodles, and wrappers', items: 20, value: 640, status: 'Healthy' as const },
-  { id: 'CAT008', name: 'Beverages', description: 'Coffee, tea, sodas, and juices', items: 35, value: 1850, status: 'Healthy' as const },
-];
-
 interface CategoriesProps {
   onCategoryClick: (category: InventoryCategory) => void;
   selectedBranch: Branch | null;
@@ -60,7 +52,14 @@ interface CategoriesProps {
 export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selectedBranch }) => {
   const { t, i18n } = useTranslation();
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [categoryMetricsMap, setCategoryMetricsMap] = useState<Map<string, InventoryCategoryMetric>>(
+    () => new Map(),
+  );
+  const [dashboardMetrics, setDashboardMetrics] = useState({
+    totalItems: 0,
+    totalValue: 0,
+    needsAttention: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -68,12 +67,21 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     try {
       setLoading(true);
       const branchId = String(selectedBranch?.id || '');
-      const [categoryRows, inventoryRows] = await Promise.all([
+      const [categoryRows, metrics] = await Promise.all([
         getInventoryCategories(branchId),
-        getInventoryItems(branchId),
+        getInventoryCategoryMetrics(branchId),
       ]);
       setCategories(categoryRows);
-      setInventoryItems(inventoryRows);
+      const map = new Map<string, InventoryCategoryMetric>();
+      for (const row of metrics.byCategory || []) {
+        map.set(String(row.categoryId), row);
+      }
+      setCategoryMetricsMap(map);
+      setDashboardMetrics({
+        totalItems: Number(metrics.totals?.totalItems) || 0,
+        totalValue: Number(metrics.totals?.totalValue) || 0,
+        needsAttention: Number(metrics.totals?.needsAttention) || 0,
+      });
     } catch (error: any) {
       toast.error(error.message || t('categories.messages.fetch_failed'));
     } finally {
@@ -91,39 +99,13 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
     cat.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const categoryMetrics = useMemo(() => {
-    const metrics = new Map<string, { totalItems: number; totalValue: number }>();
-    const keyForName = (value: string) => String(value || '').trim().toLowerCase();
-
-    categories.forEach((category) => {
-      metrics.set(category.id, { totalItems: 0, totalValue: 0 });
-      metrics.set(`name:${keyForName(category.name)}`, { totalItems: 0, totalValue: 0 });
-    });
-
-    inventoryItems.forEach((item) => {
-      const idKey = item.categoryId || '';
-      const nameKey = `name:${keyForName(item.categoryName || '')}`;
-      const target =
-        (idKey && metrics.get(idKey)) ||
-        metrics.get(nameKey);
-
-      if (!target) return;
-      target.totalItems += 1;
-      target.totalValue += Number(item.stockQty || 0) * Number(item.unitCost || 0);
-    });
-
-    return metrics;
-  }, [categories, inventoryItems]);
-
-  const dashboardMetrics = useMemo(() => {
-    const totalItems = inventoryItems.length;
-    const totalValue = inventoryItems.reduce(
-      (sum, item) => sum + Number(item.stockQty || 0) * Number(item.unitCost || 0),
-      0
-    );
-    const needsAttention = inventoryItems.filter((item) => Number(item.stockQty || 0) <= Number(item.reorderLevel || 0)).length;
-    return { totalItems, totalValue, needsAttention };
-  }, [inventoryItems]);
+  const metricFor = (category: InventoryCategory) =>
+    categoryMetricsMap.get(category.id) || {
+      categoryId: category.id,
+      itemCount: 0,
+      totalValue: 0,
+      needsAttention: 0,
+    };
 
   const localeForLanguage = (lng: string) => {
     const base = String(lng || 'en').split('-')[0];
@@ -172,13 +154,10 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       header: t('categories.total_items'),
       className: 'text-center',
       render: (category) => {
-        const metric =
-          categoryMetrics.get(category.id) ||
-          categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
-          { totalItems: 0, totalValue: 0 };
+        const metric = metricFor(category);
         return (
           <div className="flex flex-col items-center justify-center">
-            <span className="text-sm font-bold text-brand-text">{metric.totalItems}</span>
+            <span className="text-sm font-bold text-brand-text">{metric.itemCount}</span>
             <span className="text-xs text-brand-muted">{t('categories.products')}</span>
           </div>
         );
@@ -188,10 +167,7 @@ export const Categories: React.FC<CategoriesProps> = ({ onCategoryClick, selecte
       header: t('categories.total_value'),
       className: 'text-center',
       render: (category) => {
-        const metric =
-          categoryMetrics.get(category.id) ||
-          categoryMetrics.get(`name:${String(category.name).trim().toLowerCase()}`) ||
-          { totalItems: 0, totalValue: 0 };
+        const metric = metricFor(category);
         return (
           <div className="flex flex-col items-center justify-center">
             <span className="text-sm font-bold text-brand-text">{formatValue(metric.totalValue)}</span>

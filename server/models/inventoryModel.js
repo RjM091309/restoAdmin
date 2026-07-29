@@ -49,6 +49,11 @@ class InventoryModel {
 	static async getAll(branchId = null, categoryId = null) {
 		await InventoryModel.ensureSchema();
 		const params = [];
+		let invWhere = 'WHERE ACTIVE = 1 AND INGREDIENT_ID IS NOT NULL';
+		if (branchId != null && branchId !== undefined) {
+			invWhere += ' AND BRANCH_ID = ?';
+			params.push(branchId);
+		}
 		let where = 'WHERE ing.ACTIVE = 1';
 		if (branchId != null && branchId !== undefined) {
 			where += ' AND ing.BRANCH_ID = ?';
@@ -81,7 +86,7 @@ class InventoryModel {
 			LEFT JOIN master_categories mc ON mc.IDNo = ing.MASTER_CAT_ID AND mc.ACTIVE = 1
 			LEFT JOIN (
 				SELECT INGREDIENT_ID, BRANCH_ID, MAX(IDNo) AS FIRST_ID, SUM(STOCK_QTY) AS STOCK_QTY, MAX(STATUS_FLAG) AS STATUS_FLAG
-				FROM inventory WHERE ACTIVE = 1 AND INGREDIENT_ID IS NOT NULL
+				FROM inventory ${invWhere}
 				GROUP BY INGREDIENT_ID, BRANCH_ID
 			) agg ON agg.INGREDIENT_ID = ing.IDNo AND agg.BRANCH_ID = ing.BRANCH_ID
 			${where}
@@ -89,6 +94,57 @@ class InventoryModel {
 		`;
 		const [rows] = await pool.execute(query, params);
 		return rows;
+	}
+
+	/** Per-category stock metrics for Inventory landing page (no full item payload). */
+	static async getCategoryMetrics(branchId) {
+		await InventoryModel.ensureSchema();
+		if (branchId == null || branchId === undefined) {
+			return { byCategory: [], totals: { totalItems: 0, totalValue: 0, needsAttention: 0 } };
+		}
+		const bid = Number(branchId);
+		const [rows] = await pool.execute(
+			`
+			SELECT
+				ing.MASTER_CAT_ID AS category_id,
+				COUNT(*) AS item_count,
+				COALESCE(SUM(COALESCE(inv_sum.stock, 0) * COALESCE(ing.UNIT_COST, 0)), 0) AS total_value,
+				COALESCE(SUM(
+					CASE
+						WHEN COALESCE(inv_sum.stock, 0) <= COALESCE(ing.REORDER_LEVEL, 0) THEN 1
+						ELSE 0
+					END
+				), 0) AS needs_attention
+			FROM ingredients ing
+			LEFT JOIN (
+				SELECT INGREDIENT_ID, SUM(STOCK_QTY) AS stock
+				FROM inventory
+				WHERE ACTIVE = 1 AND BRANCH_ID = ? AND INGREDIENT_ID IS NOT NULL
+				GROUP BY INGREDIENT_ID
+			) inv_sum ON inv_sum.INGREDIENT_ID = ing.IDNo
+			WHERE ing.ACTIVE = 1
+			  AND ing.BRANCH_ID = ?
+			  AND ing.MASTER_CAT_ID IS NOT NULL
+			GROUP BY ing.MASTER_CAT_ID
+			`,
+			[bid, bid],
+		);
+		const byCategory = rows.map((r) => ({
+			categoryId: String(r.category_id),
+			itemCount: Number(r.item_count) || 0,
+			totalValue: Number(r.total_value) || 0,
+			needsAttention: Number(r.needs_attention) || 0,
+		}));
+		const totals = byCategory.reduce(
+			(acc, row) => {
+				acc.totalItems += row.itemCount;
+				acc.totalValue += row.totalValue;
+				acc.needsAttention += row.needsAttention;
+				return acc;
+			},
+			{ totalItems: 0, totalValue: 0, needsAttention: 0 },
+		);
+		return { byCategory, totals };
 	}
 
 	static async getById(id) {

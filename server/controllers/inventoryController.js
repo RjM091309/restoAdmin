@@ -28,6 +28,18 @@ class InventoryController {
 		};
 	}
 
+	static async getCategoryMetrics(req, res) {
+		try {
+			const branchId = InventoryController._resolveBranchId(req);
+			if (!branchId) return ApiResponse.badRequest(res, 'Branch ID is required');
+			const metrics = await InventoryModel.getCategoryMetrics(branchId);
+			return ApiResponse.success(res, metrics, 'Inventory category metrics retrieved successfully');
+		} catch (error) {
+			console.error('[InventoryController.getCategoryMetrics]', error?.message || error);
+			return ApiResponse.error(res, 'Failed to fetch inventory category metrics', 500, error.message);
+		}
+	}
+
 	static async getAll(req, res) {
 		try {
 			const branchId = InventoryController._resolveBranchId(req);

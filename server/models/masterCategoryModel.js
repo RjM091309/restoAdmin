@@ -70,7 +70,10 @@ class MasterCategoryModel {
 		const params = [];
 
 		if (isInventoryOnly) {
-			// Inventory-only: categories linked to operation_category with STATE = 1 (inventory type)
+			// Inventory page categories:
+			// 1) linked to operation_category.STATE = 1 (inventory type), OR
+			// 2) already used by active inventory stock for this branch
+			// Semi-join (not correlated EXISTS) so cost stays stable as inventory grows.
 			query = `
 				SELECT
 					mc.IDNo,
@@ -87,13 +90,24 @@ class MasterCategoryModel {
 					mc.EDITED_BY,
 					mc.EDITED_DT
 				FROM master_categories mc
-				INNER JOIN operation_category oc
+				LEFT JOIN operation_category oc
 					ON oc.IDNo = mc.OP_CAT_ID
 					AND oc.ACTIVE = 1
-					AND oc.STATE = 1
+				LEFT JOIN (
+					SELECT DISTINCT i.MASTER_CAT_ID AS cat_id
+					FROM inventory inv
+					INNER JOIN ingredients i
+						ON i.IDNo = inv.INGREDIENT_ID
+					   AND i.ACTIVE = 1
+					WHERE inv.ACTIVE = 1
+					  AND i.MASTER_CAT_ID IS NOT NULL
+					  ${branchId !== null && branchId !== undefined ? 'AND inv.BRANCH_ID = ?' : ''}
+				) used ON used.cat_id = mc.IDNo
 				WHERE mc.ACTIVE = 1
+				  AND (oc.STATE = 1 OR used.cat_id IS NOT NULL)
 			`;
 			if (branchId !== null && branchId !== undefined) {
+				params.push(branchId);
 				query += ` AND mc.BRANCH_ID = ?`;
 				params.push(branchId);
 			}

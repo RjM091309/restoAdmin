@@ -778,6 +778,122 @@ async function vertexGenerateJsonStream(prompt, opts, onAccumulated, signal) {
   throw lastErr || new Error('Vertex stream generation failed');
 }
 
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    const err = new Error('Aborted');
+    err.name = 'AbortError';
+    throw err;
+  }
+}
+
+async function vertexGeneratePlainStream(prompt, onAccumulated, signal, maxOutputTokens = 1024) {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+  }
+  const { VertexAI } = await import('@google-cloud/vertexai');
+  const locationOrder =
+    process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
+      ? [String(process.env.VERTEX_LOCATION).trim()]
+      : [VERTEX_LOCATION_PRIMARY, VERTEX_LOCATION_FALLBACK].filter((loc, i, arr) => arr.indexOf(loc) === i);
+
+  let lastErr = null;
+  for (const location of locationOrder) {
+    throwIfAborted(signal);
+    const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
+    for (const modelId of MODEL_CANDIDATES) {
+      try {
+        const model = vertex.getGenerativeModel({
+          model: modelId,
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens,
+          },
+        });
+        const streamingResp = await model.generateContentStream({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+
+        let fullText = '';
+        for await (const item of streamingResp.stream) {
+          throwIfAborted(signal);
+          const chunk =
+            item?.candidates?.[0]?.content?.parts
+              ?.map((p) => p?.text)
+              .filter(Boolean)
+              .join('') ?? '';
+          if (!chunk) continue;
+          fullText += chunk;
+          await onAccumulated(fullText);
+        }
+
+        if (!fullText.trim()) throw new Error('Empty Vertex plain stream response');
+        return fullText.trim();
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        lastErr = e;
+        if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
+      }
+    }
+  }
+  throw lastErr || new Error('Vertex plain stream generation failed');
+}
+
+async function vertexGenerateJsonStream(prompt, opts, onAccumulated, signal) {
+  const schemaBuilder = opts.schemaBuilder || buildAnalyticsResponseSchema;
+  const maxOutputTokens = opts.maxOutputTokens ?? 2048;
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = SERVICE_ACCOUNT_KEY_PATH;
+  }
+  const { VertexAI, SchemaType } = await import('@google-cloud/vertexai');
+  const locationOrder =
+    process.env.VERTEX_LOCATION && String(process.env.VERTEX_LOCATION).trim()
+      ? [String(process.env.VERTEX_LOCATION).trim()]
+      : [VERTEX_LOCATION_PRIMARY, VERTEX_LOCATION_FALLBACK].filter((loc, i, arr) => arr.indexOf(loc) === i);
+
+  let lastErr = null;
+  for (const location of locationOrder) {
+    throwIfAborted(signal);
+    const vertex = new VertexAI({ project: VERTEX_PROJECT_ID, location });
+    for (const modelId of MODEL_CANDIDATES) {
+      try {
+        const model = vertex.getGenerativeModel({
+          model: modelId,
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens,
+            responseMimeType: 'application/json',
+            responseSchema: schemaBuilder(SchemaType),
+          },
+        });
+        const streamingResp = await model.generateContentStream({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        });
+
+        let fullText = '';
+        for await (const item of streamingResp.stream) {
+          throwIfAborted(signal);
+          const chunk =
+            item?.candidates?.[0]?.content?.parts
+              ?.map((p) => p?.text)
+              .filter(Boolean)
+              .join('') ?? '';
+          if (!chunk) continue;
+          fullText += chunk;
+          await onAccumulated(fullText);
+        }
+
+        if (!fullText) throw new Error('Empty Vertex stream response');
+        return fullText;
+      } catch (e) {
+        if (e?.name === 'AbortError') throw e;
+        lastErr = e;
+        if (!/404|NOT_FOUND|not found|Publisher Model/i.test(String(e?.message ?? e))) throw e;
+      }
+    }
+  }
+  throw lastErr || new Error('Vertex stream generation failed');
+}
+
 function fallbackNarrative({ cur, prev, pctChange, menuTop, branchRows, period, locale }) {
   const loc = String(locale || 'en').toLowerCase();
   const fil = loc.startsWith('fil');

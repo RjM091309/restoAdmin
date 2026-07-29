@@ -5,7 +5,14 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from main import get_connection, _mysql_column_exists
-from sales_query_filters import billing_join_on, billing_where_clauses, orders_join_on_billing
+from sales_query_filters import (
+    billing_join_on,
+    billing_where_clauses,
+    orders_join_on_billing,
+    ph_local_day_range_filter,
+    ph_local_day_range_predicate,
+    ph_local_day_range_params,
+)
 
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics-reports"])
@@ -166,9 +173,10 @@ def menu_report(
         )
 
         if start_date and end_date:
-            # Align date filter with billing-based analytics (daily-sales)
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            params.extend(range_params)
         if branch_id:
             # Use billing.BRANCH_ID for consistency with other analytics
             branch_filter = "AND b.BRANCH_ID = %s"
@@ -404,6 +412,7 @@ def category_report(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     branch_id: Optional[int] = None,
+    limit: Optional[int] = None,
 ) -> dict:
     """
     Category-level sales report.
@@ -422,16 +431,112 @@ def category_report(
             "start_date=", start_date,
             "end_date=", end_date,
             "branch_id=", branch_id,
+            "limit=", limit,
         )
 
         if start_date and end_date:
-            # Align date filter with billing-based analytics (daily-sales)
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, range_params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+            params.extend(range_params)
         if branch_id:
             # Use billing.BRANCH_ID for consistency with other analytics
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
+
+        effective_limit = None
+        if limit is not None:
+            try:
+                effective_limit = max(1, min(int(limit), 50))
+            except (TypeError, ValueError):
+                effective_limit = 5
+
+        # Dashboard top-N: single indexed pass (skip Room/Service Charge UNION fan-out).
+        if effective_limit is not None:
+            has_parent_cat = _mysql_column_exists(cur, "categories", "PARENT_CAT_ID")
+            parent_join = "LEFT JOIN categories pc ON pc.IDNo = c.PARENT_CAT_ID" if has_parent_cat else ""
+            if has_parent_cat:
+                main_cat_sql = (
+                    f"COALESCE(NULLIF({_safe_text_sql('pc.CAT_NAME')}, ''), "
+                    f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized'))"
+                )
+                sub_cat_sql = (
+                    f"CASE WHEN c.PARENT_CAT_ID IS NOT NULL THEN COALESCE({_safe_text_sql('c.CAT_NAME')}, '') "
+                    f"ELSE '' END"
+                )
+            else:
+                main_cat_sql = f"COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized')"
+                sub_cat_sql = "''"
+
+            light_query = f"""
+                SELECT
+                    COALESCE(c.IDNo, 0) AS id,
+                    COALESCE({_safe_text_sql('c.CAT_NAME')}, 'Uncategorized') AS category,
+                    {main_cat_sql} AS mainCategory,
+                    {sub_cat_sql} AS subCategory,
+                    COALESCE(
+                        NULLIF(
+                            GROUP_CONCAT(
+                                DISTINCT {_safe_text_sql('br.BRANCH_NAME')}
+                                ORDER BY {_safe_text_sql('br.BRANCH_NAME')}
+                                SEPARATOR ', '
+                            ),
+                            ''
+                        ),
+                        'Unknown Branch'
+                    ) AS branch,
+                    COALESCE(SUM(oi.QTY), 0) AS salesQty,
+                    COALESCE(SUM(oi.LINE_TOTAL), 0) AS totalSales,
+                    0 AS refundQty,
+                    0 AS refundAmount,
+                    0 AS discounts,
+                    0 AS unitCost
+                FROM billing b
+                INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+                INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
+                INNER JOIN menu m ON m.IDNo = oi.MENU_ID
+                LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+                {parent_join}
+                LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
+                WHERE {_BILLING_WHERE}
+                {date_filter}
+                {branch_filter}
+                  AND UPPER(TRIM(COALESCE(m.MENU_NAME, ''))) <> 'ROOM CHARGE'
+                  AND UPPER(TRIM(COALESCE(c.CAT_NAME, ''))) <> 'ROOM CHARGE'
+                GROUP BY c.IDNo, c.CAT_NAME
+                HAVING salesQty > 0
+                ORDER BY totalSales DESC
+                LIMIT %s
+            """
+            cur.execute(light_query, list(params) + [effective_limit])
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            items: List[CategoryReportRow] = []
+            for row in rows:
+                total_sales = float(row.get("totalSales") or 0.0)
+                refund_amount = float(row.get("refundAmount") or 0.0)
+                discounts = float(row.get("discounts") or 0.0)
+                net_sales = total_sales - refund_amount - discounts
+                unit_cost = float(row.get("unitCost") or 0.0)
+                items.append(
+                    CategoryReportRow(
+                        id=int(row.get("id") or 0),
+                        category=str(row.get("category") or "Uncategorized"),
+                        mainCategory=str(row.get("mainCategory") or row.get("category") or "Uncategorized"),
+                        subCategory=str(row.get("subCategory") or ""),
+                        branch=str(row.get("branch") or "Unknown Branch"),
+                        salesQty=int(row.get("salesQty") or 0),
+                        totalSales=total_sales,
+                        refundQty=int(row.get("refundQty") or 0),
+                        refundAmount=refund_amount,
+                        discounts=discounts,
+                        netSales=net_sales,
+                        unitCost=unit_cost,
+                        totalRevenue=net_sales,
+                    )
+                )
+            return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
 
         # Subqueries use different billing aliases (b2 for amount, bq for qty).
         # Generate filters per-alias so SQL always references the correct table.
@@ -478,14 +583,14 @@ def category_report(
                 0 AS refundAmount,
                 0 AS discounts,
                 0 AS unitCost
-            FROM orders o
-            INNER JOIN billing b ON {_BILLING_JOIN}
+            FROM billing b
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
             INNER JOIN order_items oi ON oi.ORDER_ID = o.IDNo
             INNER JOIN menu m ON m.IDNo = oi.MENU_ID
             LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
             {parent_join}
             LEFT JOIN branches br ON br.IDNo = b.BRANCH_ID
-            WHERE 1=1
+            WHERE {_BILLING_WHERE}
             {date_filter}
             {branch_filter}
               -- Prevent the synthetic Room Charge row from double-counting.

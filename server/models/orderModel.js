@@ -7,6 +7,7 @@
 
 const pool = require('../config/db');
 const TableModel = require('./tableModel');
+const { phLocalDayRangeFilter } = require('../utils/phDateRange');
 
 class OrderModel {
 	static async getAll(branchId = null, options = {}) {
@@ -17,8 +18,8 @@ class OrderModel {
 			includeItemMeta = false,
 		} = options;
 
-		// NOTE: Do not JOIN billing 1:1 — multiple billing rows per order (refunds, retries) would duplicate
-		// every order row in the list UI. Use a scalar subquery for the latest payment method instead.
+		// Latest payment via index lookup per returned row (ORDER_ID, IDNo) —
+		// avoids aggregating the entire billing table for the branch on every list load.
 		let query = `
 			SELECT 
 				o.IDNo,
@@ -39,7 +40,11 @@ class OrderModel {
 				o.ENCODED_DT,
 				o.ENCODED_BY,
 				ui.FIRSTNAME AS ENCODED_BY_NAME,
-				(SELECT bill.PAYMENT_METHOD FROM billing bill WHERE bill.ORDER_ID = o.IDNo ORDER BY bill.IDNo DESC LIMIT 1) AS payment_method
+				(SELECT bill.PAYMENT_METHOD
+				   FROM billing bill
+				  WHERE bill.ORDER_ID = o.IDNo
+				  ORDER BY bill.IDNo DESC
+				  LIMIT 1) AS payment_method
 				${includeItemMeta ? `,
 				(SELECT COUNT(*) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_line_count,
 				(SELECT COALESCE(SUM(oi.QTY), 0) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_total_qty` : ''}
@@ -56,30 +61,62 @@ class OrderModel {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		// Compare calendar dates in Asia/Manila so late-night UTC orders map to the correct PH day.
-		const manilaEncodedDt = `COALESCE(
-			CONVERT_TZ(o.ENCODED_DT, @@session.time_zone, '+08:00'),
-			DATE_ADD(o.ENCODED_DT, INTERVAL 8 HOUR)
-		)`;
-		if (startDate) {
-			query += ` AND DATE(${manilaEncodedDt}) >= ?`;
-			params.push(String(startDate).slice(0, 10));
-		}
-		if (endDate) {
-			query += ` AND DATE(${manilaEncodedDt}) <= ?`;
-			params.push(String(endDate).slice(0, 10));
+		const range = phLocalDayRangeFilter('o.ENCODED_DT', startDate, endDate);
+		if (range.sql) {
+			query += range.sql;
+			params.push(...range.params);
 		}
 
 		query += ` ORDER BY o.ENCODED_DT DESC`;
 
 		const parsedLimit = limit != null ? parseInt(String(limit), 10) : 0;
-		// mysql2 prepared statements reject bound LIMIT placeholders (ER_WRONG_ARGUMENTS).
 		if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
-			query += ` LIMIT ${parsedLimit}`;
+			query += ` LIMIT ${Math.min(parsedLimit, 2000)}`;
+		} else if (range.sql) {
+			query += ` LIMIT 500`;
+		} else {
+			// Undated callers (e.g. waiter) — hard cap, never unbounded.
+			query += ` LIMIT 2000`;
 		}
 
 		const [rows] = await pool.execute(query, params);
 		return rows;
+	}
+
+	/** Aggregate counts for list header cards — O(index range), not O(rows returned). */
+	static async getListStats(branchId = null, options = {}) {
+		const { start_date: startDate = null, end_date: endDate = null } = options;
+		let query = `
+			SELECT
+				COUNT(*) AS total,
+				COALESCE(SUM(o.STATUS = 3), 0) AS pending,
+				COALESCE(SUM(o.STATUS = 2), 0) AS confirmed,
+				COALESCE(SUM(o.STATUS = 1), 0) AS settled,
+				COALESCE(SUM(o.STATUS = -1), 0) AS cancelled,
+				COALESCE(SUM(CASE WHEN o.STATUS = 1 THEN o.GRAND_TOTAL ELSE 0 END), 0) AS totalRevenue
+			FROM orders o
+			WHERE o.STATUS != -2
+		`;
+		const params = [];
+		if (branchId) {
+			query += ` AND o.BRANCH_ID = ?`;
+			params.push(branchId);
+		}
+		const range = phLocalDayRangeFilter('o.ENCODED_DT', startDate, endDate);
+		if (range.sql) {
+			query += range.sql;
+			params.push(...range.params);
+		}
+		const [rows] = await pool.execute(query, params);
+		const r = rows[0] || {};
+		return {
+			total: Number(r.total) || 0,
+			pending: Number(r.pending) || 0,
+			confirmed: Number(r.confirmed) || 0,
+			settled: Number(r.settled) || 0,
+			cancelled: Number(r.cancelled) || 0,
+			totalRevenue: Number(r.totalRevenue) || 0,
+		};
 	}
 
 	static async getById(id) {

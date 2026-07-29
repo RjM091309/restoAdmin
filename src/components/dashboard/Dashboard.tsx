@@ -46,6 +46,7 @@ import {
   buildBranchDashboardCacheKey,
   clearKnownEmptyBranch,
   hasBranchDashboardCacheData,
+  isBranchDashboardCacheFresh,
   isBranchDashboardPayloadEmpty,
   isBranchDashboardPayloadIncomplete,
   isKnownEmptyBranch,
@@ -855,7 +856,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
         };
 
         if (isBranchDashboardPayloadIncomplete(payload) && !background) {
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((r) => setTimeout(r, 400));
           if (reqId !== dashboardReqSeq.current) return;
           const retryBundle = await fetchBranchDashboardBundleApi({
             branchId: String(selectedBranch.id),
@@ -912,7 +913,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       if (hasBranchDashboardCacheData(cached)) {
         hydrateFromCache(cached);
         setPageLoading(false);
-        void loadDashboardBundle(true);
+        if (!isBranchDashboardCacheFresh(cacheKey)) {
+          void loadDashboardBundle(true);
+        }
         return;
       }
 
@@ -923,7 +926,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       if (hasBranchDashboardCacheData(afterPrefetch)) {
         hydrateFromCache(afterPrefetch);
         setPageLoading(false);
-        void loadDashboardBundle(true);
+        if (!isBranchDashboardCacheFresh(cacheKey)) {
+          void loadDashboardBundle(true);
+        }
         return;
       }
 
@@ -936,7 +941,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           setRecentOrderItemsMeta({});
         }
         setPageLoading(false);
-        void loadDashboardBundle(true);
+        if (!isBranchDashboardCacheFresh(cacheKey)) {
+          void loadDashboardBundle(true);
+        }
         return;
       }
 

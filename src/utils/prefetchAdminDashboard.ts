@@ -78,11 +78,9 @@ export function prefetchAdminDashboardBundle(params?: {
         branchCardsData: bundle.branchCardsData,
         branchRevenueDistribution: bundle.branchRevenueDistribution,
         topProductsData: bundle.topProductsData,
-        dailySalesForCards: bundle.dailySalesForCards,
         expenseCategoryByBranch: bundle.expenseCategoryByBranch,
         expenseRentByBranch: bundle.expenseRentByBranch,
         expenseSalaryByBranch: bundle.expenseSalaryByBranch,
-        comparePeriodReconAll: bundle.comparePeriodReconAll,
         trendByPeriod,
         branchChartsById: bundle.branchChartsById,
       });

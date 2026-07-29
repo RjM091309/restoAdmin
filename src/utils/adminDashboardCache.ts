@@ -1,4 +1,3 @@
-import type { ApiDailySalesItem } from '../services/analyticsService';
 import type { BranchPerformanceData } from '../components/dashboard/BranchPerformanceCard';
 
 export type AdminDashboardTrendPeriod = 'weekly' | 'monthly' | 'yearly';
@@ -24,11 +23,9 @@ export type AdminDashboardCachePayload = {
   branchCardsData: BranchPerformanceData[];
   branchRevenueDistribution: { name: string; value: number }[];
   topProductsData: { name: string; sales: number }[];
-  dailySalesForCards: ApiDailySalesItem[];
   expenseCategoryByBranch: Record<number, Record<string, number>>;
   expenseRentByBranch?: Record<number, number>;
   expenseSalaryByBranch?: Record<number, number>;
-  comparePeriodReconAll: number;
   trendByPeriod: Partial<Record<AdminDashboardTrendPeriod, AdminDashboardTrendPoint[]>>;
   /** Per-branch monthly trend + top products for instant branch-card focus. */
   branchChartsById?: Record<string, BranchChartsCacheEntry>;
@@ -40,15 +37,18 @@ const LOCAL_STORAGE_KEY = 'resto_admin_dashboard_cache_v1_local';
 const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Show stale local cache for instant paint; background refresh updates live data. */
 const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Skip background re-fetch when cache is newer than this (avoids stampeding the
+ * same admin-dashboard-bundle right after warm/prefetch/mount).
+ */
+export const ADMIN_DASHBOARD_BG_REFRESH_TTL_MS = 2 * 60 * 1000;
 const MAX_ENTRIES = 10;
 
 const EMPTY_PAYLOAD: AdminDashboardCachePayload = {
   branchCardsData: [],
   branchRevenueDistribution: [],
   topProductsData: [],
-  dailySalesForCards: [],
   expenseCategoryByBranch: {},
-  comparePeriodReconAll: 0,
   trendByPeriod: {},
 };
 
@@ -95,7 +95,6 @@ export function hasAdminDashboardCacheData(
     cached.branchCardsData.length > 0 ||
     cached.branchRevenueDistribution.length > 0 ||
     cached.topProductsData.length > 0 ||
-    cached.dailySalesForCards.length > 0 ||
     hasTrend
   );
 }
@@ -159,6 +158,39 @@ export function readAdminDashboardCacheIncludingStale(
   }
 }
 
+/** Age of cached entry in ms, or null if missing. Checks session then local. */
+export function getAdminDashboardCacheAgeMs(key: string): number | null {
+  const now = Date.now();
+  try {
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data && typeof sessionEntry.at === 'number') {
+      return Math.max(0, now - sessionEntry.at);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (localEntry?.data && typeof localEntry.at === 'number') {
+      return Math.max(0, now - localEntry.at);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** True when cache is young enough to skip a background network refresh. */
+export function isAdminDashboardCacheFresh(
+  key: string,
+  maxAgeMs: number = ADMIN_DASHBOARD_BG_REFRESH_TTL_MS,
+): boolean {
+  const age = getAdminDashboardCacheAgeMs(key);
+  return age != null && age < maxAgeMs;
+}
+
 export function writeAdminDashboardCache(key: string, data: AdminDashboardCachePayload): void {
   const entry = { at: Date.now(), data };
 
@@ -199,10 +231,6 @@ export function patchAdminDashboardCache(
       patch.branchRevenueDistribution && patch.branchRevenueDistribution.length > 0
         ? patch.branchRevenueDistribution
         : base.branchRevenueDistribution,
-    dailySalesForCards:
-      patch.dailySalesForCards && patch.dailySalesForCards.length > 0
-        ? patch.dailySalesForCards
-        : base.dailySalesForCards,
     topProductsData:
       patch.topProductsData && patch.topProductsData.length > 0
         ? patch.topProductsData

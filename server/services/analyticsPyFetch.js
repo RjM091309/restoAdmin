@@ -5,7 +5,7 @@ const PYSERVER_TIMEOUT_MS = Number(process.env.ANALYTICS_PYSERVER_TIMEOUT_MS || 
 const CACHE_TTL_MS = Number(process.env.ANALYTICS_PY_CACHE_TTL_MS || 120000);
 const CACHE_MAX = Number(process.env.ANALYTICS_PY_CACHE_MAX || 64);
 /** Cap concurrent in-flight PyServer requests to avoid timeout stampedes. */
-const PY_CONCURRENCY = Math.max(1, Number(process.env.ANALYTICS_PY_CONCURRENCY || 6));
+const PY_CONCURRENCY = Math.max(1, Number(process.env.ANALYTICS_PY_CONCURRENCY || 8));
 
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 

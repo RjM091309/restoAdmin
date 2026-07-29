@@ -104,10 +104,15 @@ const mapExpense = (row: ExpenseApiRecord): ExpenseRecord => ({
 
 // ---- Public API ----
 
-export const getExpenses = async (branchId?: string): Promise<ExpenseRecord[]> => {
+export const getExpenses = async (
+  branchId?: string,
+  options: { startDate?: string; endDate?: string } = {},
+): Promise<ExpenseRecord[]> => {
   const params: Record<string, string> = {
     branch_id: branchId && branchId !== 'all' ? branchId : '',
   };
+  if (options.startDate) params.start_date = options.startDate;
+  if (options.endDate) params.end_date = options.endDate;
   const response = await fetch(buildUrl('/expenses', params), {
     credentials: 'include',
     headers: authHeaders(),

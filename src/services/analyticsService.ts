@@ -74,11 +74,6 @@ export type ApiDailySalesItem = {
   gross_profit: number;
 };
 
-export type ApiDailyOrdersItem = {
-  sale_date: string;
-  order_count: number;
-};
-
 export type ApiMenuReportRow = {
   id: number;
   goods: string;
@@ -194,46 +189,6 @@ export type ApiPerformanceTrendRow = {
   sale_date?: string | null;
 };
 
-export async function fetchBranchSalesApi(params: URLSearchParams): Promise<ApiBranchSalesItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  try {
-    const res = await fetch(`${baseUrl}/api/analytics/branch-sales?${params.toString()}`);
-    if (!res.ok) {
-      // Backend unreachable / HTTP error – treat as no data for UI stability.
-      // eslint-disable-next-line no-console
-      console.warn('[analyticsService] branch-sales HTTP error:', res.status);
-      return [];
-    }
-    const json = await res.json();
-    if (json.success && json.data?.data) {
-      return json.data.data as ApiBranchSalesItem[];
-    }
-    // If Python analytics returns an error (e.g. missing legacy tables),
-    // log and gracefully fall back to empty data instead of crashing dashboard.
-    // eslint-disable-next-line no-console
-    console.warn('[analyticsService] branch-sales backend error:', json?.message || json);
-    return [];
-  } catch (err) {
-    // Network or parsing error – also degrade gracefully.
-    // eslint-disable-next-line no-console
-    console.warn('[analyticsService] branch-sales request failed:', err);
-    return [];
-  }
-}
-
-export async function fetchLeastSellingApi(params: URLSearchParams): Promise<ApiLeastSellingItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/least-selling?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics least-selling failed with status ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.success && json.data?.data) {
-    return json.data.data as ApiLeastSellingItem[];
-  }
-  return [];
-}
-
 export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTopSellingItem[]> {
   const baseUrl = getAnalyticsBaseUrl();
   const url = baseUrl
@@ -260,32 +215,6 @@ export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDa
   if (!res.ok) throw new Error(`Analytics daily-sales failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailySalesItem[];
-  }
-  return [];
-}
-
-export async function fetchDailyOrdersApi(params: URLSearchParams): Promise<ApiDailyOrdersItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/daily-orders?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics daily-orders failed with status ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.success && json.data?.data) {
-    return json.data.data as ApiDailyOrdersItem[];
-  }
-  return [];
-}
-
-export async function fetchDailyExpensesApi(params: URLSearchParams): Promise<ApiDailyExpenseItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/daily-expenses?${params.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Analytics daily-expenses failed with status ${res.status}`);
-  }
-  const json = await res.json();
-  if (json.success && json.data?.data) {
-    return json.data.data as ApiDailyExpenseItem[];
   }
   return [];
 }
@@ -576,28 +505,6 @@ export async function fetchSalesDashboardBundleApi(params: {
   };
 }
 
-/** Fast SQL probe (~100–300ms) — decides skeleton vs empty shell before full bundle. */
-export async function fetchBranchDashboardProbeApi(params: {
-  branchId: string;
-  start: string;
-  end: string;
-}): Promise<{ hasActivity: boolean }> {
-  const qs = new URLSearchParams();
-  qs.set('branch_id', params.branchId);
-  qs.set('start_date', params.start);
-  qs.set('end_date', params.end);
-
-  const url = `/api/analytics/branch-dashboard-probe?${qs.toString()}`;
-  const { res, json } = await fetchJson(url, 8000);
-  if (!res.ok) {
-    throw new Error(`Analytics branch-dashboard-probe failed with status ${res.status}`);
-  }
-  if (!json?.success || !json?.data) {
-    throw new Error(json?.message || 'Analytics branch-dashboard-probe returned an error');
-  }
-  return { hasActivity: Boolean(json.data.hasActivity) };
-}
-
 /** Single backend round-trip for branch Dashboard (replaces ~10 frontend API calls). */
 export async function fetchBranchDashboardBundleApi(params: {
   branchId: string;
@@ -610,7 +517,7 @@ export async function fetchBranchDashboardBundleApi(params: {
   qs.set('end_date', params.end);
 
   const url = `/api/analytics/branch-dashboard-bundle?${qs.toString()}`;
-  const { res, json } = await fetchJson(url, 12000);
+  const { res, json } = await fetchJson(url, 35000);
   if (!res.ok) {
     throw new Error(`Analytics branch-dashboard-bundle failed with status ${res.status}`);
   }
@@ -645,13 +552,11 @@ export type AdminDashboardBundlePayload = {
   }>;
   branchRevenueDistribution: { name: string; value: number }[];
   topProductsData: { name: string; sales: number }[];
-  dailySalesForCards: ApiDailySalesItem[];
   expenseCategoryByBranch: Record<number, Record<string, number>>;
   /** Rent totals (category + item desc e.g. Shop Rental). */
   expenseRentByBranch: Record<number, number>;
   /** Salary totals (category + dedicated salary main + item desc). */
   expenseSalaryByBranch: Record<number, number>;
-  comparePeriodReconAll: number;
   trendData: Array<{
     name: string;
     totalSales: number;
@@ -680,12 +585,15 @@ export async function fetchAdminDashboardBundleApi(params: {
   branchId?: string | null;
   period?: string;
   includeBranchCharts?: boolean;
+  /** compare/slim skips trend + top-selling for faster Branch Comparison reloads */
+  mode?: 'full' | 'compare' | 'slim';
 }): Promise<AdminDashboardBundlePayload> {
   const qs = new URLSearchParams();
   qs.set('start_date', params.start);
   qs.set('end_date', params.end);
   if (params.period) qs.set('period', params.period);
   if (params.includeBranchCharts) qs.set('include_branch_charts', 'true');
+  if (params.mode === 'compare' || params.mode === 'slim') qs.set('mode', 'compare');
   if (params.branchId && params.branchId !== 'all') {
     qs.set('branch_id', params.branchId);
   } else {
@@ -712,11 +620,9 @@ export async function fetchAdminDashboardBundleApi(params: {
     branchCardsData: data.branchCardsData || [],
     branchRevenueDistribution: data.branchRevenueDistribution || [],
     topProductsData: data.topProductsData || [],
-    dailySalesForCards: data.dailySalesForCards || [],
     expenseCategoryByBranch: data.expenseCategoryByBranch || {},
     expenseRentByBranch: data.expenseRentByBranch || {},
     expenseSalaryByBranch: data.expenseSalaryByBranch || {},
-    comparePeriodReconAll: Number(data.comparePeriodReconAll) || 0,
     trendData: Array.isArray(data.trendData) ? data.trendData : [],
     trendPeriod: String(data.trendPeriod || params.period || 'monthly'),
     branchChartsById: data.branchChartsById ?? {},

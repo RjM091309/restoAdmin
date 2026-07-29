@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -81,6 +81,13 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   }, []);
 
   const [records, setRecords] = useState<BillingRecord[]>([]);
+  const [serverStats, setServerStats] = useState<{
+    totalDue: number;
+    totalPaid: number;
+    paidCount: number;
+    partialCount: number;
+    unpaidCount: number;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,8 +111,10 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
   const [receiptOrders, setReceiptOrders] = useState<any[]>([]);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  const loadBillingReqIdRef = useRef(0);
 
   const loadBilling = useCallback(async () => {
+    const reqId = ++loadBillingReqIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -113,11 +122,16 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
       if (branchId && branchId !== 'all') {
         params.set('branch_id', branchId);
       }
+      if (dateRange?.start) params.set('start_date', dateRange.start);
+      if (dateRange?.end) params.set('end_date', dateRange.end);
+      params.set('limit', '500');
+      params.set('include_stats', '1');
       const qs = params.toString();
       const res = await fetch(`/data-api/billing/data${qs ? `?${qs}` : ''}`, {
         headers: authHeaders(),
       });
       const json = await res.json();
+      if (reqId !== loadBillingReqIdRef.current) return;
       if (!res.ok || json?.success === false) {
         throw new Error(
           json?.error || json?.message || t('billing.unable_to_load_billing_records'),
@@ -137,17 +151,31 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
         STATUS: Number(r.STATUS || r.status || 3) as BillingStatus,
         PAYMENT_REF: r.PAYMENT_REF ?? null,
         ENCODED_DT: r.ENCODED_DT ?? null,
-        ENCODED_BY_USERNAME: r.ENCODED_BY_USERNAME ?? null,
+        ENCODED_BY_USERNAME: r.ENCODED_BY_USERNAME ?? r.ENCODED_BY_NAME ?? null,
       }));
       setRecords(mapped);
+      const s = json.meta?.stats;
+      setServerStats(
+        s
+          ? {
+              totalDue: Number(s.totalDue) || 0,
+              totalPaid: Number(s.totalPaid) || 0,
+              paidCount: Number(s.paidCount) || 0,
+              partialCount: Number(s.partialCount) || 0,
+              unpaidCount: Number(s.unpaidCount) || 0,
+            }
+          : null,
+      );
     } catch (e: any) {
+      if (reqId !== loadBillingReqIdRef.current) return;
       console.error('Failed to load billing records', e);
       setError(e?.message || t('billing.unable_to_load_billing_records'));
       setRecords([]);
+      setServerStats(null);
     } finally {
-      setLoading(false);
+      if (reqId === loadBillingReqIdRef.current) setLoading(false);
     }
-  }, [branchId, t]);
+  }, [branchId, dateRange.start, dateRange.end, t]);
 
   useEffect(() => {
     loadBilling();
@@ -207,6 +235,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   }, [recordsInDateRange, searchTerm, statusFilter]);
 
   const stats = useMemo(() => {
+    if (serverStats) return serverStats;
     const totalDue = recordsInDateRange.reduce((s, r) => {
       const remaining = Number(r.AMOUNT_DUE || 0) - Number(r.AMOUNT_PAID || 0);
       return s + Math.max(0, remaining);
@@ -216,7 +245,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
     const partialCount = recordsInDateRange.filter((r) => r.STATUS === 2).length;
     const unpaidCount = recordsInDateRange.filter((r) => r.STATUS === 3).length;
     return { totalDue, totalPaid, paidCount, partialCount, unpaidCount };
-  }, [recordsInDateRange]);
+  }, [recordsInDateRange, serverStats]);
 
   const openPaymentModal = (record: BillingRecord) => {
     setActiveRecord(record);

@@ -27,14 +27,6 @@ function buildExpenseMaps(rows) {
 	return { expenseMap, expenseByBranch };
 }
 
-function branchExpensesFromMap(branchId, expenseByBranch, expenseMap) {
-	const fromBranch = expenseByBranch[branchId];
-	if (fromBranch != null) return fromBranch;
-	const branchMap = expenseMap[branchId];
-	if (!branchMap) return 0;
-	return Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
-}
-
 function buildSummary({ branchId, branchCards, totalExpenses }) {
 	if (branchId != null && branchCards.length > 0) {
 		const branch = branchCards.find((b) => String(b.id) === String(branchId));
@@ -178,7 +170,9 @@ async function buildAdminDashboardBundle({
 	branchId = null,
 	period = 'monthly',
 	include_branch_charts = false,
+	mode = 'full',
 }) {
+	const slim = String(mode || '').toLowerCase() === 'compare' || String(mode || '').toLowerCase() === 'slim';
 	const pyParams = { start_date, end_date };
 	if (branchId != null && String(branchId).trim() !== '') {
 		pyParams.branch_id = String(branchId);
@@ -188,29 +182,25 @@ async function buildAdminDashboardBundle({
 	const trendParams = { ...pyParams, period: String(period || 'monthly') };
 
 	// Single parallel wave — faster wall-clock than sequential phases.
+	// Compare/slim mode skips trend + top-selling (unused by Branch Comparison panel).
 	const [
 		branchSalesRes,
-		expenseSummaryRes,
 		topSellingRes,
 		expenseBreakdownRes,
-		dailySalesRes,
 		trendRes,
 		reconByBranch,
-		reconAll,
 		rentSalaryByBranch,
 		nodeExpenseByBranch,
 	] = await Promise.all([
 		fetchPyServerOptional('/api/analytics/branch-sales', branchSalesParams),
-		fetchPyServerOptional('/api/analytics/expense-summary', pyParams),
-		fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: '5' }),
+		slim
+			? Promise.resolve(null)
+			: fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: '5' }),
 		fetchPyServerOptional('/api/analytics/expense-breakdown', pyParams),
-		fetchPyServerOptional('/api/analytics/daily-sales', pyParams),
-		fetchPyServerOptional('/api/analytics/performance-trend', trendParams),
+		slim
+			? Promise.resolve(null)
+			: fetchPyServerOptional('/api/analytics/performance-trend', trendParams),
 		CashReconciliationModel.totalsByBranchForRange(start_date, end_date).catch(() => ({})),
-		CashReconciliationModel.aggregatesForRange(null, start_date, end_date).catch(() => ({
-			total: 0,
-			byDate: {},
-		})),
 		ExpenseModel.getRentSalaryByBranch(start_date, end_date).catch((err) => {
 			console.warn('[adminDashboardBundle] getRentSalaryByBranch failed:', err?.message || err);
 			return { rent: {}, salary: {} };
@@ -223,9 +213,13 @@ async function buildAdminDashboardBundle({
 
 	const branchSales = branchSalesRes?.data?.data || [];
 	const topSelling = topSellingRes?.data?.data || [];
-	const dailySales = dailySalesRes?.data?.data || [];
 	const expenseBreakdown = expenseBreakdownRes?.data?.data || [];
-	const expenseSummary = expenseSummaryRes?.data || { total_expense: 0 };
+	const expenseSummary = {
+		total_expense: Object.values(nodeExpenseByBranch || {}).reduce(
+			(s, v) => s + (Number(v) || 0),
+			0,
+		),
+	};
 
 	const { expenseMap, expenseByBranch } = buildExpenseMaps(expenseBreakdown);
 
@@ -259,23 +253,25 @@ async function buildAdminDashboardBundle({
 		value: netSalesByBranch[b.branch_id] || Number(b.total_sales || 0),
 	}));
 
-	const topProductsData = (topSelling || []).slice(0, 5).map((item) => ({
-		name: item.MENU_NAME || '',
-		sales: item.total_quantity,
-	}));
+	const topProductsData = slim
+		? []
+		: (topSelling || []).slice(0, 5).map((item) => ({
+				name: item.MENU_NAME || '',
+				sales: item.total_quantity,
+			}));
 
-	const comparePeriodReconAll = Number(reconAll?.total) || 0;
+	const trendData = slim
+		? []
+		: (trendRes?.data?.data || []).map((r) => ({
+				name: String(r.name ?? ''),
+				totalSales: Number(r.totalSales || 0),
+				totalExpenses: Number(r.totalExpenses || 0),
+				...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
+			}));
 
-	const trendData = (trendRes?.data?.data || []).map((r) => ({
-		name: String(r.name ?? ''),
-		totalSales: Number(r.totalSales || 0),
-		totalExpenses: Number(r.totalExpenses || 0),
-		...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
-	}));
-
-	// Retry trend alone if the parallel wave timed out.
+	// Retry trend alone if the parallel wave timed out (full mode only).
 	let finalTrendData = trendData;
-	if (finalTrendData.length === 0) {
+	if (!slim && finalTrendData.length === 0) {
 		const retryRes = await fetchPyServerOptional(
 			'/api/analytics/performance-trend',
 			trendParams,
@@ -297,20 +293,19 @@ async function buildAdminDashboardBundle({
 		totalExpenses: Number(expenseSummary?.total_expense) || 0,
 	});
 
-	const branchChartsById = include_branch_charts
-		? await buildBranchChartsForAll(branchCardsData, start_date, end_date)
-		: {};
+	const branchChartsById =
+		!slim && include_branch_charts
+			? await buildBranchChartsForAll(branchCardsData, start_date, end_date)
+			: {};
 
 	return {
 		summary,
 		branchCardsData,
 		branchRevenueDistribution,
 		topProductsData,
-		dailySalesForCards: dailySales,
 		expenseCategoryByBranch: expenseMap,
 		expenseRentByBranch: rentSalaryByBranch?.rent || {},
 		expenseSalaryByBranch: rentSalaryByBranch?.salary || {},
-		comparePeriodReconAll,
 		trendData: finalTrendData,
 		trendPeriod: String(period || 'monthly'),
 		branchChartsById,

@@ -42,6 +42,8 @@ const EMPTY_MARKER_KEY = 'resto_branch_dashboard_empty_v1';
 const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Stale-while-revalidate for instant paint across sessions/restarts. */
 const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Skip background re-fetch when cache is newer than this. */
+export const BRANCH_DASHBOARD_BG_REFRESH_TTL_MS = 2 * 60 * 1000;
 const MAX_ENTRIES = 12;
 
 const EMPTY_PAYLOAD: BranchDashboardCachePayload = {
@@ -242,6 +244,37 @@ export function readBranchDashboardCacheIncludingStale(
   } catch {
     return null;
   }
+}
+
+export function getBranchDashboardCacheAgeMs(key: string): number | null {
+  const now = Date.now();
+  try {
+    const sessionStore = readCacheStore(sessionStorage, SESSION_STORAGE_KEY);
+    const sessionEntry = sessionStore?.[key];
+    if (sessionEntry?.data && typeof sessionEntry.at === 'number') {
+      return Math.max(0, now - sessionEntry.at);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const localStore = readCacheStore(localStorage, LOCAL_STORAGE_KEY);
+    const localEntry = localStore?.[key];
+    if (localEntry?.data && typeof localEntry.at === 'number') {
+      return Math.max(0, now - localEntry.at);
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function isBranchDashboardCacheFresh(
+  key: string,
+  maxAgeMs: number = BRANCH_DASHBOARD_BG_REFRESH_TTL_MS,
+): boolean {
+  const age = getBranchDashboardCacheAgeMs(key);
+  return age != null && age < maxAgeMs;
 }
 
 export function writeBranchDashboardCache(key: string, data: BranchDashboardCachePayload): void {
