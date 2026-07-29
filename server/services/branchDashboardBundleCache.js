@@ -1,7 +1,8 @@
 const { LRUCache } = require('lru-cache');
 const { buildBranchDashboardBundle } = require('./branchDashboardBundle');
+const { getManilaMonthToDateRange } = require('../utils/manilaMonthRange');
 
-const CACHE_TTL_MS = Number(process.env.BRANCH_DASHBOARD_CACHE_TTL_MS || 180000);
+const CACHE_TTL_MS = Number(process.env.BRANCH_DASHBOARD_CACHE_TTL_MS || 30000);
 const CACHE_MAX = Number(process.env.BRANCH_DASHBOARD_CACHE_MAX || 48);
 const WARM_ATTEMPTS = Number(process.env.BRANCH_DASHBOARD_WARM_ATTEMPTS || 5);
 const WARM_RETRY_MS = Number(process.env.BRANCH_DASHBOARD_WARM_RETRY_MS || 3000);
@@ -62,13 +63,7 @@ function setCachedBranchDashboardBundle(key, bundle) {
 }
 
 function getCurrentMonthRange() {
-	const today = new Date();
-	const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-	const pad = (n) => String(n).padStart(2, '0');
-	return {
-		start_date: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
-		end_date: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-	};
+	return getManilaMonthToDateRange();
 }
 
 function getWarmBranchIds() {

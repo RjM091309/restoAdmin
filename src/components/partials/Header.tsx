@@ -9,6 +9,12 @@ import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
 import { DEFAULT_ALL_BRANCHES_LOGO } from '../../utils/branchLogo';
 import { navigateToBranch } from '../../utils/branchNavigation';
+import {
+  formatDateToLocalYmd,
+  formatYmdDisplay,
+  getManilaTodayYmd,
+  parseYmdToLocalDate,
+} from '../../utils/manilaDateTime';
 
 type DateRange = {
   start: string;
@@ -44,29 +50,19 @@ const localeForLanguage = (lng: string) => {
   return 'en-US';
 };
 
-const formatDate = (dateStr: string, lng: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString(localeForLanguage(lng), {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-};
+const formatDate = (dateStr: string, lng: string) =>
+  formatYmdDisplay(dateStr, localeForLanguage(lng));
 
+const toDate = (s: string): Date | null => (s ? parseYmdToLocalDate(s) : null);
 
-const toDate = (s: string): Date | null =>
-  s ? new Date(s) : null;
-
-const toYYYYMMDD = (d: Date): string =>
-  d.getFullYear() +
-  '-' +
-  String(d.getMonth() + 1).padStart(2, '0') +
-  '-' +
-  String(d.getDate()).padStart(2, '0');
+const toYYYYMMDD = (d: Date): string => formatDateToLocalYmd(d);
 
 const getFullMonthRange = (monthDate: Date): [Date, Date] => {
   const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-  const end = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+  // Cap "full month" end at Manila today so picking the current month cannot jump to a future day.
+  const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+  const manilaToday = parseYmdToLocalDate(getManilaTodayYmd()) ?? new Date();
+  const end = monthEnd.getTime() > manilaToday.getTime() ? manilaToday : monthEnd;
   return [start, end];
 };
 
@@ -257,10 +253,13 @@ export const Header: React.FC<HeaderProps> = ({
     options?: { closeOnComplete?: boolean }
   ) => {
     const [s, e] = update ?? [null, null];
-    onDateRangeChange({
-      start: s ? toYYYYMMDD(s) : '',
-      end: e ? toYYYYMMDD(e) : '',
-    });
+    const manilaToday = getManilaTodayYmd();
+    let start = s ? toYYYYMMDD(s) : '';
+    let end = e ? toYYYYMMDD(e) : '';
+    // Never let the global filter end past Manila today (avoids Jul 30 when today is Jul 29).
+    if (end && end > manilaToday) end = manilaToday;
+    if (start && end && start > end) start = end;
+    onDateRangeChange({ start, end });
     const closeOnComplete = options?.closeOnComplete ?? true;
     if (closeOnComplete && s && e) setDropdownOpen(false);
   };
@@ -341,6 +340,7 @@ export const Header: React.FC<HeaderProps> = ({
                       showPreviousMonths
                       startDate={pickerValue[0]}
                       endDate={pickerValue[1]}
+                      maxDate={parseYmdToLocalDate(getManilaTodayYmd()) ?? undefined}
                       openToDate={pickerValue[1] ?? pickerValue[0] ?? undefined}
                       onChange={(update) => handleDateRangeChange(update, { closeOnComplete: true })}
                       dateFormat="MMM d, yyyy"

@@ -1,3 +1,5 @@
+import { getManilaMonthToDateRange } from './manilaDateTime';
+
 type CacheStore = Record<string, { at: number; data: unknown }>;
 
 const SESSION_KEYS: Record<string, string> = {
@@ -14,8 +16,8 @@ const LOCAL_KEYS: Record<string, string> = {
   receipt: 'resto_receipt_report_cache_v1_local',
 };
 
-const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCAL_CACHE_TTL_MS = 30 * 1000;
+const STALE_LOCAL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 10;
 
 function readCacheStore(storage: Storage, storageKey: string): CacheStore | null {
@@ -130,11 +132,5 @@ export function hasNonEmptyRows<T extends { totalSales?: number; netAmount?: num
 }
 
 export function getCurrentMonthRange(): { start: string; end: string } {
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return {
-    start: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
-    end: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-  };
+  return getManilaMonthToDateRange();
 }

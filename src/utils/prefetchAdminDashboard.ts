@@ -5,16 +5,9 @@ import {
   readAdminDashboardCacheIncludingStale,
   writeAdminDashboardCache,
 } from './adminDashboardCache';
+import { getManilaMonthToDateRange } from './manilaDateTime';
 
-const getCurrentMonthRange = (): { start: string; end: string } => {
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return {
-    start: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
-    end: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-  };
-};
+const getCurrentMonthRange = (): { start: string; end: string } => getManilaMonthToDateRange();
 
 const hasNonZeroTrendRows = (
   rows: { totalSales?: number; totalExpenses?: number }[],

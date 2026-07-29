@@ -62,22 +62,10 @@ import { AccountSettingsPanel } from './components/panels/AccountSettingsPanel';
 
 // Types
 import { type Branch } from './components/partials/Header';
+import { getManilaMonthToDateRange, getManilaTodayYmd } from './utils/manilaDateTime';
 
-const toYYYYMMDD = (d: Date): string =>
-  d.getFullYear() +
-  '-' +
-  String(d.getMonth() + 1).padStart(2, '0') +
-  '-' +
-  String(d.getDate()).padStart(2, '0');
-
-const getDefaultDateRange = () => {
-  const today = new Date();
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  return {
-    start: toYYYYMMDD(startOfMonth),
-    end: toYYYYMMDD(today),
-  };
-};
+/** Default MTD in Asia/Manila so all users share the same end date (not PC clock/TZ). */
+const getDefaultDateRange = () => getManilaMonthToDateRange();
 
 
 // --- Mock Data ---
@@ -557,6 +545,16 @@ export default function App() {
   const [dateRange, setDateRange] = useState(getDefaultDateRange);
   const previousDateRangeBeforeFocusRef = useRef<{ start: string; end: string } | null>(null);
   const focusDateOverrideActiveRef = useRef(false);
+
+  // Clamp accidental future end dates (wrong PC clock / picker) to Manila today.
+  useEffect(() => {
+    const today = getManilaTodayYmd();
+    setDateRange((prev) => {
+      if (!prev.end || prev.end <= today) return prev;
+      const start = prev.start && prev.start <= today ? prev.start : today;
+      return { start, end: today };
+    });
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

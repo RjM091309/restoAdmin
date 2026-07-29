@@ -86,3 +86,56 @@ export function isEncodedDtWithinDateRange(
     if (manilaYmd == null) return true;
     return manilaYmd >= dateRange.start && manilaYmd <= dateRange.end;
 }
+
+const YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Calendar YYYY-MM-DD for "now" in Asia/Manila (not the browser's local TZ). */
+export function getManilaTodayYmd(now: Date = new Date()): string {
+    return formatUtcMsToManilaYmd(now.getTime());
+}
+
+/**
+ * Month-to-date in Asia/Manila: 1st of Manila month → Manila today.
+ * Keeps all users on the same default range regardless of PC clock/TZ.
+ */
+export function getManilaMonthToDateRange(now: Date = new Date()): { start: string; end: string } {
+    const end = getManilaTodayYmd(now);
+    const [y, m] = end.split('-');
+    return { start: `${y}-${m}-01`, end };
+}
+
+/**
+ * Parse YYYY-MM-DD as a local-calendar Date (noon avoided; local midnight).
+ * Do NOT use `new Date('YYYY-MM-DD')` — that is UTC midnight and shifts the day in western TZs.
+ */
+export function parseYmdToLocalDate(ymd: string): Date | null {
+    const m = YMD_RE.exec(String(ymd || '').trim());
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    const date = new Date(y, mo - 1, d);
+    if (Number.isNaN(date.getTime()) || date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) {
+        return null;
+    }
+    return date;
+}
+
+/** Format a DatePicker/local Date back to YYYY-MM-DD using local calendar parts. */
+export function formatDateToLocalYmd(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+/** Display YYYY-MM-DD without UTC parse shift (matches the stored calendar day). */
+export function formatYmdDisplay(ymd: string, locale = 'en-US'): string {
+    const d = parseYmdToLocalDate(ymd);
+    if (!d) return ymd;
+    return d.toLocaleDateString(locale, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+    });
+}

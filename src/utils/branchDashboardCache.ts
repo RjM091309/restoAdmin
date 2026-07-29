@@ -38,12 +38,12 @@ export type BranchDashboardCachePayload = {
 const SESSION_STORAGE_KEY = 'resto_branch_dashboard_cache_v1';
 const LOCAL_STORAGE_KEY = 'resto_branch_dashboard_cache_v1_local';
 const EMPTY_MARKER_KEY = 'resto_branch_dashboard_empty_v1';
-/** Fresh local cache TTL; background refresh after expiry. */
-const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-/** Stale-while-revalidate for instant paint across sessions/restarts. */
-const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-/** Skip background re-fetch when cache is newer than this. */
-export const BRANCH_DASHBOARD_BG_REFRESH_TTL_MS = 2 * 60 * 1000;
+/** Short TTL — keep branch KPIs aligned across users. */
+const LOCAL_CACHE_TTL_MS = 30 * 1000;
+/** Instant paint only; Dashboard always revalidates on mount. */
+const STALE_LOCAL_CACHE_TTL_MS = 5 * 60 * 1000;
+/** Tiny dedupe window after prefetch; otherwise always refresh. */
+export const BRANCH_DASHBOARD_BG_REFRESH_TTL_MS = 10 * 1000;
 const MAX_ENTRIES = 12;
 
 const EMPTY_PAYLOAD: BranchDashboardCachePayload = {

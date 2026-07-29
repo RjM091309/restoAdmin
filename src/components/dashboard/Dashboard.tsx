@@ -56,6 +56,7 @@ import {
   type BranchDashboardCachePayload,
 } from '../../utils/branchDashboardCache';
 import { waitForBranchDashboardPrefetch } from '../../utils/prefetchBranchDashboard';
+import { getManilaMonthToDateRange } from '../../utils/manilaDateTime';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -127,14 +128,7 @@ const parseIsoDate = (iso: string): Date | null => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-const getCurrentMonthRange = () => {
-  const today = new Date();
-  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  return {
-    start: toYYYYMMDD(firstDayOfMonth),
-    end: toYYYYMMDD(today),
-  };
-};
+const getCurrentMonthRange = () => getManilaMonthToDateRange();
 
 /** EESOME CAFE — show pesos with cents; other branches stay whole pesos. */
 const EESOME_BRANCH_ID = '10';
@@ -913,9 +907,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       if (hasBranchDashboardCacheData(cached)) {
         hydrateFromCache(cached);
         setPageLoading(false);
-        if (!isBranchDashboardCacheFresh(cacheKey)) {
-          void loadDashboardBundle(true);
-        }
+        void loadDashboardBundle(true);
         return;
       }
 
@@ -926,9 +918,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
       if (hasBranchDashboardCacheData(afterPrefetch)) {
         hydrateFromCache(afterPrefetch);
         setPageLoading(false);
-        if (!isBranchDashboardCacheFresh(cacheKey)) {
-          void loadDashboardBundle(true);
-        }
+        void loadDashboardBundle(true);
         return;
       }
 
@@ -941,9 +931,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
           setRecentOrderItemsMeta({});
         }
         setPageLoading(false);
-        if (!isBranchDashboardCacheFresh(cacheKey)) {
-          void loadDashboardBundle(true);
-        }
+        void loadDashboardBundle(true);
         return;
       }
 

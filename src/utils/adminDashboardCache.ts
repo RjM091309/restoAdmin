@@ -33,15 +33,15 @@ export type AdminDashboardCachePayload = {
 
 const SESSION_STORAGE_KEY = 'resto_admin_dashboard_cache_v1';
 const LOCAL_STORAGE_KEY = 'resto_admin_dashboard_cache_v1_local';
-/** Persist across browser sessions; refreshed in background after TTL. */
-const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-/** Show stale local cache for instant paint; background refresh updates live data. */
-const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Short TTL — financial KPIs must not diverge across users for hours. */
+const LOCAL_CACHE_TTL_MS = 30 * 1000;
+/** Instant paint only; always revalidate on mount (see AdminDashboard). */
+const STALE_LOCAL_CACHE_TTL_MS = 5 * 60 * 1000;
 /**
- * Skip background re-fetch when cache is newer than this (avoids stampeding the
- * same admin-dashboard-bundle right after warm/prefetch/mount).
+ * Almost never skip refresh — live MTD sales change continuously.
+ * Tiny window only avoids duplicate fetch right after prefetch write.
  */
-export const ADMIN_DASHBOARD_BG_REFRESH_TTL_MS = 2 * 60 * 1000;
+export const ADMIN_DASHBOARD_BG_REFRESH_TTL_MS = 10 * 1000;
 const MAX_ENTRIES = 10;
 
 const EMPTY_PAYLOAD: AdminDashboardCachePayload = {

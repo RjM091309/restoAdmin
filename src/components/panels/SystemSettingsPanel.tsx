@@ -32,25 +32,18 @@ import {
 import DatePicker from 'react-datepicker';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import {
+    formatDateToLocalYmd,
+    getManilaMonthToDateRange,
+    parseYmdToLocalDate,
+} from '../../utils/manilaDateTime';
 function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-const toDate = (s: string): Date | null => (s ? new Date(s) : null);
-const toYYYYMMDD = (d: Date): string =>
-    d.getFullYear() +
-    '-' +
-    String(d.getMonth() + 1).padStart(2, '0') +
-    '-' +
-    String(d.getDate()).padStart(2, '0');
-const getDefaultSyncDateRange = () => {
-    const today = new Date();
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    return {
-        start: toYYYYMMDD(monthStart),
-        end: toYYYYMMDD(today),
-    };
-};
+const toDate = (s: string): Date | null => (s ? parseYmdToLocalDate(s) : null);
+const toYYYYMMDD = (d: Date): string => formatDateToLocalYmd(d);
+const getDefaultSyncDateRange = () => getManilaMonthToDateRange();
 
 // ─── Shared Types & Helpers ────────────────────────────
 

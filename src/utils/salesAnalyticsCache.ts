@@ -18,8 +18,8 @@ export type SalesAnalyticsCachePayload = {
 
 const SESSION_STORAGE_KEY = 'resto_sales_analytics_cache_v1';
 const LOCAL_STORAGE_KEY = 'resto_sales_analytics_cache_v1_local';
-const LOCAL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const STALE_LOCAL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCAL_CACHE_TTL_MS = 30 * 1000;
+const STALE_LOCAL_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 10;
 
 const EMPTY_PAYLOAD: SalesAnalyticsCachePayload = {

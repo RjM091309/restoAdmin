@@ -28,6 +28,12 @@ import {
   type AdminDashboardTrendPoint,
 } from '../../utils/adminDashboardCache';
 import { waitForAdminDashboardPrefetch } from '../../utils/prefetchAdminDashboard';
+import {
+  formatDateToLocalYmd,
+  formatYmdDisplay,
+  getManilaMonthToDateRange,
+  parseYmdToLocalDate,
+} from '../../utils/manilaDateTime';
 
 const REVENUE_DISTRIBUTION_COLORS = [
   '#3b82f6',
@@ -195,23 +201,11 @@ type UnifiedComparisonRow = ComparisonRow | ComparisonSectionRow;
 const isSectionRow = (row: UnifiedComparisonRow): row is ComparisonSectionRow =>
   (row as ComparisonSectionRow).rowType === 'section';
 
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-};
+const formatDate = (dateStr: string) => formatYmdDisplay(dateStr);
 
-const toDate = (s: string): Date | null => (s ? new Date(s) : null);
+const toDate = (s: string): Date | null => (s ? parseYmdToLocalDate(s) : null);
 
-const toYYYYMMDD = (d: Date): string =>
-  d.getFullYear() +
-  '-' +
-  String(d.getMonth() + 1).padStart(2, '0') +
-  '-' +
-  String(d.getDate()).padStart(2, '0');
+const toYYYYMMDD = (d: Date): string => formatDateToLocalYmd(d);
 
 const parseLocalYmd = (s: string): Date | null => {
   const match = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -731,14 +725,7 @@ const getTopProductsPalette = (branchId: number | null): string[] => {
   return TOP_PRODUCTS_BAR_PALETTES[paletteIndex];
 };
 
-const getCurrentMonthRange = (): DateRange => {
-  const today = new Date();
-  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  return {
-    start: toYYYYMMDD(firstDayOfMonth),
-    end: toYYYYMMDD(today),
-  };
-};
+const getCurrentMonthRange = (): DateRange => getManilaMonthToDateRange();
 
 const WEEKDAY_LABELS_MON_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 
@@ -1851,10 +1838,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const cached = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(cached)) {
         hydrateFromCache(cached);
-        // Skip background refresh when cache is still fresh (warm/prefetch/recent visit).
-        if (!isAdminDashboardCacheFresh(analyticsCacheKey)) {
-          void loadAdminBundle(true);
-        }
+        // Always revalidate — stale browser cache was causing different totals per user.
+        void loadAdminBundle(true);
         return;
       }
 
@@ -1864,9 +1849,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       const afterPrefetch = readAdminDashboardCacheIncludingStale(analyticsCacheKey);
       if (hasAdminDashboardCacheData(afterPrefetch)) {
         hydrateFromCache(afterPrefetch);
-        if (!isAdminDashboardCacheFresh(analyticsCacheKey)) {
-          void loadAdminBundle(true);
-        }
+        void loadAdminBundle(true);
         return;
       }
 

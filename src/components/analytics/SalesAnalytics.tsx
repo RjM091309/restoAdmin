@@ -36,6 +36,7 @@ import {
   type SalesAnalyticsCachePayload,
 } from '../../utils/salesAnalyticsCache';
 import { waitForSalesAnalyticsPrefetch } from '../../utils/prefetchSalesAnalytics';
+import { getManilaMonthToDateRange } from '../../utils/manilaDateTime';
 import { isExcludedFromAllBranchesView } from '../../utils/branchLogo';
 
 /** Measures container and renders chart with explicit width/height to avoid Recharts -1 warning */
@@ -215,15 +216,7 @@ const makeWeekendXAxisTick = (
   return Tick;
 };
 
-const getCurrentMonthRange = () => {
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return {
-    start: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
-    end: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-  };
-};
+const getCurrentMonthRange = () => getManilaMonthToDateRange();
 
 const normalizeDailySalesItem = (item: ApiDailySalesItem) => {
   const totalSales = Number(item.total_sales || 0);

@@ -1,8 +1,9 @@
 const { LRUCache } = require('lru-cache');
 const { buildMenuReportBundle } = require('./menuReportBundle');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
+const { getManilaMonthToDateRange } = require('../utils/manilaMonthRange');
 
-const CACHE_TTL_MS = Number(process.env.ANALYTICS_REPORT_CACHE_TTL_MS || 180000);
+const CACHE_TTL_MS = Number(process.env.ANALYTICS_REPORT_CACHE_TTL_MS || 30000);
 const CACHE_MAX = Number(process.env.ANALYTICS_REPORT_CACHE_MAX || 64);
 const WARM_ATTEMPTS = Number(process.env.ANALYTICS_REPORT_WARM_ATTEMPTS || 5);
 const WARM_RETRY_MS = Number(process.env.ANALYTICS_REPORT_WARM_RETRY_MS || 3000);
@@ -42,13 +43,7 @@ function setCachedAnalyticsReportBundle(key, payload, hasDataFn) {
 }
 
 function getCurrentMonthRange() {
-	const today = new Date();
-	const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-	const pad = (n) => String(n).padStart(2, '0');
-	return {
-		start_date: `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-${pad(firstDay.getDate())}`,
-		end_date: `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`,
-	};
+	return getManilaMonthToDateRange();
 }
 
 function getWarmBranchIds() {
