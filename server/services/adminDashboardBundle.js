@@ -172,7 +172,10 @@ async function buildAdminDashboardBundle({
 	include_branch_charts = false,
 	mode = 'full',
 }) {
-	const slim = String(mode || '').toLowerCase() === 'compare' || String(mode || '').toLowerCase() === 'slim';
+	const modeKey = String(mode || '').toLowerCase();
+	const slim = modeKey === 'compare' || modeKey === 'slim';
+	/** Trend-chart bar drill: ranked branch list only — skip breakdown/rent/salary/recon. */
+	const drill = modeKey === 'drill';
 	const pyParams = { start_date, end_date };
 	if (branchId != null && String(branchId).trim() !== '') {
 		pyParams.branch_id = String(branchId);
@@ -183,6 +186,7 @@ async function buildAdminDashboardBundle({
 
 	// Single parallel wave — faster wall-clock than sequential phases.
 	// Compare/slim mode skips trend + top-selling (unused by Branch Comparison panel).
+	// Drill mode: branch-sales + MySQL expense totals only (bar → branch list).
 	const [
 		branchSalesRes,
 		topSellingRes,
@@ -193,18 +197,24 @@ async function buildAdminDashboardBundle({
 		nodeExpenseByBranch,
 	] = await Promise.all([
 		fetchPyServerOptional('/api/analytics/branch-sales', branchSalesParams),
-		slim
+		slim || drill
 			? Promise.resolve(null)
 			: fetchPyServerOptional('/api/analytics/top-selling', { ...pyParams, limit: '5' }),
-		fetchPyServerOptional('/api/analytics/expense-breakdown', pyParams),
-		slim
+		drill
+			? Promise.resolve(null)
+			: fetchPyServerOptional('/api/analytics/expense-breakdown', pyParams),
+		slim || drill
 			? Promise.resolve(null)
 			: fetchPyServerOptional('/api/analytics/performance-trend', trendParams),
-		CashReconciliationModel.totalsByBranchForRange(start_date, end_date).catch(() => ({})),
-		ExpenseModel.getRentSalaryByBranch(start_date, end_date).catch((err) => {
-			console.warn('[adminDashboardBundle] getRentSalaryByBranch failed:', err?.message || err);
-			return { rent: {}, salary: {} };
-		}),
+		drill
+			? Promise.resolve({})
+			: CashReconciliationModel.totalsByBranchForRange(start_date, end_date).catch(() => ({})),
+		drill
+			? Promise.resolve({ rent: {}, salary: {} })
+			: ExpenseModel.getRentSalaryByBranch(start_date, end_date).catch((err) => {
+					console.warn('[adminDashboardBundle] getRentSalaryByBranch failed:', err?.message || err);
+					return { rent: {}, salary: {} };
+				}),
 		ExpenseModel.getTotalsByBranch(start_date, end_date).catch((err) => {
 			console.warn('[adminDashboardBundle] getTotalsByBranch failed:', err?.message || err);
 			return {};
@@ -255,25 +265,27 @@ async function buildAdminDashboardBundle({
 		value: netSalesByBranch[b.branch_id] || Number(b.total_sales || 0),
 	}));
 
-	const topProductsData = slim
-		? []
-		: (topSelling || []).slice(0, 5).map((item) => ({
-				name: item.MENU_NAME || '',
-				sales: item.total_quantity,
-			}));
+	const topProductsData =
+		slim || drill
+			? []
+			: (topSelling || []).slice(0, 5).map((item) => ({
+					name: item.MENU_NAME || '',
+					sales: item.total_quantity,
+				}));
 
-	const trendData = slim
-		? []
-		: (trendRes?.data?.data || []).map((r) => ({
-				name: String(r.name ?? ''),
-				totalSales: Number(r.totalSales || 0),
-				totalExpenses: Number(r.totalExpenses || 0),
-				...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
-			}));
+	const trendData =
+		slim || drill
+			? []
+			: (trendRes?.data?.data || []).map((r) => ({
+					name: String(r.name ?? ''),
+					totalSales: Number(r.totalSales || 0),
+					totalExpenses: Number(r.totalExpenses || 0),
+					...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
+				}));
 
 	// Retry trend alone if the parallel wave timed out (full mode only).
 	let finalTrendData = trendData;
-	if (!slim && finalTrendData.length === 0) {
+	if (!slim && !drill && finalTrendData.length === 0) {
 		const retryRes = await fetchPyServerOptional(
 			'/api/analytics/performance-trend',
 			trendParams,
@@ -296,7 +308,7 @@ async function buildAdminDashboardBundle({
 	});
 
 	const branchChartsById =
-		!slim && include_branch_charts
+		!slim && !drill && include_branch_charts
 			? await buildBranchChartsForAll(branchCardsData, start_date, end_date)
 			: {};
 

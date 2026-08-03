@@ -1295,7 +1295,12 @@ class ReportsController {
 				req.query.include_branch_charts === '1' ||
 				req.query.include_branch_charts === 'true';
 			const modeRaw = String(req.query.mode || 'full').trim().toLowerCase();
-			const mode = modeRaw === 'compare' || modeRaw === 'slim' ? 'compare' : 'full';
+			const mode =
+				modeRaw === 'drill'
+					? 'drill'
+					: modeRaw === 'compare' || modeRaw === 'slim'
+						? 'compare'
+						: 'full';
 
 			const cacheKey = buildAdminDashboardBundleCacheKey({
 				start_date,

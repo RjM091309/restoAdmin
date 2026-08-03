@@ -546,6 +546,7 @@ export type AdminDashboardBundlePayload = {
     name: string;
     totalSales: number;
     reportSalesPos?: number;
+    reportSalesGross?: number;
     reconTotal?: number;
     totalExpenses: number;
     totalOrders: number;
@@ -585,23 +586,29 @@ export async function fetchAdminDashboardBundleApi(params: {
   branchId?: string | null;
   period?: string;
   includeBranchCharts?: boolean;
-  /** compare/slim skips trend + top-selling for faster Branch Comparison reloads */
-  mode?: 'full' | 'compare' | 'slim';
+  /**
+   * compare/slim — skips trend + top-selling (Branch Comparison).
+   * drill — branch-sales + expense totals only (trend bar → branch list).
+   */
+  mode?: 'full' | 'compare' | 'slim' | 'drill';
 }): Promise<AdminDashboardBundlePayload> {
   const qs = new URLSearchParams();
   qs.set('start_date', params.start);
   qs.set('end_date', params.end);
   if (params.period) qs.set('period', params.period);
   if (params.includeBranchCharts) qs.set('include_branch_charts', 'true');
-  if (params.mode === 'compare' || params.mode === 'slim') qs.set('mode', 'compare');
+  if (params.mode === 'drill') qs.set('mode', 'drill');
+  else if (params.mode === 'compare' || params.mode === 'slim') qs.set('mode', 'compare');
   if (params.branchId && params.branchId !== 'all') {
     qs.set('branch_id', params.branchId);
   } else {
     qs.set('branch_id', 'all');
   }
 
+  // Drill is a small payload; use a shorter client timeout so a hung request fails fast.
+  const timeoutMs = params.mode === 'drill' ? 20000 : 60000;
   const url = `/api/analytics/admin-dashboard-bundle?${qs.toString()}`;
-  const { res, json } = await fetchJson(url, 60000);
+  const { res, json } = await fetchJson(url, timeoutMs);
   if (!res.ok) {
     throw new Error(`Analytics admin-dashboard-bundle failed with status ${res.status}`);
   }
