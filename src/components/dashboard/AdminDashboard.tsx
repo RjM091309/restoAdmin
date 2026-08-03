@@ -16,6 +16,7 @@ import {
   type ApiTopSellingItem,
 } from '../../services/analyticsService';
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
+import { getExpenses, type ExpenseRecord } from '../../services/expenseService';
 import { CashReconciliationModal } from '../analytics/CashReconciliationModal';
 import { Modal } from '../ui/Modal';
 import { isExcludedFromAllBranchesView, sortBranchesBySidebarOrder, resolveBranchLogoUrl } from '../../utils/branchLogo';
@@ -1073,6 +1074,12 @@ const formatModalMoney = (n: number) =>
     maximumFractionDigits: 0,
   })}`;
 
+/** Branch-list rank badges — same color as chart bars (sales purple / expenses orange). */
+const trendDrillBranchRankClass = (metric: TrendDrillMetric): string =>
+  metric === 'sales'
+    ? 'bg-[rgb(139,92,246)] text-white'
+    : 'bg-[rgb(245,158,11)] text-white';
+
 const buildExpenseMaps = (rows: ApiExpenseCategoryRow[]) => {
   const expenseMap: Record<number, Record<string, number>> = {};
   const expenseByBranch: Record<number, number> = {};
@@ -1182,7 +1189,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [trendDrillBranchesLoading, setTrendDrillBranchesLoading] = useState(false);
   /** Clicked bar total — footer must match chart tooltip, not re-summed branch rows. */
   const [trendDrillChartTotal, setTrendDrillChartTotal] = useState<number | null>(null);
-  const [trendDrillBranch, setTrendDrillBranch] = useState<{ id: number; name: string } | null>(null);
+  const [trendDrillBranch, setTrendDrillBranch] = useState<{
+    id: number;
+    name: string;
+    residual?: boolean;
+  } | null>(null);
   const [trendDrillSalesRows, setTrendDrillSalesRows] = useState<ApiTopSellingItem[]>([]);
   const [trendDrillSalesRecon, setTrendDrillSalesRecon] = useState(0);
   const [trendDrillExpenseGroups, setTrendDrillExpenseGroups] = useState<TrendDrillExpenseGroup[]>([]);
@@ -1190,6 +1201,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const [trendDrillExpandedMains, setTrendDrillExpandedMains] = useState<Set<string>>(new Set());
   /** When false, hide "← Branches" (opened from a focused branch card). */
   const [trendDrillAllowBranchNav, setTrendDrillAllowBranchNav] = useState(true);
+  const [trendDrillExpenseSub, setTrendDrillExpenseSub] = useState<{
+    main: string;
+    name: string;
+    amount: number;
+  } | null>(null);
+  const [trendDrillExpenseItems, setTrendDrillExpenseItems] = useState<ExpenseRecord[]>([]);
+  const [trendDrillExpenseItemsLoading, setTrendDrillExpenseItemsLoading] = useState(false);
+  const [trendDrillCalendarOpen, setTrendDrillCalendarOpen] = useState(false);
   const trendDrillReqIdRef = useRef(0);
   const [analyticsReloadKey, setAnalyticsReloadKey] = useState(0);
   /** Period metric maps (sales/expenses/profit) for Branch Comparison rows */
@@ -1701,41 +1720,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             ...(r.sale_date ? { date: String(r.sale_date).slice(0, 10) } : {}),
           }));
 
-          const weeklyHasCalendarDates =
-            trendPeriod === 'weekly' && rowsForChart.length > 0 && rowsForChart.every((r) => r.date);
-
-          if (weeklyHasCalendarDates) {
-            const wStart = String(rowsForChart[0].date).slice(0, 10);
-            const wEnd = String(rowsForChart[rowsForChart.length - 1].date).slice(0, 10);
-            try {
-              const recon = await fetchCashReconciliationAggregates({ start: wStart, end: wEnd });
-              if (reqId !== trendReqIdRef.current) return;
-              const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
-              rowsForChart = applyReconToPerformanceTrend(rowsForChart, 'weekly', byDate, wStart, wEnd);
-            } catch {
-              // keep API rows
-            }
-          } else {
-            try {
-              const reconRange = getTrendApiDateRange(trendPeriod, start, end);
-              const recon = await fetchCashReconciliationAggregates({
-                start: reconRange.start,
-                end: reconRange.end,
-              });
-              if (reqId !== trendReqIdRef.current) return;
-              const byDate = recon.byDate && typeof recon.byDate === 'object' ? recon.byDate : {};
-              rowsForChart = applyReconToPerformanceTrend(
-                rowsForChart,
-                trendPeriod,
-                byDate,
-                reconRange.start,
-                reconRange.end,
-              );
-            } catch {
-              // keep API rows
-            }
-          }
-
+          // Total Sales = gross POS from performance-trend (no net remap / no cash recon).
           chartData = rowsForChart;
 
           if (trendPeriod === 'weekly' && chartData.length > 0 && chartData.every((d) => d.date)) {
@@ -3272,6 +3257,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     setTrendDrillExpenseGroups([]);
     setTrendDrillExpandedMains(new Set());
     setTrendDrillAllowBranchNav(true);
+    setTrendDrillExpenseSub(null);
+    setTrendDrillExpenseItems([]);
+    setTrendDrillExpenseItemsLoading(false);
+    setTrendDrillCalendarOpen(false);
   }, []);
 
   const openTrendDrillBranches = useCallback(
@@ -3279,8 +3268,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       metric: TrendDrillMetric,
       point: { name?: string; date?: string },
       chartTotal: number,
+      explicit?: { range: DateRange; label: string },
     ) => {
-      const resolved = resolveTrendBarDateRange(point, trendPeriod, trendAnchorDate, trendFallbackYear);
+      const resolved =
+        explicit ??
+        resolveTrendBarDateRange(point, trendPeriod, trendAnchorDate, trendFallbackYear);
       if (!resolved) return;
 
       const reqId = ++trendDrillReqIdRef.current;
@@ -3296,6 +3288,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       setTrendDrillSalesRecon(0);
       setTrendDrillExpenseGroups([]);
       setTrendDrillExpandedMains(new Set());
+      setTrendDrillExpenseSub(null);
+      setTrendDrillExpenseItems([]);
       setTrendDrillBranches([]);
       setTrendDrillBranchesLoading(true);
       setTrendDrillOpen(true);
@@ -3309,35 +3303,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         });
         if (reqId !== trendDrillReqIdRef.current) return;
 
-        // Keep All-Branches exclusions out of the list, then bridge any gap vs the
-        // chart bar (performance-trend includes excluded branches + recon).
-        const visibleRows = (bundle.branchCardsData || [])
-          .filter((b) => b && !isExcludedFromAllBranchesView(b.name))
-          .map((b) => ({
-            id: Number(b.id),
-            name: String(b.name || `Branch ${b.id}`),
-            amount: metric === 'sales' ? Number(b.totalSales) || 0 : Number(b.totalExpenses) || 0,
-            residual: false as boolean | undefined,
-          }))
-          .filter((b) => b.amount > 0)
+        // Sales drill uses gross POS (Total Sales) — same basis as the performance-trend bar.
+        // Expenses use branch-card totals. Exclusions (3Core / NOIR) roll into "Other branches".
+        const mapped = (bundle.branchCardsData || [])
+          .filter((b) => b)
+          .map((b) => {
+            const grossRaw = (b as BranchPerformanceData).reportSalesGross;
+            const gross = Number(grossRaw);
+            const salesAmount =
+              grossRaw != null && Number.isFinite(gross)
+                ? gross
+                : Number(b.totalSales) || 0;
+            return {
+              id: Number(b.id),
+              name: String(b.name || `Branch ${b.id}`),
+              amount: metric === 'sales' ? salesAmount : Number(b.totalExpenses) || 0,
+              residual: false as boolean | undefined,
+            };
+          });
+
+        const visibleRows = mapped
+          .filter((b) => !isExcludedFromAllBranchesView(b.name) && b.amount > 0)
           .sort((a, b) => b.amount - a.amount);
 
-        const visibleSum = visibleRows.reduce((sum, b) => sum + b.amount, 0);
+        const excludedSum = mapped
+          .filter((b) => isExcludedFromAllBranchesView(b.name))
+          .reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+
         const rows = [...visibleRows];
-        if (targetTotal > 0) {
-          const gap = targetTotal - visibleSum;
-          if (Math.abs(gap) >= 0.5) {
-            rows.push({
-              id: -1,
-              name: gap > 0 ? 'Other branches' : 'Rounding / adjustments',
-              amount: gap,
-              residual: true,
-            });
-          }
+        if (Math.abs(excludedSum) >= 0.5) {
+          rows.push({
+            id: -1,
+            name: 'Other branches',
+            amount: excludedSum,
+            residual: true,
+          });
         }
+
+        const listTotal =
+          visibleRows.reduce((sum, b) => sum + b.amount, 0) + excludedSum;
         setTrendDrillBranches(rows);
-        if (!(targetTotal > 0) && visibleSum > 0) {
-          setTrendDrillChartTotal(visibleSum);
+        // Prefer chart bar total when present so footer matches the graph tooltip.
+        if (targetTotal > 0) {
+          setTrendDrillChartTotal(targetTotal);
+        } else if (listTotal > 0) {
+          setTrendDrillChartTotal(listTotal);
+        } else {
+          setTrendDrillChartTotal(null);
         }
       } catch (err) {
         console.error('Failed to load trend drill branch totals:', err);
@@ -3412,7 +3424,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
           if (reqId !== trendDrillReqIdRef.current) return;
           const groups = groupExpenseBreakdownForBranch(Array.isArray(rows) ? rows : [], branch.id);
           setTrendDrillExpenseGroups(groups);
-          setTrendDrillExpandedMains(new Set(groups.map((g) => g.main)));
+          setTrendDrillExpandedMains(new Set());
         }
       } catch (err) {
         console.error('Failed to load trend drill breakdown:', err);
@@ -3426,6 +3438,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     },
     [trendDrillMetric, trendDrillRange],
   );
+
+  const openTrendDrillExpenseItems = useCallback(
+    async (
+      sub: { main: string; name: string; amount: number },
+      opts?: { range?: DateRange; label?: string },
+    ) => {
+      if (!trendDrillBranch || trendDrillBranch.id <= 0) return;
+      const range = opts?.range ?? trendDrillRange;
+      const { start, end } = range;
+      if (!start || !end) return;
+
+      const reqId = ++trendDrillReqIdRef.current;
+      if (opts?.range) setTrendDrillRange(opts.range);
+      if (opts?.label) setTrendDrillLabel(opts.label);
+      setTrendDrillExpenseSub(sub);
+      // Keep parent categories modal open; items open in a nested popup.
+      setTrendDrillExpenseItemsLoading(true);
+      setTrendDrillExpenseItems([]);
+
+      try {
+        const rows = await getExpenses(String(trendDrillBranch.id), {
+          startDate: start,
+          endDate: end,
+        });
+        if (reqId !== trendDrillReqIdRef.current) return;
+        const mainKey = sub.main.trim();
+        const subKey = sub.name.trim();
+        const matched = (Array.isArray(rows) ? rows : [])
+          .filter((exp) => {
+            if ((Number(exp.expAmount) || 0) <= 0) return false;
+            if ((exp.expCat || '').trim() !== mainKey) return false;
+            return (exp.expName || '').trim() === subKey;
+          })
+          .sort((a, b) => {
+            const ad = String(a.encodedDt || '');
+            const bd = String(b.encodedDt || '');
+            return bd.localeCompare(ad);
+          });
+        setTrendDrillExpenseItems(matched);
+      } catch (err) {
+        console.error('Failed to load expense item breakdown:', err);
+        if (reqId !== trendDrillReqIdRef.current) return;
+        setTrendDrillExpenseItems([]);
+      } finally {
+        if (reqId === trendDrillReqIdRef.current) setTrendDrillExpenseItemsLoading(false);
+      }
+    },
+    [trendDrillBranch, trendDrillRange],
+  );
+
+  const closeTrendDrillExpenseItems = useCallback(() => {
+    setTrendDrillExpenseSub(null);
+    setTrendDrillExpenseItems([]);
+    setTrendDrillExpenseItemsLoading(false);
+  }, []);
 
   const handleTrendBarClick = useCallback(
     (metric: TrendDrillMetric, data: any) => {
@@ -3483,6 +3550,186 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     ],
   );
 
+  const lookupTrendChartTotalForRange = useCallback(
+    (range: DateRange, metric: TrendDrillMetric): number => {
+      const { start, end } = range;
+      if (!start || !end) return 0;
+
+      if (start === end) {
+        const day = Number(start.slice(8, 10));
+        const point = monthlyData.find((d) => {
+          if (d.date && String(d.date).slice(0, 10) === start) return true;
+          if (trendPeriod === 'monthly' && Number(d.name) === day) return true;
+          return false;
+        });
+        if (!point) return 0;
+        return metric === 'sales' ? Number(point.totalSales) || 0 : Number(point.totalExpenses) || 0;
+      }
+
+      // Month bucket (yearly): match by month index / label
+      const startD = parseLocalYmd(start);
+      if (!startD) return 0;
+      const monthIdx = startD.getMonth();
+      const point =
+        monthlyData[monthIdx] ??
+        monthlyData.find((d) => {
+          const key = String(d.name || '')
+            .toLowerCase()
+            .replace(/\./g, '')
+            .trim();
+          return MONTH_LABEL_TO_INDEX[key] === monthIdx || MONTH_LABEL_TO_INDEX[key.slice(0, 3)] === monthIdx;
+        });
+      if (!point) return 0;
+      return metric === 'sales' ? Number(point.totalSales) || 0 : Number(point.totalExpenses) || 0;
+    },
+    [monthlyData, trendPeriod],
+  );
+
+  const trendDrillCanShiftDate = useMemo(() => {
+    const { start, end } = trendDrillRange;
+    if (!start || !end) return { prev: false, next: false };
+    const boundStart = compareDateRange.start || '';
+    const boundEnd = compareDateRange.end || '';
+
+    if (start === end) {
+      const d = parseLocalYmd(start);
+      if (!d) return { prev: false, next: false };
+      const prevYmd = toYYYYMMDD(addDaysLocal(d, -1));
+      const nextYmd = toYYYYMMDD(addDaysLocal(d, 1));
+      return {
+        prev: !boundStart || prevYmd >= boundStart,
+        next: !boundEnd || nextYmd <= boundEnd,
+      };
+    }
+
+    // Month range (yearly)
+    const s = parseLocalYmd(start);
+    if (!s) return { prev: false, next: false };
+    const prevMonthEnd = toYYYYMMDD(new Date(s.getFullYear(), s.getMonth(), 0));
+    const nextMonthStart = toYYYYMMDD(new Date(s.getFullYear(), s.getMonth() + 1, 1));
+    return {
+      prev: !boundStart || prevMonthEnd >= boundStart,
+      next: !boundEnd || nextMonthStart <= boundEnd,
+    };
+  }, [compareDateRange.end, compareDateRange.start, trendDrillRange]);
+
+  const applyTrendDrillDateRange = useCallback(
+    (nextRange: DateRange, nextLabel: string) => {
+      if (!nextRange.start || !nextRange.end) return;
+      const chartTotal = lookupTrendChartTotalForRange(nextRange, trendDrillMetric);
+      setTrendDrillCalendarOpen(false);
+
+      // Refresh nested expense-items popup if open, and parent category view.
+      if (trendDrillExpenseSub && trendDrillBranch && trendDrillBranch.id > 0) {
+        setTrendDrillRange(nextRange);
+        setTrendDrillLabel(nextLabel);
+        setTrendDrillChartTotal(chartTotal > 0 ? chartTotal : null);
+        void openTrendDrillBreakdown(trendDrillBranch, {
+          range: nextRange,
+          metric: trendDrillMetric,
+          label: nextLabel,
+          chartTotal,
+          allowBranchNav: trendDrillAllowBranchNav,
+        });
+        void openTrendDrillExpenseItems(trendDrillExpenseSub, {
+          range: nextRange,
+          label: nextLabel,
+        });
+        return;
+      }
+
+      // Stay on branch breakdown when already drilled into a branch.
+      if (trendDrillStep === 'breakdown' && trendDrillBranch && trendDrillBranch.id > 0) {
+        void openTrendDrillBreakdown(trendDrillBranch, {
+          range: nextRange,
+          metric: trendDrillMetric,
+          label: nextLabel,
+          chartTotal,
+          allowBranchNav: trendDrillAllowBranchNav,
+        });
+        return;
+      }
+
+      void openTrendDrillBranches(trendDrillMetric, {}, chartTotal, {
+        range: nextRange,
+        label: nextLabel,
+      });
+    },
+    [
+      lookupTrendChartTotalForRange,
+      openTrendDrillBranches,
+      openTrendDrillBreakdown,
+      openTrendDrillExpenseItems,
+      trendDrillAllowBranchNav,
+      trendDrillBranch,
+      trendDrillExpenseSub,
+      trendDrillMetric,
+      trendDrillStep,
+    ],
+  );
+
+  const navigateTrendDrillDate = useCallback(
+    (delta: -1 | 1) => {
+      const { start, end } = trendDrillRange;
+      if (!start || !end) return;
+
+      let nextRange: DateRange | null = null;
+      let nextLabel = '';
+
+      if (start === end) {
+        const d = parseLocalYmd(start);
+        if (!d) return;
+        const shifted = addDaysLocal(d, delta);
+        const ymd = toYYYYMMDD(shifted);
+        if (compareDateRange.start && ymd < compareDateRange.start) return;
+        if (compareDateRange.end && ymd > compareDateRange.end) return;
+        nextRange = { start: ymd, end: ymd };
+        nextLabel = formatYmdDisplay(ymd);
+      } else {
+        const s = parseLocalYmd(start);
+        if (!s) return;
+        const monthStart = new Date(s.getFullYear(), s.getMonth() + delta, 1);
+        const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+        nextRange = { start: toYYYYMMDD(monthStart), end: toYYYYMMDD(monthEnd) };
+        if (compareDateRange.start && nextRange.end < compareDateRange.start) return;
+        if (compareDateRange.end && nextRange.start > compareDateRange.end) return;
+        nextLabel = monthStart.toLocaleString(undefined, { month: 'short', year: 'numeric' });
+      }
+
+      if (!nextRange) return;
+      applyTrendDrillDateRange(nextRange, nextLabel);
+    },
+    [applyTrendDrillDateRange, compareDateRange.end, compareDateRange.start, trendDrillRange],
+  );
+
+  const jumpTrendDrillToDay = useCallback(
+    (day: Date | null) => {
+      if (!day || Number.isNaN(day.getTime())) return;
+      let ymd = toYYYYMMDD(day);
+      if (compareDateRange.start && ymd < compareDateRange.start) ymd = compareDateRange.start;
+      if (compareDateRange.end && ymd > compareDateRange.end) ymd = compareDateRange.end;
+      applyTrendDrillDateRange({ start: ymd, end: ymd }, formatYmdDisplay(ymd));
+    },
+    [applyTrendDrillDateRange, compareDateRange.end, compareDateRange.start],
+  );
+
+  const trendDrillPickerDate = useMemo(() => {
+    const key =
+      trendDrillRange.start && trendDrillRange.end && trendDrillRange.start === trendDrillRange.end
+        ? trendDrillRange.start
+        : trendDrillRange.start || trendDrillRange.end;
+    return key ? parseLocalYmd(key) : null;
+  }, [trendDrillRange.end, trendDrillRange.start]);
+
+  const trendDrillPickerMinDate = useMemo(
+    () => (compareDateRange.start ? parseLocalYmd(compareDateRange.start) ?? undefined : undefined),
+    [compareDateRange.start],
+  );
+  const trendDrillPickerMaxDate = useMemo(
+    () => (compareDateRange.end ? parseLocalYmd(compareDateRange.end) ?? undefined : undefined),
+    [compareDateRange.end],
+  );
+
   const trendDrillBranchesTotal = useMemo(() => {
     if (trendDrillChartTotal != null && trendDrillChartTotal > 0) return trendDrillChartTotal;
     return trendDrillBranches.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
@@ -3508,6 +3755,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const trendDrillExpenseGroupsTotal = useMemo(
     () => trendDrillExpenseGroups.reduce((sum, g) => sum + (Number(g.total) || 0), 0),
     [trendDrillExpenseGroups],
+  );
+
+  const trendDrillExpenseItemsTotal = useMemo(
+    () => trendDrillExpenseItems.reduce((sum, r) => sum + (Number(r.expAmount) || 0), 0),
+    [trendDrillExpenseItems],
   );
 
   const trendDrillExpenseTotal = useMemo(() => {
@@ -4716,18 +4968,81 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         }
         subtitle={
           <div className="flex flex-col items-start gap-1.5">
-            <p className="text-sm text-slate-500 m-0">
-              {trendDrillLabel}
-              {trendDrillRange.start && trendDrillRange.end && trendDrillRange.start !== trendDrillRange.end
-                ? ` · ${formatDate(trendDrillRange.start)} – ${formatDate(trendDrillRange.end)}`
-                : ''}
-            </p>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="Previous date"
+                disabled={
+                  !trendDrillCanShiftDate.prev ||
+                  trendDrillBranchesLoading ||
+                  trendDrillBreakdownLoading ||
+                  trendDrillExpenseItemsLoading
+                }
+                onClick={() => navigateTrendDrillDate(-1)}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border-0 shadow-sm hover:opacity-90 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer ${trendDrillBranchRankClass(trendDrillMetric)}`}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Pick date"
+                  title="Click to pick a date"
+                  onClick={() => setTrendDrillCalendarOpen((open) => !open)}
+                  className="text-sm text-slate-700 m-0 min-w-[7.5rem] px-2 py-1 rounded-lg text-center font-semibold tabular-nums cursor-pointer hover:bg-slate-100 border border-transparent hover:border-slate-200"
+                >
+                  {trendDrillLabel}
+                  {trendDrillRange.start &&
+                  trendDrillRange.end &&
+                  trendDrillRange.start !== trendDrillRange.end
+                    ? ` · ${formatDate(trendDrillRange.start)} – ${formatDate(trendDrillRange.end)}`
+                    : ''}
+                </button>
+                {trendDrillCalendarOpen ? (
+                  <>
+                    <div
+                      className="fixed inset-0 z-[85]"
+                      onClick={() => setTrendDrillCalendarOpen(false)}
+                      aria-hidden
+                    />
+                    <div
+                      className="absolute z-[90] top-full left-1/2 -translate-x-1/2 mt-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DatePicker
+                        inline
+                        selected={trendDrillPickerDate}
+                        onChange={jumpTrendDrillToDay}
+                        minDate={trendDrillPickerMinDate}
+                        maxDate={trendDrillPickerMaxDate}
+                        calendarClassName="react-datepicker-material"
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                aria-label="Next date"
+                disabled={
+                  !trendDrillCanShiftDate.next ||
+                  trendDrillBranchesLoading ||
+                  trendDrillBreakdownLoading ||
+                  trendDrillExpenseItemsLoading
+                }
+                onClick={() => navigateTrendDrillDate(1)}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border-0 shadow-sm hover:opacity-90 disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer ${trendDrillBranchRankClass(trendDrillMetric)}`}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
             {trendDrillStep === 'breakdown' && trendDrillAllowBranchNav ? (
               <button
                 type="button"
                 onClick={() => {
                   setTrendDrillStep('branches');
                   setTrendDrillBranch(null);
+                  closeTrendDrillExpenseItems();
                 }}
                 className="inline-flex items-center gap-1 text-sm font-bold text-brand-primary hover:text-brand-utilities cursor-pointer"
               >
@@ -4739,6 +5054,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         }
         maxWidth="3xl"
         bodyClassName="px-5 py-4"
+        closeButtonClassName={`${trendDrillBranchRankClass(trendDrillMetric)} hover:opacity-90`}
         footer={
           <div className="flex items-center justify-between gap-3 w-full">
             <span className="text-sm text-slate-500">
@@ -4764,7 +5080,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
               <button
                 type="button"
                 onClick={closeTrendDrill}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                className={`px-3 py-1.5 rounded-lg border-0 text-sm font-semibold shadow-sm hover:opacity-90 cursor-pointer ${trendDrillBranchRankClass(trendDrillMetric)}`}
               >
                 Close
               </button>
@@ -4781,6 +5097,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
             <div className="space-y-2">
               {trendDrillBranches.map((branch, idx) => {
                 const isResidual = Boolean(branch.residual);
+                const rankIdx = trendDrillBranches
+                  .slice(0, idx)
+                  .filter((b) => !b.residual).length;
                 const row = (
                   <>
                     <div className="flex items-center gap-3 min-w-0">
@@ -4788,12 +5107,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${
                           isResidual
                             ? 'bg-slate-100 text-slate-500'
-                            : trendDrillMetric === 'sales'
-                              ? 'bg-violet-100 text-violet-700'
-                              : 'bg-amber-100 text-amber-700'
+                            : trendDrillBranchRankClass(trendDrillMetric)
                         }`}
                       >
-                        {isResidual ? '·' : idx + 1}
+                        {isResidual ? '·' : rankIdx + 1}
                       </span>
                       <span
                         className={`text-sm truncate ${
@@ -4829,9 +5146,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                   <button
                     key={branch.id}
                     type="button"
-                    onClick={() =>
-                      void openTrendDrillBreakdown(branch, { chartTotal: Number(branch.amount) || 0 })
-                    }
+                    onClick={() => {
+                      closeTrendDrillExpenseItems();
+                      void openTrendDrillBreakdown(branch, {
+                        chartTotal: Number(branch.amount) || 0,
+                      });
+                    }}
                     className="w-full text-left flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50/60 hover:border-violet-200 hover:bg-violet-50/40 cursor-pointer transition-colors"
                   >
                     {row}
@@ -4859,7 +5179,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 <tbody>
                   {trendDrillSalesRows.map((row, idx) => (
                     <tr key={`${row.IDNo}-${idx}`} className="border-b border-slate-100 last:border-b-0">
-                      <td className="px-3 py-2 text-sm font-semibold text-slate-700">{idx + 1}</td>
+                      <td className="px-3 py-2 text-sm font-semibold text-slate-700 tabular-nums">
+                        {idx + 1}
+                      </td>
                       <td className="px-3 py-2 text-sm text-slate-800">{row.MENU_NAME || 'Unknown'}</td>
                       <td className="px-3 py-2 text-sm text-slate-700 text-right tabular-nums">
                         {Number(row.total_quantity || 0).toLocaleString()}
@@ -4915,36 +5237,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                         return next;
                       });
                     }}
-                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 bg-amber-50/50 hover:bg-amber-50 cursor-pointer"
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2.5 bg-[rgb(245,158,11)] hover:opacity-90 cursor-pointer"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <ChevronRight
                         size={16}
-                        className={`text-slate-400 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+                        className={`text-black shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
                       />
-                      <span className="text-sm font-semibold text-slate-800 truncate">{group.main}</span>
-                      <span className="text-[11px] text-slate-400 shrink-0">{group.subs.length}</span>
+                      <span className="text-sm font-bold text-black truncate">{group.main}</span>
+                      <span className="text-[11px] text-black/70 shrink-0">{group.subs.length}</span>
                     </div>
-                    <span className="text-sm font-bold tabular-nums text-slate-900 shrink-0">
+                    <span className="text-sm font-bold tabular-nums text-black shrink-0">
                       {formatModalMoney(group.total)}
                     </span>
                   </button>
                   {expanded ? (
                     <ul className="divide-y divide-slate-50 bg-white">
                       {group.subs.map((sub) => (
-                        <li
-                          key={`${group.main}-${sub.name}`}
-                          className="flex items-center justify-between gap-3 px-3 py-2 pl-9"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm text-slate-700 truncate">{sub.name}</p>
-                            {sub.count > 0 ? (
-                              <p className="text-[11px] text-slate-400">{sub.count} entr{sub.count === 1 ? 'y' : 'ies'}</p>
-                            ) : null}
-                          </div>
-                          <span className="text-sm font-semibold tabular-nums text-slate-800 shrink-0">
-                            {formatModalMoney(sub.amount)}
-                          </span>
+                        <li key={`${group.main}-${sub.name}`}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void openTrendDrillExpenseItems({
+                                main: group.main,
+                                name: sub.name,
+                                amount: sub.amount,
+                              })
+                            }
+                            className="w-full flex items-center justify-between gap-3 px-3 py-2 pl-9 hover:bg-amber-50/40 cursor-pointer text-left"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{sub.name}</p>
+                              {sub.count > 0 ? (
+                                <p className="text-[11px] text-slate-400">
+                                  {sub.count} entr{sub.count === 1 ? 'y' : 'ies'}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-sm font-bold tabular-nums text-slate-900">
+                                {formatModalMoney(sub.amount)}
+                              </span>
+                              <ChevronRight size={16} className="text-slate-300" />
+                            </div>
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -4952,6 +5288,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 </div>
               );
             })}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={trendDrillExpenseSub !== null}
+        onClose={closeTrendDrillExpenseItems}
+        title={`${trendDrillExpenseSub?.name ?? 'Items'} · ${trendDrillBranch?.name ?? ''}`}
+        subtitle={
+          <p className="text-sm text-slate-500 m-0">
+            {trendDrillExpenseSub?.main ? `${trendDrillExpenseSub.main} · ` : ''}
+            {trendDrillLabel}
+          </p>
+        }
+        maxWidth="2xl"
+        bodyClassName="px-5 py-4"
+        layerClassName="z-[70]"
+        closeButtonClassName={`${trendDrillBranchRankClass('expenses')} hover:opacity-90`}
+        footer={
+          <div className="flex items-center justify-between gap-3 w-full">
+            <span className="text-sm text-slate-500">
+              {trendDrillExpenseItemsLoading
+                ? 'Loading…'
+                : `${trendDrillExpenseItems.length} item${trendDrillExpenseItems.length === 1 ? '' : 's'}`}
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-bold tabular-nums text-slate-800">
+                Total{' '}
+                {formatModalMoney(
+                  trendDrillExpenseSub?.amount ?? trendDrillExpenseItemsTotal,
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={closeTrendDrillExpenseItems}
+                className={`px-3 py-1.5 rounded-lg border-0 text-sm font-semibold shadow-sm hover:opacity-90 cursor-pointer ${trendDrillBranchRankClass('expenses')}`}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {trendDrillExpenseItemsLoading ? (
+          <div className="py-10 text-center text-sm text-slate-500">Loading items…</div>
+        ) : trendDrillExpenseItems.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-500">No expense items in this range.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">#</th>
+                  <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase">Item</th>
+                  <th className="px-3 py-2 text-xs font-bold text-slate-500 uppercase text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trendDrillExpenseItems.map((exp, idx) => (
+                  <tr key={exp.id} className="border-b border-slate-100 last:border-b-0">
+                    <td className="px-3 py-2 text-sm font-semibold text-slate-700 tabular-nums">
+                      {idx + 1}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-slate-800">
+                      <p className="font-medium">{exp.expDesc || exp.expName || '—'}</p>
+                      {exp.expSource ? (
+                        <p className="text-[11px] text-slate-400 mt-0.5">{exp.expSource}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-sm font-bold text-slate-900 text-right tabular-nums">
+                      {formatModalMoney(Number(exp.expAmount) || 0)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Modal>
