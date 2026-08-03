@@ -7,8 +7,10 @@ export type BranchPerformanceData = {
   id: number;
   name: string;
   totalSales: number;
-  /** POS report sales before recon: gross `total_sales` sum (aligns with Sales Analytics Total sales KPI) */
+  /** POS net sales before recon (paid − refund/discount). */
   reportSalesPos?: number;
+  /** Gross POS `total_sales` — aligns with Total Sales chart / performance-trend. */
+  reportSalesGross?: number;
   reconTotal?: number;
   totalExpenses: number;
   totalOrders: number;

@@ -242,6 +242,8 @@ async function buildAdminDashboardBundle({
 			name: b.branch_name,
 			totalSales: posBase + reconTotal,
 			reportSalesPos: posBase,
+			/** Gross POS total_sales — same basis as performance-trend / Total Sales chart. */
+			reportSalesGross: Number(b.total_sales || 0),
 			reconTotal,
 			totalExpenses,
 			totalOrders: b.order_count,

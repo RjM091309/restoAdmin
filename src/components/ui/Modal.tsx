@@ -25,6 +25,10 @@ export interface ModalProps {
   titleClassName?: string;
   /** Merged onto the scrollable body wrapper. */
   bodyClassName?: string;
+  /** Applied to backdrop + outer fixed layer (e.g. `z-[70]` for nested modals). */
+  layerClassName?: string;
+  /** Merged onto the header close (X) button. */
+  closeButtonClassName?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -39,6 +43,8 @@ export const Modal: React.FC<ModalProps> = ({
   panelClassName,
   titleClassName,
   bodyClassName,
+  layerClassName,
+  closeButtonClassName,
 }) => {
   const { t } = useTranslation();
   // Prevent body scroll when modal is open
@@ -74,13 +80,14 @@ export const Modal: React.FC<ModalProps> = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
+            className={cn('fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]', layerClassName)}
           />
 
           {/* Modal Container */}
           <div
             className={cn(
               'fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none',
+              layerClassName,
               containerClassName
             )}
           >
@@ -112,7 +119,11 @@ export const Modal: React.FC<ModalProps> = ({
                   type="button"
                   onClick={onClose}
                   title={t('common.close')}
-                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl bg-gray-50 text-brand-muted hover:bg-red-50 hover:text-red-500 transition-colors shadow-sm"
+                  className={cn(
+                    'shrink-0 w-9 h-9 flex items-center justify-center rounded-xl shadow-sm transition-colors',
+                    closeButtonClassName ||
+                      'bg-gray-50 text-brand-muted hover:bg-red-50 hover:text-red-500'
+                  )}
                 >
                   <X size={18} />
                 </button>
