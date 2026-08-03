@@ -487,7 +487,10 @@ const classifyMainExpenseKey = (key: string): MainExpenseBucket => {
   const isFoodMain =
     mainPart.includes('식자재') ||
     mainPart.includes('food') ||
-    mainPart.includes('inventory');
+    mainPart.includes('inventory') ||
+    // Market / mart purchases are food COGS (e.g. KumHo "3. 마트 / Mart").
+    mainPart.includes('마트') ||
+    /\bmart\b/.test(mainPart);
   if (full.startsWith('inventory|') || isFoodMain) return 'food';
 
   return 'other';
@@ -2687,14 +2690,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     let food = buckets.food;
     let rent = buckets.rent;
     let salary = buckets.salary;
+    let other = buckets.other;
 
-    // Item-level rent via EXP_DESC (KumHo 월세 under Fixed Costs, Blue Moon "Shop Rental").
+    // Item-level rent via EXP_DESC (KumHo 가게월세 under Fixed Costs, Blue Moon "Shop Rental").
     // Category map misses those; backend getRentSalaryByBranch scans EXP_DESC.
     if (backendRent > rent) {
       const extraRent = backendRent - rent;
       rent = backendRent;
-      // Those rows were usually counted under Food Supplies → pull out of food.
-      if (food >= extraRent) food -= extraRent;
+      // Pull extra rent out of the bucket where those rows were classified.
+      // KumHo: Fixed Costs / Indirect → other. Legacy: some rent sat under Food Supplies.
+      if (other >= extraRent) {
+        other -= extraRent;
+      } else if (food >= extraRent) {
+        food -= extraRent;
+      } else {
+        const fromOther = Math.min(other, extraRent);
+        other -= fromOther;
+        const rem = extraRent - fromOther;
+        if (rem > 0) food = Math.max(0, food - rem);
+      }
     }
 
     // Take richer salary (category map has DJ/PROMOTER/C.A.; backend may catch more).
