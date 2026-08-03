@@ -156,8 +156,10 @@ class ExpenseModel {
 		}
 
 		query += ` ORDER BY e.IDNo DESC`;
+		// Date-scoped lists must be complete so Expense Breakdown drill-down /
+		// subcategory badges match analytics totals (LIMIT 500 dropped Vehicle & Gas etc.).
 		if (range.sql) {
-			query += ` LIMIT 500`;
+			query += ` LIMIT 20000`;
 		} else {
 			query += ` LIMIT 2000`;
 		}
@@ -187,7 +189,7 @@ class ExpenseModel {
 					fbParams.push(...range.params);
 				}
 				fb += ` ORDER BY e.IDNo DESC`;
-				if (range.sql) fb += ` LIMIT 500`;
+				if (range.sql) fb += ` LIMIT 20000`;
 				else fb += ` LIMIT 2000`;
 				[rows] = await pool.execute(fb, fbParams);
 			} else {
