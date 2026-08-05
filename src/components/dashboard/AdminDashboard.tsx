@@ -585,83 +585,85 @@ function TrendChartContainer({
   );
 }
 
-/** Equal top/bottom panes — domain [-1, 1]. Each series fills its own half;
- *  heights are compressed so large vs small totals don't look far apart. */
+const niceStep = (max: number, targetSteps: number): number => {
+  const m = Number(max);
+  if (!(m > 0) || !Number.isFinite(m)) return 1;
+  const rough = m / Math.max(1, targetSteps);
+  const pow10 = Math.pow(10, Math.floor(Math.log10(rough)));
+  const r = rough / pow10;
+  const mult = r <= 1 ? 1 : r <= 2 ? 2 : r <= 5 ? 5 : 10;
+  return mult * pow10;
+};
+
+const buildNiceMax = (maxAbs: number) => {
+  // Keep a minimum scale so the axis doesn't collapse at tiny ranges.
+  const minMax = 10_000;
+  const effectiveMax = Math.max(Number.isFinite(maxAbs) ? maxAbs : 0, minMax);
+  const step = niceStep(effectiveMax, 4);
+  return Math.ceil(effectiveMax / step) * step;
+};
+
+/** Equal top/bottom panes — domain [-1, 1]. When expenses are significant,
+ *  peak expense maps to middle tick (-⅔); axis max = peak × 1.5. */
 type TrendYScale = {
   salesMax: number;
   expenseMax: number;
+  /** Actual max expense — anchored at chart -⅔ (middle expense tick). */
+  peakExpense: number;
   domain: [number, number];
 };
 
-/** Mild softening only — mostly proportional, just rounds off extreme spikes.
- *  Day-to-day size variation is controlled here; the sales-vs-expenses gap
- *  within a single day is controlled separately by TREND_MAX_PAIR_GAP below —
- *  keeping the two concerns independent instead of fighting over one knob. */
-const TREND_HEIGHT_GAMMA = 0.5;
-/** Non-zero bars start at least this fraction of the pane. */
-const TREND_MIN_FILL = 0.15;
-/** Even the tallest bar stops here — leaves headroom so nothing looks oversized. */
-const TREND_MAX_FILL = 0.6;
-/** Cap: sales and expenses bars on the same day can't differ by more than this
- *  fraction of the pane, however far apart the real peso amounts are. */
-const TREND_MAX_PAIR_GAP = 0.25;
-
-/** If one spike is >2× the next value, scale to second*1.15 so normal days expand. */
-const robustSeriesMax = (values: number[]): number => {
-  const sorted = values.filter((v) => v > 0).sort((a, b) => a - b);
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const peak = sorted[sorted.length - 1];
-  const second = sorted[sorted.length - 2];
-  if (peak > second * 2) return second * 1.15;
-  return peak;
-};
+const EXPENSE_PEAK_CHART = -2 / 3;
 
 const buildTrendYScale = (salesValues: number[], expenseValues: number[]): TrendYScale => {
-  const salesPeak = robustSeriesMax(salesValues);
-  const expensePeak = robustSeriesMax(expenseValues);
-  const salesMax = Math.max(salesPeak > 0 ? salesPeak : Math.max(0, ...salesValues), 10_000);
-  const expenseMax = Math.max(expensePeak > 0 ? expensePeak : salesMax, 10_000);
-  return { salesMax, expenseMax, domain: [-1, 1] };
-};
+  const maxSales = Math.max(0, ...salesValues);
+  const maxExpense = Math.max(0, ...expenseValues);
+  const salesMax = buildNiceMax(maxSales);
+  const expenseFloor = salesMax * 3;
 
-/** Map peso value → [TREND_MIN_FILL, TREND_MAX_FILL] within its series so heights stay visually close. */
-const toTrendChartMagnitude = (value: number, seriesMax: number): number => {
-  const t = Math.min(value / seriesMax, 1);
-  const compressed = Math.pow(t, TREND_HEIGHT_GAMMA);
-  return TREND_MIN_FILL + (TREND_MAX_FILL - TREND_MIN_FILL) * compressed;
-};
-
-/** Compress each series independently, then pull the shorter bar up (never shrink
- *  the taller one) so a single day's pair never looks farther apart than the cap. */
-const computeTrendPairFills = (
-  rawSales: number,
-  rawExpenses: number,
-  scale: TrendYScale,
-): { salesFill: number | null; expenseFill: number | null } => {
-  let salesFill = rawSales > 0 && scale.salesMax > 0 ? toTrendChartMagnitude(rawSales, scale.salesMax) : null;
-  let expenseFill = rawExpenses > 0 && scale.expenseMax > 0 ? toTrendChartMagnitude(rawExpenses, scale.expenseMax) : null;
-
-  if (salesFill != null && expenseFill != null) {
-    const gap = salesFill - expenseFill;
-    if (gap > TREND_MAX_PAIR_GAP) {
-      expenseFill = salesFill - TREND_MAX_PAIR_GAP;
-    } else if (gap < -TREND_MAX_PAIR_GAP) {
-      salesFill = expenseFill - TREND_MAX_PAIR_GAP;
-    }
+  if (!(maxExpense > 0)) {
+    return { salesMax, expenseMax: expenseFloor, peakExpense: 0, domain: [-1, 1] };
   }
 
-  return { salesFill, expenseFill };
+  const useMiddlePeak = maxExpense > expenseFloor * (2 / 3);
+  if (useMiddlePeak) {
+    const peakExpense = maxExpense;
+    const expenseMax = Math.max(expenseFloor, buildNiceMax(peakExpense * 1.5));
+    return { salesMax, expenseMax, peakExpense, domain: [-1, 1] };
+  }
+
+  return { salesMax, expenseMax: expenseFloor, peakExpense: 0, domain: [-1, 1] };
 };
 
-/** Symmetric ticks: sales top half, expenses bottom half. */
-const buildTrendYTicks = (): number[] => [1, 0.5, 0, -0.5, -1];
+const toTrendChartSales = (value: number, salesMax: number): number | null => {
+  if (!(value > 0) || !(salesMax > 0)) return null;
+  return Math.min(value / salesMax, 1);
+};
+
+const toTrendChartExpense = (value: number, scale: TrendYScale): number | null => {
+  if (!(value > 0) || !(scale.expenseMax > 0)) return null;
+  if (scale.peakExpense > 0) {
+    const chartMag = Math.min((value / scale.peakExpense) * Math.abs(EXPENSE_PEAK_CHART), 1);
+    return -chartMag;
+  }
+  return -Math.min(value / scale.expenseMax, 1);
+};
+
+/** Sales: 2 ticks (½ & max). Expenses: 3 ticks (⅓, ⅔ & max of expense pane). */
+const buildTrendYTicks = (): number[] => [1, 0.5, 0, -1 / 3, -2 / 3, -1];
 
 const formatTrendYAxisTick = (chartValue: number, scale: TrendYScale): string => {
   const v = Number(chartValue);
   if (!Number.isFinite(v) || v === 0) return '₱0k';
 
-  const raw = v > 0 ? v * scale.salesMax : Math.abs(v) * scale.expenseMax;
+  let raw: number;
+  if (v > 0) {
+    raw = v * scale.salesMax;
+  } else if (scale.peakExpense > 0 && Math.abs(v - EXPENSE_PEAK_CHART) < 0.001) {
+    raw = scale.peakExpense;
+  } else {
+    raw = Math.abs(v) * scale.expenseMax;
+  }
 
   if (raw >= 1_000_000) {
     const m = raw / 1_000_000;
@@ -3335,14 +3337,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   }, [trendYScale]);
 
   const trendChartData = useMemo(() => {
+    const { salesMax } = trendYScale;
     return monthlyData.map((d) => {
       const rawSales = clampFiniteNonNegative(d.totalSales);
       const rawExpenses = clampFiniteNonNegative(d.totalExpenses);
-      const { salesFill, expenseFill } = computeTrendPairFills(rawSales, rawExpenses, trendYScale);
       return {
         ...d,
-        totalSales: salesFill,
-        negativeExpenses: expenseFill != null ? -expenseFill : null,
+        totalSales: toTrendChartSales(rawSales, salesMax),
+        negativeExpenses: toTrendChartExpense(rawExpenses, trendYScale),
         rawTotalSales: rawSales,
         rawTotalExpenses: rawExpenses,
       };
