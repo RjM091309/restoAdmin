@@ -17,6 +17,19 @@ function stripLeadingNumber(value: string): string {
     .trim();
 }
 
+function hasLeadingNumber(value: string): boolean {
+  return /^\d+\.?\s/.test(String(value || '').trim());
+}
+
+/** Collapse numbered/unnumbered + punctuation variants into one key. */
+function canonicalCategoryKey(value: string): string {
+  const parts = String(value || '')
+    .split('/')
+    .map((p) => stripLeadingNumber(p.trim()))
+    .filter(Boolean);
+  return normalizeCategoryLabel(parts.join(' / ') || stripLeadingNumber(value));
+}
+
 function englishTail(value: string): string {
   const parts = String(value || '')
     .split('/')
@@ -27,7 +40,7 @@ function englishTail(value: string): string {
 
 function tokenSet(value: string): Set<string> {
   return new Set(
-    normalizeCategoryLabel(value)
+    canonicalCategoryKey(value)
       .split(/[\s/]+/)
       .map((t) => t.trim())
       .filter((t) => t.length > 1),
@@ -35,17 +48,21 @@ function tokenSet(value: string): Set<string> {
 }
 
 function categoryMatchScore(extracted: string, candidate: string): number {
+  const aKey = canonicalCategoryKey(extracted);
+  const bKey = canonicalCategoryKey(candidate);
+  if (!aKey || !bKey) return 0;
+  if (aKey === bKey) return 100;
+
   const a = normalizeCategoryLabel(extracted);
   const b = normalizeCategoryLabel(candidate);
-  if (!a || !b) return 0;
-  if (a === b) return 100;
+  if (a && b && a === b) return 100;
 
   const engA = englishTail(extracted);
   const engB = englishTail(candidate);
   if (engA && engB && engA === engB) return 95;
   if (engA && engB && (engA.includes(engB) || engB.includes(engA))) return 85;
 
-  if (a.includes(b) || b.includes(a)) return 80;
+  if (a.includes(b) || b.includes(a) || aKey.includes(bKey) || bKey.includes(aKey)) return 80;
 
   const tokensA = tokenSet(extracted);
   const tokensB = tokenSet(candidate);
@@ -58,18 +75,71 @@ function categoryMatchScore(extracted: string, candidate: string): number {
   return Math.round(ratio * 70);
 }
 
-function uniqueSubCategoryLabels(categories: InventoryCategory[]): string[] {
-  const seen = new Set<string>();
-  const labels: string[] = [];
+function labelOf(cat: InventoryCategory): string {
+  return String(cat.categoryType || cat.name || '').trim();
+}
+
+function isOfficialLabel(label: string): boolean {
+  return hasLeadingNumber(label);
+}
+
+/** Prefer numbered official labels over unnumbered scanner leftovers. */
+function preferOfficialCategory(pool: InventoryCategory[]): InventoryCategory | undefined {
+  if (pool.length === 0) return undefined;
+  const numbered = pool.filter((cat) => isOfficialLabel(labelOf(cat)) || isOfficialLabel(cat.name || ''));
+  return numbered[0] ?? pool[0];
+}
+
+/**
+ * Unique subcategory labels for AI extraction / matching.
+ * Collapses numbered + unnumbered duplicates onto the official numbered label when present.
+ * Also collapses variants that share the same English tail (e.g. 기타경비 vs 간접비 / Indirect*).
+ */
+export function preferredSubCategoryLabels(categories: InventoryCategory[]): string[] {
+  const byCanonical = new Map<string, string>();
+
   for (const cat of categories) {
-    const label = String(cat.categoryType || cat.name || '').trim();
+    if (cat.active === false) continue;
+    const label = labelOf(cat);
     if (!label) continue;
-    const key = normalizeCategoryLabel(label);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    labels.push(label);
+    const key = canonicalCategoryKey(label);
+    if (!key) continue;
+    const existing = byCanonical.get(key);
+    if (!existing) {
+      byCanonical.set(key, label);
+      continue;
+    }
+    if (!isOfficialLabel(existing) && isOfficialLabel(label)) {
+      byCanonical.set(key, label);
+    }
   }
-  return labels;
+
+  const byEnglish = new Map<string, string>();
+  for (const label of byCanonical.values()) {
+    const eng = englishTail(label);
+    const collapseKey = eng || canonicalCategoryKey(label);
+    const existing = byEnglish.get(collapseKey);
+    if (!existing) {
+      byEnglish.set(collapseKey, label);
+      continue;
+    }
+    if (!isOfficialLabel(existing) && isOfficialLabel(label)) {
+      byEnglish.set(collapseKey, label);
+    }
+  }
+
+  return Array.from(byEnglish.values()).sort((a, b) => {
+    const numA = /^(\d+)\.?\s/.exec(a);
+    const numB = /^(\d+)\.?\s/.exec(b);
+    if (numA && numB) {
+      const nA = parseInt(numA[1], 10);
+      const nB = parseInt(numB[1], 10);
+      if (nA !== nB) return nA - nB;
+    }
+    if (numA && !numB) return -1;
+    if (!numA && numB) return 1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
 }
 
 function pickMasterCategoryForSubCategory(
@@ -77,11 +147,11 @@ function pickMasterCategoryForSubCategory(
   subCategoryLabel: string,
   preferredOpCategoryId: string | null,
 ): InventoryCategory | undefined {
-  const normalized = normalizeCategoryLabel(subCategoryLabel);
+  const targetKey = canonicalCategoryKey(subCategoryLabel);
   const matches = categories.filter((cat) => {
-    const type = normalizeCategoryLabel(cat.categoryType || '');
-    const name = normalizeCategoryLabel(cat.name || '');
-    return type === normalized || name === normalized;
+    const typeKey = canonicalCategoryKey(cat.categoryType || '');
+    const nameKey = canonicalCategoryKey(cat.name || '');
+    return typeKey === targetKey || nameKey === targetKey;
   });
   if (matches.length === 0) return undefined;
 
@@ -90,36 +160,34 @@ function pickMasterCategoryForSubCategory(
     : matches;
   const pool = preferredOpMatches.length > 0 ? preferredOpMatches : matches;
 
-  const subRow = pool.find(
-    (cat) =>
-      normalizeCategoryLabel(cat.name || '') === normalized ||
-      normalizeCategoryLabel(cat.categoryType || '') === normalized,
-  );
-  return subRow ?? pool[0];
+  return preferOfficialCategory(pool);
 }
 
 function findFallbackMasterCategory(
   categories: InventoryCategory[],
   preferredOpCategoryId: string | null,
 ): InventoryCategory | undefined {
-  const others = categories.find(
+  const othersPool = categories.filter(
     (cat) =>
-      normalizeCategoryLabel(cat.categoryType) === 'others' ||
-      normalizeCategoryLabel(cat.name) === 'others',
+      canonicalCategoryKey(cat.categoryType) === 'others' ||
+      canonicalCategoryKey(cat.name) === 'others',
   );
+  const others = preferOfficialCategory(othersPool);
   if (others) return others;
 
   if (preferredOpCategoryId) {
-    const opMatch = categories.find((cat) => cat.opCategoryId === preferredOpCategoryId);
-    if (opMatch) return opMatch;
+    const opMatches = categories.filter((cat) => cat.opCategoryId === preferredOpCategoryId);
+    const opPick = preferOfficialCategory(opMatches);
+    if (opPick) return opPick;
   }
 
-  return categories[0];
+  return preferOfficialCategory(categories) ?? categories[0];
 }
 
 /**
  * Map an extracted receipt category to an existing master category id.
  * Never creates new sub categories — only uses rows already in RestoAdmin.
+ * Prefers numbered official rows when numbered + unnumbered duplicates exist.
  */
 export function resolveExistingMasterCategoryId(
   categories: InventoryCategory[],
@@ -134,21 +202,33 @@ export function resolveExistingMasterCategoryId(
   const raw = String(extractedCategory || '').trim();
 
   if (raw) {
-    const exact = active.find((cat) => {
-      const type = String(cat.categoryType || '').trim();
-      const name = String(cat.name || '').trim();
-      return (
-        type === raw ||
-        name === raw ||
-        normalizeCategoryLabel(type) === normalizeCategoryLabel(raw) ||
-        normalizeCategoryLabel(name) === normalizeCategoryLabel(raw)
-      );
+    const rawKey = canonicalCategoryKey(raw);
+    const rawEng = englishTail(raw);
+
+    // Strong matches: same canonical key OR same English tail (handles
+    // "기타경비 / Indirect Expenses" vs "8. 간접비 / Indirect expenses").
+    const strongMatches = active.filter((cat) => {
+      const type = cat.categoryType || '';
+      const name = cat.name || '';
+      const typeKey = canonicalCategoryKey(type);
+      const nameKey = canonicalCategoryKey(name);
+      if (typeKey === rawKey || nameKey === rawKey) return true;
+      if (!rawEng) return false;
+      return englishTail(type) === rawEng || englishTail(name) === rawEng;
     });
-    if (exact) return exact.id;
+
+    if (strongMatches.length > 0) {
+      const preferredOpMatches = preferredOpCategoryId
+        ? strongMatches.filter((cat) => cat.opCategoryId === preferredOpCategoryId)
+        : strongMatches;
+      const pool = preferredOpMatches.length > 0 ? preferredOpMatches : strongMatches;
+      const picked = preferOfficialCategory(pool);
+      if (picked) return picked.id;
+    }
 
     let bestLabel = '';
     let bestScore = 0;
-    for (const label of uniqueSubCategoryLabels(active)) {
+    for (const label of preferredSubCategoryLabels(active)) {
       const score = categoryMatchScore(raw, label);
       if (score > bestScore) {
         bestScore = score;

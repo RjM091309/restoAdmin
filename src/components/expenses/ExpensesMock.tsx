@@ -20,7 +20,7 @@ import { uploadExpenseReceipt } from '../../services/uploadService';
 import { compressReceiptImage, fetchReceiptScannerGeminiKey, stitchReceiptImages } from '../../services/receiptScannerService';
 import { extractExpenseItemsFromReceiptImage, type ReceiptExpenseExtractionResult } from '../../services/receiptExpenseExtraction';
 import { syncIngredientsFromExpenses } from '../../services/ingredientService';
-import { resolveExistingMasterCategoryId } from '../../utils/expenseCategoryResolve';
+import { preferredSubCategoryLabels, resolveExistingMasterCategoryId } from '../../utils/expenseCategoryResolve';
 import { SidePanel } from '../ui/SidePanel';
 import { Modal } from '../ui/Modal';
 import { Edit2, Trash2, Plus, Loader2, Check, X, Search, Receipt, Upload, ScanLine, History, Eye } from 'lucide-react';
@@ -735,13 +735,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   );
 
   const extractionCategoryTypes = useMemo(() => {
-    const unique = new Set<string>();
-    (masterCategories || []).forEach((c) => {
-      if (!c?.active) return;
-      const t = String(c.categoryType || '').trim();
-      if (t) unique.add(t);
-    });
-    const list = Array.from(unique.values()).slice(0, 40);
+    const list = preferredSubCategoryLabels(masterCategories || []).slice(0, 40);
     return list.length ? list : DEFAULT_EXTRACTION_CATEGORIES;
   }, [masterCategories]);
 
