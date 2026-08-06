@@ -1283,22 +1283,23 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
   const openBreakdownRowDetail = useCallback(
     (rowName: string) => {
-      if (rowName === 'Others') return;
-
       const masterById = new Map(masterCategories.map((c) => [String(c.id), c]));
       let items: ExpenseRecord[] = [];
       const opName = (selectedOperation?.name || '').trim();
 
       if (selectedCategory) {
-        items = rangeEntriesForCategoryAnalytics.filter((exp) => {
-          return tableItemBreakdownLabel(exp, selectedCategory.name) === rowName;
-        });
+        // "Others" rolls up every item beyond the top 6 rows, so match against
+        // the whole group of names instead of a single exact name.
+        const matchNames = rowName === 'Others' ? expenseBreakdown.othersKeys : new Set([rowName]);
+        items = rangeEntriesForCategoryAnalytics.filter((exp) =>
+          matchNames.has(tableItemBreakdownLabel(exp, selectedCategory.name)),
+        );
         if (items.length === 0) {
-          items = expensesInRange.filter(
-            (exp) => tableItemBreakdownLabel(exp, selectedCategory.name) === rowName,
+          items = expensesInRange.filter((exp) =>
+            matchNames.has(tableItemBreakdownLabel(exp, selectedCategory.name)),
           );
         }
-      } else if (selectedOperationId) {
+      } else if (rowName !== 'Others' && selectedOperationId) {
         if (breakdownUsesAnalyticsSubCategoryRows && opName) {
           items = expensesInRange.filter((exp) =>
             expenseMatchesOperationSubCategory(exp, opName, rowName),
@@ -1340,6 +1341,7 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
     },
     [
       breakdownUsesAnalyticsSubCategoryRows,
+      expenseBreakdown,
       expensesInAnalyticsRange,
       expensesInRange,
       masterCategories,
@@ -2603,7 +2605,6 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                           // (We keep PIE_COLORS for other screens, but breakdown rows use HSL.)
                           const color = distinctSeriesColor(idx);
                           const isOthers = row.name === 'Others';
-                          const canClickOthers = Boolean(selectedCategory) && isOthers && expenseBreakdown.othersKeys.size > 0;
                           const canClickMainCategory =
                             !selectedOperation &&
                             !selectedCategory &&
@@ -2611,28 +2612,14 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                             operations.some((op) => op.name === row.name);
                           const canClickSubCategory =
                             Boolean(selectedOperation) && !selectedCategory && !isOthers;
-                          const canClickTableItem = Boolean(selectedCategory) && !isOthers;
+                          // "Others" only ever appears when a sub category is selected, and it
+                          // always has at least one grouped item — open the same detail modal.
+                          const canClickTableItem = Boolean(selectedCategory);
                           const canOpenDetailModal = canClickSubCategory || canClickTableItem;
-                          const isRowClickable = canClickOthers || canClickMainCategory || canOpenDetailModal;
+                          const isRowClickable = canClickMainCategory || canOpenDetailModal;
                           const handleBreakdownRowClick = () => {
                             if (canOpenDetailModal) {
                               openBreakdownRowDetail(row.name);
-                              return;
-                            }
-                            if (canClickOthers) {
-                              setCurrentPage(1);
-                              setTableSearch('');
-                              setTableItemsNameFilter((prev) => {
-                                // toggle: click again to clear
-                                if (prev && prev.size === expenseBreakdown.othersKeys.size) {
-                                  let same = true;
-                                  for (const k of expenseBreakdown.othersKeys) {
-                                    if (!prev.has(k)) { same = false; break; }
-                                  }
-                                  if (same) return null;
-                                }
-                                return new Set(expenseBreakdown.othersKeys);
-                              });
                               return;
                             }
                             if (canClickMainCategory) {
@@ -2669,11 +2656,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                 aria-label={
                                   canOpenDetailModal
                                     ? `View expense items for ${row.name}`
-                                    : canClickOthers
-                                      ? 'Filter table items by Others group'
-                                      : canClickMainCategory
-                                        ? 'Open sub category breakdown for selected main category'
-                                        : undefined
+                                    : canClickMainCategory
+                                      ? 'Open sub category breakdown for selected main category'
+                                      : undefined
                                 }
                               >
                                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
@@ -2688,11 +2673,9 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
                                 aria-label={
                                   canOpenDetailModal
                                     ? `View expense items for ${row.name}`
-                                    : canClickOthers
-                                      ? 'Filter table items by Others group'
-                                      : canClickMainCategory
-                                        ? 'Open sub category breakdown for selected main category'
-                                        : undefined
+                                    : canClickMainCategory
+                                      ? 'Open sub category breakdown for selected main category'
+                                      : undefined
                                 }
                               >
                                 <div className={cn('h-2.5 rounded-full bg-slate-100 overflow-hidden', isRowClickable ? 'hover:bg-slate-200/60 transition-colors' : '')}>
