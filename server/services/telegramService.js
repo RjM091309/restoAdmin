@@ -54,6 +54,7 @@ class TelegramService {
 
 	static CALLBACK_BRANCH_IDS = {
 		report_total: null, // all branches
+		report_branch_compare: null, // reserved — 업장별 비교
 		report_kims: 2, // Kim's B
 		report_blue_m: 3, // Blue M
 		report_keum: 9, // Keum
@@ -113,17 +114,18 @@ class TelegramService {
 		return [
 			[
 				{ text: '합계 Total', callback_data: 'report_total' },
+				{ text: '업장별 비교', callback_data: 'report_branch_compare' },
+			],
+			[
 				{ text: "김형제 Kim's B", callback_data: 'report_kims' },
-			],
-			[
 				{ text: '블루문 Blue M', callback_data: 'report_blue_m' },
+			],
+			[
 				{ text: '금호반점 Keum', callback_data: 'report_keum' },
-			],
-			[
 				{ text: '프라임 BBQ', callback_data: 'report_pre' },
-				{ text: 'EESOME', callback_data: 'report_eesome' },
 			],
 			[
+				{ text: 'EESOME', callback_data: 'report_eesome' },
 				{ text: '신규 New', callback_data: 'report_new' },
 			],
 		];
@@ -134,17 +136,18 @@ class TelegramService {
 			keyboard: [
 				[
 					{ text: '합계 Total' },
+					{ text: '업장별 비교' },
+				],
+				[
 					{ text: "김형제 Kim's B" },
-				],
-				[
 					{ text: '블루문 Blue M' },
+				],
+				[
 					{ text: '금호반점 Keum' },
-				],
-				[
 					{ text: '프라임 BBQ' },
-					{ text: 'EESOME' },
 				],
 				[
+					{ text: 'EESOME' },
 					{ text: '신규 New' },
 				],
 			],
@@ -156,6 +159,7 @@ class TelegramService {
 
 	static REPORT_TEXT_TO_CALLBACK = {
 		'합계 Total': 'report_total',
+		'업장별 비교': 'report_branch_compare',
 		"김형제 Kim's B": 'report_kims',
 		'블루문 Blue M': 'report_blue_m',
 		'금호반점 Keum': 'report_keum',
@@ -315,6 +319,7 @@ class TelegramService {
 	static buildReportTitle(callbackData) {
 		const titles = {
 			report_total: '합계 Total',
+			report_branch_compare: '업장별 비교',
 			report_kims: "김형제 Kim's B",
 			report_blue_m: '블루문 Blue M',
 			report_keum: '금호반점 Keum',
