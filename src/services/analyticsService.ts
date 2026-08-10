@@ -41,6 +41,27 @@ async function fetchJson(url: string, timeoutMs = ANALYTICS_FETCH_MS): Promise<{
   }
 }
 
+/**
+ * Prefer direct PyServer when VITE_ANALYTICS_BASE_URL is set; on network/HTTP failure
+ * fall back to same-origin Node `/api/analytics/*` (proxies PyServer + SQL fallback).
+ */
+async function fetchAnalyticsPath(
+  path: string,
+  timeoutMs = ANALYTICS_FETCH_MS,
+): Promise<{ res: Response; json: any }> {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  const baseUrl = getAnalyticsBaseUrl();
+  if (baseUrl) {
+    try {
+      const { res, json } = await fetchJson(`${baseUrl}${normalized}`, timeoutMs);
+      if (res.ok) return { res, json };
+    } catch {
+      // PyServer unreachable / timed out — use Node proxy
+    }
+  }
+  return fetchJson(normalized, timeoutMs);
+}
+
 export type ApiBranchSalesItem = {
   branch_id: number;
   branch_name: string;
@@ -203,11 +224,7 @@ export type ApiPerformanceTrendRow = {
 };
 
 export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTopSellingItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/top-selling?${params.toString()}`
-    : `/api/analytics/top-selling?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/top-selling?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics top-selling failed with status ${res.status}`);
   }
@@ -218,13 +235,8 @@ export async function fetchTopSellingApi(params: URLSearchParams): Promise<ApiTo
 }
 
 export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDailySalesItem[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/daily-sales?${params.toString()}`
-    : `/api/analytics/daily-sales?${params.toString()}`;
-
   // Node proxy already falls back to SQL when PyServer is slow/unreachable.
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/daily-sales?${params.toString()}`);
   if (!res.ok) throw new Error(`Analytics daily-sales failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailySalesItem[];
@@ -246,22 +258,7 @@ export async function fetchDailyPerBranchApi(params: {
     qs.set('branch_id', params.branchId);
   }
 
-  const path = `/api/analytics/daily-per-branch?${qs.toString()}`;
-  const baseUrl = getAnalyticsBaseUrl();
-
-  // Prefer PyServer when configured; on 404/failure fall back to Node proxy (SQL fallback).
-  if (baseUrl) {
-    try {
-      const { res, json } = await fetchJson(`${baseUrl}${path}`);
-      if (res.ok && json?.success && json?.data?.data) {
-        return json.data.data as ApiDailyPerBranchItem[];
-      }
-    } catch {
-      // fall through to Node
-    }
-  }
-
-  const { res, json } = await fetchJson(path);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/daily-per-branch?${qs.toString()}`);
   if (!res.ok) throw new Error(`Analytics daily-per-branch failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailyPerBranchItem[];
@@ -270,12 +267,8 @@ export async function fetchDailyPerBranchApi(params: {
 }
 
 export async function fetchTopProfitDriversApi(params: URLSearchParams): Promise<Array<ApiMenuReportRow & { branch_id?: number | null }>> {
-  const baseUrl = getAnalyticsBaseUrl();
   if (!params.has('limit')) params.set('limit', '20');
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/top-profit-drivers?${params.toString()}`
-    : `/api/analytics/top-profit-drivers?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/top-profit-drivers?${params.toString()}`);
   if (!res.ok) throw new Error(`Analytics top-profit-drivers failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as Array<ApiMenuReportRow & { branch_id?: number | null }>;
@@ -284,11 +277,7 @@ export async function fetchTopProfitDriversApi(params: URLSearchParams): Promise
 }
 
 export async function fetchMenuReportApi(params: URLSearchParams): Promise<ApiMenuReportRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/menu-report?${params.toString()}`
-    : `/api/analytics/menu-report?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/menu-report?${params.toString()}`);
   if (!res.ok) throw new Error(`Analytics menu-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiMenuReportRow[];
@@ -359,11 +348,7 @@ export async function fetchMenuReportBundleApi(params: {
 }
 
 export async function fetchCategoryReportApi(params: URLSearchParams): Promise<ApiCategoryReportRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/category-report?${params.toString()}`
-    : `/api/analytics/category-report?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/category-report?${params.toString()}`);
   if (!res.ok) throw new Error(`Analytics category-report failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiCategoryReportRow[];
@@ -374,16 +359,16 @@ export async function fetchCategoryReportApi(params: URLSearchParams): Promise<A
 export async function fetchCategoryMenuBreakdownApi(
   params: URLSearchParams
 ): Promise<ApiCategoryMenuBreakdownRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/category-menu-breakdown?${params.toString()}`);
+  const { res, json } = await fetchAnalyticsPath(
+    `/api/analytics/category-menu-breakdown?${params.toString()}`,
+  );
   if (!res.ok) {
     throw new Error(`Analytics category-menu-breakdown failed with status ${res.status}`);
   }
-  const json = await res.json();
-  if (!json.success) {
+  if (!json?.success) {
     throw new Error(
-      (typeof json.message === 'string' && json.message) ||
-        (typeof json.error === 'string' && json.error) ||
+      (typeof json?.message === 'string' && json.message) ||
+        (typeof json?.error === 'string' && json.error) ||
         'Analytics category-menu-breakdown returned an error'
     );
   }
@@ -395,12 +380,10 @@ export async function fetchCategoryMenuBreakdownApi(
 }
 
 export async function fetchPaymentReportApi(params: URLSearchParams): Promise<ApiPaymentReportRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/payment-report?${params.toString()}`);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/payment-report?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics payment-report failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiPaymentReportRow[];
   }
@@ -408,12 +391,10 @@ export async function fetchPaymentReportApi(params: URLSearchParams): Promise<Ap
 }
 
 export async function fetchReceiptReportApi(params: URLSearchParams): Promise<ApiReceiptReportRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/receipt-report?${params.toString()}`);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/receipt-report?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics receipt-report failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data?.data) {
     return json.data.data as ApiReceiptReportRow[];
   }
@@ -421,25 +402,23 @@ export async function fetchReceiptReportApi(params: URLSearchParams): Promise<Ap
 }
 
 export async function fetchReceiptDetailApi(orderId: number | string): Promise<ApiReceiptDetail> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/receipt-detail?order_id=${encodeURIComponent(String(orderId))}`);
+  const { res, json } = await fetchAnalyticsPath(
+    `/api/analytics/receipt-detail?order_id=${encodeURIComponent(String(orderId))}`,
+  );
   if (!res.ok) {
     throw new Error(`Analytics receipt-detail failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data) {
     return json.data as ApiReceiptDetail;
   }
-  throw new Error(json.message || 'Failed to load receipt detail');
+  throw new Error(json?.message || 'Failed to load receipt detail');
 }
 
 export async function fetchExpenseSummaryApi(params: URLSearchParams): Promise<ApiExpenseSummary> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const res = await fetch(`${baseUrl}/api/analytics/expense-summary?${params.toString()}`);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/expense-summary?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics expense-summary failed with status ${res.status}`);
   }
-  const json = await res.json();
   if (json.success && json.data) {
     return {
       total_expense: Number(json.data.total_expense ?? 0),
@@ -451,11 +430,7 @@ export async function fetchExpenseSummaryApi(params: URLSearchParams): Promise<A
 export async function fetchExpenseCategoryBreakdownApi(
   params: URLSearchParams,
 ): Promise<ApiExpenseCategoryRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/expense-breakdown?${params.toString()}`
-    : `/api/analytics/expense-breakdown?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/expense-breakdown?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics expense-breakdown failed with status ${res.status}`);
   }
@@ -466,11 +441,7 @@ export async function fetchExpenseCategoryBreakdownApi(
 }
 
 export async function fetchPerformanceTrendApi(params: URLSearchParams): Promise<ApiPerformanceTrendRow[]> {
-  const baseUrl = getAnalyticsBaseUrl();
-  const url = baseUrl
-    ? `${baseUrl}/api/analytics/performance-trend?${params.toString()}`
-    : `/api/analytics/performance-trend?${params.toString()}`;
-  const { res, json } = await fetchJson(url);
+  const { res, json } = await fetchAnalyticsPath(`/api/analytics/performance-trend?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Analytics performance-trend failed with status ${res.status}`);
   }

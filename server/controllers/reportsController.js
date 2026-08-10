@@ -878,6 +878,66 @@ class ReportsController {
 		}
 	}
 
+	// Per-menu lines within one category (proxied to PyServer)
+	static async getAnalyticsCategoryMenuBreakdown(req, res) {
+		try {
+			const { category_id, start_date, end_date } = req.query;
+			if (category_id == null || String(category_id).trim() === '') {
+				return ApiResponse.badRequest(res, 'category_id is required');
+			}
+
+			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+
+			const url = new URL('/api/analytics/category-menu-breakdown', PYSERVER_BASE_URL);
+			url.searchParams.set('category_id', String(category_id));
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId != null && String(branchId) !== '' && String(branchId) !== 'all') {
+				url.searchParams.set('branch_id', String(branchId));
+			}
+
+			const pyRes = await fetch(url.toString());
+			if (!pyRes.ok) {
+				const text = await pyRes.text().catch(() => '');
+				console.error('[PyServer] category-menu-breakdown HTTP error:', pyRes.status, text);
+				return ApiResponse.error(
+					res,
+					`Python analytics service error (status ${pyRes.status})`,
+					502,
+					text || `PyServer responded with status ${pyRes.status}`
+				);
+			}
+
+			const json = await pyRes.json().catch((err) => {
+				console.error('[PyServer] category-menu-breakdown JSON parse error:', err);
+				return null;
+			});
+
+			if (!json || json.success === false) {
+				const msg = json?.message || 'Unknown error from Python analytics service';
+				console.error('[PyServer] category-menu-breakdown error payload:', json);
+				return ApiResponse.error(res, msg, 502, json?.error || msg);
+			}
+
+			const rows = json?.data?.data || [];
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					category_id,
+					data: rows,
+				},
+				'Category menu breakdown retrieved from Python service'
+			);
+		} catch (error) {
+			console.error('Error fetching analytics category menu breakdown from PyServer:', error);
+			return ApiResponse.error(res, 'Failed to fetch analytics category menu breakdown', 500, error.message);
+		}
+	}
+
 	// Payment method breakdown report (proxied to PyServer)
 	static async getAnalyticsPaymentReport(req, res) {
 		try {

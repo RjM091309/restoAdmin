@@ -98,6 +98,7 @@ router.get("/api/analytics/menu-report", authenticate, ReportsController.getAnal
 router.get("/api/analytics/menu-report-bundle", authenticate, ReportsController.getAnalyticsMenuReportBundle);
 router.get("/api/analytics/menu-item-trend", authenticate, ReportsController.getAnalyticsMenuItemTrend);
 router.get("/api/analytics/category-report", authenticate, ReportsController.getAnalyticsCategoryReport);
+router.get("/api/analytics/category-menu-breakdown", authenticate, ReportsController.getAnalyticsCategoryMenuBreakdown);
 router.get("/api/analytics/payment-report", authenticate, ReportsController.getAnalyticsPaymentReport);
 router.get("/api/analytics/top-selling", authenticate, ReportsController.getAnalyticsTopSelling);
 router.get("/api/analytics/top-profit-drivers", authenticate, ReportsController.getAnalyticsTopProfitDrivers);
