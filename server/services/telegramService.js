@@ -6,6 +6,9 @@ const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/a
 const { buildAdminDashboardBundle } = require('./adminDashboardBundle');
 const { buildBranchDashboardBundle } = require('./branchDashboardBundle');
 const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
+const RESTO_ANALYTICS_PUBLIC_URL = (
+	process.env.RESTO_ANALYTICS_PUBLIC_URL || 'http://45.32.119.62:2998'
+).trim().replace(/\/$/, '');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 function requestJson(url, method = 'POST', payload = null) {
@@ -54,7 +57,7 @@ class TelegramService {
 
 	static CALLBACK_BRANCH_IDS = {
 		report_total: null, // all branches
-		report_branch_compare: null, // reserved — 업장별 비교
+		report_branch_compare: null, // redirects to RestoAnalytics Multi-Branch Board
 		report_kims: 2, // Kim's B
 		report_blue_m: 3, // Blue M
 		report_keum: 9, // Keum
@@ -70,6 +73,18 @@ class TelegramService {
 		'report_eesome',
 		'report_pre',
 	]);
+
+	static getBranchCompareUrl() {
+		return `${RESTO_ANALYTICS_PUBLIC_URL}/?view=branch-comparison`;
+	}
+
+	static buildBranchCompareOpenMarkup() {
+		return {
+			inline_keyboard: [
+				[{ text: '📊 Multi-Branch Board', url: TelegramService.getBranchCompareUrl() }],
+			],
+		};
+	}
 
 	static TELEGRAM_BRANCH_GROUPS = [
 		{ label: "김형제 Kim's B", branchIds: [2] },
@@ -111,10 +126,12 @@ class TelegramService {
 	}
 
 	static buildReportButtons() {
+		const compareUrl = TelegramService.getBranchCompareUrl();
 		return [
 			[
 				{ text: '합계 Total', callback_data: 'report_total' },
-				{ text: '업장별 비교', callback_data: 'report_branch_compare' },
+				// Direct URL open → RestoAnalytics Multi-Branch Board (?view=branch-comparison)
+				{ text: '업장별 비교', url: compareUrl },
 			],
 			[
 				{ text: "김형제 Kim's B", callback_data: 'report_kims' },
@@ -132,11 +149,16 @@ class TelegramService {
 	}
 
 	static buildPersistentReplyKeyboard() {
+		const compareUrl = TelegramService.getBranchCompareUrl();
+		// Telegram Web Apps require HTTPS; with HTTPS, one tap opens the board in-app.
+		const compareButton = compareUrl.startsWith('https://')
+			? { text: '업장별 비교', web_app: { url: compareUrl } }
+			: { text: '업장별 비교' };
 		return {
 			keyboard: [
 				[
 					{ text: '합계 Total' },
-					{ text: '업장별 비교' },
+					compareButton,
 				],
 				[
 					{ text: "김형제 Kim's B" },
@@ -155,6 +177,34 @@ class TelegramService {
 			one_time_keyboard: false,
 			is_persistent: true,
 		};
+	}
+
+	static async sendBranchCompareRedirect({ botToken, chatId, callbackQueryId = null }) {
+		const url = TelegramService.getBranchCompareUrl();
+		if (callbackQueryId) {
+			const answerPayload = {
+				callback_query_id: callbackQueryId,
+				text: 'Opening Multi-Branch Board…',
+				show_alert: false,
+			};
+			// answerCallbackQuery.url only accepts HTTPS (or game links)
+			if (url.startsWith('https://')) {
+				answerPayload.url = url;
+			}
+			await TelegramService.callTelegramApi(botToken, 'answerCallbackQuery', answerPayload);
+		}
+
+		await TelegramService.callTelegramApi(botToken, 'sendMessage', {
+			chat_id: String(chatId),
+			text: [
+				'<b>업장별 비교 → Multi-Branch Board</b>',
+				'',
+				`<a href="${url}">Tap here to open RestoAnalytics</a>`,
+			].join('\n'),
+			parse_mode: 'HTML',
+			disable_web_page_preview: false,
+			reply_markup: TelegramService.buildBranchCompareOpenMarkup(),
+		});
 	}
 
 	static REPORT_TEXT_TO_CALLBACK = {
@@ -806,6 +856,15 @@ class TelegramService {
 
 		const callbackQuery = update?.callback_query;
 		if (callbackQuery?.id && callbackQuery?.message?.chat?.id && callbackQuery?.data) {
+			if (callbackQuery.data === 'report_branch_compare') {
+				await TelegramService.sendBranchCompareRedirect({
+					botToken: settings.botToken,
+					chatId: callbackQuery.message.chat.id,
+					callbackQueryId: callbackQuery.id,
+				});
+				return { handled: true, type: 'callback_branch_compare' };
+			}
+
 			if (!TelegramService.FORMATTED_CALLBACKS.has(callbackQuery.data)) {
 				await TelegramService.callTelegramApi(settings.botToken, 'answerCallbackQuery', {
 					callback_query_id: callbackQuery.id,
@@ -848,6 +907,14 @@ class TelegramService {
 
 		if (chatId && Object.prototype.hasOwnProperty.call(TelegramService.REPORT_TEXT_TO_CALLBACK, text)) {
 			const callbackData = TelegramService.REPORT_TEXT_TO_CALLBACK[text];
+			if (callbackData === 'report_branch_compare') {
+				await TelegramService.sendBranchCompareRedirect({
+					botToken: settings.botToken,
+					chatId,
+				});
+				return { handled: true, type: 'reply_keyboard_branch_compare' };
+			}
+
 			if (!TelegramService.FORMATTED_CALLBACKS.has(callbackData)) {
 				await TelegramService.sendMessage({
 					chatId: String(chatId),

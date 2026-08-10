@@ -9,6 +9,8 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 2000,
+        // RestoAnalytics public URL (업장별 비교 → Multi-Branch Board)
+        RESTO_ANALYTICS_PUBLIC_URL: 'http://45.32.119.62:2998',
         // Avoid inherited IDE/sandbox proxy breaking Loyverse HTTPS calls.
         HTTP_PROXY: '',
         HTTPS_PROXY: '',
