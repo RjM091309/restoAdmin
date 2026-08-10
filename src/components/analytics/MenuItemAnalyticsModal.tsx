@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Cell,
 } from 'recharts';
 import { Modal } from '../ui/Modal';
 import { fetchMenuItemTrendApi } from '../../services/analyticsService';
@@ -141,6 +142,19 @@ const pctChange = (current: number, previous: number): number | null => {
 /** Branch Comparison index: 100 = flat, 104.4 = +4.4%. */
 const monthIndexFromPct = (percentChange: number): number => 100 + (Number(percentChange) || 0);
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
+type DailyChartPoint = {
+  date: string;
+  label: string;
+  dayNum: number;
+  dayName: string;
+  qty: number;
+  amount: number;
+  isSaturday: boolean;
+  isSunday: boolean;
+};
+
 const sumDailyInRange = (
   daily: Array<{ sale_date: string; qty: number; amount: number }>,
   range: DateRange | null,
@@ -157,6 +171,46 @@ const sumDailyInRange = (
   return { amount, qty };
 };
 
+/** Zero-filled calendar series for the selected header date range. */
+const buildDailySeries = (
+  daily: Array<{ sale_date: string; qty: number; amount: number }>,
+  range: DateRange,
+): DailyChartPoint[] => {
+  const byDate = new Map<string, { qty: number; amount: number }>();
+  for (const row of daily) {
+    const d = String(row.sale_date || '').slice(0, 10);
+    if (!d) continue;
+    const prev = byDate.get(d) || { qty: 0, amount: 0 };
+    byDate.set(d, {
+      qty: prev.qty + (Number(row.qty) || 0),
+      amount: prev.amount + (Number(row.amount) || 0),
+    });
+  }
+
+  const start = parseLocalYmd(range.start);
+  const end = parseLocalYmd(range.end);
+  if (!start || !end || start > end) return [];
+
+  const points: DailyChartPoint[] = [];
+  for (let cur = new Date(start.getFullYear(), start.getMonth(), start.getDate()); cur <= end; ) {
+    const date = toYYYYMMDD(cur);
+    const jsDay = cur.getDay();
+    const hit = byDate.get(date) || { qty: 0, amount: 0 };
+    points.push({
+      date,
+      label: cur.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }),
+      dayNum: cur.getDate(),
+      dayName: DAY_NAMES[jsDay],
+      qty: hit.qty,
+      amount: hit.amount,
+      isSaturday: jsDay === 6,
+      isSunday: jsDay === 0,
+    });
+    cur = addDaysLocal(cur, 1);
+  }
+  return points;
+};
+
 function useMenuItemAnalytics(
   target: MenuItemAnalyticsTarget | null,
   dateRange: DateRange,
@@ -167,6 +221,7 @@ function useMenuItemAnalytics(
   const [error, setError] = useState<string | null>(null);
   const [compareRows, setCompareRows] = useState<CompareRow[]>([]);
   const [monthly, setMonthly] = useState<Array<{ label: string; amount: number; qty: number }>>([]);
+  const [dailySeries, setDailySeries] = useState<DailyChartPoint[]>([]);
   const [trendYear, setTrendYear] = useState<string>('');
 
   useEffect(() => {
@@ -181,12 +236,12 @@ function useMenuItemAnalytics(
         const mtd = getMtdVsFullPreviousMonth(dateRange.end);
         const endDate = parseLocalYmd(dateRange.end) || new Date();
 
-        // Cover 6 calendar months + same-period previous window in one fetch.
+        // Cover 6 calendar months + same-period previous window + selected range in one fetch.
         const chartStart = new Date(endDate.getFullYear(), endDate.getMonth() - 5, 1);
-        const fetchStartCandidates = [toYYYYMMDD(chartStart)];
+        const fetchStartCandidates = [toYYYYMMDD(chartStart), dateRange.start];
         if (same?.previous.start) fetchStartCandidates.push(same.previous.start);
         if (mtd?.previous.start) fetchStartCandidates.push(mtd.previous.start);
-        const fetchStart = fetchStartCandidates.sort()[0];
+        const fetchStart = fetchStartCandidates.filter(Boolean).sort()[0];
         const fetchEnd = toYYYYMMDD(endDate);
 
         const daily = await fetchMenuItemTrendApi({
@@ -197,6 +252,8 @@ function useMenuItemAnalytics(
         });
 
         if (cancelled) return;
+
+        setDailySeries(buildDailySeries(daily, dateRange));
 
         const sameCur = sumDailyInRange(daily, same?.current ?? null);
         const samePrev = sumDailyInRange(daily, same?.previous ?? null);
@@ -268,6 +325,7 @@ function useMenuItemAnalytics(
         setError(t('sales_analytics.network_error'));
         setCompareRows([]);
         setMonthly([]);
+        setDailySeries([]);
         setTrendYear('');
       } finally {
         if (!cancelled) setLoading(false);
@@ -280,7 +338,7 @@ function useMenuItemAnalytics(
     };
   }, [active, target?.goods, target?.branchId, target?.branchName, dateRange.start, dateRange.end, t]);
 
-  return { loading, error, compareRows, monthly, trendYear, t };
+  return { loading, error, compareRows, monthly, dailySeries, trendYear, t };
 }
 
 const CompareValue: React.FC<{
@@ -297,13 +355,13 @@ const CompareValue: React.FC<{
     : `${Math.round(previous).toLocaleString()}`;
 
   return (
-    <div className="flex flex-col items-end gap-0.5">
-      <span className="text-sm font-semibold text-slate-700 tabular-nums">{display}</span>
+    <div className="flex items-baseline justify-end gap-1 min-w-0">
+      <span className="text-xs font-semibold text-slate-700 tabular-nums truncate">{display}</span>
       {index == null ? (
-        <span className="text-[11px] font-medium text-slate-400">—</span>
+        <span className="text-[10px] font-medium text-slate-400">—</span>
       ) : (
         <span
-          className={`text-[11px] font-medium ${
+          className={`text-[10px] font-medium ${
             up ? 'text-emerald-600' : 'text-red-500'
           }`}
         >
@@ -322,230 +380,374 @@ export const MenuItemAnalyticsPanel: React.FC<MenuItemAnalyticsPanelProps> = ({
   className = '',
   bare = false,
 }) => {
-  const { loading, error, compareRows, monthly, trendYear, t } = useMenuItemAnalytics(target, dateRange, active);
+  const { loading, error, compareRows, monthly, dailySeries, trendYear, t } = useMenuItemAnalytics(
+    target,
+    dateRange,
+    active,
+  );
 
   const emptyMonthly = monthly.every((m) => m.amount === 0 && m.qty === 0);
+  const withSales = dailySeries.filter((d) => d.qty > 0);
+  const bestDay = withSales.length
+    ? [...withSales].sort((a, b) => b.qty - a.qty || b.amount - a.amount)[0]
+    : null;
+  const bestDayLabel = (() => {
+    if (!bestDay) return '—';
+    const d = parseLocalYmd(bestDay.date);
+    const fullDate = d
+      ? d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      : bestDay.date;
+    return `${fullDate} · ${bestDay.dayName}`;
+  })();
+  const periodQty = dailySeries.reduce((s, d) => s + d.qty, 0);
+  const periodAmount = dailySeries.reduce((s, d) => s + d.amount, 0);
+  const emptyDaily = dailySeries.length === 0 || periodQty === 0;
+  const monthlyQtyAvg = Math.round(
+    monthly.reduce((s, m) => s + m.qty, 0) / Math.max(monthly.length, 1),
+  );
+  const monthlyAmountAvg =
+    monthly.reduce((s, m) => s + m.amount, 0) / Math.max(monthly.length, 1);
 
   const body = (
-      <div className={`flex-1 min-h-0 overflow-y-auto space-y-4 ${bare ? 'px-5 py-4' : 'px-4 py-3'}`}>
-        {!target ? (
-          <div className="flex h-full min-h-[220px] flex-col items-center justify-center text-center text-sm text-slate-400">
-            <BarChart3 size={36} className="mb-2 text-slate-300" />
-            {t('sales_analytics.item_analytics_pick_item')}
+    <div
+      className={`flex-1 min-h-0 min-w-0 max-w-full overflow-y-auto overflow-x-hidden flex flex-col ${
+        bare ? 'px-5 py-3' : 'px-3 py-2.5'
+      }`}
+    >
+      {!target ? (
+        <div className="flex flex-1 min-h-[160px] flex-col items-center justify-center text-center text-sm text-slate-400">
+          <BarChart3 size={32} className="mb-2 text-slate-300" />
+          {t('sales_analytics.item_analytics_pick_item')}
+        </div>
+      ) : loading ? (
+        <div className="flex flex-1 min-h-[160px] items-center justify-center">
+          <Loader2 size={24} className="animate-spin text-violet-500" />
+        </div>
+      ) : error ? (
+        <div className="flex flex-1 min-h-[120px] items-center justify-center text-sm text-red-500 font-medium">
+          {error}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 min-w-0 max-w-full">
+          {/* KPI strip */}
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="rounded-lg bg-emerald-50/70 border border-emerald-100 px-2 py-1.5 min-w-0">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-emerald-700/80">
+                {t('sales_analytics.item_analytics_best_day')}
+              </div>
+              <div className="text-[11px] font-bold text-emerald-700 leading-snug">
+                {bestDayLabel}
+              </div>
+            </div>
+            <div className="rounded-lg bg-slate-50 border border-slate-100 px-2 py-1.5 min-w-0">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                {t('sales_analytics.item_analytics_day_sales')}
+              </div>
+              <div className="text-sm font-bold text-slate-900 tabular-nums truncate">
+                {bestDay ? money(bestDay.amount) : '—'}
+              </div>
+              <div className="text-[10px] text-violet-600 font-semibold tabular-nums truncate leading-tight">
+                {bestDay ? `${bestDay.qty.toLocaleString()} ${t('sales_analytics.sold')}` : '—'}
+              </div>
+            </div>
+            <div className="rounded-lg bg-violet-50/70 border border-violet-100 px-2 py-1.5 min-w-0">
+              <div className="text-[9px] font-semibold uppercase tracking-wide text-violet-700/80">
+                {t('sales_analytics.item_analytics_period_total')}
+              </div>
+              <div className="text-sm font-bold text-violet-800 tabular-nums truncate">
+                {money(periodAmount)}
+              </div>
+              <div className="text-[10px] text-violet-600 font-semibold tabular-nums truncate leading-tight">
+                {periodQty.toLocaleString()} {t('sales_analytics.sold')}
+              </div>
+            </div>
           </div>
-        ) : loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 size={28} className="animate-spin text-violet-500" />
+
+          {/* Daily chart — fixed compact height */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-[11px] font-semibold text-slate-700">
+                {t('sales_analytics.item_analytics_daily_sales')}
+              </p>
+              <span className="text-[9px] text-slate-400">
+                {t('sales_analytics.item_analytics_peak_hint')}
+              </span>
+            </div>
+            {emptyDaily ? (
+              <div className="h-32 flex items-center justify-center text-sm text-slate-500">
+                {t('sales_analytics.item_analytics_no_daily')}
+              </div>
+            ) : (
+              <div className="h-36 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={dailySeries}
+                    margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
+                    barCategoryGap="12%"
+                  >
+                    <CartesianGrid stroke="#eef2ff" vertical={false} strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="dayNum"
+                      interval={0}
+                      height={20}
+                      tickLine={false}
+                      axisLine={false}
+                      tick={({ x, y, payload }: { x?: number; y?: number; payload?: { value: number } }) => {
+                        const point = dailySeries.find((d) => d.dayNum === Number(payload?.value));
+                        const fill = point?.isSaturday
+                          ? '#f87171'
+                          : point?.isSunday
+                            ? '#34d399'
+                            : '#64748b';
+                        return (
+                          <text
+                            x={x}
+                            y={(y ?? 0) + 12}
+                            textAnchor="middle"
+                            fill={fill}
+                            fontSize={10}
+                            fontWeight={700}
+                          >
+                            {payload?.value}
+                          </text>
+                        );
+                      }}
+                    />
+                    <YAxis
+                      tick={{ fill: '#7c3aed', fontSize: 9 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={28}
+                      allowDecimals={false}
+                    />
+                    <Tooltip
+                      formatter={(value: number, _name: string, props: { payload?: DailyChartPoint }) => {
+                        const rev = Number(props?.payload?.amount) || 0;
+                        return [
+                          `${Math.round(Number(value) || 0).toLocaleString()} ${t('sales_analytics.sold')} · ${money(rev)}`,
+                          t('sales_analytics.item_analytics_day_sales'),
+                        ];
+                      }}
+                      labelFormatter={(_label, payload) => {
+                        const p = payload?.[0]?.payload as DailyChartPoint | undefined;
+                        return p ? `${p.label} (${p.dayName})` : '';
+                      }}
+                      contentStyle={{
+                        borderRadius: 10,
+                        border: '1px solid #e2e8f0',
+                        fontSize: 12,
+                      }}
+                    />
+                    <Bar dataKey="qty" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                      {dailySeries.map((point) => (
+                        <Cell
+                          key={point.date}
+                          fill={
+                            bestDay && point.date === bestDay.date
+                              ? '#34d399'
+                              : point.qty > 0
+                                ? CHART_COLOR_QTY
+                                : '#e2e8f0'
+                          }
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
-        ) : error ? (
-          <div className="py-10 text-center text-sm text-red-500 font-medium">{error}</div>
-        ) : (
-          <>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+
+          {/* Compare — compact */}
+          <div className="rounded-lg border border-slate-200 overflow-hidden min-w-0">
+            <div className="px-2.5 py-1 bg-slate-50 border-b border-slate-100">
+              <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
                 {t('sales_analytics.item_analytics_comparison')}
               </p>
-              <div className="rounded-xl border border-slate-200 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      <th className="px-2.5 py-1.5">{t('sales_analytics.item_analytics_metric')}</th>
-                      <th className="px-2 py-1.5 text-right">{t('sales_analytics.item_analytics_sold_qty')}</th>
-                      <th className="px-2 py-1.5 text-right">{t('sales_analytics.item_analytics_amount')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {compareRows.map((row) => (
-                      <tr key={row.id} className="border-t border-slate-100">
-                        <td className="px-2.5 py-2 text-[12px] text-slate-700 font-medium leading-snug">
-                          {row.label}
-                        </td>
-                        <td className="px-2 py-2">
-                          <CompareValue
-                            current={row.current.qty}
-                            previous={row.previous.qty}
-                            asMoney={false}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <CompareValue
-                            current={row.current.amount}
-                            previous={row.previous.amount}
-                            asMoney
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            </div>
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[42%]" />
+                <col className="w-[29%]" />
+                <col className="w-[29%]" />
+              </colgroup>
+              <thead>
+                <tr className="text-left text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                  <th className="px-2.5 py-1">{t('sales_analytics.item_analytics_metric')}</th>
+                  <th className="px-2 py-1 text-right">{t('sales_analytics.item_analytics_sold_qty')}</th>
+                  <th className="px-2 py-1 text-right">{t('sales_analytics.item_analytics_amount')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compareRows.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-100">
+                    <td className="px-2.5 py-1 text-[11px] text-slate-700 font-medium leading-snug break-words">
+                      {row.label}
+                    </td>
+                    <td className="px-2 py-1 overflow-hidden">
+                      <CompareValue
+                        current={row.current.qty}
+                        previous={row.previous.qty}
+                        asMoney={false}
+                      />
+                    </td>
+                    <td className="px-2 py-1 overflow-hidden">
+                      <CompareValue
+                        current={row.current.amount}
+                        previous={row.previous.amount}
+                        asMoney
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Monthly — full-width cards, same size as Daily sales */}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold text-slate-700">
+              {t('sales_analytics.item_analytics_monthly_trend')}
+            </p>
+            {trendYear ? (
+              <span className="text-[10px] font-medium text-slate-400">{trendYear}</span>
+            ) : null}
+          </div>
+          {emptyMonthly ? (
+            <div className="h-36 flex items-center justify-center text-sm text-slate-500 rounded-lg border border-slate-100">
+              {t('sales_analytics.no_data_available')}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 min-w-0">
+              <div className="rounded-lg border border-slate-200 bg-white p-2 min-w-0 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[11px] font-semibold text-violet-800">
+                    {t('sales_analytics.item_analytics_sold_qty')}
+                  </span>
+                  <span className="text-[10px] font-semibold text-violet-600 tabular-nums">
+                    {monthlyQtyAvg.toLocaleString()} avg
+                  </span>
+                </div>
+                <div className="h-36 w-full min-w-0 overflow-hidden">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={monthly}
+                      margin={{ top: 4, right: 12, left: 0, bottom: 2 }}
+                      barCategoryGap="12%"
+                    >
+                      <CartesianGrid stroke="#eef2ff" vertical={false} strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 600 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                        height={22}
+                        padding={{ left: 4, right: 8 }}
+                      />
+                      <YAxis
+                        tick={{ fill: '#7c3aed', fontSize: 9 }}
+                        axisLine={false}
+                        tickLine={false}
+                        width={28}
+                        allowDecimals={false}
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [
+                          Math.round(Number(value) || 0).toLocaleString(),
+                          t('sales_analytics.item_analytics_sold_qty'),
+                        ]}
+                        contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11 }}
+                      />
+                      <Bar dataKey="qty" fill={CHART_COLOR_QTY} radius={[4, 4, 0, 0]} barSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-2 min-w-0 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[11px] font-semibold text-emerald-800 truncate">
+                    {t('sales_analytics.item_analytics_amount')}
+                  </span>
+                  <span className="text-[10px] font-semibold text-emerald-600 tabular-nums shrink-0">
+                    {money(monthlyAmountAvg)} avg
+                  </span>
+                </div>
+                <div className="h-36 w-full min-w-0 overflow-hidden">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={monthly} margin={{ top: 4, right: 14, left: 0, bottom: 2 }}>
+                      <defs>
+                        <linearGradient id="itemSalesFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={CHART_COLOR_AMOUNT} stopOpacity={0.35} />
+                          <stop offset="100%" stopColor={CHART_COLOR_AMOUNT} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="#d1fae5" vertical={false} strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 600 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
+                        height={22}
+                        padding={{ left: 4, right: 10 }}
+                      />
+                      <YAxis
+                        tick={{ fill: '#059669', fontSize: 9 }}
+                        tickFormatter={(v) => axisMoney(Number(v))}
+                        axisLine={false}
+                        tickLine={false}
+                        width={36}
+                      />
+                      <Tooltip
+                        formatter={(value: number) => [
+                          money(value),
+                          t('sales_analytics.item_analytics_amount'),
+                        ]}
+                        contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 11 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="amount"
+                        stroke={CHART_COLOR_AMOUNT}
+                        strokeWidth={2}
+                        fill="url(#itemSalesFill)"
+                        dot={{ r: 3, fill: CHART_COLOR_AMOUNT, strokeWidth: 0 }}
+                        activeDot={{ r: 4 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
-
-            <div>
-              <div className="mb-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  {t('sales_analytics.item_analytics_monthly_trend')}
-                </p>
-              </div>
-              {emptyMonthly ? (
-                <div className="py-8 text-center text-sm text-slate-500">
-                  {t('sales_analytics.no_data_available')}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* Qty sold — bars */}
-                  <div className="rounded-xl border border-violet-100 bg-gradient-to-b from-violet-50/80 to-white p-2.5">
-                    <div className="grid grid-cols-3 items-center mb-1 px-0.5 gap-1">
-                      <span className="text-[11px] font-semibold text-violet-800 truncate">
-                        {t('sales_analytics.item_analytics_sold_qty')}
-                      </span>
-                      <span className="text-center text-xs font-bold tabular-nums text-violet-700">
-                        {trendYear || '—'}
-                      </span>
-                      <span className="text-right text-xs font-semibold text-violet-600 tabular-nums">
-                        {Math.round(
-                          monthly.reduce((s, m) => s + m.qty, 0) / Math.max(monthly.length, 1),
-                        ).toLocaleString()}{' '}
-                        avg
-                      </span>
-                    </div>
-                    <div className="h-44 w-full min-w-0 px-0.5">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={monthly} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-                          <CartesianGrid stroke="#ede9fe" vertical={false} strokeDasharray="3 3" />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
-                            axisLine={false}
-                            tickLine={false}
-                            interval={0}
-                            height={28}
-                            tickMargin={4}
-                          />
-                          <YAxis
-                            tick={{ fill: '#7c3aed', fontSize: 9 }}
-                            axisLine={false}
-                            tickLine={false}
-                            width={36}
-                          />
-                          <Tooltip
-                            formatter={(value: number) => [
-                              Math.round(Number(value) || 0).toLocaleString(),
-                              t('sales_analytics.item_analytics_sold_qty'),
-                            ]}
-                            contentStyle={{
-                              borderRadius: 10,
-                              border: '1px solid #e2e8f0',
-                              fontSize: 12,
-                            }}
-                          />
-                          <Bar
-                            dataKey="qty"
-                            fill={CHART_COLOR_QTY}
-                            radius={[5, 5, 0, 0]}
-                            barSize={16}
-                          />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Total sales — soft area */}
-                  <div className="rounded-xl border border-emerald-100 bg-gradient-to-b from-emerald-50/80 to-white p-2.5">
-                    <div className="grid grid-cols-3 items-center mb-1 px-0.5 gap-1">
-                      <span className="text-[11px] font-semibold text-emerald-800 truncate">
-                        {t('sales_analytics.item_analytics_amount')}
-                      </span>
-                      <span className="text-center text-xs font-bold tabular-nums text-emerald-700">
-                        {trendYear || '—'}
-                      </span>
-                      <span className="text-right text-xs font-semibold text-emerald-600 tabular-nums">
-                        {money(
-                          monthly.reduce((s, m) => s + m.amount, 0) / Math.max(monthly.length, 1),
-                        )}{' '}
-                        avg
-                      </span>
-                    </div>
-                    <div className="h-44 w-full min-w-0 px-0.5">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={monthly} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-                          <defs>
-                            <linearGradient id="itemSalesFill" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={CHART_COLOR_AMOUNT} stopOpacity={0.35} />
-                              <stop offset="100%" stopColor={CHART_COLOR_AMOUNT} stopOpacity={0.02} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid stroke="#d1fae5" vertical={false} strokeDasharray="3 3" />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
-                            axisLine={false}
-                            tickLine={false}
-                            interval={0}
-                            height={28}
-                            tickMargin={4}
-                          />
-                          <YAxis
-                            tick={{ fill: '#059669', fontSize: 9 }}
-                            tickFormatter={(v) => axisMoney(Number(v))}
-                            axisLine={false}
-                            tickLine={false}
-                            width={44}
-                          />
-                          <Tooltip
-                            formatter={(value: number) => [
-                              money(value),
-                              t('sales_analytics.item_analytics_amount'),
-                            ]}
-                            contentStyle={{
-                              borderRadius: 10,
-                              border: '1px solid #e2e8f0',
-                              fontSize: 12,
-                            }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="amount"
-                            stroke={CHART_COLOR_AMOUNT}
-                            strokeWidth={2.25}
-                            fill="url(#itemSalesFill)"
-                            dot={{ r: 3, fill: CHART_COLOR_AMOUNT, strokeWidth: 0 }}
-                            activeDot={{ r: 5 }}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 
   if (bare) return body;
 
   return (
     <div
-      className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full ${className}`}
+      className={`bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col w-full h-full min-h-0 ${className}`}
     >
-      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-emerald-50/40 shrink-0">
+      <div className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-gray-100 shrink-0">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-violet-600 shrink-0">
-              <BarChart3 size={15} />
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-violet-100 text-violet-600 shrink-0">
+              <BarChart3 size={13} />
             </span>
             <h4 className="text-sm font-semibold text-slate-900 truncate">
               {target?.goods || t('sales_analytics.item_analytics_title')}
             </h4>
           </div>
           {target ? (
-            <p className="text-[11px] font-medium text-slate-500 pl-9">
+            <p className="text-[10px] font-medium text-slate-500 pl-8 mt-0.5">
               {t('sales_analytics.high_revenue')} · {target.branchName}
             </p>
           ) : (
-            <p className="text-[11px] font-medium text-slate-400 pl-9">
+            <p className="text-[10px] font-medium text-slate-400 pl-8 mt-0.5">
               {t('sales_analytics.item_analytics_pick_item')}
             </p>
           )}
@@ -579,8 +781,9 @@ export const MenuItemAnalyticsModal: React.FC<MenuItemAnalyticsModalProps> = ({
       onClose={onClose}
       title={target?.goods || t('sales_analytics.item_analytics_title')}
       subtitle={subtitle}
-      maxWidth="3xl"
-      bodyClassName="p-0"
+      maxWidth="4xl"
+      bodyClassName="p-0 overflow-x-hidden"
+      panelClassName="overflow-hidden"
     >
       <MenuItemAnalyticsPanel
         target={target}

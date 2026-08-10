@@ -526,6 +526,53 @@ class ReportsController {
 		}
 	}
 
+	// Daily sales per branch (day × branch matrix)
+	static async getAnalyticsDailyPerBranch(req, res) {
+		try {
+			const { start_date, end_date } = req.query;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
+
+			const url = new URL('/api/analytics/daily-per-branch', PYSERVER_BASE_URL);
+			if (start_date) url.searchParams.set('start_date', start_date);
+			if (end_date) url.searchParams.set('end_date', end_date);
+			if (branchId) url.searchParams.set('branch_id', String(branchId));
+
+			let series = [];
+			try {
+				const pyRes = await ReportsController.fetchPyServer(url.toString());
+				if (!pyRes.ok) {
+					const text = await pyRes.text().catch(() => '');
+					throw new Error(`PyServer status ${pyRes.status}: ${text}`);
+				}
+				const json = await pyRes.json().catch(() => null);
+				if (!json || json.success === false) {
+					throw new Error(json?.message || 'PyServer daily-per-branch error');
+				}
+				series = json?.data?.data || [];
+			} catch (pyErr) {
+				console.warn(
+					'[PyServer] daily-per-branch unavailable, using Node SQL fallback:',
+					pyErr?.message || pyErr,
+				);
+				series = await ReportsModel.getDailySalesPerBranch(start_date, end_date, branchId);
+			}
+
+			return ApiResponse.success(
+				res,
+				{
+					start_date: start_date || null,
+					end_date: end_date || null,
+					branch_id: branchId,
+					data: series,
+				},
+				'Daily sales per branch retrieved',
+			);
+		} catch (error) {
+			console.error('Error fetching analytics daily-per-branch:', error);
+			return ApiResponse.error(res, 'Failed to fetch daily sales per branch', 500, error.message);
+		}
+	}
+
 	// Branch-level sales (proxied to PyServer)
 	static async getAnalyticsBranchSales(req, res) {
 		try {

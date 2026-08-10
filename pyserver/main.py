@@ -257,6 +257,19 @@ class DailySalesItem(BaseModel):
     gross_profit: float
 
 
+class DailyPerBranchItem(BaseModel):
+    """One branch × calendar day row for Sales Analytics weekday / detail views."""
+    branch_id: int
+    branch_name: str
+    sale_date: str
+    day_name: str
+    total_sales: float
+    refund: float
+    discount: float
+    net_sales: float
+    order_count: int
+
+
 class DailyOrdersItem(BaseModel):
     sale_date: str
     order_count: int
@@ -1256,6 +1269,93 @@ def daily_sales(
 
     # Sort by date
     items.sort(key=lambda x: x.sale_date)
+    return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
+
+
+@app.get("/api/analytics/daily-per-branch")
+def daily_per_branch(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    branch_id: Optional[int] = None,
+) -> dict:
+    """
+    Daily sales broken out by branch (day × branch matrix).
+    Same PH(+08:00) day + paid-status rules as daily-sales.
+    Used by Sales Analytics Week view and all-branches daily detail table.
+    """
+    try:
+        billing_local_dt = """COALESCE(
+            CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+            DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+        )"""
+
+        date_filter = ""
+        params: List[object] = []
+        if start_date and end_date:
+            date_filter, params = ph_local_day_range_filter(
+                "b.ENCODED_DT", start_date, end_date
+            )
+
+        branch_filter = ""
+        if branch_id:
+            branch_filter = "AND br.IDNo = %s"
+            params.append(branch_id)
+
+        query = f"""
+            SELECT
+                br.IDNo AS branch_id,
+                br.BRANCH_NAME AS branch_name,
+                DATE_FORMAT(DATE({billing_local_dt}), '%Y-%m-%d') AS sale_date,
+                DAYNAME(DATE({billing_local_dt})) AS day_name,
+                COALESCE(SUM(b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS total_sales,
+                COALESCE(SUM(COALESCE(b.REFUND, 0)), 0) AS refund,
+                COALESCE(SUM(COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS discount,
+                COALESCE(SUM(b.AMOUNT_PAID - COALESCE(b.REFUND, 0)), 0) AS net_sales,
+                COUNT(DISTINCT b.ORDER_ID) AS order_count
+            FROM branches br
+            INNER JOIN billing b ON b.BRANCH_ID = br.IDNo AND {_BILLING_WHERE} {date_filter}
+            INNER JOIN orders o ON {_ORDERS_ON_BILLING}
+            WHERE br.ACTIVE = 1 {branch_filter}
+            GROUP BY br.IDNo, br.BRANCH_NAME, DATE({billing_local_dt})
+            HAVING sale_date IS NOT NULL
+            ORDER BY br.BRANCH_NAME, sale_date
+        """
+
+        conn = get_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(query, params)
+            rows = cast(List[Dict[str, Any]], cur.fetchall() or [])
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as exc:
+        print("[PyServer] daily-per-branch query failed:", getattr(exc, "message", str(exc)))
+        return {
+            "success": False,
+            "message": "Failed to fetch daily sales per branch",
+            "error": getattr(exc, "message", str(exc)),
+        }
+
+    items: List[DailyPerBranchItem] = []
+    for row in rows:
+        sale_date = row.get("sale_date")
+        if sale_date is None:
+            continue
+        items.append(
+            DailyPerBranchItem(
+                branch_id=int(row["branch_id"]),
+                branch_name=str(row.get("branch_name") or ""),
+                sale_date=str(sale_date),
+                day_name=str(row.get("day_name") or ""),
+                total_sales=float(row.get("total_sales") or 0.0),
+                refund=float(row.get("refund") or 0.0),
+                discount=float(row.get("discount") or 0.0),
+                net_sales=float(row.get("net_sales") or 0.0),
+                order_count=int(row.get("order_count") or 0),
+            )
+        )
+
     return {"success": True, "data": {"data": [item.model_dump() for item in items]}}
 
 

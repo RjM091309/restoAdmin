@@ -2060,6 +2060,69 @@ class ReportsModel {
 		return result;
 	}
 
+	/**
+	 * Daily sales broken out by branch (day × branch).
+	 * Fallback when PyServer daily-per-branch is unavailable.
+	 */
+	static async getDailySalesPerBranch(startDate = null, endDate = null, branchId = null) {
+		const billingLocalDt = `COALESCE(
+			CONVERT_TZ(b.ENCODED_DT, @@session.time_zone, '+08:00'),
+			DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
+		)`;
+
+		let dateFilter = '';
+		const params = [];
+		if (startDate && endDate) {
+			dateFilter = `AND b.ENCODED_DT >= COALESCE(
+				CONVERT_TZ(CONCAT(?, ' 00:00:00'), '+08:00', @@session.time_zone),
+				DATE_SUB(CONCAT(?, ' 00:00:00'), INTERVAL 8 HOUR)
+			) AND b.ENCODED_DT < COALESCE(
+				CONVERT_TZ(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), '+08:00', @@session.time_zone),
+				DATE_SUB(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), INTERVAL 8 HOUR)
+			)`;
+			params.push(startDate, startDate, endDate, endDate);
+		}
+
+		let branchFilter = '';
+		if (branchId) {
+			branchFilter = 'AND br.IDNo = ?';
+			params.push(branchId);
+		}
+
+		const query = `
+			SELECT
+				br.IDNo AS branch_id,
+				br.BRANCH_NAME AS branch_name,
+				DATE_FORMAT(DATE(${billingLocalDt}), '%Y-%m-%d') AS sale_date,
+				DAYNAME(DATE(${billingLocalDt})) AS day_name,
+				COALESCE(SUM(b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS total_sales,
+				COALESCE(SUM(COALESCE(b.REFUND, 0)), 0) AS refund,
+				COALESCE(SUM(COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS discount,
+				COALESCE(SUM(b.AMOUNT_PAID - COALESCE(b.REFUND, 0)), 0) AS net_sales,
+				COUNT(DISTINCT b.ORDER_ID) AS order_count
+			FROM branches br
+			INNER JOIN billing b ON b.BRANCH_ID = br.IDNo AND b.STATUS IN (1, 2) ${dateFilter}
+			INNER JOIN orders o ON o.IDNo = b.ORDER_ID AND o.STATUS NOT IN (-1, -2)
+			WHERE br.ACTIVE = 1 ${branchFilter}
+			GROUP BY br.IDNo, br.BRANCH_NAME, DATE(${billingLocalDt})
+			HAVING sale_date IS NOT NULL
+			ORDER BY br.BRANCH_NAME, sale_date
+		`;
+
+		const [rows] = await pool.execute(query, params);
+		return (rows || []).map((row) => ({
+			branch_id: Number(row.branch_id),
+			branch_name: String(row.branch_name || ''),
+			sale_date: String(row.sale_date || '').slice(0, 10),
+			day_name: String(row.day_name || ''),
+			total_sales: Number(row.total_sales) || 0,
+			refund: Number(row.refund) || 0,
+			discount: Number(row.discount) || 0,
+			net_sales: Number(row.net_sales) || 0,
+			order_count: Number(row.order_count) || 0,
+		}));
+	}
+
 	// Get least selling menu items (items with fewest orders, excluding zero)
 	// Uses BOTH product_sales_summary (imported/Loyverse data) AND actual orders
 	static async getLeastSellingItems(startDate = null, endDate = null, branchId = null, limit = 5) {

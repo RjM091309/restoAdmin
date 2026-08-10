@@ -8,10 +8,12 @@ import { Modal } from '../ui/Modal';
 import {
   fetchTopProfitDriversApi,
   fetchSalesDashboardBundleApi,
+  fetchDailyPerBranchApi,
   isAnalyticsFetchTimeout,
   type ApiBranchSalesItem,
   type ApiMenuReportRow,
   type ApiDailySalesItem,
+  type ApiDailyPerBranchItem,
 } from '../../services/analyticsService';
 import {
   BarChart,
@@ -27,6 +29,7 @@ import {
 import { fetchCashReconciliationAggregates } from '../../services/cashReconciliationService';
 import { CashReconciliationModal } from './CashReconciliationModal';
 import { MenuItemAnalyticsModal, MenuItemAnalyticsPanel, type MenuItemAnalyticsTarget } from './MenuItemAnalyticsModal';
+import { SalesDayDrillModal, type SalesDayDrillOpenArgs } from './SalesDayDrillModal';
 import {
   buildSalesAnalyticsCacheKey,
   hasSalesAnalyticsCacheData,
@@ -361,9 +364,13 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   );
   const [profitDriversError, setProfitDriversError] = useState<string | null>(null);
   const [profitDriversBranchId, setProfitDriversBranchId] = useState<number | null>(null);
+  /** All-branches race chart selection — filters Total sales KPI + daily chart. Empty = all. */
+  const [chartBranchIds, setChartBranchIds] = useState<number[]>([]);
   const [profitDriversModalOpen, setProfitDriversModalOpen] = useState(false);
   const [itemAnalyticsTarget, setItemAnalyticsTarget] = useState<MenuItemAnalyticsTarget | null>(null);
   const [itemAnalyticsOpen, setItemAnalyticsOpen] = useState(false);
+  const [dayDrillOpen, setDayDrillOpen] = useState(false);
+  const [dayDrillInitial, setDayDrillInitial] = useState<SalesDayDrillOpenArgs | null>(null);
 
   const [dailySalesCurrent, setDailySalesCurrent] = useState<ApiDailySalesItem[]>(
     () => initialSalesLoad.cached?.dailySalesCurrent ?? [],
@@ -376,6 +383,8 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   );
   const [dailySalesError, setDailySalesError] = useState<string | null>(null);
 
+  const [dailyPerBranch, setDailyPerBranch] = useState<ApiDailyPerBranchItem[]>([]);
+
   const [cashReconciliationOpen, setCashReconciliationOpen] = useState(false);
   const [reconAdjustCurrent, setReconAdjustCurrent] = useState<{
     byDate: Record<string, number>;
@@ -385,7 +394,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     () => initialSalesLoad.cached?.reconAdjustPreviousTotal ?? 0,
   );
 
-  const trendData = useMemo(() => {
+  const allBranchesTrendData = useMemo(() => {
     const byDate = reconAdjustCurrent.byDate;
     const saleDatesWithPosRow = new Set<string>();
 
@@ -453,6 +462,53 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     return rows;
   }, [dailySalesCurrent, reconAdjustCurrent.byDate]);
 
+  /** Daily series for KPI cards + Total sales chart (filtered by race-graph branch selection). */
+  const trendData = useMemo(() => {
+    if (!isAllBranch || chartBranchIds.length === 0 || dailyPerBranch.length === 0) {
+      return allBranchesTrendData;
+    }
+    const idSet = new Set(chartBranchIds);
+    const agg = new Map<
+      string,
+      { totalSales: number; refund: number; discount: number; netSales: number }
+    >();
+    for (const row of dailyPerBranch) {
+      if (!idSet.has(Number(row.branch_id))) continue;
+      const key = toSaleDateKey(String(row.sale_date));
+      const prev = agg.get(key) || { totalSales: 0, refund: 0, discount: 0, netSales: 0 };
+      prev.totalSales += Number(row.total_sales) || 0;
+      prev.refund += Number(row.refund) || 0;
+      prev.discount += Number(row.discount) || 0;
+      prev.netSales += Number(row.net_sales) || 0;
+      agg.set(key, prev);
+    }
+    return allBranchesTrendData.map((base) => {
+      const hit = agg.get(base.saleDate);
+      if (!hit) {
+        return {
+          ...base,
+          totalSales: 0,
+          refund: 0,
+          discount: 0,
+          netSales: 0,
+          productCost: 0,
+          productUnitPrice: 0,
+          grossProfit: 0,
+        };
+      }
+      return {
+        ...base,
+        totalSales: hit.totalSales,
+        refund: hit.refund,
+        discount: hit.discount,
+        netSales: hit.netSales,
+        productCost: 0,
+        productUnitPrice: 0,
+        grossProfit: hit.netSales,
+      };
+    });
+  }, [isAllBranch, chartBranchIds, dailyPerBranch, allBranchesTrendData]);
+
   const previousTrendData = useMemo(() => {
     if (dailySalesPrevious.length === 0) return [];
     return dailySalesPrevious.map((item) => normalizeDailySalesItem(item));
@@ -485,8 +541,15 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   }, []);
 
   useEffect(() => {
-    if (!isAllBranch) setProfitDriversBranchId(null);
+    if (!isAllBranch) {
+      setProfitDriversBranchId(null);
+      setChartBranchIds([]);
+    }
   }, [isAllBranch]);
+
+  useEffect(() => {
+    setChartBranchIds([]);
+  }, [dateRange.start, dateRange.end]);
 
   const profitDriversEffectiveBranchId = useMemo(() => {
     if (profitDriversBranchId != null) return String(profitDriversBranchId);
@@ -728,9 +791,40 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
   const fetchProfitDrivers = useCallback(() => loadProfitDriversOnly(false), [loadProfitDriversOnly]);
 
   const handleSelectDriversBranch = useCallback((branchId: number) => {
-    setProfitDriversBranchId(branchId);
-    setTimeout(() => profitDriversRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 0);
+    setChartBranchIds((prev) => {
+      const next = prev.includes(branchId)
+        ? prev.filter((id) => id !== branchId)
+        : [...prev, branchId];
+      setProfitDriversBranchId(next.length === 0 ? null : next[next.length - 1]);
+      return next;
+    });
   }, []);
+
+  /** Same flow as Admin Dashboard Overall Performance Trend → Sales by branch → Top menus. */
+  const handleTrendDayClick = useCallback(
+    (data: unknown) => {
+      const payload = ((data as { payload?: Record<string, unknown> } | null)?.payload ??
+        data) as {
+        saleDate?: string;
+        label?: string;
+        totalSales?: number;
+        refund?: number;
+        discount?: number;
+        netSales?: number;
+        grossProfit?: number;
+      } | null;
+      if (!payload?.saleDate) return;
+      const metricValue = Number(payload[activeMetric] ?? payload.totalSales) || 0;
+      if (metricValue <= 0 && !(Number(payload.totalSales) > 0)) return;
+      setDayDrillInitial({
+        saleDate: String(payload.saleDate).slice(0, 10),
+        label: String(payload.label || ''),
+        chartTotal: metricValue > 0 ? metricValue : Number(payload.totalSales) || 0,
+      });
+      setDayDrillOpen(true);
+    },
+    [activeMetric],
+  );
 
   const openItemAnalytics = useCallback(
     (item: { row: ApiMenuReportRow; profit: number; branchId: number | null; branchName: string }) => {
@@ -803,6 +897,35 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     }
     void loadProfitDriversOnly(dailySalesCurrent.length > 0);
   }, [profitDriversEffectiveBranchId, loadProfitDriversOnly, dailySalesCurrent.length]);
+
+  // Day × branch series for all-branches detail table
+  useEffect(() => {
+    if (!dateRange.start || !dateRange.end || !isAllBranch) {
+      setDailyPerBranch([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchDailyPerBranchApi({
+      start: dateRange.start,
+      end: dateRange.end,
+      branchId: null,
+    })
+      .then((rows) => {
+        if (cancelled) return;
+        setDailyPerBranch(
+          rows.filter((r) => !isExcludedFromAllBranchesView(r.branch_name)),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (!isAnalyticsFetchTimeout(err)) console.error(err);
+        setDailyPerBranch([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange.start, dateRange.end, isAllBranch]);
 
   const loadReconAggregates = useCallback(async () => {
     const hasRange = dateRange.start && dateRange.end;
@@ -900,20 +1023,20 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
 
   const chartPointCount = trendData.length;
   const responsiveBarSize = useMemo(() => {
-    if (chartPointCount <= 2) return 180;
-    if (chartPointCount <= 4) return 120;
-    if (chartPointCount <= 7) return 72;
-    if (chartPointCount <= 14) return 42;
-    if (chartPointCount <= 31) return 24;
-    if (chartPointCount <= 62) return 16;
-    return 10;
+    if (chartPointCount <= 2) return 200;
+    if (chartPointCount <= 4) return 140;
+    if (chartPointCount <= 7) return 88;
+    if (chartPointCount <= 14) return 52;
+    if (chartPointCount <= 31) return 32;
+    if (chartPointCount <= 62) return 20;
+    return 12;
   }, [chartPointCount]);
   const responsiveBarCategoryGap = useMemo(() => {
     if (chartPointCount <= 2) return '0%';
-    if (chartPointCount <= 4) return '4%';
-    if (chartPointCount <= 7) return '8%';
-    if (chartPointCount <= 14) return '12%';
-    return '18%';
+    if (chartPointCount <= 4) return '2%';
+    if (chartPointCount <= 7) return '3%';
+    if (chartPointCount <= 14) return '4%';
+    return '6%';
   }, [chartPointCount]);
   const responsiveXAxisInterval = useMemo(() => {
     // Show every date label (no 1,3,5,7 skip) for typical month ranges.
@@ -945,22 +1068,47 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
     [saleDateByChartLabel, responsiveXAxisTickMargin, responsiveXAxisTextAnchor, responsiveXAxisAngle],
   );
 
-  const salesTableRows = useMemo(
-    () =>
-      [...trendData]
-        .slice()
-        .reverse()
-        .map((row) => ({
-          date: row.tableDate,
-          totalSales: row.totalSales,
-          refund: row.refund,
-          discount: row.discount,
-          netSales: row.netSales,
-          productUnitPrice: row.productUnitPrice,
-          grossProfit: row.grossProfit,
-        })),
-    [trendData]
-  );
+  const salesTableRows = useMemo(() => {
+    // All Branches: one row per branch × day (detailed). Single branch: aggregated daily trend.
+    if (isAllBranch && dailyPerBranch.length > 0) {
+      return [...dailyPerBranch]
+        .sort((a, b) => {
+          const byDate = String(b.sale_date).localeCompare(String(a.sale_date));
+          if (byDate !== 0) return byDate;
+          return String(a.branch_name).localeCompare(String(b.branch_name));
+        })
+        .map((row) => {
+          const parsed = parseDateSafe(String(row.sale_date).slice(0, 10));
+          const date = parsed
+            ? parsed.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+            : String(row.sale_date).slice(0, 10);
+          return {
+            date,
+            branchName: row.branch_name,
+            totalSales: Number(row.total_sales) || 0,
+            refund: Number(row.refund) || 0,
+            discount: Number(row.discount) || 0,
+            netSales: Number(row.net_sales) || 0,
+            productUnitPrice: 0,
+            grossProfit: Number(row.net_sales) || 0,
+          };
+        });
+    }
+    return [...trendData]
+      .slice()
+      .reverse()
+      .map((row) => ({
+        date: row.tableDate,
+        branchName: null as string | null,
+        totalSales: row.totalSales,
+        refund: row.refund,
+        discount: row.discount,
+        netSales: row.netSales,
+        productUnitPrice: row.productUnitPrice,
+        grossProfit: row.grossProfit,
+      }));
+  }, [trendData, isAllBranch, dailyPerBranch]);
+
   const TABLE_PAGE_SIZE = 10;
   const totalTablePages = Math.max(1, Math.ceil(salesTableRows.length / TABLE_PAGE_SIZE));
   const safeTablePage = Math.min(tablePage, totalTablePages - 1);
@@ -1016,8 +1164,10 @@ const metricConfig = {
       };
 
       const current = aggregateMetric(trendData, key);
-      let previous = aggregateMetric(previousTrendData, key);
-      if (key === 'totalSales' || key === 'netSales' || key === 'grossProfit') {
+      // Branch race filter has no prior-period per-branch series — skip misleading deltas.
+      const branchFiltered = isAllBranch && chartBranchIds.length > 0;
+      let previous = branchFiltered ? 0 : aggregateMetric(previousTrendData, key);
+      if (!branchFiltered && (key === 'totalSales' || key === 'netSales' || key === 'grossProfit')) {
         previous += reconAdjustPreviousTotal;
       }
       const diff = current - previous;
@@ -1028,7 +1178,7 @@ const metricConfig = {
       const sign = diff >= 0 ? '+' : '-';
       const absDiff = Math.abs(diff);
       const absPercent = Math.abs(percent);
-      const delta = `${sign}${money(absDiff)} (${absPercent.toFixed(2)}%)`;
+      const delta = branchFiltered ? '—' : `${sign}${money(absDiff)} (${absPercent.toFixed(2)}%)`;
 
       return {
         key,
@@ -1046,7 +1196,7 @@ const metricConfig = {
       makeItem('netSales', t('sales_analytics.net_sales')),
       makeItem('grossProfit', t('sales_analytics.gross_profit')),
     ];
-  }, [trendData, previousTrendData, metricConfig, t, reconAdjustPreviousTotal, money]);
+  }, [trendData, previousTrendData, metricConfig, t, reconAdjustPreviousTotal, money, isAllBranch, chartBranchIds]);
   /** POS / daily-sales net only (no cash reconciliation) — for modal breakdown */
   const reportNetSalesTotal = useMemo(
     () =>
@@ -1093,13 +1243,34 @@ const metricConfig = {
     [branchSalesData],
   );
 
+  const dayDrillLockedBranch = useMemo(() => {
+    // Header single-branch selection
+    if (!isAllBranch && selectedBranch?.id && String(selectedBranch.id) !== 'all') {
+      const id = Number(selectedBranch.id);
+      if (Number.isFinite(id) && id > 0) {
+        return { id, name: selectedBranch.name || `Branch ${id}` };
+      }
+    }
+    // Race-graph filter: one branch selected → skip "Sales by branch", open Top menus
+    if (isAllBranch && chartBranchIds.length === 1) {
+      const id = chartBranchIds[0];
+      const match = visibleBranchSalesData.find((b) => b.branch_id === id);
+      return { id, name: match?.branch_name || `Branch ${id}` };
+    }
+    return null;
+  }, [isAllBranch, selectedBranch, chartBranchIds, visibleBranchSalesData]);
+
   // Branch chart data for horizontal bar
   const branchChartData = useMemo(() => {
-    return visibleBranchSalesData.map(b => ({
+    return visibleBranchSalesData.map((b) => ({
       name: b.branch_name,
       sales: b.total_sales,
+      branchId: b.branch_id,
     }));
   }, [visibleBranchSalesData]);
+
+  const chartBranchIdSet = useMemo(() => new Set(chartBranchIds), [chartBranchIds]);
+  const branchRaceChartHeight = Math.max(160, visibleBranchSalesData.length * 34 + 36);
 
   const branchColorById = useMemo(() => {
     const map = new Map<number, string>();
@@ -1108,6 +1279,27 @@ const metricConfig = {
     });
     return map;
   }, [visibleBranchSalesData]);
+
+  const selectedChartBranches = useMemo(
+    () =>
+      chartBranchIds.map((id) => {
+        const match = visibleBranchSalesData.find((b) => b.branch_id === id);
+        return {
+          id,
+          name: match?.branch_name || `Branch ${id}`,
+          color: branchColorById.get(id) || CHART_THEME_COLOR,
+        };
+      }),
+    [chartBranchIds, visibleBranchSalesData, branchColorById],
+  );
+
+  const removeChartBranchFilter = useCallback((branchId: number) => {
+    setChartBranchIds((prev) => {
+      const next = prev.filter((id) => id !== branchId);
+      setProfitDriversBranchId(next.length === 0 ? null : next[next.length - 1]);
+      return next;
+    });
+  }, []);
 
   const branchXAxisTicks = useMemo(() => {
     const million = 1_000_000;
@@ -1132,10 +1324,13 @@ const metricConfig = {
     return `₱${Math.round(n / million)}M`;
   }, []);
 
+  const showBranchColumn = isAllBranch && salesTableRows.some((r) => r.branchName);
+
   // --- Export Functions (CSV + PDF) ---
   const handleExportCsv = useCallback(() => {
     const headers = [
       t('sales_analytics.date'),
+      ...(showBranchColumn ? [t('sales_analytics.branch')] : []),
       t('sales_analytics.total_sales'),
       t('sales_analytics.refund'),
       t('sales_analytics.discount'),
@@ -1152,6 +1347,7 @@ const metricConfig = {
 
     const rows = salesTableRows.map((row) => [
       row.date,
+      ...(showBranchColumn ? [row.branchName || ''] : []),
       row.totalSales.toString(),
       row.refund.toString(),
       row.discount.toString(),
@@ -1178,7 +1374,7 @@ const metricConfig = {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [salesTableRows, selectedBranch, dateRange, t]);
+  }, [salesTableRows, selectedBranch, dateRange, t, showBranchColumn]);
 
   const handleExportPdf = useCallback(async () => {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
@@ -1189,6 +1385,7 @@ const metricConfig = {
 
     const headers = [
       t('sales_analytics.date'),
+      ...(showBranchColumn ? [t('sales_analytics.branch')] : []),
       t('sales_analytics.total_sales'),
       t('sales_analytics.refund'),
       t('sales_analytics.discount'),
@@ -1199,6 +1396,7 @@ const metricConfig = {
 
     const body = salesTableRows.map((row) => [
       row.date,
+      ...(showBranchColumn ? [row.branchName || ''] : []),
       money(row.totalSales),
       money(row.refund),
       money(row.discount),
@@ -1220,7 +1418,7 @@ const metricConfig = {
     const filename = `sales_report_${cleanBranchName}_${dateRange.start}_to_${dateRange.end}.pdf`;
 
     doc.save(filename);
-  }, [salesTableRows, selectedBranch, dateRange, t, money]);
+  }, [salesTableRows, selectedBranch, dateRange, t, money, showBranchColumn]);
 
   const isPageLoading = dailySalesLoading && dailySalesCurrent.length === 0;
 
@@ -1326,10 +1524,31 @@ const metricConfig = {
           ))}
         </div>
         <div className="p-6 border-t border-gray-200">
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <BarChart3 size={18} className="text-brand-muted" />
-              <h4 className="text-lg font-normal text-brand-text">{activeMetricLabel}</h4>
+          <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+              <BarChart3 size={18} className="text-brand-muted shrink-0" />
+              <h4 className="text-lg font-normal text-brand-text shrink-0">{activeMetricLabel}</h4>
+              {selectedChartBranches.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => removeChartBranchFilter(b.id)}
+                  className="inline-flex items-center gap-1.5 max-w-[180px] px-2 py-1 rounded-full text-[11px] font-semibold border hover:opacity-90"
+                  style={{
+                    backgroundColor: colorWithAlpha(b.color, 0.12),
+                    borderColor: colorWithAlpha(b.color, 0.35),
+                    color: b.color,
+                  }}
+                  title={`Remove ${b.name}`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: b.color }}
+                  />
+                  <span className="truncate">{b.name}</span>
+                  <span className="opacity-70 shrink-0">×</span>
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-3">
               <InlineDropdown value={chartType} options={['line graph', 'bar chart'] as const} formatOption={(v) => t(`sales_analytics.${v.replace(' ', '_')}`)} onChange={(v) => setChartType(v)} />
@@ -1346,7 +1565,13 @@ const metricConfig = {
                   <XAxis dataKey="label" tick={salesChartXAxisTick} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
-                  <Bar dataKey={activeMetric} fill={CHART_THEME_COLOR} barSize={responsiveBarSize} />
+                  <Bar
+                    dataKey={activeMetric}
+                    fill={CHART_THEME_COLOR}
+                    barSize={responsiveBarSize}
+                    cursor="pointer"
+                    onClick={handleTrendDayClick}
+                  />
                 </BarChart>
               ) : (
                 <AreaChart width={width} height={height} data={trendData}>
@@ -1354,7 +1579,18 @@ const metricConfig = {
                   <XAxis dataKey="label" tick={salesChartXAxisTick} interval={responsiveXAxisInterval} angle={responsiveXAxisAngle} textAnchor={responsiveXAxisTextAnchor} height={responsiveXAxisHeight} tickMargin={responsiveXAxisTickMargin} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => `₱${Math.round(v / 1000)}k`} axisLine={false} tickLine={false} />
                   <Tooltip {...tooltipProps} />
-                  <Area type="linear" dataKey={activeMetric} stroke={CHART_THEME_COLOR} strokeWidth={2} fill={CHART_THEME_COLOR} fillOpacity={0.2} dot={true} activeDot={true} />
+                  <Area
+                    type="linear"
+                    dataKey={activeMetric}
+                    stroke={CHART_THEME_COLOR}
+                    strokeWidth={2}
+                    fill={CHART_THEME_COLOR}
+                    fillOpacity={0.2}
+                    dot={{ r: 3, cursor: 'pointer' }}
+                    activeDot={{ r: 5, cursor: 'pointer', onClick: handleTrendDayClick }}
+                    style={{ cursor: 'pointer' }}
+                    onClick={handleTrendDayClick}
+                  />
                 </AreaChart>
               )
             }
@@ -1367,21 +1603,37 @@ const metricConfig = {
         className={`grid grid-cols-1 gap-6 items-stretch ${
           isAllBranch
             ? 'xl:grid-cols-2'
-            : 'xl:grid-cols-[minmax(260px,0.85fr)_minmax(0,1.45fr)]'
+            : 'xl:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.4fr)]'
         }`}
       >
         {/* Card 1: Total Sales per Branch — all-branches comparison only */}
         {isAllBranch ? (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
-            <div className="flex items-center gap-2">
-              <Store size={18} className="text-brand-muted" />
-              <h4 className="text-base font-semibold text-brand-text">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Store size={18} className="text-brand-muted shrink-0" />
+              <h4 className="text-base font-semibold text-brand-text truncate">
                 {t('sales_analytics.total_sales_per_branch')}
               </h4>
             </div>
+            {chartBranchIds.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setChartBranchIds([]);
+                  setProfitDriversBranchId(null);
+                }}
+                className="text-[11px] font-semibold text-violet-600 hover:underline shrink-0"
+              >
+                {t('sales_analytics.all_branches')}
+              </button>
+            ) : (
+              <span className="text-[10px] text-brand-muted shrink-0 hidden sm:inline">
+                tap branch → Total sales
+              </span>
+            )}
           </div>
-          <div className="flex-1 flex flex-col min-h-0 px-5 py-4">
+          <div className="flex-1 flex flex-col min-h-0 px-5 py-3">
             {branchSalesLoading && visibleBranchSalesData.length === 0 ? (
               <div className="flex flex-1 items-center justify-center">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
@@ -1399,17 +1651,18 @@ const metricConfig = {
               </div>
             ) : (
               <>
-                <div className="flex-1 min-h-[180px] mb-4 flex flex-col min-w-0">
+                <div className="mb-2 flex flex-col min-w-0" style={{ height: branchRaceChartHeight }}>
                   <ChartContainer
-                    className="w-full min-w-0 flex-1"
-                    minHeight={180}
+                    className="w-full min-w-0 h-full"
+                    minHeight={branchRaceChartHeight}
                     render={({ width, height }) => (
                       <BarChart
                         width={width}
                         height={height}
                         data={branchChartData}
                         layout="vertical"
-                        barCategoryGap="18%"
+                        margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                        barCategoryGap={4}
                       >
                         <CartesianGrid stroke="#e5e7eb" horizontal={false} />
                         <XAxis
@@ -1423,27 +1676,41 @@ const metricConfig = {
                         <YAxis
                           type="category"
                           dataKey="name"
-                          width={130}
+                          width={120}
                           interval={0}
-                          tick={{ fill: '#334155', fontSize: 12, fontWeight: 500 }}
+                          tick={{ fill: '#334155', fontSize: 11, fontWeight: 500 }}
                           axisLine={false}
                           tickLine={false}
                         />
                         <Tooltip cursor={false} content={<LoyverseTooltip />} />
                         <Bar
                           dataKey="sales"
-                          barSize={22}
+                          barSize={26}
                           radius={[0, 6, 6, 0]}
-                          onClick={(_data, index) => {
-                            const i = typeof index === 'number' ? index : -1;
-                            const b = visibleBranchSalesData[i];
-                            if (!b) return;
-                            handleSelectDriversBranch(b.branch_id);
+                          cursor="pointer"
+                          onClick={(data: any) => {
+                            const id = Number(data?.branchId ?? data?.payload?.branchId);
+                            if (!Number.isFinite(id)) return;
+                            handleSelectDriversBranch(id);
                           }}
                         >
-                          {branchChartData.map((_entry, index) => (
-                            <Cell key={index} fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]} />
-                          ))}
+                          {branchChartData.map((entry, index) => {
+                            const selected =
+                              chartBranchIdSet.size === 0 || chartBranchIdSet.has(entry.branchId);
+                            return (
+                              <Cell
+                                key={entry.branchId}
+                                fill={BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]}
+                                fillOpacity={selected ? 1 : 0.28}
+                                stroke={
+                                  chartBranchIdSet.has(entry.branchId)
+                                    ? BRANCH_BAR_COLORS[index % BRANCH_BAR_COLORS.length]
+                                    : undefined
+                                }
+                                strokeWidth={chartBranchIdSet.has(entry.branchId) ? 1.5 : 0}
+                              />
+                            );
+                          })}
                         </Bar>
                       </BarChart>
                     )}
@@ -1465,7 +1732,11 @@ const metricConfig = {
                           key={b.branch_id}
                           onClick={() => handleSelectDriversBranch(b.branch_id)}
                           className={`border-b border-gray-50 last:border-b-0 cursor-pointer hover:bg-violet-50/40 ${
-                            profitDriversBranchId === b.branch_id ? 'bg-violet-50/50' : i % 2 === 0 ? '' : 'bg-gray-50/40'
+                            chartBranchIdSet.has(b.branch_id)
+                              ? 'bg-violet-50/70'
+                              : i % 2 === 0
+                                ? ''
+                                : 'bg-gray-50/40'
                           }`}
                         >
                           <td className="px-3 py-2.5">
@@ -1491,31 +1762,24 @@ const metricConfig = {
         {/* Card 2: Top Revenue Items */}
         <div
           ref={profitDriversRef}
-          className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full"
+          className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full min-h-0"
         >
           <div
-            className={`flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-violet-50/70 via-white to-pink-50/60 ${
-              isAllBranch ? 'px-5 py-4' : 'px-4 py-2.5'
+            className={`flex items-center justify-between border-b border-gray-100 ${
+              isAllBranch ? 'px-4 py-2.5' : 'px-4 py-3'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <span
-                className={`inline-flex items-center justify-center rounded-full bg-violet-100 text-violet-600 ${
-                  isAllBranch ? 'h-8 w-8' : 'h-7 w-7'
-                }`}
-              >
-                <TrendingUp size={isAllBranch ? 18 : 15} />
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-violet-100 text-violet-600 shrink-0">
+                <TrendingUp size={15} />
               </span>
-              <div className="flex flex-col">
-                <h4
-                  className={`font-semibold text-slate-900 ${
-                    isAllBranch ? 'text-base' : 'text-sm'
-                  }`}
-                >
+              <div className="flex flex-col min-w-0">
+                <h4 className="font-semibold text-slate-900 text-sm">
                   {t('sales_analytics.top_revenue_items')}
                 </h4>
-                <p className="text-[11px] font-medium text-slate-500">
-                  {t('sales_analytics.high_revenue')} · {profitDriversBranchLabel}
+                <p className="text-[11px] font-medium text-slate-500 truncate">
+                  {profitDriversBranchLabel}
+                  {!isAllBranch ? ` · ${t('sales_analytics.item_analytics_click_hint')}` : ''}
                 </p>
               </div>
             </div>
@@ -1524,7 +1788,7 @@ const metricConfig = {
                 <button
                   type="button"
                   onClick={() => setProfitDriversModalOpen(true)}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-semibold bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
                 >
                   {t('sales_analytics.view_more')}
                 </button>
@@ -1532,7 +1796,10 @@ const metricConfig = {
               {profitDriversBranchId != null && isAllBranch ? (
                 <button
                   type="button"
-                  onClick={() => setProfitDriversBranchId(null)}
+                  onClick={() => {
+                    setProfitDriversBranchId(null);
+                    setChartBranchIds([]);
+                  }}
                   className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[12px] font-semibold border"
                   title="Clear branch filter"
                   style={(() => {
@@ -1550,24 +1817,24 @@ const metricConfig = {
               ) : null}
             </div>
           </div>
-          <div className={isAllBranch ? 'flex-1 px-5 py-4' : 'flex-1 px-3 py-2'}>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
             {profitDriversLoading && profitDriversData.length === 0 ? (
-              <div className="flex items-center justify-center py-16">
+              <div className="flex h-full items-center justify-center py-16">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
             ) : profitDriversError ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex h-full flex-col items-center justify-center py-12 text-center">
                 <AlertCircle size={32} className="text-red-400 mb-2" />
                 <p className="text-sm text-red-500 font-medium">{profitDriversError}</p>
                 <button onClick={fetchProfitDrivers} className="mt-2 text-xs text-violet-600 font-bold hover:underline cursor-pointer">{t('sales_analytics.retry')}</button>
               </div>
             ) : profitDriversData.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="flex h-full flex-col items-center justify-center py-12 text-center">
                 <TrendingUp size={36} className="text-gray-300 mb-2" />
                 <p className="text-sm text-brand-muted font-medium">{t('sales_analytics.no_data_available')}</p>
               </div>
             ) : (
-              <div className={isAllBranch ? 'space-y-3' : 'space-y-1'}>
+              <div className="h-full flex flex-col gap-1">
                 {topProfitDrivers.map((item, idx) => {
                   const isSelected =
                     !isAllBranch &&
@@ -1579,18 +1846,16 @@ const metricConfig = {
                     type="button"
                     key={`${item.row.id}-${item.branchId ?? 'all'}-${idx}`}
                     onClick={() => openItemAnalytics(item)}
-                    className={`w-full text-left flex items-center justify-between rounded-lg border transition-all cursor-pointer ${
-                      isAllBranch ? 'p-3.5 rounded-xl' : 'px-2.5 py-1.5'
-                    } ${
+                    className={`w-full text-left flex items-center justify-between rounded-lg border transition-all cursor-pointer flex-1 min-h-0 px-2.5 py-1.5 ${
                       isSelected
                         ? 'border-violet-300 bg-violet-50 shadow-sm'
                         : 'border-violet-50 bg-gradient-to-r from-slate-50 via-white to-violet-50/40 hover:shadow-sm hover:border-violet-200 hover:bg-violet-50/30'
                     }`}
                   >
-                    <div className={`flex items-center min-w-0 flex-1 ${isAllBranch ? 'gap-3' : 'gap-2'}`}>
+                    <div className={`flex items-center min-w-0 flex-1 ${isAllBranch ? 'gap-2' : 'gap-2'}`}>
                       <div
                         className={`rounded-md flex items-center justify-center font-bold shrink-0 bg-violet-100 text-violet-700 ${
-                          isAllBranch ? 'w-8 h-8 text-sm rounded-lg' : 'w-5 h-5 text-[10px]'
+                          isAllBranch ? 'w-6 h-6 text-[11px]' : 'w-5 h-5 text-[10px]'
                         }`}
                       >
                         {idx + 1}
@@ -1598,15 +1863,15 @@ const metricConfig = {
                       <div className="min-w-0">
                         <p
                           className={`font-semibold text-slate-900 truncate ${
-                            isAllBranch ? 'text-sm' : 'text-[13px] leading-tight'
+                            isAllBranch ? 'text-[13px] leading-tight' : 'text-[13px] leading-tight'
                           }`}
                         >
                           {item.row.goods}
                         </p>
-                        <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                           {profitDriversEffectiveBranchId ? null : (
                             <span
-                              className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full font-semibold border"
+                              className="inline-flex items-center text-[10px] px-1.5 py-px rounded-full font-semibold border"
                               style={(() => {
                                 const branchColor =
                                   (item.branchId != null ? branchColorById.get(item.branchId) : undefined) ||
@@ -1628,8 +1893,8 @@ const metricConfig = {
                       <div className="text-right">
                         {isAllBranch ? (
                           <>
-                            <span className="text-sm font-semibold text-slate-900">{money(item.profit)}</span>
-                            <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            <span className="text-[13px] font-semibold text-slate-900 leading-tight">{money(item.profit)}</span>
+                            <div className="text-[10px] text-slate-500 font-medium leading-tight">
                               {(Number((item.row as any).salesQty) || 0).toLocaleString()} {t('sales_analytics.sold')}
                             </div>
                           </>
@@ -1658,6 +1923,7 @@ const metricConfig = {
             target={itemAnalyticsTarget}
             dateRange={dateRange}
             active={!isAllBranch}
+            className="h-full"
           />
         ) : null}
       </div>
@@ -1736,6 +2002,20 @@ const metricConfig = {
         dateRange={dateRange}
       />
 
+      <SalesDayDrillModal
+        open={dayDrillOpen}
+        onClose={() => {
+          setDayDrillOpen(false);
+          setDayDrillInitial(null);
+        }}
+        initial={dayDrillInitial}
+        boundRange={dateRange}
+        lockedBranch={dayDrillLockedBranch}
+        dailyPerBranch={dailyPerBranch}
+        filterBranchIds={chartBranchIds}
+        formatMoney={money}
+      />
+
       {/* ── Sales Table ────────────────────────────── */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
@@ -1760,10 +2040,13 @@ const metricConfig = {
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px]">
+          <table className={`w-full ${showBranchColumn ? 'min-w-[1040px]' : 'min-w-[920px]'}`}>
             <thead>
               <tr className="text-left text-xs font-medium text-brand-muted border-b border-gray-100">
                 <th className="px-5 py-3">{t('sales_analytics.date')}</th>
+                {showBranchColumn ? (
+                  <th className="px-5 py-3">{t('sales_analytics.branch')}</th>
+                ) : null}
                 <th className="px-5 py-3">{t('sales_analytics.total_sales')}</th>
                 <th className="px-5 py-3">{t('sales_analytics.refund')}</th>
                 <th className="px-5 py-3">{t('sales_analytics.discount')}</th>
@@ -1774,8 +2057,11 @@ const metricConfig = {
             </thead>
             <tbody>
               {pagedTableRows.map((row, idx) => (
-                <tr key={`${row.date}-${idx}`} className="border-b border-gray-100 last:border-b-0">
+                <tr key={`${row.date}-${row.branchName ?? 'all'}-${idx}`} className="border-b border-gray-100 last:border-b-0">
                   <td className="px-5 py-3.5 text-sm text-brand-text">{row.date}</td>
+                  {showBranchColumn ? (
+                    <td className="px-5 py-3.5 text-sm font-medium text-brand-text">{row.branchName}</td>
+                  ) : null}
                   <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.totalSales)}</td>
                   <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.refund)}</td>
                   <td className="px-5 py-3.5 text-sm text-brand-text">{money(row.discount)}</td>

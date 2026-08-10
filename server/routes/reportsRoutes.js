@@ -92,6 +92,7 @@ router.get("/reports/validate-imported-data", authenticate, ReportsController.va
 
 // GET - Python analytics proxies (Sales Analytics, reports)
 router.get("/api/analytics/daily-sales", authenticate, ReportsController.getAnalyticsDailySales);
+router.get("/api/analytics/daily-per-branch", authenticate, ReportsController.getAnalyticsDailyPerBranch);
 router.get("/api/analytics/branch-sales", authenticate, ReportsController.getAnalyticsBranchSales);
 router.get("/api/analytics/menu-report", authenticate, ReportsController.getAnalyticsMenuReport);
 router.get("/api/analytics/menu-report-bundle", authenticate, ReportsController.getAnalyticsMenuReportBundle);

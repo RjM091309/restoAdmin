@@ -74,6 +74,19 @@ export type ApiDailySalesItem = {
   gross_profit: number;
 };
 
+/** One branch × calendar day row (Sales Analytics Week / detail table). */
+export type ApiDailyPerBranchItem = {
+  branch_id: number;
+  branch_name: string;
+  sale_date: string;
+  day_name: string;
+  total_sales: number;
+  refund: number;
+  discount: number;
+  net_sales: number;
+  order_count: number;
+};
+
 export type ApiMenuReportRow = {
   id: number;
   goods: string;
@@ -215,6 +228,43 @@ export async function fetchDailySalesApi(params: URLSearchParams): Promise<ApiDa
   if (!res.ok) throw new Error(`Analytics daily-sales failed with status ${res.status}`);
   if (json.success && json.data?.data) {
     return json.data.data as ApiDailySalesItem[];
+  }
+  return [];
+}
+
+export async function fetchDailyPerBranchApi(params: {
+  start: string;
+  end: string;
+  branchId?: string | null;
+}): Promise<ApiDailyPerBranchItem[]> {
+  const qs = new URLSearchParams();
+  qs.set('start_date', params.start);
+  qs.set('end_date', params.end);
+  if (params.branchId === null || params.branchId === 'all') {
+    qs.set('branch_id', 'all');
+  } else if (params.branchId) {
+    qs.set('branch_id', params.branchId);
+  }
+
+  const path = `/api/analytics/daily-per-branch?${qs.toString()}`;
+  const baseUrl = getAnalyticsBaseUrl();
+
+  // Prefer PyServer when configured; on 404/failure fall back to Node proxy (SQL fallback).
+  if (baseUrl) {
+    try {
+      const { res, json } = await fetchJson(`${baseUrl}${path}`);
+      if (res.ok && json?.success && json?.data?.data) {
+        return json.data.data as ApiDailyPerBranchItem[];
+      }
+    } catch {
+      // fall through to Node
+    }
+  }
+
+  const { res, json } = await fetchJson(path);
+  if (!res.ok) throw new Error(`Analytics daily-per-branch failed with status ${res.status}`);
+  if (json.success && json.data?.data) {
+    return json.data.data as ApiDailyPerBranchItem[];
   }
   return [];
 }
