@@ -4240,9 +4240,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                               className={`text-sm font-semibold ${
                                 row.id === 'totalExpenses'
                                   ? 'text-red-600'
-                                  : isTop
-                                    ? 'text-brand-primary'
-                                    : 'text-slate-700'
+                                  : row.id === 'totalRevenue'
+                                    ? value >= 0
+                                      ? 'text-emerald-600'
+                                      : 'text-red-600'
+                                    : isTop
+                                      ? 'text-brand-primary'
+                                      : 'text-slate-700'
                               }`}
                             >
                               {formatCurrency(value)}
