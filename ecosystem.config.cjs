@@ -9,8 +9,9 @@ module.exports = {
       env: {
         NODE_ENV: 'development',
         PORT: 2000,
-        // RestoAnalytics public URL (업장별 비교 → Multi-Branch Board)
-        RESTO_ANALYTICS_PUBLIC_URL: 'http://45.32.119.62:2998',
+        // 업장별 비교 → mobile comparison board (Telegram Web App / URL button)
+        BRANCH_COMPARE_PUBLIC_URL: 'https://mobile.moonctgroup.com',
+        RESTO_ANALYTICS_PUBLIC_URL: 'https://mobile.moonctgroup.com',
         // Avoid inherited IDE/sandbox proxy breaking Loyverse HTTPS calls.
         HTTP_PROXY: '',
         HTTPS_PROXY: '',

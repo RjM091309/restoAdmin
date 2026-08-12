@@ -6,9 +6,20 @@ const { resolveNetSalesFromRow, sumNetSalesFromDailyRows } = require('../utils/a
 const { buildAdminDashboardBundle } = require('./adminDashboardBundle');
 const { buildBranchDashboardBundle } = require('./branchDashboardBundle');
 const PYSERVER_BASE_URL = process.env.PYSERVER_BASE_URL || 'http://localhost:2100';
-const RESTO_ANALYTICS_PUBLIC_URL = (
-	process.env.RESTO_ANALYTICS_PUBLIC_URL || 'http://45.32.119.62:2998'
-).trim().replace(/\/$/, '');
+// Reply-keyboard Web App requires HTTPS. Never fall back to plain http (that becomes a text button + chat message).
+const BRANCH_COMPARE_PUBLIC_URL = (() => {
+	const candidates = [
+		process.env.BRANCH_COMPARE_PUBLIC_URL,
+		'https://mobile.moonctgroup.com',
+	];
+	for (const raw of candidates) {
+		const url = String(raw || '')
+			.trim()
+			.replace(/\/$/, '');
+		if (url.startsWith('https://')) return url;
+	}
+	return 'https://mobile.moonctgroup.com';
+})();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 function requestJson(url, method = 'POST', payload = null) {
@@ -57,7 +68,7 @@ class TelegramService {
 
 	static CALLBACK_BRANCH_IDS = {
 		report_total: null, // all branches
-		report_branch_compare: null, // redirects to RestoAnalytics Multi-Branch Board
+		report_branch_compare: null, // opens https://mobile.moonctgroup.com via Web App / URL button
 		report_kims: 2, // Kim's B
 		report_blue_m: 3, // Blue M
 		report_keum: 9, // Keum
@@ -75,15 +86,8 @@ class TelegramService {
 	]);
 
 	static getBranchCompareUrl() {
-		return `${RESTO_ANALYTICS_PUBLIC_URL}/?view=branch-comparison`;
-	}
-
-	static buildBranchCompareOpenMarkup() {
-		return {
-			inline_keyboard: [
-				[{ text: '📊 Multi-Branch Board', url: TelegramService.getBranchCompareUrl() }],
-			],
-		};
+		// Deep-link into Multi-Branch comparison board (not the home P&L screen).
+		return `${BRANCH_COMPARE_PUBLIC_URL}/?view=branch-comparison`;
 	}
 
 	static TELEGRAM_BRANCH_GROUPS = [
@@ -130,7 +134,7 @@ class TelegramService {
 		return [
 			[
 				{ text: '합계 Total', callback_data: 'report_total' },
-				// Direct URL open → RestoAnalytics Multi-Branch Board (?view=branch-comparison)
+				// Direct URL open → mobile comparison board
 				{ text: '업장별 비교', url: compareUrl },
 			],
 			[
@@ -150,15 +154,12 @@ class TelegramService {
 
 	static buildPersistentReplyKeyboard() {
 		const compareUrl = TelegramService.getBranchCompareUrl();
-		// Telegram Web Apps require HTTPS; with HTTPS, one tap opens the board in-app.
-		const compareButton = compareUrl.startsWith('https://')
-			? { text: '업장별 비교', web_app: { url: compareUrl } }
-			: { text: '업장별 비교' };
+		// Web App button: one tap opens URL in Telegram browser — no chat message is sent.
 		return {
 			keyboard: [
 				[
 					{ text: '합계 Total' },
-					compareButton,
+					{ text: '업장별 비교', web_app: { url: compareUrl } },
 				],
 				[
 					{ text: "김형제 Kim's B" },
@@ -179,32 +180,20 @@ class TelegramService {
 		};
 	}
 
-	static async sendBranchCompareRedirect({ botToken, chatId, callbackQueryId = null }) {
-		const url = TelegramService.getBranchCompareUrl();
-		if (callbackQueryId) {
-			const answerPayload = {
-				callback_query_id: callbackQueryId,
-				text: 'Opening Multi-Branch Board…',
-				show_alert: false,
-			};
-			// answerCallbackQuery.url only accepts HTTPS (or game links)
-			if (url.startsWith('https://')) {
-				answerPayload.url = url;
-			}
-			await TelegramService.callTelegramApi(botToken, 'answerCallbackQuery', answerPayload);
-		}
-
-		await TelegramService.callTelegramApi(botToken, 'sendMessage', {
+	/** Re-apply Web App keyboard; delete helper message so chat stays clean. */
+	static async refreshReplyKeyboardSilent({ botToken, chatId }) {
+		const sent = await TelegramService.callTelegramApi(botToken, 'sendMessage', {
 			chat_id: String(chatId),
-			text: [
-				'<b>업장별 비교 → Multi-Branch Board</b>',
-				'',
-				`<a href="${url}">Tap here to open RestoAnalytics</a>`,
-			].join('\n'),
-			parse_mode: 'HTML',
-			disable_web_page_preview: false,
-			reply_markup: TelegramService.buildBranchCompareOpenMarkup(),
+			text: '\u2060', // word-joiner — nearly invisible, required by Telegram
+			reply_markup: TelegramService.buildPersistentReplyKeyboard(),
 		});
+		const messageId = sent?.body?.result?.message_id;
+		if (messageId != null) {
+			await TelegramService.callTelegramApi(botToken, 'deleteMessage', {
+				chat_id: String(chatId),
+				message_id: messageId,
+			}).catch(() => {});
+		}
 	}
 
 	static REPORT_TEXT_TO_CALLBACK = {
@@ -856,11 +845,11 @@ class TelegramService {
 
 		const callbackQuery = update?.callback_query;
 		if (callbackQuery?.id && callbackQuery?.message?.chat?.id && callbackQuery?.data) {
+			// Legacy callback — dismiss only; inline keyboard uses a direct URL button.
 			if (callbackQuery.data === 'report_branch_compare') {
-				await TelegramService.sendBranchCompareRedirect({
-					botToken: settings.botToken,
-					chatId: callbackQuery.message.chat.id,
-					callbackQueryId: callbackQuery.id,
+				await TelegramService.callTelegramApi(settings.botToken, 'answerCallbackQuery', {
+					callback_query_id: callbackQuery.id,
+					show_alert: false,
 				});
 				return { handled: true, type: 'callback_branch_compare' };
 			}
@@ -907,8 +896,9 @@ class TelegramService {
 
 		if (chatId && Object.prototype.hasOwnProperty.call(TelegramService.REPORT_TEXT_TO_CALLBACK, text)) {
 			const callbackData = TelegramService.REPORT_TEXT_TO_CALLBACK[text];
+			// Old plain-text keyboard still cached: no bot reply — just install Web App keyboard.
 			if (callbackData === 'report_branch_compare') {
-				await TelegramService.sendBranchCompareRedirect({
+				await TelegramService.refreshReplyKeyboardSilent({
 					botToken: settings.botToken,
 					chatId,
 				});
