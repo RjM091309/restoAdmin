@@ -421,7 +421,7 @@ export async function fetchExpenseSummaryApi(params: URLSearchParams): Promise<A
   }
   if (json.success && json.data) {
     return {
-      total_expense: Number(json.data.total_expense ?? 0),
+      total_expense: Number(json.data.data?.total_expense ?? 0),
     };
   }
   return { total_expense: 0 };

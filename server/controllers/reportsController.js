@@ -74,7 +74,7 @@ class ReportsController {
 	static async getRevenueReport(req, res) {
 		try {
 			const { period = 'daily', start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			if (!['daily', 'weekly', 'monthly'].includes(period)) {
 				return ApiResponse.badRequest(res, 'Period must be daily, weekly, or monthly');
@@ -101,7 +101,7 @@ class ReportsController {
 	static async getOrderReport(req, res) {
 		try {
 			const { start_date, end_date, status } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getOrderReport(start_date, end_date, branchId, status ? parseInt(status) : null);
 
@@ -122,7 +122,7 @@ class ReportsController {
 	static async getPopularMenuItems(req, res) {
 		try {
 			const { start_date, end_date, limit = 10 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getPopularMenuItems(start_date, end_date, branchId, parseInt(limit));
 
@@ -143,7 +143,7 @@ class ReportsController {
 	static async getDailySalesByProduct(req, res) {
 		try {
 			const { start_date, end_date, limit = 5 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getDailySalesByProduct(start_date, end_date, branchId, parseInt(limit));
 
@@ -199,7 +199,7 @@ class ReportsController {
 	static async getTableUtilizationReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getTableUtilizationReport(start_date, end_date, branchId);
 
@@ -219,7 +219,7 @@ class ReportsController {
 	static async getEmployeePerformanceReport(req, res) {
 		try {
 			const { start_date, end_date, employee_id } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getEmployeePerformanceReport(
 				start_date,
@@ -245,7 +245,7 @@ class ReportsController {
 	static async getSalesHourlySummary(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getSalesHourlySummary(start_date, end_date, branchId);
 
@@ -282,7 +282,7 @@ class ReportsController {
 	static async getReceipts(req, res) {
 		try {
 			const { start_date, end_date, employee_filter, search } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getReceipts(start_date, end_date, branchId, employee_filter || null, search || null);
 
@@ -319,7 +319,7 @@ class ReportsController {
 	static async getDiscountReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getDiscountReport(start_date, end_date, branchId);
 
@@ -354,7 +354,7 @@ class ReportsController {
 	static async getSalesCategoryReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getSalesCategoryReport(start_date, end_date, branchId);
 
@@ -389,7 +389,7 @@ class ReportsController {
 	static async getGoodsSalesReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getGoodsSalesReport(start_date, end_date, branchId);
 
@@ -460,7 +460,7 @@ class ReportsController {
 	static async getLeastSellingItems(req, res) {
 		try {
 			const { start_date, end_date, limit = 5 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const report = await ReportsModel.getLeastSellingItems(start_date || null, end_date || null, branchId, parseInt(limit));
 
@@ -577,7 +577,7 @@ class ReportsController {
 	static async getAnalyticsBranchSales(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/branch-sales', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -629,7 +629,7 @@ class ReportsController {
 	static async getAnalyticsExpenseSummary(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/expense-summary', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -886,7 +886,7 @@ class ReportsController {
 				return ApiResponse.badRequest(res, 'category_id is required');
 			}
 
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/category-menu-breakdown', PYSERVER_BASE_URL);
 			url.searchParams.set('category_id', String(category_id));
@@ -942,7 +942,7 @@ class ReportsController {
 	static async getAnalyticsPaymentReport(req, res) {
 		try {
 			const { start_date, end_date } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/payment-report', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -994,7 +994,7 @@ class ReportsController {
 	static async getAnalyticsTopProfitDrivers(req, res) {
 		try {
 			const { start_date, end_date, limit = 20 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/top-profit-drivers', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -1048,7 +1048,7 @@ class ReportsController {
 	static async getAnalyticsTopSelling(req, res) {
 		try {
 			const { start_date, end_date, limit = 5 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/top-selling', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -1102,7 +1102,7 @@ class ReportsController {
 	static async getAnalyticsLeastSelling(req, res) {
 		try {
 			const { start_date, end_date, limit = 5 } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/least-selling', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
@@ -1156,7 +1156,7 @@ class ReportsController {
 	static async getAnalyticsReceiptReport(req, res) {
 		try {
 			const { start_date, end_date, type } = req.query;
-			const branchId = req.session?.branch_id || req.query.branch_id || req.user?.branch_id || null;
+			const branchId = ReportsController.resolveAnalyticsBranchId(req);
 
 			const url = new URL('/api/analytics/receipt-report', PYSERVER_BASE_URL);
 			if (start_date) url.searchParams.set('start_date', start_date);
