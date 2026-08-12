@@ -1,4 +1,5 @@
 const https = require('https');
+const crypto = require('crypto');
 const TelegramSettingsModel = require('../models/telegramSettingsModel');
 const CashReconciliationModel = require('../models/cashReconciliationModel');
 const pool = require('../config/db');
@@ -20,6 +21,9 @@ const BRANCH_COMPARE_PUBLIC_URL = (() => {
 	}
 	return 'https://mobile.moonctgroup.com';
 })();
+const TELEGRAM_MINIAPP_SECRET = (
+	process.env.TELEGRAM_MINIAPP_SECRET || 'resto-mobile-tg-sso-2026'
+).trim();
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 function requestJson(url, method = 'POST', payload = null) {
@@ -86,8 +90,16 @@ class TelegramService {
 	]);
 
 	static getBranchCompareUrl() {
-		// Deep-link into Multi-Branch comparison board (not the home P&L screen).
-		return `${BRANCH_COMPARE_PUBLIC_URL}/?view=branch-comparison`;
+		// Signed SSO params so Mini App can skip password login even when initData is empty.
+		const ts = Math.floor(Date.now() / 1000);
+		const payload = `branch-comparison:${ts}`;
+		const sig = crypto.createHmac('sha256', TELEGRAM_MINIAPP_SECRET).update(payload).digest('hex');
+		const q = new URLSearchParams({
+			view: 'branch-comparison',
+			tg_t: String(ts),
+			tg_sig: sig,
+		});
+		return `${BRANCH_COMPARE_PUBLIC_URL}/?${q.toString()}`;
 	}
 
 	static TELEGRAM_BRANCH_GROUPS = [

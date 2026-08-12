@@ -12,6 +12,7 @@ module.exports = {
         // 업장별 비교 → mobile comparison board (Telegram Web App / URL button)
         BRANCH_COMPARE_PUBLIC_URL: 'https://mobile.moonctgroup.com',
         RESTO_ANALYTICS_PUBLIC_URL: 'https://mobile.moonctgroup.com',
+        TELEGRAM_MINIAPP_SECRET: 'resto-mobile-tg-sso-2026',
         // Avoid inherited IDE/sandbox proxy breaking Loyverse HTTPS calls.
         HTTP_PROXY: '',
         HTTPS_PROXY: '',
