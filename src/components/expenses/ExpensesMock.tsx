@@ -735,9 +735,12 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
   );
 
   const extractionCategoryTypes = useMemo(() => {
-    const list = preferredSubCategoryLabels(masterCategories || []).slice(0, 40);
+    const opStateById = new Map(
+      (operations || []).map((o) => [String(o.id), Number(o.state) === 1 ? 1 : 0] as const),
+    );
+    const list = preferredSubCategoryLabels(masterCategories || [], opStateById).slice(0, 40);
     return list.length ? list : DEFAULT_EXTRACTION_CATEGORIES;
-  }, [masterCategories]);
+  }, [masterCategories, operations]);
 
   const openReceiptModal = useCallback(() => {
     setReceiptFileError(null);
@@ -895,13 +898,21 @@ export const ExpensesMock: React.FC<ExpensesMockProps> = ({ selectedBranch, date
 
       const resolvedOp = operations.find((o) => o.active && o.state === 1) ?? operations.find((o) => o.active) ?? null;
       const defaultOpCategoryId = resolvedOp?.id ?? null;
+      const opStateById = new Map(
+        operations.map((o) => [String(o.id), Number(o.state) === 1 ? 1 : 0] as const),
+      );
       const categoryMap = new Map<string, string>();
 
       const resolveCategory = (extractedCategory: string): string => {
         const key = String(extractedCategory || '').trim() || 'Others';
         const cached = categoryMap.get(key);
         if (cached) return cached;
-        const masterCatId = resolveExistingMasterCategoryId(masterCategories, key, defaultOpCategoryId);
+        const masterCatId = resolveExistingMasterCategoryId(
+          masterCategories,
+          key,
+          defaultOpCategoryId,
+          opStateById,
+        );
         categoryMap.set(key, masterCatId);
         return masterCatId;
       };

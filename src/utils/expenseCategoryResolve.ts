@@ -1,5 +1,7 @@
 import type { InventoryCategory } from '../services/inventoryService';
 
+export type OpStateById = Map<string, number> | Record<string, number>;
+
 function normalizeCategoryLabel(value: string): string {
   return String(value || '')
     .trim()
@@ -83,6 +85,127 @@ function isOfficialLabel(label: string): boolean {
   return hasLeadingNumber(label);
 }
 
+function getOpState(opCategoryId: string | null | undefined, opStateById?: OpStateById): number | undefined {
+  if (opCategoryId == null || opCategoryId === '' || !opStateById) return undefined;
+  const key = String(opCategoryId);
+  if (opStateById instanceof Map) return opStateById.get(key);
+  return opStateById[key];
+}
+
+/** Inventory-linked main categories (STATE=1), typically 식자재 / Food Supplies. */
+function isInventoryOp(opCategoryId: string | null | undefined, opStateById?: OpStateById): boolean {
+  return getOpState(opCategoryId, opStateById) === 1;
+}
+
+/**
+ * Operating-expense style subs that belong under 매장운영 / Operation (STATE=0),
+ * not under Food Supplies — even if a scanner leftover duplicate exists there.
+ */
+const OPS_LIKE_TAILS = new Set([
+  'supplies',
+  'indirect',
+  'indirect expenses',
+  'indirect expense',
+  'utilities',
+  'utilities / bills',
+  'bills',
+  'labor',
+  'benefits',
+  'labor, benefits',
+  'vehicle',
+  'gas',
+  'vehicle & gas',
+  'fixed costs',
+  'fixed costs, tax',
+  'tax',
+  'rent',
+]);
+
+const FOOD_LIKE_TAILS = new Set([
+  'meat',
+  'poultry',
+  'meat & poultry',
+  'seafood',
+  'produce',
+  'vegetables',
+  'fruits',
+  'vegetables & fruits',
+  'rice',
+  'grains',
+  'rice & grains',
+  'beverages',
+  'liquor',
+  'beverages & liquor',
+  'dairy',
+  'fresh food',
+  'dry goods',
+  'groceries',
+  'condiments',
+  'groceries & condiments',
+  'oil',
+  'sauce',
+  'seasoning',
+  'oil, sauce, seasoning',
+]);
+
+function isOpsLikeLabel(label: string): boolean {
+  const eng = englishTail(label);
+  const key = canonicalCategoryKey(label);
+  if (OPS_LIKE_TAILS.has(eng) || OPS_LIKE_TAILS.has(key)) return true;
+  return /(supply|supplies|indirect|utilit|labor|benefit|vehicle|\bgas\b|fixed cost|\btax\b|\brent\b)/i.test(
+    eng || key,
+  );
+}
+
+function isFoodLikeLabel(label: string): boolean {
+  const eng = englishTail(label);
+  const key = canonicalCategoryKey(label);
+  if (FOOD_LIKE_TAILS.has(eng) || FOOD_LIKE_TAILS.has(key)) return true;
+  return /(meat|poultry|seafood|produce|vegetable|fruit|rice|grain|beverage|liquor|dairy|fresh food|dry goods|grocer|condiment|seasoning|\boil\b|\bsauce\b)/i.test(
+    eng || key,
+  );
+}
+
+/**
+ * Prefer numbered official labels. When the same sub exists under both inventory
+ * (Food Supplies) and non-inventory (Operation), pick Operation for ops-like
+ * categories and Food Supplies for food-like ones — so receipt upload does not keep
+ * attaching Supplies/Indirect to Food Supplies leftovers.
+ */
+function preferBestCategory(
+  pool: InventoryCategory[],
+  preferredOpCategoryId: string | null,
+  opStateById?: OpStateById,
+): InventoryCategory | undefined {
+  if (pool.length === 0) return undefined;
+  if (pool.length === 1) return pool[0];
+
+  const numbered = pool.filter((cat) => isOfficialLabel(labelOf(cat)) || isOfficialLabel(cat.name || ''));
+  let candidates = numbered.length > 0 ? numbered : pool;
+
+  if (opStateById && candidates.length > 1) {
+    const inventory = candidates.filter((cat) => isInventoryOp(cat.opCategoryId, opStateById));
+    const nonInventory = candidates.filter((cat) => !isInventoryOp(cat.opCategoryId, opStateById));
+    if (inventory.length > 0 && nonInventory.length > 0) {
+      const sample = labelOf(candidates[0]) || candidates[0].name || '';
+      if (isOpsLikeLabel(sample)) {
+        candidates = nonInventory;
+      } else if (isFoodLikeLabel(sample)) {
+        candidates = inventory;
+      } else {
+        candidates = nonInventory;
+      }
+    }
+  }
+
+  if (preferredOpCategoryId) {
+    const preferred = candidates.filter((cat) => String(cat.opCategoryId) === String(preferredOpCategoryId));
+    if (preferred.length > 0) return preferred[0];
+  }
+
+  return candidates[0];
+}
+
 /** Prefer numbered official labels over unnumbered scanner leftovers. */
 function preferOfficialCategory(pool: InventoryCategory[]): InventoryCategory | undefined {
   if (pool.length === 0) return undefined;
@@ -94,9 +217,13 @@ function preferOfficialCategory(pool: InventoryCategory[]): InventoryCategory | 
  * Unique subcategory labels for AI extraction / matching.
  * Collapses numbered + unnumbered duplicates onto the official numbered label when present.
  * Also collapses variants that share the same English tail (e.g. 기타경비 vs 간접비 / Indirect*).
+ * When the same English tail exists under inventory + Operation, prefer Operation for ops-like labels.
  */
-export function preferredSubCategoryLabels(categories: InventoryCategory[]): string[] {
-  const byCanonical = new Map<string, string>();
+export function preferredSubCategoryLabels(
+  categories: InventoryCategory[],
+  opStateById?: OpStateById,
+): string[] {
+  const byCanonical = new Map<string, InventoryCategory>();
 
   for (const cat of categories) {
     if (cat.active === false) continue;
@@ -106,46 +233,49 @@ export function preferredSubCategoryLabels(categories: InventoryCategory[]): str
     if (!key) continue;
     const existing = byCanonical.get(key);
     if (!existing) {
-      byCanonical.set(key, label);
+      byCanonical.set(key, cat);
       continue;
     }
-    if (!isOfficialLabel(existing) && isOfficialLabel(label)) {
-      byCanonical.set(key, label);
-    }
+    const picked = preferBestCategory([existing, cat], null, opStateById);
+    if (picked) byCanonical.set(key, picked);
   }
 
-  const byEnglish = new Map<string, string>();
-  for (const label of byCanonical.values()) {
+  const byEnglish = new Map<string, InventoryCategory>();
+  for (const cat of byCanonical.values()) {
+    const label = labelOf(cat);
     const eng = englishTail(label);
     const collapseKey = eng || canonicalCategoryKey(label);
     const existing = byEnglish.get(collapseKey);
     if (!existing) {
-      byEnglish.set(collapseKey, label);
+      byEnglish.set(collapseKey, cat);
       continue;
     }
-    if (!isOfficialLabel(existing) && isOfficialLabel(label)) {
-      byEnglish.set(collapseKey, label);
-    }
+    const picked = preferBestCategory([existing, cat], null, opStateById);
+    if (picked) byEnglish.set(collapseKey, picked);
   }
 
-  return Array.from(byEnglish.values()).sort((a, b) => {
-    const numA = /^(\d+)\.?\s/.exec(a);
-    const numB = /^(\d+)\.?\s/.exec(b);
-    if (numA && numB) {
-      const nA = parseInt(numA[1], 10);
-      const nB = parseInt(numB[1], 10);
-      if (nA !== nB) return nA - nB;
-    }
-    if (numA && !numB) return -1;
-    if (!numA && numB) return 1;
-    return a.localeCompare(b, undefined, { numeric: true });
-  });
+  return Array.from(byEnglish.values())
+    .map((cat) => labelOf(cat))
+    .filter(Boolean)
+    .sort((a, b) => {
+      const numA = /^(\d+)\.?\s/.exec(a);
+      const numB = /^(\d+)\.?\s/.exec(b);
+      if (numA && numB) {
+        const nA = parseInt(numA[1], 10);
+        const nB = parseInt(numB[1], 10);
+        if (nA !== nB) return nA - nB;
+      }
+      if (numA && !numB) return -1;
+      if (!numA && numB) return 1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
 }
 
 function pickMasterCategoryForSubCategory(
   categories: InventoryCategory[],
   subCategoryLabel: string,
   preferredOpCategoryId: string | null,
+  opStateById?: OpStateById,
 ): InventoryCategory | undefined {
   const targetKey = canonicalCategoryKey(subCategoryLabel);
   const matches = categories.filter((cat) => {
@@ -155,12 +285,7 @@ function pickMasterCategoryForSubCategory(
   });
   if (matches.length === 0) return undefined;
 
-  const preferredOpMatches = preferredOpCategoryId
-    ? matches.filter((cat) => cat.opCategoryId === preferredOpCategoryId)
-    : matches;
-  const pool = preferredOpMatches.length > 0 ? preferredOpMatches : matches;
-
-  return preferOfficialCategory(pool);
+  return preferBestCategory(matches, preferredOpCategoryId, opStateById);
 }
 
 function findFallbackMasterCategory(
@@ -187,12 +312,14 @@ function findFallbackMasterCategory(
 /**
  * Map an extracted receipt category to an existing master category id.
  * Never creates new sub categories — only uses rows already in RestoAdmin.
- * Prefers numbered official rows when numbered + unnumbered duplicates exist.
+ * Prefers numbered official rows; when Supplies/Indirect exist under both Food
+ * Supplies and Operation, prefers Operation.
  */
 export function resolveExistingMasterCategoryId(
   categories: InventoryCategory[],
   extractedCategory: string,
   preferredOpCategoryId: string | null,
+  opStateById?: OpStateById,
 ): string {
   const active = categories.filter((c) => c.active);
   if (!active.length) {
@@ -218,17 +345,13 @@ export function resolveExistingMasterCategoryId(
     });
 
     if (strongMatches.length > 0) {
-      const preferredOpMatches = preferredOpCategoryId
-        ? strongMatches.filter((cat) => cat.opCategoryId === preferredOpCategoryId)
-        : strongMatches;
-      const pool = preferredOpMatches.length > 0 ? preferredOpMatches : strongMatches;
-      const picked = preferOfficialCategory(pool);
+      const picked = preferBestCategory(strongMatches, preferredOpCategoryId, opStateById);
       if (picked) return picked.id;
     }
 
     let bestLabel = '';
     let bestScore = 0;
-    for (const label of preferredSubCategoryLabels(active)) {
+    for (const label of preferredSubCategoryLabels(active, opStateById)) {
       const score = categoryMatchScore(raw, label);
       if (score > bestScore) {
         bestScore = score;
@@ -237,7 +360,12 @@ export function resolveExistingMasterCategoryId(
     }
 
     if (bestScore >= 60 && bestLabel) {
-      const matched = pickMasterCategoryForSubCategory(active, bestLabel, preferredOpCategoryId);
+      const matched = pickMasterCategoryForSubCategory(
+        active,
+        bestLabel,
+        preferredOpCategoryId,
+        opStateById,
+      );
       if (matched) return matched.id;
     }
   }
