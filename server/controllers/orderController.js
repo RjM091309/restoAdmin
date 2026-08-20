@@ -1113,6 +1113,69 @@ class OrderController {
 			return ApiResponse.error(res, 'Failed to update order status', 500, error.message);
 		}
 	}
+
+	static async updateEncodedDt(req, res) {
+		try {
+			const { id } = req.params;
+			const encodedRaw = req.body?.ENCODED_DT ?? req.body?.encoded_dt ?? req.body?.encodedDt ?? null;
+			const encodedDt = OrderModel.normalizeEncodedDt(encodedRaw);
+			if (!encodedDt) {
+				return ApiResponse.badRequest(res, 'ENCODED_DT is required (YYYY-MM-DD HH:MM:SS)');
+			}
+
+			const order = await OrderModel.getById(id);
+			if (!order) {
+				return ApiResponse.notFound(res, 'Order');
+			}
+
+			const userId = req.session?.user_id || req.user?.user_id || null;
+			const updated = await OrderModel.updateEncodedDtCascade(id, encodedDt, userId);
+			const refreshed = await OrderModel.getById(id);
+
+			socketService.emitOrderUpdate(id, {
+				order_id: id,
+				order_no: refreshed?.ORDER_NO,
+				encoded_dt: encodedDt,
+			});
+
+			return ApiResponse.success(
+				res,
+				{ order_id: parseInt(id, 10), encoded_dt: encodedDt, updated },
+				'Order encoded date updated successfully'
+			);
+		} catch (error) {
+			console.error('Error updating order encoded date:', error);
+			return ApiResponse.error(res, 'Failed to update encoded date', 500, error.message);
+		}
+	}
+
+	static async softDelete(req, res) {
+		try {
+			const { id } = req.params;
+			const order = await OrderModel.getById(id);
+			if (!order) {
+				return ApiResponse.notFound(res, 'Order');
+			}
+
+			const userId = req.session?.user_id || req.user?.user_id || null;
+			const updated = await OrderModel.softDeleteCascade(id, userId);
+
+			socketService.emitOrderUpdate(id, {
+				order_id: id,
+				order_no: order.ORDER_NO,
+				status: -2,
+			});
+
+			return ApiResponse.success(
+				res,
+				{ order_id: parseInt(id, 10), status: -2, updated },
+				'Order soft-deleted successfully'
+			);
+		} catch (error) {
+			console.error('Error soft-deleting order:', error);
+			return ApiResponse.error(res, 'Failed to soft-delete order', 500, error.message);
+		}
+	}
 }
 
 module.exports = OrderController;

@@ -41,118 +41,127 @@ class ApiController {
 				});
 			}
 
-			const user = await UserModel.findByUsernameWithRole(username);
+			const candidates = await UserModel.findAllByUsernameWithRole(username);
 
-			if (user) {
-				const storedPassword = user.PASSWORD;
-				const salt = user.SALT;
-				const userRole = user.role || null;
-
-				let isValid = false;
-				let isLegacy = false;
-
-				if (isArgonHash(storedPassword)) {
-					isValid = await argon2.verify(storedPassword, password);
-				} else { 
-					const hashedMD5 = generateMD5(salt + password);
-					isValid = (hashedMD5 === storedPassword);
-					isLegacy = true;
-				}
-
-				if (isValid) {
-					const allowedPermissions = [1, 2, 3, 14, 15, 16]; 
-					const userPermissions = parseInt(user.PERMISSIONS, 10);
-					
-					console.log(`[${timestamp}] [LOGIN CHECK] ${username} - PERMISSIONS: ${user.PERMISSIONS}, parsed: ${userPermissions}, allowed: [${allowedPermissions.join(', ')}]`);
-					
-					if (!allowedPermissions.includes(userPermissions)) {
-						console.log(`[${timestamp}] [LOGIN FAILED] ${username} - Not an allowed mobile app user`);
-						return res.status(403).json({
-							success: false,
-							error: 'This account is for web admin only. Please use the web application to login.'
-						});
-					}
-					
-					console.log(`[${timestamp}] [LOGIN PERMISSION CHECK PASSED] ${username} - PERMISSIONS: ${userPermissions}`);
-
-					if (isLegacy) {
-						const newHash = await argon2.hash(password);
-						await UserModel.updatePassword(user.IDNo, newHash);
-					}
-
-					await UserModel.updateLastLogin(user.IDNo);
-
-					console.log(`[${timestamp}] [LOGIN] ${username}`);
-
-					let branches = [];
-					try {
-						if (user.PERMISSIONS === 1) {
-							branches = await BranchModel.getAllActive();
-						} else {
-							branches = await UserBranchModel.getBranchesByUserId(user.IDNo);
-						}
-					} catch (branchError) {
-						console.error(`[${timestamp}] [LOGIN] Error getting branches for user ${user.IDNo}:`, branchError);
-						branches = [];
-					}
-
-					// Resolve branch metadata for per-branch users so the frontend can display the real name immediately.
-					let branchMeta = null;
-					try {
-						if (user.BRANCH_ID != null && user.BRANCH_ID !== '') {
-							branchMeta = await BranchModel.getById(user.BRANCH_ID);
-						}
-					} catch (_) {
-						branchMeta = null;
-					}
-
-					const tokenPayload = {
-						user_id: user.IDNo,
-						username: user.USERNAME,
-						permissions: user.PERMISSIONS,
-						firstname: user.FIRSTNAME,
-						lastname: user.LASTNAME,
-						branch_id: user.BRANCH_ID || null,
-						branch_name: branchMeta?.BRANCH_NAME || null,
-						branch_code: branchMeta?.BRANCH_CODE || null,
-					};
-					const tokens = generateTokenPair(tokenPayload);
-
-					return res.json({
-						success: true,
-						data: {
-							user_id: user.IDNo,
-							username: user.USERNAME,
-							firstname: user.FIRSTNAME,
-							lastname: user.LASTNAME,
-							permissions: user.PERMISSIONS,
-							branch_id: user.BRANCH_ID || null,
-							branch_name: branchMeta?.BRANCH_NAME || null,
-							branch_code: branchMeta?.BRANCH_CODE || null,
-							role: userRole,
-							table_id: user.TABLE_ID || null,
-							branches: branches
-						},
-						tokens: {
-							accessToken: tokens.accessToken,
-							refreshToken: tokens.refreshToken,
-							expiresIn: tokens.expiresIn
-						}
-					});
-				} else {
-					console.log(`[${timestamp}] [LOGIN FAILED] ${username}`);
-					return res.status(401).json({
-						success: false,
-						error: 'Incorrect password'
-					});
-				}
-			} else {
+			if (!candidates.length) {
 				console.log(`[${timestamp}] [LOGIN FAILED] ${username}`);
 				return res.status(401).json({
 					success: false,
 					error: 'User not found or inactive'
 				});
 			}
+
+			const matches = [];
+			for (const user of candidates) {
+				const storedPassword = user.PASSWORD;
+				const salt = user.SALT;
+				let isValid = false;
+				let isLegacy = false;
+
+				if (isArgonHash(storedPassword)) {
+					isValid = await argon2.verify(storedPassword, password);
+				} else {
+					const hashedMD5 = generateMD5(salt + password);
+					isValid = (hashedMD5 === storedPassword);
+					isLegacy = true;
+				}
+
+				if (isValid) {
+					matches.push({ user, isLegacy });
+				}
+			}
+
+			if (!matches.length) {
+				console.log(`[${timestamp}] [LOGIN FAILED] ${username}`);
+				return res.status(401).json({
+					success: false,
+					error: 'Incorrect password'
+				});
+			}
+
+			const picked = matches.find((m) => parseInt(m.user.PERMISSIONS, 10) === 1) || matches[0];
+			const user = picked.user;
+			const isLegacy = picked.isLegacy;
+			const userRole = user.role || null;
+			const allowedPermissions = [1, 2, 3, 14, 15, 16];
+			const userPermissions = parseInt(user.PERMISSIONS, 10);
+
+			console.log(`[${timestamp}] [LOGIN CHECK] ${username} - PERMISSIONS: ${user.PERMISSIONS}, parsed: ${userPermissions}, allowed: [${allowedPermissions.join(', ')}]`);
+
+			if (!allowedPermissions.includes(userPermissions)) {
+				console.log(`[${timestamp}] [LOGIN FAILED] ${username} - Not an allowed mobile app user`);
+				return res.status(403).json({
+					success: false,
+					error: 'This account is for web admin only. Please use the web application to login.'
+				});
+			}
+
+			console.log(`[${timestamp}] [LOGIN PERMISSION CHECK PASSED] ${username} - PERMISSIONS: ${userPermissions}`);
+
+			if (isLegacy) {
+				const newHash = await argon2.hash(password);
+				await UserModel.updatePassword(user.IDNo, newHash);
+			}
+
+			await UserModel.updateLastLogin(user.IDNo);
+
+			console.log(`[${timestamp}] [LOGIN] ${username} (user_id=${user.IDNo}, role=${userRole || 'n/a'})`);
+
+			let branches = [];
+			try {
+				if (user.PERMISSIONS === 1) {
+					branches = await BranchModel.getAllActive();
+				} else {
+					branches = await UserBranchModel.getBranchesByUserId(user.IDNo);
+				}
+			} catch (branchError) {
+				console.error(`[${timestamp}] [LOGIN] Error getting branches for user ${user.IDNo}:`, branchError);
+				branches = [];
+			}
+
+			// Resolve branch metadata for per-branch users so the frontend can display the real name immediately.
+			let branchMeta = null;
+			try {
+				if (user.BRANCH_ID != null && user.BRANCH_ID !== '') {
+					branchMeta = await BranchModel.getById(user.BRANCH_ID);
+				}
+			} catch (_) {
+				branchMeta = null;
+			}
+
+			const tokenPayload = {
+				user_id: user.IDNo,
+				username: user.USERNAME,
+				permissions: user.PERMISSIONS,
+				firstname: user.FIRSTNAME,
+				lastname: user.LASTNAME,
+				branch_id: user.BRANCH_ID || null,
+				branch_name: branchMeta?.BRANCH_NAME || null,
+				branch_code: branchMeta?.BRANCH_CODE || null,
+			};
+			const tokens = generateTokenPair(tokenPayload);
+
+			return res.json({
+				success: true,
+				data: {
+					user_id: user.IDNo,
+					username: user.USERNAME,
+					firstname: user.FIRSTNAME,
+					lastname: user.LASTNAME,
+					permissions: user.PERMISSIONS,
+					branch_id: user.BRANCH_ID || null,
+					branch_name: branchMeta?.BRANCH_NAME || null,
+					branch_code: branchMeta?.BRANCH_CODE || null,
+					role: userRole,
+					table_id: user.TABLE_ID || null,
+					branches: branches
+				},
+				tokens: {
+					accessToken: tokens.accessToken,
+					refreshToken: tokens.refreshToken,
+					expiresIn: tokens.expiresIn
+				}
+			});
 		} catch (error) {
 			console.error(`[${timestamp}] [LOGIN ERROR] ${req.body?.username || 'N/A'}`);
 			return res.status(500).json({

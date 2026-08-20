@@ -142,6 +142,23 @@ const requireAdmin = (req, res, next) => {
 };
 
 /**
+ * Restrict to the 3coredev developer account (username check, not role).
+ * Must be used after authenticate()
+ */
+const require3core = (req, res, next) => {
+	if (!req.user) {
+		return ApiResponse.unauthorized(res, 'Authentication required');
+	}
+
+	const username = String(req.user.username || req.session?.username || '').trim().toLowerCase();
+	if (username !== '3coredev') {
+		return ApiResponse.forbidden(res, 'Only the 3coredev account can perform this action');
+	}
+
+	next();
+};
+
+/**
  * Permission-based authorization
  * @param {Array|Number} requiredPermissions - Required permission level(s)
  */
@@ -168,6 +185,7 @@ module.exports = {
 	authenticate,
 	optionalAuthenticate,
 	requireAdmin,
+	require3core,
 	requirePermission
 };
 

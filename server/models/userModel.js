@@ -4,12 +4,14 @@ const argon2 = require('argon2');
 
 class UserModel {
     static async findByUsername(username) {
-        const query = 'SELECT * FROM user_info WHERE USERNAME = ? AND ACTIVE = 1';
+        const query = `SELECT * FROM user_info
+            WHERE USERNAME = ? AND ACTIVE = 1
+            ORDER BY (PERMISSIONS = 1) DESC, IDNo DESC`;
         const [rows] = await pool.execute(query, [username]);
         return rows[0];
     }
 
-    static async findByUsernameWithRole(username) {
+    static async findAllByUsernameWithRole(username) {
         const query = `
             SELECT 
                 u.*,
@@ -17,8 +19,14 @@ class UserModel {
             FROM user_info u
             LEFT JOIN user_role ur ON ur.IDno = u.PERMISSIONS
             WHERE u.USERNAME = ? AND u.ACTIVE = 1
+            ORDER BY (u.PERMISSIONS = 1) DESC, u.IDNo DESC
         `;
         const [rows] = await pool.execute(query, [username]);
+        return rows;
+    }
+
+    static async findByUsernameWithRole(username) {
+        const rows = await this.findAllByUsernameWithRole(username);
         return rows[0];
     }
 

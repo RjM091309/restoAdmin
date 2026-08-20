@@ -470,6 +470,87 @@ class OrderModel {
 			).toFixed(2)
 		);
 	}
+
+	/** Normalize UI/API datetime to MySQL DATETIME `YYYY-MM-DD HH:MM:SS`. */
+	static normalizeEncodedDt(raw) {
+		const s = String(raw ?? '').trim().replace('T', ' ');
+		const m = s.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/);
+		if (!m) return null;
+		return `${m[1]} ${m[2]}:${m[3]}:${m[4] ?? '00'}`;
+	}
+
+	/**
+	 * Set ENCODED_DT on orders + related sales tables (same calendar timestamp).
+	 */
+	static async updateEncodedDtCascade(orderId, encodedDt, userId = null) {
+		const conn = await pool.getConnection();
+		try {
+			await conn.beginTransaction();
+			const [orderResult] = await conn.execute(
+				`UPDATE orders
+				 SET ENCODED_DT = ?, EDITED_BY = COALESCE(?, EDITED_BY), EDITED_DT = CURRENT_TIMESTAMP
+				 WHERE IDNo = ?`,
+				[encodedDt, userId, orderId]
+			);
+			const [billingResult] = await conn.execute(
+				`UPDATE billing SET ENCODED_DT = ? WHERE ORDER_ID = ?`,
+				[encodedDt, orderId]
+			);
+			const [itemsResult] = await conn.execute(
+				`UPDATE order_items SET ENCODED_DT = ? WHERE ORDER_ID = ?`,
+				[encodedDt, orderId]
+			);
+			const [payResult] = await conn.execute(
+				`UPDATE payment_transactions SET ENCODED_DT = ? WHERE ORDER_ID = ?`,
+				[encodedDt, orderId]
+			);
+			const [scanResult] = await conn.execute(
+				`UPDATE receipt_scan_history SET ENCODED_DT = ? WHERE ORDER_ID = ?`,
+				[encodedDt, orderId]
+			);
+			await conn.commit();
+			return {
+				orders: orderResult.affectedRows,
+				billing: billingResult.affectedRows,
+				order_items: itemsResult.affectedRows,
+				payment_transactions: payResult.affectedRows,
+				receipt_scan_history: scanResult.affectedRows,
+			};
+		} catch (err) {
+			await conn.rollback();
+			throw err;
+		} finally {
+			conn.release();
+		}
+	}
+
+	/** Soft delete: STATUS = -2 on orders and billing. */
+	static async softDeleteCascade(orderId, userId = null) {
+		const conn = await pool.getConnection();
+		try {
+			await conn.beginTransaction();
+			const [orderResult] = await conn.execute(
+				`UPDATE orders
+				 SET STATUS = -2, EDITED_BY = COALESCE(?, EDITED_BY), EDITED_DT = CURRENT_TIMESTAMP
+				 WHERE IDNo = ?`,
+				[userId, orderId]
+			);
+			const [billingResult] = await conn.execute(
+				`UPDATE billing SET STATUS = -2 WHERE ORDER_ID = ?`,
+				[orderId]
+			);
+			await conn.commit();
+			return {
+				orders: orderResult.affectedRows,
+				billing: billingResult.affectedRows,
+			};
+		} catch (err) {
+			await conn.rollback();
+			throw err;
+		} finally {
+			conn.release();
+		}
+	}
 }
 
 module.exports = OrderModel;

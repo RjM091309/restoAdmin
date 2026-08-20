@@ -7,7 +7,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticate } = require('../middleware/unifiedAuth');
+const { authenticate, require3core } = require('../middleware/unifiedAuth');
 const OrderController = require('../controllers/orderController');
 
 // Orders page route removed - use API endpoints instead
@@ -22,6 +22,8 @@ router.post('/orders/manual-settled', authenticate, OrderController.createManual
 router.post('/orders/:id/items', authenticate, OrderController.addItemsToOrder);
 router.put('/orders/:id', authenticate, OrderController.update);
 router.patch('/orders/:id/status', authenticate, OrderController.updateStatus);
+router.patch('/orders/:id/encoded-dt', authenticate, require3core, OrderController.updateEncodedDt);
+router.patch('/orders/:id/soft-delete', authenticate, require3core, OrderController.softDelete);
 router.put('/order_items/:id/status', authenticate, OrderController.updateItemStatus);
 
 // Order Items Individual Operations

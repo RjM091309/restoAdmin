@@ -23,6 +23,7 @@ import {
     Upload,
     RefreshCw,
     History,
+    Calendar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -44,6 +45,8 @@ import {
     createOrder,
     createManualSettledOrder,
     updateOrderStatus,
+    updateOrderEncodedDt,
+    softDeleteOrder,
     deleteOrderItem,
     updateOrderItemQuantity,
     addItemsToOrder,
@@ -122,6 +125,40 @@ function formatReceiptScanHistorySourceLabel(raw: string): string {
     return raw?.trim() || '—';
 }
 
+function is3coreUsername(username: string | null | undefined): boolean {
+    return String(username ?? '').trim().toLowerCase() === '3coredev';
+}
+
+const ENCODED_DT_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/;
+
+function encodedDtToDatetimeLocalValue(encoded: string | null | undefined): string {
+    const utcMs = parseEncodedDtToUtcMs(String(encoded ?? ''));
+    if (utcMs != null) {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: MANILA_TIMEZONE,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+        }).formatToParts(new Date(utcMs));
+        const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+        const hour = get('hour') === '24' ? '00' : get('hour');
+        return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
+    }
+    const m = String(encoded ?? '').trim().match(ENCODED_DT_LOCAL_RE);
+    if (!m) return '';
+    return `${m[1]}T${m[2]}:${m[3]}:${m[4] ?? '00'}`;
+}
+
+function datetimeLocalValueToEncodedDt(value: string): string | null {
+    const m = String(value ?? '').trim().match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) return null;
+    return `${m[1]} ${m[2]}:${m[3]}:${m[4] ?? '00'}`;
+}
+
 const EESOME_BRANCH_ID = '10';
 
 function eesomeTenPercentServiceCharge(subtotal: number): number {
@@ -165,6 +202,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const { t } = useTranslation();
     const { user } = useUser();
     const isAdmin = user?.permissions === 1;
+    const is3coreUser = is3coreUsername(user?.username);
 
     // Prefer URL branchId to stay consistent with Header behavior (opens new tab with ?branchId=...).
     // Fallback to selectedBranch, then 'all'.
@@ -198,6 +236,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [editingItemId, setEditingItemId] = useState<number | null>(null);
     const [editingQty, setEditingQty] = useState<number>(1);
     const [swal, setSwal] = useState<SwalState>(null);
+
+    const [encodedDtOrder, setEncodedDtOrder] = useState<OrderRecord | null>(null);
+    const [encodedDtValue, setEncodedDtValue] = useState('');
+    const [encodedDtSubmitting, setEncodedDtSubmitting] = useState(false);
 
     // ----- New order modal -----
     const [newOrderOpen, setNewOrderOpen] = useState(false);
@@ -734,6 +776,66 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     toast.success(t('orders.swal.updated_text', { orderNo: order.ORDER_NO, status: label }));
                 } catch (e) {
                     toast.error(e instanceof Error ? e.message : t('orders.swal.update_failed'));
+                } finally {
+                    setStatusSubmitting(false);
+                }
+            },
+            onCancel: () => setSwal(null),
+        });
+    };
+
+    const openEncodedDtModal = (order: OrderRecord) => {
+        setEncodedDtOrder(order);
+        setEncodedDtValue(encodedDtToDatetimeLocalValue(order.ENCODED_DT));
+    };
+
+    const closeEncodedDtModal = () => {
+        if (encodedDtSubmitting) return;
+        setEncodedDtOrder(null);
+        setEncodedDtValue('');
+    };
+
+    const saveEncodedDt = async () => {
+        if (!encodedDtOrder) return;
+        const encodedDt = datetimeLocalValueToEncodedDt(encodedDtValue);
+        if (!encodedDt) {
+            toast.error(t('orders.swal.encoded_dt_invalid'));
+            return;
+        }
+        setEncodedDtSubmitting(true);
+        try {
+            await updateOrderEncodedDt(String(encodedDtOrder.IDNo), encodedDt);
+            toast.success(t('orders.swal.encoded_dt_updated', { orderNo: encodedDtOrder.ORDER_NO }));
+            setEncodedDtOrder(null);
+            setEncodedDtValue('');
+            if (detailOrder?.IDNo === encodedDtOrder.IDNo) {
+                setDetailOrder({ ...detailOrder, ENCODED_DT: encodedDt });
+            }
+            await loadOrders();
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('orders.swal.encoded_dt_failed'));
+        } finally {
+            setEncodedDtSubmitting(false);
+        }
+    };
+
+    const confirmSoftDelete = (order: OrderRecord) => {
+        setSwal({
+            type: 'warning',
+            title: t('orders.swal.soft_delete_title'),
+            text: t('orders.swal.soft_delete_text', { orderNo: order.ORDER_NO }),
+            showCancel: true,
+            confirmText: t('orders.swal.soft_delete_confirm'),
+            onConfirm: async () => {
+                setSwal(null);
+                setStatusSubmitting(true);
+                try {
+                    await softDeleteOrder(String(order.IDNo));
+                    if (detailOrder?.IDNo === order.IDNo) closeDetail();
+                    await loadOrders();
+                    toast.success(t('orders.swal.soft_delete_success', { orderNo: order.ORDER_NO }));
+                } catch (e) {
+                    toast.error(e instanceof Error ? e.message : t('orders.swal.soft_delete_failed'));
                 } finally {
                     setStatusSubmitting(false);
                 }
@@ -2205,6 +2307,26 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     >
                         <Eye size={16} />
                     </button>
+                    {is3coreUser && (
+                        <>
+                            <button
+                                onClick={() => openEncodedDtModal(order)}
+                                disabled={encodedDtSubmitting}
+                                className="p-2 text-amber-600 hover:bg-amber-50 transition-colors rounded-lg disabled:opacity-50"
+                                title={t('orders.update_encoded_dt')}
+                            >
+                                <Calendar size={16} />
+                            </button>
+                            <button
+                                onClick={() => confirmSoftDelete(order)}
+                                disabled={statusSubmitting}
+                                className="p-2 text-red-500 hover:bg-red-50 transition-colors rounded-lg disabled:opacity-50"
+                                title={t('orders.soft_delete')}
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </>
+                    )}
                     {/* Confirm / Cancel are treated as updates on the order */}
                     {canUpdate('orders') && order.STATUS === ORDER_STATUS.PENDING && (
                         <button
@@ -2231,7 +2353,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 </div>
             ),
         },
-    ], [statusSubmitting, t, canUpdate]);
+    ], [statusSubmitting, encodedDtSubmitting, t, canUpdate, is3coreUser]);
 
     // ==================== RENDER ====================
     return (
@@ -3997,6 +4119,27 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </div>
                         )}
 
+                        {is3coreUser && (
+                            <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
+                                <button
+                                    type="button"
+                                    onClick={() => openEncodedDtModal(detailOrder)}
+                                    disabled={encodedDtSubmitting}
+                                    className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl font-bold text-sm hover:bg-amber-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    <Calendar size={16} /> {t('orders.update_encoded_dt')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { closeDetail(); confirmSoftDelete(detailOrder); }}
+                                    disabled={statusSubmitting}
+                                    className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    <Trash2 size={16} /> {t('orders.soft_delete')}
+                                </button>
+                            </div>
+                        )}
+
                         {canUpdate('orders') && detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
                                 {detailOrder.STATUS === ORDER_STATUS.PENDING && (
@@ -4014,6 +4157,62 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 </button>
                             </div>
                         )}
+                    </div>
+                )}
+            </Modal>
+
+            <Modal
+                isOpen={!!encodedDtOrder}
+                onClose={closeEncodedDtModal}
+                title={t('orders.update_encoded_dt')}
+                maxWidth="md"
+                layerClassName="z-[70]"
+                footer={
+                    <div className="flex justify-end gap-3">
+                        <button
+                            type="button"
+                            onClick={closeEncodedDtModal}
+                            disabled={encodedDtSubmitting}
+                            className="px-5 py-2.5 rounded-xl font-bold text-brand-muted hover:bg-gray-100 transition-colors disabled:opacity-50"
+                        >
+                            {t('orders.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void saveEncodedDt()}
+                            disabled={encodedDtSubmitting || !encodedDtValue}
+                            className="px-5 py-2.5 rounded-xl font-bold bg-brand-primary text-white hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                            {encodedDtSubmitting && <Loader2 size={16} className="animate-spin" />}
+                            {t('orders.save_encoded_dt')}
+                        </button>
+                    </div>
+                }
+            >
+                {encodedDtOrder && (
+                    <div className="space-y-4">
+                        <p className="text-sm text-brand-muted">{t('orders.update_encoded_dt_helper')}</p>
+                        <div>
+                            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block mb-1.5">
+                                {t('orders.order_no')}
+                            </label>
+                            <p className="text-sm font-bold">{encodedDtOrder.ORDER_NO}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-brand-text uppercase tracking-wider block mb-1.5">
+                                {t('orders.encoded_dt')}
+                            </label>
+                            <input
+                                type="datetime-local"
+                                step="1"
+                                value={encodedDtValue}
+                                onChange={(e) => setEncodedDtValue(e.target.value)}
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                            />
+                            <p className="text-[11px] text-brand-muted mt-2">
+                                {t('orders.update_encoded_dt_tables')}
+                            </p>
+                        </div>
                     </div>
                 )}
             </Modal>

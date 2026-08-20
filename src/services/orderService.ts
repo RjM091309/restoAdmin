@@ -217,6 +217,32 @@ export async function updateOrderStatus(orderId: string, status: number): Promis
     await handleResponse<{ order_id: number; status: number }>(response);
 }
 
+export async function updateOrderEncodedDt(orderId: string, encodedDt: string): Promise<void> {
+    const response = await fetch(buildUrl(`/orders/${orderId}/encoded-dt`), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify({ ENCODED_DT: encodedDt }),
+    });
+    await handleResponse<{ order_id: number; encoded_dt: string }>(response);
+}
+
+export async function softDeleteOrder(orderId: string): Promise<void> {
+    const response = await fetch(buildUrl(`/orders/${orderId}/soft-delete`), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify({}),
+    });
+    await handleResponse<{ order_id: number; status: number }>(response);
+}
+
 export type InventoryInsufficientItem = {
     ingredientName: string;
     required: number;
