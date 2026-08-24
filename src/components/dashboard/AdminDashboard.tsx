@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { type Branch } from '../partials/Header';
 import { Skeleton } from '../ui/Skeleton';
 import { BranchPerformanceCard, type BranchPerformanceData } from './BranchPerformanceCard';
-import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Calendar, ChevronDown, ChevronRight, ChevronLeft, ArrowLeft, RotateCcw } from 'lucide-react';
+import { cn } from '../../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import DatePicker from 'react-datepicker';
 import {
@@ -35,6 +36,7 @@ import {
   formatDateToLocalYmd,
   formatYmdDisplay,
   getManilaMonthToDateRange,
+  getManilaTodayYmd,
   parseYmdToLocalDate,
 } from '../../utils/manilaDateTime';
 
@@ -204,11 +206,30 @@ type UnifiedComparisonRow = ComparisonRow | ComparisonSectionRow;
 const isSectionRow = (row: UnifiedComparisonRow): row is ComparisonSectionRow =>
   (row as ComparisonSectionRow).rowType === 'section';
 
-const formatDate = (dateStr: string) => formatYmdDisplay(dateStr);
+const localeForLanguage = (lng: string) => {
+  const base = String(lng || 'en').split('-')[0];
+  if (base === 'ja') return 'ja-JP';
+  if (base === 'ko') return 'ko-KR';
+  if (base === 'zh') return 'zh-CN';
+  return 'en-US';
+};
+
+const formatDate = (dateStr: string, lng?: string) =>
+  formatYmdDisplay(dateStr, lng ? localeForLanguage(lng) : undefined);
 
 const toDate = (s: string): Date | null => (s ? parseYmdToLocalDate(s) : null);
 
 const toYYYYMMDD = (d: Date): string => formatDateToLocalYmd(d);
+
+const getFullMonthRange = (monthDate: Date): [Date, Date] => {
+  const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+  const manilaToday = parseYmdToLocalDate(getManilaTodayYmd()) ?? new Date();
+  const end = monthEnd.getTime() > manilaToday.getTime() ? manilaToday : monthEnd;
+  return [start, end];
+};
+
+const DATE_PICKER_MONTHS_SHOWN = 3;
 
 const parseLocalYmd = (s: string): Date | null => {
   const match = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1192,7 +1213,7 @@ const preferNonEmptyRecord = <T,>(
 ): Record<number, T> => (Object.keys(next).length > 0 ? next : prev);
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, dateRange, onDateRangeChange }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const analyticsReqIdRef = useRef(0);
   const trendReqIdRef = useRef(0);
   const isFirstTrendEffectRef = useRef(true);
@@ -2803,6 +2824,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
   const compareStartDate = toDate(compareDateRange.start);
   const compareEndDate = toDate(compareDateRange.end);
   const comparePickerValue: [Date | null, Date | null] = [compareStartDate, compareEndDate];
+  const compareDefaultMonth = getCurrentMonthRange();
+  const isCompareDefaultMonth =
+    compareDateRange.start === compareDefaultMonth.start &&
+    compareDateRange.end === compareDefaultMonth.end;
   const comparePanelWidthClass =
     selectedCount <= 2 ? 'w-[75vw] max-w-5xl' : selectedCount <= 4 ? 'w-[85vw] max-w-6xl' : 'w-[95vw] max-w-[1800px]';
   const compareTitle =
@@ -3082,12 +3107,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     return Math.max(fromBreakdown, Number(branch.totalExpenses) || 0);
   };
 
-  const handleCompareDateRangeChange = (update: [Date | null, Date | null] | null) => {
+  const handleCompareDateRangeChange = (
+    update: [Date | null, Date | null] | null,
+    options?: { closeOnComplete?: boolean },
+  ) => {
     const [s, e] = update ?? [null, null];
-    const nextRange = {
-      start: s ? toYYYYMMDD(s) : '',
-      end: e ? toYYYYMMDD(e) : '',
-    };
+    const manilaToday = getManilaTodayYmd();
+    let start = s ? toYYYYMMDD(s) : '';
+    let end = e ? toYYYYMMDD(e) : '';
+    if (end && end > manilaToday) end = manilaToday;
+    if (start && end && start > end) start = end;
+    const nextRange = { start, end };
+    const closeOnComplete = options?.closeOnComplete ?? true;
+    if (closeOnComplete && s && e) setIsCompareDateOpen(false);
+
+    // Same month clicked twice (or same range re-selected) — do not flip the
+    // skeleton on. The fetch effect only re-runs when start/end strings change,
+    // so loading would otherwise stay true forever.
+    if (start === compareDateRange.start && end === compareDateRange.end) return;
+
     // Show comparison skeleton as soon as a full range is picked so values don't
     // flash stale numbers while prior-period bundles reload.
     if (isComparePanelOpen && nextRange.start && nextRange.end) {
@@ -3095,7 +3133,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     }
     setCompareDateRange(nextRange);
     onDateRangeChange(nextRange);
-    if (s && e) setIsCompareDateOpen(false);
+  };
+
+  const resetCompareDateRangeToDefaultMonth = () => {
+    const def = getCurrentMonthRange();
+    handleCompareDateRangeChange([toDate(def.start), toDate(def.end)], { closeOnComplete: true });
   };
 
   const trendAnchorDate = useMemo(() => {
@@ -4934,7 +4976,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       {compareTitle}
                     </p>
                   </div>
-                  <div className="relative">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={resetCompareDateRangeToDefaultMonth}
+                      disabled={isCompareDefaultMonth || isComparePanelLoading}
+                      title={t('admin_dashboard.reset_date_range')}
+                      aria-label={t('admin_dashboard.reset_date_range')}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-brand-primary bg-brand-primary text-white shadow-sm hover:bg-brand-primary/90 hover:border-brand-primary/90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                    <div className="relative">
                     <button
                       type="button"
                       onClick={() => setIsCompareDateOpen((open) => !open)}
@@ -4943,7 +4996,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       <Calendar size={18} className="text-brand-primary" />
                       <span className="text-sm text-slate-700 whitespace-nowrap">
                         {compareDateRange.start && compareDateRange.end
-                          ? `${formatDate(compareDateRange.start)} - ${formatDate(compareDateRange.end)}`
+                          ? `${formatDate(compareDateRange.start, i18n.language)} - ${formatDate(compareDateRange.end, i18n.language)}`
                           : t('admin_dashboard.date_range')}
                       </span>
                       <ChevronDown size={16} className="text-brand-primary transition-colors" />
@@ -4957,19 +5010,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                           aria-hidden
                         />
                         <div className="absolute top-full right-0 mt-2 z-[60]">
+                          <div className="date-picker-multi-wrap">
                           <DatePicker
                             inline
                             selectsRange
+                            monthsShown={DATE_PICKER_MONTHS_SHOWN}
+                            showPreviousMonths
                             startDate={comparePickerValue[0]}
                             endDate={comparePickerValue[1]}
-                            onChange={handleCompareDateRangeChange}
+                            maxDate={parseYmdToLocalDate(getManilaTodayYmd()) ?? undefined}
+                            openToDate={comparePickerValue[1] ?? comparePickerValue[0] ?? undefined}
+                            onChange={(update) => handleCompareDateRangeChange(update, { closeOnComplete: true })}
                             dateFormat="MMM d, yyyy"
-                            calendarClassName="react-datepicker-material"
+                            calendarClassName="react-datepicker-material react-datepicker-material--multi"
                             isClearable
+                            renderCustomHeader={({
+                              monthDate,
+                              decreaseMonth,
+                              increaseMonth,
+                              prevMonthButtonDisabled,
+                              nextMonthButtonDisabled,
+                              customHeaderCount,
+                            }) => {
+                              const monthLabel = monthDate.toLocaleDateString(localeForLanguage(i18n.language), {
+                                month: 'long',
+                                year: 'numeric',
+                              });
+                              const isFirstMonth = customHeaderCount === 0;
+                              const isLastMonth = customHeaderCount === DATE_PICKER_MONTHS_SHOWN - 1;
+
+                              return (
+                                <div className="react-datepicker-multi-month-header flex items-center justify-between">
+                                  {isFirstMonth ? (
+                                    <button
+                                      type="button"
+                                      onClick={decreaseMonth}
+                                      disabled={prevMonthButtonDisabled}
+                                      className={cn(
+                                        'rounded transition-colors shrink-0',
+                                        prevMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                      )}
+                                      aria-label="Previous month"
+                                    >
+                                      <ArrowLeft size={14} className="text-brand-muted" />
+                                    </button>
+                                  ) : (
+                                    <span className="w-3 shrink-0" aria-hidden />
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleCompareDateRangeChange(getFullMonthRange(monthDate), { closeOnComplete: true });
+                                    }}
+                                    className="react-datepicker-multi-month-title font-bold text-brand-text hover:text-brand-primary cursor-pointer transition-colors rounded hover:bg-gray-100 text-center leading-tight"
+                                    aria-label={`Select all of ${monthLabel}`}
+                                  >
+                                    {monthLabel}
+                                  </button>
+
+                                  {isLastMonth ? (
+                                    <button
+                                      type="button"
+                                      onClick={increaseMonth}
+                                      disabled={nextMonthButtonDisabled}
+                                      className={cn(
+                                        'rounded transition-colors shrink-0',
+                                        nextMonthButtonDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 cursor-pointer'
+                                      )}
+                                      aria-label="Next month"
+                                    >
+                                      <ArrowLeft size={14} className="text-brand-muted rotate-180" />
+                                    </button>
+                                  ) : (
+                                    <span className="w-3 shrink-0" aria-hidden />
+                                  )}
+                                </div>
+                              );
+                            }}
                           />
+                          </div>
                         </div>
                       </>
                     )}
+                  </div>
                   </div>
                 </div>
 

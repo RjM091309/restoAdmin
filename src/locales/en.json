@@ -202,6 +202,7 @@
 		"comparison_board": "Branch Comparison Board",
 		"comparison_note": "Top = highest value, except Expenses (lowest is best)",
 		"date_range": "Date range",
+		"reset_date_range": "Reset to this month",
 		"branch_overview": "Branch overview",
 		"net_revenue": "Net Revenue",
 		"no_revenue_data": "No sales or expense data for the selected period.",

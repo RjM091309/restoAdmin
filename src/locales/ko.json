@@ -191,6 +191,7 @@
 		"comparison_board": "지점 비교 보드",
 		"comparison_note": "최고 = 가장 높은 값, 단 비용은 가장 낮은 값이 최선입니다",
 		"date_range": "날짜 범위",
+		"reset_date_range": "이번 달로 초기화",
 		"branch_overview": "지점 개요",
 		"net_revenue": "순이익",
 		"no_revenue_data": "선택한 기간에 매출 또는 비용 데이터가 없습니다.",
