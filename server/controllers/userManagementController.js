@@ -162,6 +162,11 @@ class UserManagementController {
                 results = await UserModel.getNonAdminUsersWithRoleAndBranch(currentBranchId);
             }
 
+            const currentUsername = req.user?.username || req.session?.username;
+            if (currentUsername !== '3coredev') {
+                results = results.filter(u => u.USERNAME !== '3coredev');
+            }
+
             if (UserManagementController.isJsonRequest(req)) {
                 res.json({ success: true, data: results });
             } else {
