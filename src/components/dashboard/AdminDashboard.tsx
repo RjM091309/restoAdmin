@@ -1740,14 +1740,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       options: { background?: boolean } = {},
     ) => {
       const { background = false } = options;
+      // Cached/shared summary is always the all-branches total (cache entries aren't branch-scoped);
+      // `summary` below is what actually renders, swapped to the focused branch's totals when applicable.
+      const allBranchesSummary =
+        payload.branchCardsData.length > 0
+          ? computeAllBranchesSummary(payload.branchCardsData, payload.expenseCategoryByBranch)
+          : payload.summary;
       const focusedBranch = activeBranchIdRef.current
         ? payload.branchCardsData.find((b) => b.id === activeBranchIdRef.current)
         : null;
       const summary = focusedBranch
         ? computeBranchSummary(focusedBranch, payload.expenseCategoryByBranch)
-        : payload.branchCardsData.length > 0
-          ? computeAllBranchesSummary(payload.branchCardsData, payload.expenseCategoryByBranch)
-          : payload.summary;
+        : allBranchesSummary;
 
       if (background) {
         setBranchCardsData((prev) =>
@@ -1788,7 +1792,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       }
 
       patchAdminDashboardCache(analyticsCacheKey, {
-        summary,
+        summary: allBranchesSummary,
         branchCardsData: payload.branchCardsData,
         branchRevenueDistribution: payload.branchRevenueDistribution,
         topProductsData: payload.topProductsData,
@@ -4750,7 +4754,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                             </span>
                           ))}
                           {dailyAverageSales != null && (
-                            <span className="ml-2 mr-8 text-sm font-medium text-slate-600">
+                            <span className="ml-2 mr-8 text-sm font-bold text-slate-600">
                               {t('admin_dashboard.daily_average')} : ₱{Math.round(dailyAverageSales).toLocaleString()}
                             </span>
                           )}
