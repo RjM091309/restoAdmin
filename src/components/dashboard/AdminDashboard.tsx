@@ -102,6 +102,24 @@ function computeAllBranchesSummary(
   };
 }
 
+/** Mirrors computeAllBranchesSummary's per-branch expense logic for a single focused branch. */
+function computeBranchSummary(
+  branch: BranchPerformanceData,
+  expenseCategoryByBranch: Record<number, Record<string, number>>,
+): SummaryData {
+  const branchMap = expenseCategoryByBranch[branch.id];
+  const fromBreakdown = branchMap
+    ? Object.values(branchMap).reduce((sum, v) => sum + (Number(v) || 0), 0)
+    : 0;
+  const totalSales = Number(branch.totalSales) || 0;
+  const totalExpenses = Math.max(fromBreakdown, Number(branch.totalExpenses) || 0);
+  return {
+    totalSales,
+    totalExpenses,
+    totalRevenue: totalSales - totalExpenses,
+  };
+}
+
 const SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v3';
 const LEGACY_SUMMARY_CACHE_PREFIX = 'admin_dashboard_summary_v1';
 
@@ -1722,8 +1740,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
       options: { background?: boolean } = {},
     ) => {
       const { background = false } = options;
-      const summary =
-        payload.branchCardsData.length > 0
+      const focusedBranch = activeBranchIdRef.current
+        ? payload.branchCardsData.find((b) => b.id === activeBranchIdRef.current)
+        : null;
+      const summary = focusedBranch
+        ? computeBranchSummary(focusedBranch, payload.expenseCategoryByBranch)
+        : payload.branchCardsData.length > 0
           ? computeAllBranchesSummary(payload.branchCardsData, payload.expenseCategoryByBranch)
           : payload.summary;
 
@@ -3393,6 +3415,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
     });
   }, [monthlyData, trendYScale]);
 
+  const dailyAverageSales = useMemo(() => {
+    if (!summaryData) return null;
+    const startDate = toDate(compareDateRange.start);
+    const endDate = toDate(compareDateRange.end);
+    if (!startDate || !endDate) return null;
+    const dayCount = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1);
+    return summaryData.totalSales / dayCount;
+  }, [summaryData, compareDateRange.start, compareDateRange.end]);
+
   const closeTrendDrill = useCallback(() => {
     trendDrillReqIdRef.current += 1;
     setTrendDrillOpen(false);
@@ -4703,13 +4734,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                       content={TrendTooltipContent}
                       cursor={{ fill: 'transparent' }}
                     />
-                    <Legend 
-                      iconType="circle" 
-                      wrapperStyle={{ paddingTop: '20px' }} 
-                      formatter={(value) => <span className="ml-2 mr-8 text-sm font-medium text-slate-600">
-                        {value === 'totalSales' ? t('admin_dashboard.total_sales') : 
-                         value === 'negativeExpenses' ? t('admin_dashboard.total_expenses') : value}
-                      </span>}
+                    <Legend
+                      iconType="circle"
+                      wrapperStyle={{ paddingTop: '20px' }}
+                      content={({ payload }) => (
+                        <div className="flex flex-wrap items-center justify-center pt-5">
+                          {payload?.map((entry) => (
+                            <span key={entry.value} className="flex items-center ml-2 mr-8 text-sm font-medium text-slate-600">
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-full mr-1.5"
+                                style={{ backgroundColor: entry.color }}
+                              />
+                              {entry.value === 'totalSales' ? t('admin_dashboard.total_sales') :
+                               entry.value === 'negativeExpenses' ? t('admin_dashboard.total_expenses') : entry.value}
+                            </span>
+                          ))}
+                          {dailyAverageSales != null && (
+                            <span className="ml-2 mr-8 text-sm font-medium text-slate-600">
+                              {t('admin_dashboard.daily_average')} : ₱{Math.round(dailyAverageSales).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     />
                     <Bar 
                       dataKey="totalSales" 
