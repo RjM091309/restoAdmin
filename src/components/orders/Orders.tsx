@@ -4066,6 +4066,56 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             )}
                         </div>
 
+                        {/* Totals breakdown — GRAND_TOTAL can include a service/room
+                            charge on top of the item subtotal (see SERVICE_CHARGE),
+                            which otherwise makes the total look wrong next to the
+                            visible items. Settled/cancelled orders already show the
+                            charge as its own row inside the items table above, so
+                            this only kicks in for orders still in progress. */}
+                        {!(detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) &&
+                            (detailServiceCharge > 0 || Number(detailOrder.TAX_AMOUNT || 0) > 0 || Number(detailOrder.DISCOUNT_AMOUNT || 0) > 0) && (
+                                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3 space-y-1.5">
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-brand-muted">{t('orders.subtotal')}</span>
+                                        <span className="font-semibold tabular-nums">
+                                            ₱{formatPesoUpToTwoDecimals(Number(detailOrder.SUBTOTAL || 0))}
+                                        </span>
+                                    </div>
+                                    {detailServiceCharge > 0 && (
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-brand-muted">
+                                                {detailIsRoomCharge ? (t('table.room_charge') ?? 'Room charge') : t('orders.service_charge')}
+                                            </span>
+                                            <span className="font-semibold tabular-nums">
+                                                ₱{formatPesoUpToTwoDecimals(detailServiceCharge)}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {Number(detailOrder.TAX_AMOUNT || 0) > 0 && (
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-brand-muted">{t('orders.tax')}</span>
+                                            <span className="font-semibold tabular-nums">
+                                                ₱{formatPesoUpToTwoDecimals(Number(detailOrder.TAX_AMOUNT || 0))}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {Number(detailOrder.DISCOUNT_AMOUNT || 0) > 0 && (
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-brand-muted">{t('orders.discount')}</span>
+                                            <span className="font-semibold tabular-nums text-red-600">
+                                                -₱{formatPesoUpToTwoDecimals(Number(detailOrder.DISCOUNT_AMOUNT || 0))}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center justify-between text-sm pt-1.5 border-t border-gray-200">
+                                        <span className="font-bold text-brand-text">{t('orders.grand_total')}</span>
+                                        <span className="font-extrabold text-brand-primary tabular-nums">
+                                            ₱{formatPesoUpToTwoDecimals(Number(detailOrder.GRAND_TOTAL))}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
                         {/* Additional items (add menu to this order) */}
                         {canUpdate('orders') && detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
                             <div className="space-y-3 pt-2 border-t border-gray-100">

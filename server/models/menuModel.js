@@ -202,9 +202,19 @@ class MenuModel {
 				m.MENU_DESCRIPTION,
 				m.MENU_IMG,
 				m.MENU_PRICE,
-				m.IS_AVAILABLE
+				m.IS_AVAILABLE,
+				COALESCE(sales.total_qty, 0) AS total_qty,
+				COALESCE(sales.total_revenue, 0) AS total_revenue
 			FROM menu m
 			LEFT JOIN categories c ON m.CATEGORY_ID = c.IDNo
+			LEFT JOIN (
+				SELECT 
+					oi.MENU_ID,
+					SUM(oi.QTY) as total_qty,
+					SUM(oi.LINE_TOTAL) as total_revenue
+				FROM order_items oi
+				GROUP BY oi.MENU_ID
+			) sales ON sales.MENU_ID = m.IDNo
 			WHERE m.ACTIVE = 1 AND m.IS_AVAILABLE = 1
 		`;
 		
@@ -220,7 +230,7 @@ class MenuModel {
 			params.push(branchId);
 		}
 		
-		query += ` ORDER BY m.IDNo ASC`;
+		query += ` ORDER BY total_qty DESC, total_revenue DESC, m.IDNo ASC`;
 		
 		const [rows] = await pool.execute(query, params);
 		return rows.map((row) => ({

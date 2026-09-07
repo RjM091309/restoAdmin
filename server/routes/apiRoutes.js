@@ -62,6 +62,11 @@ router.get("/tables", authenticateJWT, ApiController.getTables);
 // Query params: ?category_id=X (optional - filter by category)
 router.get("/menu", authenticateJWT, ApiController.getMenuItems);
 
+// GET - Get top revenue / popular menu items
+// URL: /api/menu/top-revenue
+// Headers: Authorization: Bearer <accessToken>
+router.get("/menu/top-revenue", authenticateJWT, ApiController.getTopRevenueItems);
+
 // GET - Get user orders (for syncing with local storage)
 // URL: /api/orders
 // Headers: Authorization: Bearer <accessToken>
@@ -90,6 +95,11 @@ router.get("/waiter/orders", authenticateJWT, ApiController.getWaiterOrders);
 // URL: /api/waiter/orders/:order_id/status
 // Body: { status: number } (allowed: 3=PENDING, 2=CONFIRMED)
 router.patch("/waiter/orders/:order_id/status", authenticateJWT, ApiController.updateWaiterOrderStatus);
+
+// POST - Transfer table order (Lipat Mesa)
+// URL: /api/waiter/orders/:order_id/transfer-table
+// Body: { target_table_id: number }
+router.post("/waiter/orders/:order_id/transfer-table", authenticateJWT, ApiController.transferTableOrder);
 
 // POST - Create new order
 // URL: /api/orders

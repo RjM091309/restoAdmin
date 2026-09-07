@@ -23,6 +23,8 @@ const TranslationService = require('../utils/translationService');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils');
 const { stitchReceiptDataUrls } = require('../services/receiptStitchService');
 const { analyzeReceipt, extractOrderLinesFromReceipt } = require('../services/orderReceiptHelpers');
+const { toPublicImageUrl } = require('../utils/uploadPaths');
+const { getManilaTodayYmd } = require('../utils/manilaMonthRange');
 const pool = require('../config/db');
 
 class ApiController {
@@ -330,7 +332,8 @@ class ApiController {
 		const targetLanguage = req.query.lang || req.query.language || 'en';
 
 		try {
-			const categories = await CategoryModel.getAll();
+			const branchId = req.query.branch_id || req.user?.branch_id || null;
+			const categories = await CategoryModel.getAll(branchId);
 			let formattedCategories = categories.map(cat => ({
 				id: cat.IDNo,
 				name: cat.CAT_NAME,
@@ -450,14 +453,16 @@ class ApiController {
 				category_name: menu.CATEGORY_NAME || null,
 				name: menu.MENU_NAME,
 				description: menu.MENU_DESCRIPTION || null,
-				image: menu.MENU_IMG ? baseUrl + menu.MENU_IMG : null,
+				image: toPublicImageUrl(baseUrl, menu.MENU_IMG),
 				price: parseFloat(menu.MENU_PRICE || 0),
 				is_available: (menu.EFFECTIVE_AVAILABLE ?? menu.IS_AVAILABLE) === 1,
 				inventory_tracked: menu.INVENTORY_TRACKED === 1,
 				inventory_available: menu.INVENTORY_AVAILABLE === 1,
 				inventory_stock: menu.INVENTORY_STOCK !== null && menu.INVENTORY_STOCK !== undefined
 					? parseFloat(menu.INVENTORY_STOCK)
-					: null
+					: null,
+				sales_qty: parseInt(menu.total_qty || 0, 10),
+				total_revenue: parseFloat(menu.total_revenue || 0)
 			}));
 
 			if (TranslationService.isAvailable()) {
@@ -523,6 +528,109 @@ class ApiController {
 			res.status(500).json({ 
 				success: false,
 				error: 'Failed to fetch menu items' 
+			});
+		}
+	}
+
+	static async getTopRevenueItems(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			const branchId = parseInt(req.query.branch_id || req.user?.branch_id || '3', 10);
+			const limit = parseInt(req.query.limit || '20', 10);
+
+			if (
+				ApiController._topRevenueCache &&
+				(Date.now() - ApiController._topRevenueCache.timestamp < 60000) &&
+				ApiController._topRevenueCache.branchId === branchId &&
+				ApiController._topRevenueCache.limit === limit
+			) {
+				return res.json(ApiController._topRevenueCache.response);
+			}
+
+			let [rows] = await pool.execute(`
+				SELECT 
+					m.IDNo as id,
+					m.CATEGORY_ID as category_id,
+					c.CAT_NAME as category_name,
+					m.MENU_NAME as name,
+					m.MENU_DESCRIPTION as description,
+					m.MENU_IMG as image,
+					m.MENU_PRICE as price,
+					m.IS_AVAILABLE as is_available,
+					COALESCE(SUM(oi.QTY), 0) as total_qty,
+					COALESCE(SUM(oi.LINE_TOTAL), 0) as total_revenue
+				FROM menu m
+				INNER JOIN order_items oi ON oi.MENU_ID = m.IDNo
+				LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+				LEFT JOIN orders o ON o.IDNo = oi.ORDER_ID
+				WHERE m.ACTIVE = 1 AND m.BRANCH_ID = ?
+				GROUP BY m.IDNo, m.CATEGORY_ID, c.CAT_NAME, m.MENU_NAME, m.MENU_DESCRIPTION, m.MENU_IMG, m.MENU_PRICE, m.IS_AVAILABLE
+				ORDER BY total_revenue DESC, total_qty DESC
+				LIMIT ${limit}
+			`, [branchId]);
+
+			if (!rows || rows.length === 0) {
+				const [fallback] = await pool.execute(`
+					SELECT 
+						m.IDNo as id,
+						m.CATEGORY_ID as category_id,
+						c.CAT_NAME as category_name,
+						m.MENU_NAME as name,
+						m.MENU_DESCRIPTION as description,
+						m.MENU_IMG as image,
+						m.MENU_PRICE as price,
+						m.IS_AVAILABLE as is_available,
+						0 as total_qty,
+						0 as total_revenue
+					FROM menu m
+					LEFT JOIN categories c ON c.IDNo = m.CATEGORY_ID
+					WHERE m.ACTIVE = 1 AND m.BRANCH_ID = ?
+					ORDER BY m.IDNo ASC
+					LIMIT ${limit}
+				`, [branchId]);
+				rows = fallback;
+			}
+
+			let baseUrl = req.protocol + '://' + req.get('host');
+			if (req.get('x-forwarded-proto') === 'https' || req.get('host').includes('resto-admin.3core21.com')) {
+				baseUrl = 'https://' + req.get('host');
+			}
+
+			const formattedMenus = rows.map(menu => ({
+				id: menu.id,
+				category_id: menu.category_id,
+				category_name: menu.category_name || null,
+				name: menu.name,
+				description: menu.description || null,
+				image: toPublicImageUrl(baseUrl, menu.image),
+				price: parseFloat(menu.price || 0),
+				is_available: Number(menu.is_available) === 1,
+				inventory_tracked: false,
+				inventory_available: true,
+				inventory_stock: null,
+				sales_qty: parseInt(menu.total_qty || 0, 10),
+				total_revenue: parseFloat(menu.total_revenue || 0)
+			}));
+
+			const responsePayload = {
+				success: true,
+				data: formattedMenus,
+				count: formattedMenus.length
+			};
+
+			ApiController._topRevenueCache = {
+				response: responsePayload,
+				timestamp: Date.now(),
+				branchId,
+				limit
+			};
+
+			return res.json(responsePayload);
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] GET /api/menu/top-revenue - Error:`, error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch top revenue menu items'
 			});
 		}
 	}
@@ -601,7 +709,8 @@ class ApiController {
 							qty: parseFloat(item.QTY || 0),
 							unit_price: parseFloat(item.UNIT_PRICE || 0),
 							line_total: parseFloat(item.LINE_TOTAL || 0),
-							status: item.STATUS
+							status: item.STATUS,
+							remarks: item.REMARKS || null
 						}))
 					};
 				})
@@ -749,38 +858,55 @@ class ApiController {
 				const branches = await UserBranchModel.getBranchesByUserId(user_id);
 				if (branches.length > 0) resolvedBranchId = branches[0].IDNo;
 			}
-			const orders = await OrderModel.getAll(resolvedBranchId);
+			// Waiter view is a shift-based worklist, not an all-time archive —
+			// scope to today (Manila calendar day) so this doesn't keep growing
+			// forever as settled orders pile up. Pending/confirmed orders are
+			// realistically always from today anyway (they get resolved fast).
+			const today = getManilaTodayYmd();
+			const orders = await OrderModel.getAll(resolvedBranchId, {
+				start_date: today,
+				end_date: today,
+			});
 			const activeOrders = orders.filter(order => [3, 2, 1].includes(order.STATUS));
 
-			const ordersWithItems = await Promise.all(
-				activeOrders.map(async (order) => {
-					const items = await OrderItemsModel.getByOrderId(order.IDNo);
-					return {
-						order_id: order.IDNo,
-						order_no: order.ORDER_NO,
-						payment_method: order.payment_method || null,
-						table_id: order.TABLE_ID,
-						table_number: order.TABLE_NUMBER || null,
-						order_type: order.ORDER_TYPE,
-						status: order.STATUS,
-						subtotal: parseFloat(order.SUBTOTAL || 0),
-						tax_amount: parseFloat(order.TAX_AMOUNT || 0),
-						service_charge: parseFloat(order.SERVICE_CHARGE || 0),
-						discount_amount: parseFloat(order.DISCOUNT_AMOUNT || 0),
-						grand_total: parseFloat(order.GRAND_TOTAL || 0),
-						encoded_dt: order.ENCODED_DT,
-						items: items.map(item => ({
-							item_id: item.IDNo,
-							menu_id: item.MENU_ID,
-							menu_name: item.MENU_NAME,
-							qty: parseFloat(item.QTY || 0),
-							unit_price: parseFloat(item.UNIT_PRICE || 0),
-							line_total: parseFloat(item.LINE_TOTAL || 0),
-							status: item.STATUS
-						}))
-					};
-				})
+			// One query for every order's items instead of one query PER order
+			// (that N+1 loop was the real cost once order history grew — e.g.
+			// 500 orders meant 500 separate round-trips just to render this list).
+			const itemsByOrderId = await OrderItemsModel.getByOrderIds(
+				activeOrders.map(order => order.IDNo)
 			);
+
+			const ordersWithItems = activeOrders.map((order) => {
+				const items = itemsByOrderId.get(order.IDNo) || [];
+				return {
+					order_id: order.IDNo,
+					order_no: order.ORDER_NO,
+					payment_method: order.payment_method || null,
+					table_id: order.TABLE_ID,
+					table_number: order.TABLE_NUMBER || null,
+					order_type: order.ORDER_TYPE,
+					status: order.STATUS,
+					subtotal: parseFloat(order.SUBTOTAL || 0),
+					tax_amount: parseFloat(order.TAX_AMOUNT || 0),
+					service_charge: parseFloat(order.SERVICE_CHARGE || 0),
+					discount_amount: parseFloat(order.DISCOUNT_AMOUNT || 0),
+					grand_total: parseFloat(order.GRAND_TOTAL || 0),
+					amount_paid: parseFloat(order.amount_paid || order.AMOUNT_PAID || 0),
+					payment_ref: order.payment_ref || order.PAYMENT_REF || null,
+					encoded_by_name: order.ENCODED_BY_NAME || null,
+					encoded_dt: order.ENCODED_DT,
+					items: items.map(item => ({
+						item_id: item.IDNo,
+						menu_id: item.MENU_ID,
+						menu_name: item.MENU_NAME,
+						qty: parseFloat(item.QTY || 0),
+						unit_price: parseFloat(item.UNIT_PRICE || 0),
+						line_total: parseFloat(item.LINE_TOTAL || 0),
+						status: item.STATUS,
+						remarks: item.REMARKS || null
+					}))
+				};
+			});
 
 			return res.json({ success: true, data: ordersWithItems });
 		} catch (error) {
@@ -793,7 +919,15 @@ class ApiController {
 		const timestamp = new Date().toISOString();
 		const user_id = req.user?.user_id;
 		const { order_id } = req.params;
-		const { status, payment_method } = req.body || {};
+		const {
+			status,
+			payment_method,
+			discount_amount,
+			grand_total,
+			amount_paid,
+			payment_ref,
+			remarks
+		} = req.body || {};
 		const allowedStatuses = [3, 2, 1];
 
 		try {
@@ -809,6 +943,20 @@ class ApiController {
 				return res.status(403).json({ success: false, error: 'Order is not in your branch' });
 			}
 
+			let finalGrandTotal = parseFloat(order.GRAND_TOTAL || 0);
+			const discountNum = parseFloat(discount_amount || 0);
+
+			if (targetStatus === 1 && (discountNum > 0 || grand_total != null)) {
+				finalGrandTotal = grand_total != null
+					? parseFloat(grand_total)
+					: Math.max(0, parseFloat(order.SUBTOTAL || order.GRAND_TOTAL || 0) - (discountNum > 0 ? discountNum : 0));
+
+				await pool.execute(
+					'UPDATE orders SET DISCOUNT_AMOUNT = ?, GRAND_TOTAL = ?, EDITED_BY = ?, EDITED_DT = NOW() WHERE IDNo = ?',
+					[discountNum > 0 ? discountNum : 0, finalGrandTotal, user_id, order_id]
+				);
+			}
+
 			if (targetStatus === 1) {
 				await InventoryDeductionModel.updateStatusByOrderId(Number(order_id), 1, user_id);
 				await OrderModel.updateStatus(order_id, 1, user_id);
@@ -817,6 +965,8 @@ class ApiController {
 			}
 
 			const paymentMethod = payment_method || 'CASH';
+			const finalAmountPaid = amount_paid != null ? parseFloat(amount_paid) : finalGrandTotal;
+			const finalPaymentRef = payment_ref || (paymentMethod === 'CASH' ? 'Settled via Cashier App' : null);
 
 			if (targetStatus === 1) {
 				if (order.TABLE_ID) await TableModel.updateStatus(order.TABLE_ID, 1);
@@ -824,8 +974,10 @@ class ApiController {
 				if (existingBilling) {
 					await BillingModel.updateForOrder(order_id, {
 						status: 1,
-						amount_paid: order.GRAND_TOTAL,
+						amount_due: finalGrandTotal,
+						amount_paid: finalAmountPaid,
 						payment_method: paymentMethod,
+						payment_ref: finalPaymentRef,
 						encoded_dt: order.ENCODED_DT || null,
 					});
 				} else {
@@ -833,8 +985,9 @@ class ApiController {
 						branch_id: order.BRANCH_ID,
 						order_id: order_id,
 						payment_method: paymentMethod,
-						amount_due: order.GRAND_TOTAL,
-						amount_paid: order.GRAND_TOTAL,
+						amount_due: finalGrandTotal,
+						amount_paid: finalAmountPaid,
+						payment_ref: finalPaymentRef,
 						status: 1,
 						user_id: user_id,
 						encoded_dt: order.ENCODED_DT || null,
@@ -845,8 +998,8 @@ class ApiController {
 					await BillingModel.recordTransaction({
 						order_id: order_id,
 						payment_method: paymentMethod,
-						amount_paid: order.GRAND_TOTAL,
-						payment_ref: 'Settled via Cashier App',
+						amount_paid: finalAmountPaid,
+						payment_ref: finalPaymentRef || 'Settled via Cashier App',
 						user_id: user_id,
 						encoded_dt: order.ENCODED_DT || null,
 					});
@@ -854,14 +1007,29 @@ class ApiController {
 					console.error(`[${timestamp}] [TRANSACTION ERROR] ${e.message}`);
 				}
 
+				// Best-effort report sync:
+				// Legacy tables like sales_hourly_summary may not exist in newer DBs.
+				// Guard each optional sync function so missing tables/functions don't spam logs.
 				try {
 					const ReportsModel = require('../models/reportsModel');
-					await ReportsModel.syncOrderToSalesHourlySummary(order_id);
-					await ReportsModel.syncOrderToSalesCategoryReport(order_id);
-					await ReportsModel.syncOrderToProductSalesSummary(order_id);
+					if (ReportsModel && typeof ReportsModel.syncOrderToGoodsSalesReport === 'function') {
+						await ReportsModel.syncOrderToGoodsSalesReport(order_id);
+					}
+					if (ReportsModel && typeof ReportsModel.syncOrderToSalesCategoryReport === 'function') {
+						await ReportsModel.syncOrderToSalesCategoryReport(order_id);
+					}
+					if (ReportsModel && typeof ReportsModel.syncOrderToSalesHourlySummary === 'function') {
+						await ReportsModel.syncOrderToSalesHourlySummary(order_id);
+					}
 				} catch (syncError) {
-					console.error(`[${timestamp}] [SYNC ERROR] ${syncError.message}`);
+					console.warn(`[${timestamp}] [SYNC WARNING] ${syncError.message}`);
 				}
+			}
+
+			let tableNumber = null;
+			if (order.TABLE_ID) {
+				const table = await TableModel.getById(order.TABLE_ID);
+				if (table) tableNumber = table.TABLE_NUMBER;
 			}
 
 			const orderItems = await OrderItemsModel.getByOrderId(order_id);
@@ -870,16 +1038,112 @@ class ApiController {
 				order_no: order.ORDER_NO,
 				payment_method: targetStatus === 1 ? paymentMethod : null,
 				table_id: order.TABLE_ID,
+				table_number: tableNumber,
 				order_type: order.ORDER_TYPE,
 				status: targetStatus,
-				grand_total: parseFloat(order.GRAND_TOTAL || 0),
-				items: orderItems
+				subtotal: parseFloat(order.SUBTOTAL || 0),
+				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
+				service_charge: parseFloat(order.SERVICE_CHARGE || 0),
+				discount_amount: discountNum > 0 ? discountNum : parseFloat(order.DISCOUNT_AMOUNT || 0),
+				grand_total: finalGrandTotal,
+				items: orderItems.map(item => ({
+					item_id: item.IDNo,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				encoded_by: order.ENCODED_BY ?? user_id ?? null,
+				branch_id: order.BRANCH_ID || resolvedBranchId || null
 			});
 
 			return res.json({ success: true, data: { order_id: parseInt(order_id, 10), status: targetStatus } });
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] PATCH /api/waiter/orders/${order_id}/status - Error:`, error);
 			return res.status(500).json({ success: false, error: 'Failed to update order status' });
+		}
+	}
+
+	static async transferTableOrder(req, res) {
+		const timestamp = new Date().toISOString();
+		const user_id = req.user?.user_id;
+		const { order_id } = req.params;
+		const { target_table_id } = req.body || {};
+
+		try {
+			if (!user_id) return res.status(400).json({ success: false, error: 'User ID is required' });
+			if (!order_id) return res.status(400).json({ success: false, error: 'Order ID is required' });
+			if (!target_table_id) return res.status(400).json({ success: false, error: 'Target table is required' });
+
+			const order = await OrderModel.getById(order_id);
+			if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+
+			const targetTable = await TableModel.getById(target_table_id);
+			if (!targetTable) return res.status(404).json({ success: false, error: 'Target table not found' });
+
+			const oldTableId = order.TABLE_ID;
+			const newTableId = parseInt(target_table_id, 10);
+
+			if (oldTableId === newTableId) {
+				return res.status(400).json({ success: false, error: 'Target table is already the current table' });
+			}
+
+			// Update order's table ID
+			await OrderModel.update(order_id, {
+				TABLE_ID: newTableId,
+				ORDER_TYPE: order.ORDER_TYPE,
+				STATUS: order.STATUS,
+				SUBTOTAL: order.SUBTOTAL,
+				TAX_AMOUNT: order.TAX_AMOUNT,
+				SERVICE_CHARGE: order.SERVICE_CHARGE,
+				DISCOUNT_AMOUNT: order.DISCOUNT_AMOUNT,
+				GRAND_TOTAL: order.GRAND_TOTAL,
+				user_id: user_id
+			});
+
+			// Update new table status to Occupied (2)
+			await TableModel.updateStatus(newTableId, 2);
+
+			// Check if old table has any remaining active orders
+			if (oldTableId) {
+				const remainingOrders = await OrderModel.getByTableId(oldTableId);
+				const otherActive = (remainingOrders || []).filter(o => o.IDNo !== parseInt(order_id, 10) && [2, 3].includes(o.STATUS));
+				if (otherActive.length === 0) {
+					await TableModel.updateStatus(oldTableId, 1); // Set to Available
+				}
+			}
+
+			// Broadcast socket updates to all clients
+			const orderItems = await OrderItemsModel.getByOrderId(order_id);
+			const targetTableName = targetTable.TABLE_NAME || targetTable.TABLE_NO || `Table ${newTableId}`;
+			socketService.emitOrderUpdate(order_id, {
+				order_id: parseInt(order_id, 10),
+				order_no: order.ORDER_NO,
+				table_id: newTableId,
+				table_number: targetTableName,
+				old_table_id: oldTableId,
+				status: order.STATUS,
+				grand_total: parseFloat(order.GRAND_TOTAL || 0),
+				items: orderItems,
+				encoded_by: order.ENCODED_BY ?? user_id ?? null
+			});
+
+			return res.json({
+				success: true,
+				message: `Order #${order.ORDER_NO} successfully transferred to ${targetTableName}`,
+				data: {
+					order_id: parseInt(order_id, 10),
+					old_table_id: oldTableId,
+					new_table_id: newTableId,
+					new_table_name: targetTableName
+				}
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] POST /api/waiter/orders/${order_id}/transfer-table - Error:`, error);
+			return res.status(500).json({ success: false, error: 'Failed to transfer table order' });
 		}
 	}
 
@@ -909,7 +1173,8 @@ class ApiController {
 				qty: parseFloat(item.qty),
 				unit_price: parseFloat(item.unit_price),
 				line_total: parseFloat(item.qty) * parseFloat(item.unit_price),
-				status: item.status || 3
+				status: item.status || 3,
+				remarks: item.remarks || item.notes || null
 			}));
 
 			const validation = await InventoryDeductionService.validateOrderItemsForInventory(resolvedBranchId, newOrderItems);
@@ -957,8 +1222,41 @@ class ApiController {
 
 			if (orderData.TABLE_ID) await TableModel.updateStatus(orderData.TABLE_ID, 2);
 
+			let tableNumber = null;
+			if (orderData.TABLE_ID) {
+				const table = await TableModel.getById(orderData.TABLE_ID);
+				if (table) tableNumber = table.TABLE_NUMBER;
+			}
+
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
-			socketService.emitOrderCreated(orderId, { order_id: orderId, order_no: orderData.ORDER_NO, table_id: orderData.TABLE_ID, status: orderData.STATUS, grand_total: orderData.GRAND_TOTAL, items: orderItems, items_count: items.length });
+			// encoded_by lets clients tell whether THEY created this order, so the
+			// "New Order Received" alert only fires for other staff, not the creator.
+			socketService.emitOrderCreated(orderId, {
+				order_id: orderId,
+				order_no: orderData.ORDER_NO,
+				table_id: orderData.TABLE_ID,
+				table_number: tableNumber,
+				order_type: orderData.ORDER_TYPE,
+				status: orderData.STATUS,
+				subtotal: parseFloat(orderData.SUBTOTAL || 0),
+				tax_amount: parseFloat(orderData.TAX_AMOUNT || 0),
+				service_charge: parseFloat(orderData.SERVICE_CHARGE || 0),
+				discount_amount: parseFloat(orderData.DISCOUNT_AMOUNT || 0),
+				grand_total: parseFloat(orderData.GRAND_TOTAL || 0),
+				items: orderItems.map(item => ({
+					item_id: item.IDNo,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				items_count: items.length,
+				encoded_by: user_id || null,
+				branch_id: resolvedBranchId
+			});
 
 			return res.json({ success: true, data: { order_id: orderId, order_no: orderData.ORDER_NO, table_id: orderData.TABLE_ID, status: orderData.STATUS, grand_total: orderData.GRAND_TOTAL, items_count: items.length } });
 		} catch (error) {
@@ -995,7 +1293,8 @@ class ApiController {
 				qty: parseFloat(item.qty),
 				unit_price: parseFloat(item.unit_price),
 				line_total: parseFloat(item.qty) * parseFloat(item.unit_price),
-				status: item.status || 3
+				status: item.status || 3,
+				remarks: item.remarks || item.notes || null
 			}));
 
 			await OrderItemsModel.createForOrder(order_id, orderItemsToAdd, user_id);
@@ -1018,8 +1317,39 @@ class ApiController {
 			const existingBilling = await BillingModel.getByOrderId(order_id);
 			if (existingBilling) await BillingModel.updateForOrder(order_id, { amount_due: newGrandTotal });
 
+			let tableNumber = null;
+			if (existingOrder.TABLE_ID) {
+				const table = await TableModel.getById(existingOrder.TABLE_ID);
+				if (table) tableNumber = table.TABLE_NUMBER;
+			}
+
 			const allOrderItems = await OrderItemsModel.getByOrderId(order_id);
-			socketService.emitOrderItemsAdded(order_id, { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, table_id: existingOrder.TABLE_ID, status: existingOrder.STATUS, grand_total: newGrandTotal, items: allOrderItems, items_added: items.length });
+			socketService.emitOrderItemsAdded(order_id, {
+				order_id: parseInt(order_id),
+				order_no: existingOrder.ORDER_NO,
+				table_id: existingOrder.TABLE_ID,
+				table_number: tableNumber,
+				order_type: existingOrder.ORDER_TYPE,
+				status: existingOrder.STATUS,
+				subtotal: newSubtotal,
+				tax_amount: parseFloat(existingOrder.TAX_AMOUNT || 0),
+				service_charge: parseFloat(existingOrder.SERVICE_CHARGE || 0),
+				discount_amount: parseFloat(existingOrder.DISCOUNT_AMOUNT || 0),
+				grand_total: newGrandTotal,
+				items: allOrderItems.map(item => ({
+					item_id: item.IDNo,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				items_added: items.length,
+				encoded_by: user_id || null,
+				branch_id: resolvedBranchId
+			});
 
 			return res.json({ success: true, data: { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, items_added: items.length, new_subtotal: newSubtotal, new_grand_total: newGrandTotal } });
 		} catch (error) {

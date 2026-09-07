@@ -679,85 +679,18 @@ class ReportsModel {
 		};
 	}
 
-	// Sync order to sales_hourly_summary when order is paid/settled
-	// This automatically updates the sales_hourly_summary table when an order is completed
-	// Aggregates sales by hour and branch
+	// Legacy: sync order to sales_hourly_summary (summary table removed)
+	// NO-OP now; kept only for backward compatibility so callers don't break.
 	static async syncOrderToSalesHourlySummary(orderId) {
-		try {
-			// Get order details with billing info
-			const [orderRows] = await pool.execute(`
-				SELECT 
-					o.IDNo,
-					o.BRANCH_ID,
-					o.ENCODED_DT,
-					o.GRAND_TOTAL,
-					o.DISCOUNT_AMOUNT,
-					o.SUBTOTAL,
-					b.STATUS as billing_status,
-					b.AMOUNT_PAID
-				FROM orders o
-				LEFT JOIN billing b ON b.ORDER_ID = o.IDNo
-				WHERE o.IDNo = ?
-			`, [orderId]);
+		return {
+			success: false,
+			message: 'sales_hourly_summary table has been removed; syncOrderToSalesHourlySummary is disabled.',
+		};
+	}
 
-			if (!orderRows || orderRows.length === 0) {
-				return { success: false, message: 'Order not found' };
-			}
-
-			const order = orderRows[0];
-
-			// Only sync if billing is PAID (status = 1)
-			if (!order.billing_status || parseInt(order.billing_status) !== 1) {
-				return { success: false, message: 'Order not paid yet' };
-			}
-
-			// Round down datetime to the hour (e.g., 2026-02-07 14:35:22 -> 2026-02-07 14:00:00)
-			const orderDate = new Date(order.ENCODED_DT);
-			orderDate.setMinutes(0);
-			orderDate.setSeconds(0);
-			orderDate.setMilliseconds(0);
-			const saleDatetime = orderDate.toISOString().slice(0, 19).replace('T', ' ');
-
-			const branchId = order.BRANCH_ID || null;
-			const totalSales = parseFloat(order.GRAND_TOTAL) || 0;
-			const discount = parseFloat(order.DISCOUNT_AMOUNT) || 0;
-			const refund = 0; // Orders don't have refunds at creation, refunds are separate
-			const netSales = totalSales - discount;
-			const productUnitPrice = parseFloat(order.SUBTOTAL) || 0;
-			const grossProfit = netSales; // Simplified: gross profit = net sales
-
-			// Check if record exists for this hour and branch
-			const [existingRows] = await pool.execute(`
-				SELECT id FROM sales_hourly_summary 
-				WHERE branch_id <=> ? AND sale_datetime = ?
-			`, [branchId, saleDatetime]);
-
-			if (existingRows && existingRows.length > 0) {
-				// Update existing record - add to existing values
-				await pool.execute(`
-					UPDATE sales_hourly_summary SET
-						total_sales = total_sales + ?,
-						refund = refund + ?,
-						discount = discount + ?,
-						net_sales = net_sales + ?,
-						product_unit_price = product_unit_price + ?,
-						gross_profit = gross_profit + ?
-					WHERE branch_id <=> ? AND sale_datetime = ?
-				`, [totalSales, refund, discount, netSales, productUnitPrice, grossProfit, branchId, saleDatetime]);
-			} else {
-				// Insert new record
-				await pool.execute(`
-					INSERT INTO sales_hourly_summary (branch_id, sale_datetime, total_sales, refund, discount, net_sales, product_unit_price, gross_profit)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-				`, [branchId, saleDatetime, totalSales, refund, discount, netSales, productUnitPrice, grossProfit]);
-			}
-
-			return { success: true, message: 'Order synced to sales_hourly_summary' };
-		} catch (error) {
-			console.error('Error syncing order to sales_hourly_summary:', error);
-			// Don't throw - this is a background sync operation
-			return { success: false, message: error.message };
-		}
+	// Alias for syncOrderToGoodsSalesReport for backward compatibility
+	static async syncOrderToProductSalesSummary(orderId) {
+		return this.syncOrderToGoodsSalesReport(orderId);
 	}
 
 	// Sync order to goods_sales_report when order is paid/settled
@@ -1805,12 +1738,18 @@ class ReportsModel {
 				summaryRefundParams.push(branchId);
 			}
 
-			const [summaryRefundCountRows] = await pool.execute(`
-				SELECT COUNT(*) as record_count
-				FROM sales_hourly_summary
-				WHERE 1=1 ${summaryRefundBranchFilter} AND (refund > 0 OR refund IS NOT NULL)
-			`, summaryRefundParams);
-			const summaryRefundCount = parseInt(summaryRefundCountRows[0]?.record_count || 0);
+			let summaryRefundCount = 0;
+			try {
+				const [summaryRefundCountRows] = await pool.execute(`
+					SELECT COUNT(*) as record_count
+					FROM sales_hourly_summary
+					WHERE 1=1 ${summaryRefundBranchFilter} AND (refund > 0 OR refund IS NOT NULL)
+				`, summaryRefundParams);
+				summaryRefundCount = parseInt(summaryRefundCountRows[0]?.record_count || 0);
+			} catch (e) {
+				// Legacy summary table sales_hourly_summary has been removed
+				summaryRefundCount = 0;
+			}
 
 			// Use the same summaryTotalRefund to ensure refund_report matches sales_hourly_summary
 			const summaryRefundAmount = summaryTotalRefund;

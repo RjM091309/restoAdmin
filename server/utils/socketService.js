@@ -53,6 +53,36 @@ function initializeSocket(server) {
       }
     });
 
+    // Handle cashier room joining
+    socket.on('join_cashier', () => {
+      socket.join('cashier');
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} joined cashier room`);
+      }
+    });
+
+    socket.on('leave_cashier', () => {
+      socket.leave('cashier');
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} left cashier room`);
+      }
+    });
+
+    // Handle waiter room joining
+    socket.on('join_waiter', () => {
+      socket.join('waiter');
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} joined waiter room`);
+      }
+    });
+
+    socket.on('leave_waiter', () => {
+      socket.leave('waiter');
+      if (SOCKET_LOG_CONNECTIONS) {
+        console.log(`[SOCKET] Client ${socket.id} left waiter room`);
+      }
+    });
+
     // Handle user room joining (for real-time notifications)
     socket.on('join_user', (userId) => {
       if (userId != null && userId !== '') {
@@ -77,13 +107,6 @@ function initializeSocket(server) {
   return io;
 }
 
-function isConfirmedStatus(orderData) {
-  const rawStatus = orderData?.status ?? orderData?.STATUS;
-  if (rawStatus == null) return false;
-  const status = typeof rawStatus === 'string' ? parseInt(rawStatus, 10) : rawStatus;
-  return status === 2;
-}
-
 // Emit order update event
 function emitOrderUpdate(orderId, orderData) {
   if (!io) {
@@ -98,15 +121,15 @@ function emitOrderUpdate(orderId, orderData) {
     timestamp: new Date().toISOString()
   };
   
-  // Emit to order room unless status is CONFIRMED (2)
-  if (!isConfirmedStatus(orderData)) {
-    io.to(room).emit('order_updated', payload);
-  }
-  // Also emit to kitchen room
+  // Emit to order room, kitchen, cashier, waiter, and broadcast globally
+  io.to(room).emit('order_updated', payload);
   io.to('kitchen').emit('order_updated', payload);
+  io.to('cashier').emit('order_updated', payload);
+  io.to('waiter').emit('order_updated', payload);
+  io.emit('order_updated', payload);
 
   if (SOCKET_LOG_EMITS) {
-    console.log(`[SOCKET] Emitted order_updated to room: ${room} and kitchen`);
+    console.log(`[SOCKET] Emitted order_updated to room: ${room}, kitchen, cashier, waiter, and global`);
   }
 }
 
@@ -124,17 +147,15 @@ function emitOrderCreated(orderId, orderData) {
     timestamp: new Date().toISOString()
   };
 
-  // Emit to order room unless status is CONFIRMED (2)
-  if (!isConfirmedStatus(orderData)) {
-    io.to(room).emit('order_created', payload);
-  }
-  // Also emit to kitchen room (NEW ORDERS)
+  // Emit to order room, kitchen, cashier, waiter, and broadcast globally
+  io.to(room).emit('order_created', payload);
   io.to('kitchen').emit('order_created', payload);
-  // Also emit globally for safety
+  io.to('cashier').emit('order_created', payload);
+  io.to('waiter').emit('order_created', payload);
   io.emit('order_created', payload);
 
   if (SOCKET_LOG_EMITS) {
-    console.log(`[SOCKET] Emitted order_created to room: ${room} and kitchen`);
+    console.log(`[SOCKET] Emitted order_created to room: ${room}, kitchen, cashier, waiter, and global`);
   }
 }
 
@@ -152,15 +173,15 @@ function emitOrderItemsAdded(orderId, orderData) {
     timestamp: new Date().toISOString()
   };
 
-  // Emit to order room unless status is CONFIRMED (2)
-  if (!isConfirmedStatus(orderData)) {
-    io.to(room).emit('order_items_added', payload);
-  }
-  // Also emit to kitchen room
+  // Emit to order room, kitchen, cashier, waiter, and broadcast globally
+  io.to(room).emit('order_items_added', payload);
   io.to('kitchen').emit('order_items_added', payload);
+  io.to('cashier').emit('order_items_added', payload);
+  io.to('waiter').emit('order_items_added', payload);
+  io.emit('order_items_added', payload);
 
   if (SOCKET_LOG_EMITS) {
-    console.log(`[SOCKET] Emitted order_items_added to room: ${room} and kitchen`);
+    console.log(`[SOCKET] Emitted order_items_added to room: ${room}, kitchen, cashier, waiter, and global`);
   }
 }
 

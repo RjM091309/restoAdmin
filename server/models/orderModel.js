@@ -44,7 +44,17 @@ class OrderModel {
 				   FROM billing bill
 				  WHERE bill.ORDER_ID = o.IDNo
 				  ORDER BY bill.IDNo DESC
-				  LIMIT 1) AS payment_method
+				  LIMIT 1) AS payment_method,
+				(SELECT bill.AMOUNT_PAID
+				   FROM billing bill
+				  WHERE bill.ORDER_ID = o.IDNo
+				  ORDER BY bill.IDNo DESC
+				  LIMIT 1) AS amount_paid,
+				(SELECT bill.PAYMENT_REF
+				   FROM billing bill
+				  WHERE bill.ORDER_ID = o.IDNo
+				  ORDER BY bill.IDNo DESC
+				  LIMIT 1) AS payment_ref
 				${includeItemMeta ? `,
 				(SELECT COUNT(*) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_line_count,
 				(SELECT COALESCE(SUM(oi.QTY), 0) FROM order_items oi WHERE oi.ORDER_ID = o.IDNo AND oi.STATUS != -1) AS item_total_qty` : ''}

@@ -6,7 +6,7 @@
 // ============================================
 
 const MenuModel = require('../models/menuModel');
-const { SUBDIRS, publicUrl, safeDeletePublicFile } = require('../utils/uploadPaths');
+const { SUBDIRS, publicUrl, toPublicImageUrl, safeDeletePublicFile } = require('../utils/uploadPaths');
 const TranslationService = require('../utils/translationService');
 const ApiResponse = require('../utils/apiResponse');
 
@@ -121,7 +121,7 @@ class MenuController {
 			// Format image URL if exists
 			if (menu.MENU_IMG) {
 				const baseUrl = req.protocol + '://' + req.get('host');
-				menu.MENU_IMG = menu.MENU_IMG.startsWith('http') ? menu.MENU_IMG : baseUrl + menu.MENU_IMG;
+				menu.MENU_IMG = toPublicImageUrl(baseUrl, menu.MENU_IMG);
 			}
 
 			return ApiResponse.success(res, menu, 'Menu retrieved successfully');

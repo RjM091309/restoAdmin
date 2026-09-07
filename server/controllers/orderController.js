@@ -153,6 +153,8 @@ class OrderController {
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
 
 			// Emit socket event for order creation
+			// encoded_by lets clients tell whether THEY created this order, so the
+			// "New Order Received" alert only fires for other staff, not the creator.
 			socketService.emitOrderCreated(orderId, {
 				order_id: orderId,
 				order_no: payload.ORDER_NO,
@@ -160,7 +162,9 @@ class OrderController {
 				status: payload.STATUS,
 				grand_total: payload.GRAND_TOTAL,
 				items: orderItems,
-				items_count: items.length
+				items_count: items.length,
+				encoded_by: req.session?.user_id || req.user?.user_id || null,
+				branch_id: parseInt(payload.BRANCH_ID) || null
 			});
 
 			// Notify the user who created the order (branch-scoped)
@@ -457,6 +461,7 @@ class OrderController {
 					grand_total: payload.GRAND_TOTAL,
 					items: orderItems,
 					items_count: itemsNormalized.length,
+					branch_id: parseInt(payload.BRANCH_ID) || null
 				});
 			} catch (e) {
 				console.error('[MANUAL ORDER] Socket emit failed:', e?.message || e);
