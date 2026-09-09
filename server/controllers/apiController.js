@@ -417,6 +417,7 @@ class ApiController {
 				id: table.IDNo,
 				table_number: table.TABLE_NUMBER,
 				capacity: table.CAPACITY,
+				room_charge: table.ROOM_CHARGE != null ? parseFloat(table.ROOM_CHARGE) : null,
 				status: table.STATUS,
 				branch_id: table.BRANCH_ID ?? null
 			}));
@@ -884,6 +885,7 @@ class ApiController {
 					payment_method: order.payment_method || null,
 					table_id: order.TABLE_ID,
 					table_number: order.TABLE_NUMBER || null,
+					room_charge: order.ROOM_CHARGE != null ? parseFloat(order.ROOM_CHARGE) : 0,
 					order_type: order.ORDER_TYPE,
 					status: order.STATUS,
 					subtotal: parseFloat(order.SUBTOTAL || 0),
@@ -1144,6 +1146,98 @@ class ApiController {
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] POST /api/waiter/orders/${order_id}/transfer-table - Error:`, error);
 			return res.status(500).json({ success: false, error: 'Failed to transfer table order' });
+		}
+	}
+
+	// Extend the room charge on an active order: adds one more unit of the
+	// table's ROOM_CHARGE to the order's SERVICE_CHARGE and recomputes
+	// GRAND_TOTAL (SUBTOTAL + TAX + SERVICE_CHARGE - DISCOUNT).
+	static async extendRoomCharge(req, res) {
+		const timestamp = new Date().toISOString();
+		const user_id = req.user?.user_id;
+		const { order_id } = req.params;
+
+		try {
+			if (!user_id) return res.status(400).json({ success: false, error: 'User ID is required' });
+			if (!order_id) return res.status(400).json({ success: false, error: 'Order ID is required' });
+
+			const order = await OrderModel.getById(order_id);
+			if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+
+			const resolvedBranchId = req.query.branch_id || req.user?.branch_id || null;
+			if (resolvedBranchId && order.BRANCH_ID && parseInt(order.BRANCH_ID) !== parseInt(resolvedBranchId)) {
+				return res.status(403).json({ success: false, error: 'Order is not in your branch' });
+			}
+
+			// Only active (pending / confirmed) orders can be extended.
+			if (![2, 3].includes(parseInt(order.STATUS, 10))) {
+				return res.status(400).json({ success: false, error: 'Only active orders can be extended' });
+			}
+
+			if (!order.TABLE_ID) {
+				return res.status(400).json({ success: false, error: 'Order has no table assigned' });
+			}
+
+			const table = await TableModel.getById(order.TABLE_ID);
+			const roomCharge = parseFloat(table?.ROOM_CHARGE) || 0;
+			if (!Number.isFinite(roomCharge) || roomCharge <= 0) {
+				return res.status(400).json({ success: false, error: 'This table has no room charge' });
+			}
+
+			const newServiceCharge = Number((parseFloat(order.SERVICE_CHARGE || 0) + roomCharge).toFixed(2));
+			const newGrandTotal = OrderModel.computeGrandTotal(
+				order.SUBTOTAL,
+				order.TAX_AMOUNT,
+				newServiceCharge,
+				order.DISCOUNT_AMOUNT
+			);
+
+			await pool.execute(
+				'UPDATE orders SET SERVICE_CHARGE = ?, GRAND_TOTAL = ?, EDITED_BY = ?, EDITED_DT = NOW() WHERE IDNo = ?',
+				[newServiceCharge, newGrandTotal, user_id, order_id]
+			);
+
+			let tableNumber = table?.TABLE_NUMBER || null;
+			const orderItems = await OrderItemsModel.getByOrderId(order_id);
+			socketService.emitOrderUpdate(order_id, {
+				order_id: parseInt(order_id, 10),
+				order_no: order.ORDER_NO,
+				table_id: order.TABLE_ID,
+				table_number: tableNumber,
+				room_charge: roomCharge,
+				order_type: order.ORDER_TYPE,
+				status: order.STATUS,
+				subtotal: parseFloat(order.SUBTOTAL || 0),
+				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
+				service_charge: newServiceCharge,
+				discount_amount: parseFloat(order.DISCOUNT_AMOUNT || 0),
+				grand_total: newGrandTotal,
+				items: orderItems.map(item => ({
+					item_id: item.IDNo,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				encoded_by: order.ENCODED_BY ?? user_id ?? null,
+				branch_id: order.BRANCH_ID || resolvedBranchId || null
+			});
+
+			return res.json({
+				success: true,
+				data: {
+					order_id: parseInt(order_id, 10),
+					room_charge_added: roomCharge,
+					service_charge: newServiceCharge,
+					grand_total: newGrandTotal
+				}
+			});
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] POST /api/waiter/orders/${order_id}/extend-room-charge - Error:`, error);
+			return res.status(500).json({ success: false, error: 'Failed to extend room charge' });
 		}
 	}
 

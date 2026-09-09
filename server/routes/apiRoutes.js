@@ -101,6 +101,11 @@ router.patch("/waiter/orders/:order_id/status", authenticateJWT, ApiController.u
 // Body: { target_table_id: number }
 router.post("/waiter/orders/:order_id/transfer-table", authenticateJWT, ApiController.transferTableOrder);
 
+// POST - Extend room charge (adds one more unit of the table's ROOM_CHARGE
+// to the order's SERVICE_CHARGE and recomputes GRAND_TOTAL)
+// URL: /api/waiter/orders/:order_id/extend-room-charge
+router.post("/waiter/orders/:order_id/extend-room-charge", authenticateJWT, ApiController.extendRoomCharge);
+
 // POST - Create new order
 // URL: /api/orders
 // Headers: Authorization: Bearer <accessToken>

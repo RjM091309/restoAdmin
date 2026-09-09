@@ -30,6 +30,7 @@ class OrderModel {
 				o.ORDER_NO,
 				o.TABLE_ID,
 				t.TABLE_NUMBER,
+				t.ROOM_CHARGE,
 				o.ORDER_TYPE,
 				o.STATUS,
 				o.SUBTOTAL,
