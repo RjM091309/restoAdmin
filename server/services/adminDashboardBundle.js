@@ -4,6 +4,8 @@ const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 const { resolveNetSalesFromRow } = require('../utils/analyticsSales');
 
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 15000);
+/** 3Core (BR004) — Rj's testing branch, matches is3coreBranch() in src/utils/branchLogo.ts. */
+const TEST_BRANCH_NAME_PATTERN = /3core/i;
 
 function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
 	return fetchPyCachedOptional(path, params, { timeoutMs });
@@ -221,7 +223,16 @@ async function buildAdminDashboardBundle({
 		}),
 	]);
 
-	const branchSales = branchSalesRes?.data?.data || [];
+	const scopedBranchIdForFilter =
+		branchId != null && String(branchId).trim() !== '' ? Number(branchId) : null;
+	const rawBranchSales = branchSalesRes?.data?.data || [];
+	// 3Core (BR004) is a testing-only branch — drop it from "All Branches" aggregates
+	// unless it's the branch explicitly being viewed. Mirrors is3coreBranch() in the frontend.
+	const branchSales = rawBranchSales.filter(
+		(b) =>
+			!TEST_BRANCH_NAME_PATTERN.test(String(b.branch_name || '')) ||
+			Number(b.branch_id) === scopedBranchIdForFilter,
+	);
 	const topSelling = topSellingRes?.data?.data || [];
 	const expenseBreakdown = expenseBreakdownRes?.data?.data || [];
 	const expenseSummary = {

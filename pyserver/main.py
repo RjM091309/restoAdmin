@@ -38,6 +38,11 @@ _EXPENSE_LOCAL_DT_SQL = """COALESCE(
     DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
 )"""
 
+# 3Core (BR004, IDNo=4) — Rj's testing-only branch. Excluded from "All Branches" aggregates
+# (branch_id not given) so it never inflates admin dashboard totals/trend. Mirrors
+# is3coreBranch() in src/utils/branchLogo.ts and TEST_BRANCH_NAME_PATTERN in adminDashboardBundle.js.
+_TEST_BRANCH_IDS = (4,)
+
 
 def _get_db_config() -> dict:
     return {
@@ -366,6 +371,8 @@ def branch_sales(
         if branch_id:
             branch_filter_billing = "AND br.IDNo = %s"
             billing_params.append(branch_id)
+        else:
+            branch_filter_billing = f"AND br.IDNo NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         # amount_paid + refund let us derive daily-sales-equivalent net in one query:
         # net_sales = paid + discount - discount - refund = paid - refund
@@ -473,9 +480,11 @@ def least_selling(
         if branch_id:
             order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
+        else:
+            order_branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         orders_query = f"""
-            SELECT 
+            SELECT
                 m.MENU_NAME as name,
                 COALESCE(c.CAT_NAME, 'Uncategorized') as category,
                 COALESCE(SUM(oi.QTY), 0) as total_quantity,
@@ -612,6 +621,8 @@ def top_selling(
         if branch_id:
             order_branch_filter = "AND b.BRANCH_ID = %s"
             order_params.append(branch_id)
+        else:
+            order_branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         orders_query = f"""
             SELECT 
@@ -748,6 +759,8 @@ def _daily_sales_date_branch_filters(
     if branch_id:
         branch_filter = f"AND {branch_col} = %s"
         params.append(branch_id)
+    else:
+        branch_filter = f"AND {branch_col} NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
     return date_filter, branch_filter, params
 
 
@@ -828,6 +841,8 @@ def _daily_sales_fetch_refund(
     if branch_id:
         refund_branch_filter = "AND {refund_branch_col} = %s"
         refund_params.append(branch_id)
+    else:
+        refund_branch_filter = f"AND {{refund_branch_col}} NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
     if has_refund_tracker:
         refund_day_dt = """COALESCE(
@@ -947,6 +962,8 @@ def top_profit_drivers(
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
+        else:
+            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         has_line_cost = _mysql_column_exists(cur, "order_items", "LINE_COST")
         line_cogs_expr = "COALESCE(oi.LINE_COST, 0)" if has_line_cost else "0"
@@ -1300,6 +1317,8 @@ def daily_per_branch(
         if branch_id:
             branch_filter = "AND br.IDNo = %s"
             params.append(branch_id)
+        else:
+            branch_filter = f"AND br.IDNo NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         query = f"""
             SELECT
@@ -1391,9 +1410,11 @@ def daily_orders(
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
+        else:
+            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
 
         query = f"""
-            SELECT 
+            SELECT
                 DATE_FORMAT({billing_local_dt}, '%Y-%m-%d') AS sale_date,
                 COUNT(DISTINCT b.ORDER_ID) AS order_count
             FROM billing b
@@ -1458,6 +1479,8 @@ def expense_summary(
         if branch_id:
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
+        else:
+            where.append(f"e.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
 
         if start_date and end_date:
             where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
@@ -1516,6 +1539,8 @@ def daily_expenses(
         if branch_id:
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
+        else:
+            where.append(f"e.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
 
         if start_date and end_date:
             where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
@@ -1591,6 +1616,8 @@ def expense_breakdown(
         if branch_id:
             where.append("e.BRANCH_ID = %s")
             params.append(branch_id)
+        else:
+            where.append(f"e.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
 
         if start_date and end_date:
             where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
@@ -1717,6 +1744,8 @@ def performance_trend(
             if branch_id:
                 sales_where_w.append("b.BRANCH_ID = %s")
                 sales_params_w.append(branch_id)
+            else:
+                sales_where_w.append(f"b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
             paid_sql = f"""
                 SELECT DATE_FORMAT(DATE({billing_local_dt}), '%Y-%m-%d') AS sale_date,
                        COALESCE(SUM(b.AMOUNT_PAID), 0) AS paid_total
@@ -1732,6 +1761,8 @@ def performance_trend(
             if branch_id:
                 disc_where_w.append("o.BRANCH_ID = %s")
                 disc_params_w.append(branch_id)
+            else:
+                disc_where_w.append(f"o.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
             disc_sql = f"""
                 SELECT DATE_FORMAT(DATE({billing_local_dt}), '%Y-%m-%d') AS sale_date,
                        COALESCE(SUM(o.DISCOUNT_AMOUNT), 0) AS discount_total
@@ -1748,6 +1779,8 @@ def performance_trend(
             if branch_id:
                 exp_where_w.append("e.BRANCH_ID = %s")
                 exp_params_w.append(branch_id)
+            else:
+                exp_where_w.append(f"e.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
             exp_sql = f"""
                 SELECT DATE_FORMAT(DATE({_EXPENSE_LOCAL_DT_SQL}), '%Y-%m-%d') AS exp_date,
                        COALESCE(SUM(e.EXP_AMOUNT), 0) AS total_expense
@@ -1822,6 +1855,8 @@ def performance_trend(
         if branch_id:
             sales_where.append("b.BRANCH_ID = %s")
             sales_params.append(branch_id)
+        else:
+            sales_where.append(f"b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
 
         sales_query = f"""
             SELECT
@@ -1845,6 +1880,8 @@ def performance_trend(
         if branch_id:
             disc_where.append("o.BRANCH_ID = %s")
             disc_params.append(branch_id)
+        else:
+            disc_where.append(f"o.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
 
         disc_query = f"""
             SELECT
@@ -1864,6 +1901,8 @@ def performance_trend(
         if branch_id:
             exp_where.append("e.BRANCH_ID = %s")
             exp_params.append(branch_id)
+        else:
+            exp_where.append(f"e.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})")
         if effective_start and effective_end:
             exp_where.append(ph_local_day_range_predicate("e.ENCODED_DT"))
             exp_params.extend(ph_local_day_range_params(

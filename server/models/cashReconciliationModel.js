@@ -201,7 +201,7 @@ class CashReconciliationModel {
 		let sql = `
 			SELECT BRANCH_ID, COALESCE(SUM(AMOUNT), 0) AS branch_total
 			FROM cash_reconciliation
-			WHERE ACTIVE = 1
+			WHERE ACTIVE = 1 AND BRANCH_ID NOT IN (4) -- 3Core (BR004) testing branch, excluded from All-Branches totals
 		`;
 		if (startDate) {
 			sql += ' AND BUSINESS_DATE >= ?';
