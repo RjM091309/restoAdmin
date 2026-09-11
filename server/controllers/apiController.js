@@ -1184,7 +1184,12 @@ class ApiController {
 				return res.status(400).json({ success: false, error: 'This table has no room charge' });
 			}
 
-			const newServiceCharge = Number((parseFloat(order.SERVICE_CHARGE || 0) + roomCharge).toFixed(2));
+			// Qty supports 0.5 steps, same as admin's manual-order room charge stepper.
+			const rawQty = parseFloat(req.body?.qty);
+			const qty = Number.isFinite(rawQty) && rawQty > 0 ? Math.round(rawQty * 2) / 2 : 1;
+			const roomChargeAdded = Number((roomCharge * qty).toFixed(2));
+
+			const newServiceCharge = Number((parseFloat(order.SERVICE_CHARGE || 0) + roomChargeAdded).toFixed(2));
 			const newGrandTotal = OrderModel.computeGrandTotal(
 				order.SUBTOTAL,
 				order.TAX_AMOUNT,
@@ -1205,6 +1210,7 @@ class ApiController {
 				table_id: order.TABLE_ID,
 				table_number: tableNumber,
 				room_charge: roomCharge,
+				room_charge_units_added: qty,
 				order_type: order.ORDER_TYPE,
 				status: order.STATUS,
 				subtotal: parseFloat(order.SUBTOTAL || 0),
@@ -1230,7 +1236,8 @@ class ApiController {
 				success: true,
 				data: {
 					order_id: parseInt(order_id, 10),
-					room_charge_added: roomCharge,
+					room_charge_added: roomChargeAdded,
+					units_added: qty,
 					service_charge: newServiceCharge,
 					grand_total: newGrandTotal
 				}
@@ -1246,7 +1253,7 @@ class ApiController {
 		const user_id = req.user?.user_id;
 
 		try {
-			const { branch_id, order_no, table_id, order_type, subtotal, tax_amount, service_charge, discount_amount, grand_total, items } = req.body;
+			const { branch_id, order_no, table_id, order_type, subtotal, tax_amount, service_charge, discount_amount, grand_total, items, encoded_dt } = req.body;
 
 			if (!order_no || order_no.trim() === '') return res.status(400).json({ success: false, error: 'Order number is required' });
 			if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ success: false, error: 'At least one order item is required' });
@@ -1291,14 +1298,28 @@ class ApiController {
 				SERVICE_CHARGE: parseFloat(service_charge) || 0,
 				DISCOUNT_AMOUNT: parseFloat(discount_amount) || 0,
 				GRAND_TOTAL: parseFloat(grand_total) || 0,
+				// Preserve offline timestamp: if the tablet took this order while offline,
+				// encoded_dt holds the original time so reports/billing show the correct time
+				// instead of the later sync time. Falls back to NOW() if not provided.
+				ENCODED_DT: encoded_dt || null,
 				user_id: user_id
 			};
 
 			const existingOrder = await OrderModel.findLatestByOrderNo(orderData.BRANCH_ID, orderData.ORDER_NO);
 			if (existingOrder) {
-				return res.status(400).json({
-					success: false,
-					error: `Order #${orderData.ORDER_NO} already exists. Please use a different order number.`,
+				// Idempotent: if a tablet retried after a brief dropout and the order was
+				// already saved, return the existing order ID so the sync engine can
+				// continue processing subsequent queued actions (e.g. settlements).
+				return res.status(200).json({
+					success: true,
+					data: {
+						order_id: existingOrder.IDNo,
+						order_no: existingOrder.ORDER_NO,
+						table_id: existingOrder.TABLE_ID,
+						status: existingOrder.STATUS,
+						grand_total: parseFloat(existingOrder.GRAND_TOTAL || 0),
+						already_exists: true,
+					},
 				});
 			}
 

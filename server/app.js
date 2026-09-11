@@ -143,7 +143,14 @@ app.get('/api/change-lang', (req, res) => {
   res.json({ success: true, language: lang });
 });
 
-// Root route - API server info
+// Public health-check endpoint — no auth required.
+// Used by the Flutter offline-sync probe to verify server reachability
+// without triggering 401 errors in the browser console.
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
+
 // Returns HTML page if browser requests HTML, JSON otherwise
 app.get('/', (req, res) => {
 	const accepts = req.headers.accept || '';
