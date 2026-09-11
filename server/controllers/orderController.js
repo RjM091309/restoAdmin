@@ -122,6 +122,22 @@ class OrderController {
 				);
 			}
 
+			// A table can only have one open order at a time. Creating a second one here
+			// would also re-stamp the table's Room Charge onto it (see resolveServiceChargeWithRoomCharge),
+			// double-billing the guest. Callers should append to the existing order instead.
+			if (payload.TABLE_ID) {
+				const activeTableOrder = await OrderModel.getActiveByTable(payload.BRANCH_ID, payload.TABLE_ID);
+				if (activeTableOrder) {
+					return res.status(409).json({
+						success: false,
+						error: `This table already has an active order (#${activeTableOrder.ORDER_NO}). Add items to that order instead of creating a new one.`,
+						code: 'ACTIVE_ORDER_EXISTS',
+						existing_order_id: activeTableOrder.IDNo,
+						existing_order_no: activeTableOrder.ORDER_NO,
+					});
+				}
+			}
+
 			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(payload.TABLE_ID, req.body.SERVICE_CHARGE);
 			payload.GRAND_TOTAL = OrderModel.computeGrandTotal(
 				payload.SUBTOTAL,
@@ -326,6 +342,25 @@ class OrderController {
 				user_id: userId,
 			};
 
+			if (!payload.ORDER_NO) {
+				return ApiResponse.badRequest(res, 'Order number is required');
+			}
+
+			// Same guard as create(): don't let a manual order create a second open
+			// order (and a second Room Charge) for a table that already has one.
+			if (payload.TABLE_ID) {
+				const activeTableOrder = await OrderModel.getActiveByTable(payload.BRANCH_ID, payload.TABLE_ID);
+				if (activeTableOrder) {
+					return res.status(409).json({
+						success: false,
+						error: `This table already has an active order (#${activeTableOrder.ORDER_NO}). Add items to that order instead of creating a new one.`,
+						code: 'ACTIVE_ORDER_EXISTS',
+						existing_order_id: activeTableOrder.IDNo,
+						existing_order_no: activeTableOrder.ORDER_NO,
+					});
+				}
+			}
+
 			payload.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(
 				payload.TABLE_ID,
 				req.body.SERVICE_CHARGE ?? req.body.service_charge
@@ -336,10 +371,6 @@ class OrderController {
 				payload.SERVICE_CHARGE,
 				payload.DISCOUNT_AMOUNT
 			);
-
-			if (!payload.ORDER_NO) {
-				return ApiResponse.badRequest(res, 'Order number is required');
-			}
 
 			// Idempotency/safety guard:
 			// if the same manual order number already exists in this branch and is already

@@ -168,6 +168,25 @@ class OrderModel {
 		return rows[0] || null;
 	}
 
+	// Find the table's already-open order (CONFIRMED=2 or PENDING=3), if any.
+	// Used to stop a second order (and a second Room Charge) from being created
+	// for a table that's already occupied by an unsettled order.
+	static async getActiveByTable(branchId, tableId) {
+		const id = tableId != null && tableId !== '' ? parseInt(tableId, 10) : NaN;
+		if (!branchId || !Number.isFinite(id) || id <= 0) {
+			return null;
+		}
+		const query = `
+			SELECT IDNo, BRANCH_ID, ORDER_NO, TABLE_ID, STATUS
+			FROM orders
+			WHERE BRANCH_ID = ? AND TABLE_ID = ? AND STATUS IN (2, 3)
+			ORDER BY IDNo DESC
+			LIMIT 1
+		`;
+		const [rows] = await pool.execute(query, [branchId, id]);
+		return rows[0] || null;
+	}
+
 	static async create(data) {
 		const {
 			BRANCH_ID,
