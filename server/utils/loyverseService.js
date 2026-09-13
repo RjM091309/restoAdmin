@@ -36,6 +36,11 @@ class LoyverseService {
 		this.rawReceiptLogCache = new Map(); // key -> lastSeenMs
 		this.rawReceiptLogTtlMs = parseInt(process.env.LOYVERSE_RAW_RECEIPT_LOG_TTL_MS, 10) || (24 * 60 * 60 * 1000); // 24h
 		this.rawReceiptLogMax = parseInt(process.env.LOYVERSE_RAW_RECEIPT_LOG_MAX, 10) || 5000;
+		// Same dedup pattern for "menu item not found" warnings — unmapped SKUs otherwise
+		// re-log on every incremental sync pass (every syncInterval) and can flood disk.
+		this.missingMenuItemLogCache = new Map(); // key -> lastSeenMs
+		this.missingMenuItemLogTtlMs = parseInt(process.env.LOYVERSE_MISSING_MENU_LOG_TTL_MS, 10) || (60 * 60 * 1000); // 1h
+		this.missingMenuItemLogMax = parseInt(process.env.LOYVERSE_MISSING_MENU_LOG_MAX, 10) || 5000;
 		// Safety limits (0 = no limit). Useful when you have very large datasets.
 		this.maxSyncReceipts = parseInt(process.env.LOYVERSE_SYNC_MAX_RECEIPTS) || 0;
 		this.maxSyncPages = parseInt(process.env.LOYVERSE_SYNC_MAX_PAGES) || 0;
@@ -235,6 +240,30 @@ class LoyverseService {
 			entries.sort((a, b) => a[1] - b[1]); // oldest first
 			for (let i = 0; i < entries.length - minKeep; i++) {
 				this.rawReceiptLogCache.delete(entries[i][0]);
+			}
+		}
+
+		return true;
+	}
+
+	_shouldLogMissingMenuItem(branchId, sku, itemName) {
+		const now = Date.now();
+		const key = `${branchId}|${sku || ''}|${itemName || ''}`;
+		const last = this.missingMenuItemLogCache.get(key);
+
+		if (last != null && (now - last) < this.missingMenuItemLogTtlMs) {
+			return false;
+		}
+
+		this.missingMenuItemLogCache.set(key, now);
+
+		// Lightweight cleanup to keep memory bounded
+		if (this.missingMenuItemLogCache.size > this.missingMenuItemLogMax) {
+			const minKeep = Math.floor(this.missingMenuItemLogMax * 0.8);
+			const entries = Array.from(this.missingMenuItemLogCache.entries());
+			entries.sort((a, b) => a[1] - b[1]); // oldest first
+			for (let i = 0; i < entries.length - minKeep; i++) {
+				this.missingMenuItemLogCache.delete(entries[i][0]);
 			}
 		}
 
@@ -1156,9 +1185,12 @@ class LoyverseService {
 					]);
 				}
 			} else {
-				// Log unmapped items for manual review
-				console.warn(`[Loyverse Sync] Menu item not found: "${itemName}" (SKU: ${sku})`);
-				
+				// Log unmapped items for manual review (deduped — see _shouldLogMissingMenuItem;
+				// without this, incremental auto-sync re-logs the same SKU every syncInterval and floods disk)
+				if (this._shouldLogMissingMenuItem(branchId, sku, itemName)) {
+					console.warn(`[Loyverse Sync] Menu item not found: "${itemName}" (SKU: ${sku})`);
+				}
+
 				// Skip unmapped items
 			}
 		}
