@@ -20,6 +20,19 @@ export default defineConfig(({ mode }) => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       allowedHosts: ['moonctgroup.com', 'www.moonctgroup.com'],
+      watch: {
+        // On this shared host something (Tailwind v4's content auto-detection walking
+        // up past the repo root, most likely) was picking up inotify watches on
+        // constantly-written system files like /var/log/nginx/access.log and
+        // /var/log/syslog. Every write to those triggered chokidar's "unknown file
+        // changed" full-reload path, so the login page reloaded in an infinite loop.
+        // Hard-restrict watching to this project so nothing outside it can trigger a reload.
+        ignored: [
+          '**/node_modules/**',
+          '**/.git/**',
+          (path: string) => !path.startsWith(__dirname),
+        ],
+      },
       proxy: {
         // Existing backend /api/* routes (dashboard, admin, etc.) — no rewrite needed
         '/api': { target: 'http://localhost:2000', changeOrigin: true },
