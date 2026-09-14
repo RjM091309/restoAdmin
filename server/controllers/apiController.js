@@ -26,6 +26,7 @@ const { analyzeReceipt, extractOrderLinesFromReceipt } = require('../services/or
 const { toPublicImageUrl } = require('../utils/uploadPaths');
 const { getManilaTodayYmd } = require('../utils/manilaMonthRange');
 const pool = require('../config/db');
+const crypto = require('crypto');
 
 class ApiController {
 	// Login endpoint for mobile app
@@ -131,6 +132,12 @@ class ApiController {
 				branchMeta = null;
 			}
 
+			// Single-device-session enforcement: this login's sid becomes the
+			// only valid one for this account — authenticateJWT rejects any
+			// older token still out there on another device on its next call.
+			const sid = crypto.randomUUID();
+			await UserModel.updateActiveSession(user.IDNo, sid);
+
 			const tokenPayload = {
 				user_id: user.IDNo,
 				username: user.USERNAME,
@@ -140,6 +147,8 @@ class ApiController {
 				branch_id: user.BRANCH_ID || null,
 				branch_name: branchMeta?.BRANCH_NAME || null,
 				branch_code: branchMeta?.BRANCH_CODE || null,
+				floor: user.FLOOR || null,
+				sid,
 			};
 			const tokens = generateTokenPair(tokenPayload);
 
@@ -154,6 +163,7 @@ class ApiController {
 					branch_id: user.BRANCH_ID || null,
 					branch_name: branchMeta?.BRANCH_NAME || null,
 					branch_code: branchMeta?.BRANCH_CODE || null,
+					floor: user.FLOOR || null,
 					role: userRole,
 					table_id: user.TABLE_ID || null,
 					branches: branches

@@ -29,6 +29,7 @@ function generateAccessToken(payload) {
 			branch_id: payload.branch_id || null,
 			branch_name: payload.branch_name || null,
 			branch_code: payload.branch_code || null,
+			sid: payload.sid || null,
 			type: 'access'
 		},
 		JWT_SECRET,

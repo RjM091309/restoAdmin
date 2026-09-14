@@ -11,6 +11,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPage, SkeletonStatCards, SkeletonPageHeader, SkeletonTable } from '../ui/Skeleton';
 import { useUser } from '../../context/UserContext';
 
+// Branches where the ground/2nd-floor table split actually exists: Blue Moon
+// (3) is the real branch, 3Core (4) is kept for testing.
+const FLOOR_ENABLED_BRANCH_IDS = [3, 4];
+
 interface UserRow {
   id: string;
   firstName: string;
@@ -23,6 +27,7 @@ interface UserRow {
   branchId: string | number | null;
   tableNumber: string | number | null;
   tableId: string | number | null;
+  floor: string;
   status: 'Active' | 'Inactive';
 }
 
@@ -60,6 +65,7 @@ export const Users: React.FC = () => {
     roleId: '' as string | number,
     branchId: '' as string | number | null,
     tableId: '' as string | number | null,
+    floor: '' as string,
   });
 
   // Options State
@@ -95,6 +101,7 @@ export const Users: React.FC = () => {
         branchId: u.BRANCH_ID || null,
         tableNumber: u.TABLE_NUMBER || '—',
         tableId: u.TABLE_ID || null,
+        floor: u.FLOOR || '',
         status: u.ACTIVE === 1 ? 'Active' : 'Inactive'
       }));
       setUsers(mappedData);
@@ -199,6 +206,7 @@ export const Users: React.FC = () => {
       roleId: '',
       branchId: null,
       tableId: null,
+      floor: '',
     });
     setIsModalOpen(true);
   };
@@ -214,6 +222,7 @@ export const Users: React.FC = () => {
       roleId: user.roleId,
       branchId: user.branchId,
       tableId: user.tableId,
+      floor: user.floor,
     });
     setIsModalOpen(true);
   };
@@ -246,6 +255,7 @@ export const Users: React.FC = () => {
         user_role: formData.roleId,
         branch_id: formData.branchId,
         table_id: formData.tableId,
+        floor: formData.floor || null,
       };
 
       const res = await fetch(url, {
@@ -465,6 +475,7 @@ export const Users: React.FC = () => {
               roleId: '',
               branchId: null,
               tableId: null,
+              floor: '',
             });
           }
         }}
@@ -502,7 +513,16 @@ export const Users: React.FC = () => {
               <Select2
                 options={roles}
                 value={formData.roleId}
-                onChange={(val) => setFormData({ ...formData, roleId: val as string | number, tableId: val === 2 ? formData.tableId : null })}
+                onChange={(val) => {
+                  const selectedLabel = roles.find((r) => String(r.value) === String(val))?.label || '';
+                  const isFloorRole = /waiter|cashier/i.test(selectedLabel);
+                  setFormData({
+                    ...formData,
+                    roleId: val as string | number,
+                    tableId: val === 2 ? formData.tableId : null,
+                    floor: isFloorRole ? formData.floor : '',
+                  });
+                }}
                 placeholder={t('manage_users.select_role')}
               />
             </div>
@@ -512,7 +532,11 @@ export const Users: React.FC = () => {
               <Select2
                 options={branches}
                 value={formData.branchId}
-                onChange={(val) => setFormData({ ...formData, branchId: val as string | number | null })}
+                onChange={(val) => setFormData({
+                  ...formData,
+                  branchId: val as string | number | null,
+                  floor: FLOOR_ENABLED_BRANCH_IDS.includes(Number(val)) ? formData.floor : '',
+                })}
                 placeholder={t('manage_users.select_branch')}
                 disabled={formData.roleId === 1}
               />
@@ -526,6 +550,22 @@ export const Users: React.FC = () => {
                   value={formData.tableId}
                   onChange={(val) => setFormData({ ...formData, tableId: val as string | number | null })}
                   placeholder={t('manage_users.select_table')}
+                />
+              </div>
+            )}
+
+            {/waiter|cashier/i.test(roles.find((r) => String(r.value) === String(formData.roleId))?.label || '') && FLOOR_ENABLED_BRANCH_IDS.includes(Number(formData.branchId)) && (
+              <div className="space-y-2 col-span-2">
+                <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">Floor</label>
+                <Select2
+                  options={[
+                    { value: '', label: 'All Floors' },
+                    { value: 'gf', label: 'Ground Floor' },
+                    { value: '2f', label: '2nd Floor' },
+                  ]}
+                  value={formData.floor}
+                  onChange={(val) => setFormData({ ...formData, floor: (val as string) || '' })}
+                  placeholder="Select floor"
                 />
               </div>
             )}

@@ -6,17 +6,18 @@
 // ============================================
 
 const { verifyAccessToken } = require('../utils/jwt');
+const UserModel = require('../models/userModel');
 
 /**
  * JWT Authentication Middleware
  * Verifies JWT token from Authorization header
  * Attaches user info to req.user if valid
  */
-const authenticateJWT = (req, res, next) => {
+const authenticateJWT = async (req, res, next) => {
 	try {
 		// Get token from Authorization header
 		const authHeader = req.headers.authorization;
-		
+
 		if (!authHeader) {
 			return res.status(401).json({
 				success: false,
@@ -25,8 +26,8 @@ const authenticateJWT = (req, res, next) => {
 		}
 
 		// Extract token from "Bearer <token>"
-		const token = authHeader.startsWith('Bearer ') 
-			? authHeader.slice(7) 
+		const token = authHeader.startsWith('Bearer ')
+			? authHeader.slice(7)
 			: authHeader;
 
 		if (!token) {
@@ -38,7 +39,21 @@ const authenticateJWT = (req, res, next) => {
 
 		// Verify token
 		const decoded = verifyAccessToken(token);
-		
+
+		// Single-device-session enforcement: if this account has since logged
+		// in elsewhere, ACTIVE_SESSION_ID will have moved on from this
+		// token's sid. A null DB value means the feature hasn't stamped this
+		// account yet (pre-existing token from before this shipped) — allow
+		// it through untouched rather than mass-logging-out everyone.
+		const activeSessionId = await UserModel.getActiveSessionId(decoded.user_id);
+		if (activeSessionId && decoded.sid !== activeSessionId) {
+			return res.status(401).json({
+				success: false,
+				error: 'This account was signed in on another device.',
+				code: 'SESSION_REPLACED'
+			});
+		}
+
 		// Attach user info to request
 		req.user = {
 			user_id: decoded.user_id,

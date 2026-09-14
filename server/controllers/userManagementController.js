@@ -183,7 +183,7 @@ class UserManagementController {
             const {
                 txtFirstName, txtLastName, txtUserName,
                 txtPassword, txtPassword2,
-                user_role, table_id, salt, branch_id
+                user_role, table_id, salt, branch_id, floor
             } = req.body;
 
             if (txtPassword !== txtPassword2) {
@@ -225,6 +225,8 @@ class UserManagementController {
                 }
             }
 
+            await UserModel.updateFloor(newUserId, floor || null);
+
             // Always return JSON for API routes
             res.json({ success: true, message: 'User created successfully', data: { id: newUserId } });
         } catch (err) {
@@ -247,7 +249,7 @@ class UserManagementController {
             const {
                 txtFirstName, txtLastName, txtUserName,
                 txtPassword, txtPassword2,
-                user_role, table_id, branch_id
+                user_role, table_id, branch_id, floor
             } = req.body;
 
             const roleId = parseInt(user_role);
@@ -277,6 +279,10 @@ class UserManagementController {
             if (creatorPerm === 1 && branch_id !== undefined) {
                 const targetBranchId = roleId === 1 ? null : (branch_id ? parseInt(branch_id) : null);
                 await UserModel.updateBranch(id, targetBranchId);
+            }
+
+            if (floor !== undefined) {
+                await UserModel.updateFloor(id, floor || null);
             }
 
             // Always return JSON for API routes
