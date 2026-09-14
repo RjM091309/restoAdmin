@@ -147,6 +147,27 @@ class UserModel {
         await pool.execute(query, [branchId, userId]);
     }
 
+    static async updateFloor(userId, floor) {
+        const query = 'UPDATE user_info SET FLOOR = ? WHERE IDNo = ?';
+        await pool.execute(query, [floor, userId]);
+    }
+
+    // Single-device-session enforcement for the mobile /api/login surface: a
+    // login overwrites this, and authenticateJWT rejects any older token
+    // whose sid no longer matches it.
+    static async updateActiveSession(userId, sid) {
+        const query = 'UPDATE user_info SET ACTIVE_SESSION_ID = ? WHERE IDNo = ?';
+        await pool.execute(query, [sid, userId]);
+    }
+
+    static async getActiveSessionId(userId) {
+        const [rows] = await pool.execute(
+            'SELECT ACTIVE_SESSION_ID FROM user_info WHERE IDNo = ? LIMIT 1',
+            [userId]
+        );
+        return rows.length > 0 ? rows[0].ACTIVE_SESSION_ID : null;
+    }
+
     static async getBranchId(userId) {
         const [rows] = await pool.execute(
             'SELECT BRANCH_ID FROM user_info WHERE IDNo = ? LIMIT 1',
