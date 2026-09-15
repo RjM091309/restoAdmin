@@ -940,7 +940,7 @@ class ApiController {
 			payment_ref,
 			remarks
 		} = req.body || {};
-		const allowedStatuses = [3, 2, 1];
+		const allowedStatuses = [3, 2, 1, -1];
 
 		try {
 			if (!user_id) return res.status(400).json({ success: false, error: 'User ID is required' });
@@ -972,6 +972,11 @@ class ApiController {
 			if (targetStatus === 1) {
 				await InventoryDeductionModel.updateStatusByOrderId(Number(order_id), 1, user_id);
 				await OrderModel.updateStatus(order_id, 1, user_id);
+			} else if (targetStatus === -1) {
+				// CANCELLED: reverse deductions (add stock back), same as the
+				// admin web panel's own cancel handler.
+				await InventoryDeductionService.reverseOnOrderCancelled(Number(order_id), user_id);
+				await OrderModel.updateStatus(order_id, targetStatus, user_id);
 			} else {
 				await OrderModel.updateStatus(order_id, targetStatus, user_id);
 			}
@@ -1036,6 +1041,9 @@ class ApiController {
 				} catch (syncError) {
 					console.warn(`[${timestamp}] [SYNC WARNING] ${syncError.message}`);
 				}
+			} else if (targetStatus === -1) {
+				// CANCELLED: free the table, same as SETTLED — no billing record needed.
+				if (order.TABLE_ID) await TableModel.updateStatus(order.TABLE_ID, 1);
 			}
 
 			let tableNumber = null;
