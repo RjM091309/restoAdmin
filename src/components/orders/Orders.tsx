@@ -32,6 +32,7 @@ import {
     isEncodedDtWithinDateRange,
     parseEncodedDtToUtcMs,
 } from '../../utils/manilaDateTime';
+import { isFloorEnabledBranch, type TableFloor } from '../../utils/floorScope';
 import { DataTable, type ColumnDef } from '../ui/DataTable';
 import { Modal } from '../ui/Modal';
 import { Select2 } from '../ui/Select2';
@@ -249,7 +250,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [newOrderNo, setNewOrderNo] = useState('');
     const [newOrderType, setNewOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [newOrderTableId, setNewOrderTableId] = useState<string>('');
-    const [branchTables, setBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [newOrderFloor, setNewOrderFloor] = useState<TableFloor | ''>('');
+    const [branchTables, setBranchTables] = useState<{ value: string; label: string; floor: TableFloor | null }[]>([]);
     const [branchTablesRoomChargeById, setBranchTablesRoomChargeById] = useState<Record<string, number>>({});
     const [newOrderItems, setNewOrderItems] = useState<NewOrderItem[]>([]);
     const [newOrderSelectedMenuId, setNewOrderSelectedMenuId] = useState<string>('');
@@ -265,7 +267,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualBranchOptions, setManualBranchOptions] = useState<{ value: string; label: string }[]>([]);
     const [manualOrderType, setManualOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [manualOrderTableId, setManualOrderTableId] = useState<string>('');
-    const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [manualOrderFloor, setManualOrderFloor] = useState<TableFloor | ''>('');
+    const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string; floor: TableFloor | null }[]>([]);
     const [manualBranchTablesRoomChargeById, setManualBranchTablesRoomChargeById] = useState<Record<string, number>>({});
     const [manualRoomChargeQty, setManualRoomChargeQty] = useState<number>(1);
     const [manualOrderItems, setManualOrderItems] = useState<NewOrderItem[]>([]);
@@ -451,11 +454,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     throw new Error(json.error || json.message || 'Failed to load tables');
                 }
                 const raw = json.data ?? json;
-                const mapped: { value: string; label: string }[] = (Array.isArray(raw) ? raw : [])
+                const mapped: { value: string; label: string; floor: TableFloor | null }[] = (Array.isArray(raw) ? raw : [])
                     .filter((t: any) => t.STATUS === 1) // available only
                     .map((t: any) => ({
                         value: String(t.IDNo),
                         label: `Table ${t.TABLE_NUMBER}`,
+                        floor: t.FLOOR === 'gf' || t.FLOOR === '2f' ? (t.FLOOR as TableFloor) : null,
                     }));
                 const roomChargeById: Record<string, number> = {};
                 for (const t of (Array.isArray(raw) ? raw : [])) {
@@ -857,6 +861,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setNewOrderItems([]);
         setNewOrderSelectedMenuId('');
         setNewOrderQty(1);
+        setNewOrderFloor('');
         setNewOrderOpen(true);
     };
 
@@ -891,6 +896,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualDiscountAmount('0');
         setManualOrderBranchId('');
         setManualBranchTables([]);
+        setManualOrderFloor('');
         setManualOrderOpen(true);
     };
 
@@ -959,11 +965,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     throw new Error(json.error || json.message || 'Failed to load tables');
                 }
                 const raw = json.data ?? json;
-                const mapped: { value: string; label: string }[] = (Array.isArray(raw) ? raw : [])
+                const mapped: { value: string; label: string; floor: TableFloor | null }[] = (Array.isArray(raw) ? raw : [])
                     .filter((t: any) => t.STATUS === 1) // available only
                     .map((t: any) => ({
                         value: String(t.IDNo),
                         label: `Table ${t.TABLE_NUMBER}`,
+                        floor: t.FLOOR === 'gf' || t.FLOOR === '2f' ? (t.FLOOR as TableFloor) : null,
                     }));
                 const roomChargeById: Record<string, number> = {};
                 for (const t of (Array.isArray(raw) ? raw : [])) {
@@ -1089,6 +1096,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             .finally(() => { if (!cancelled) setNewOrderLoadingRefs(false); });
         return () => { cancelled = true; };
     }, [newOrderOpen, branchId]);
+
+    // Floor is a pure UI filter over branchTables (only meaningful for the
+    // multi-floor branches) — it isn't sent with the order itself.
+    const newOrderTableOptions = useMemo(() => {
+        if (!isFloorEnabledBranch(branchId) || !newOrderFloor) return branchTables;
+        return branchTables.filter((t) => t.floor === newOrderFloor);
+    }, [branchTables, branchId, newOrderFloor]);
 
     const newOrderSubtotal = newOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
     const newOrderTableRoomCharge =
@@ -1929,6 +1943,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             .finally(() => { if (!cancelled) setManualOrderLoadingRefs(false); });
         return () => { cancelled = true; };
     }, [manualOrderOpen, effectiveManualBranchId]);
+
+    // Same floor-as-UI-filter approach as the New Order modal, but the source
+    // list switches between manualBranchTables / branchTables depending on
+    // whether the modal has its own branch picker (All Branches view).
+    const manualOrderTableOptions = useMemo(() => {
+        const source = isAllBranches ? manualBranchTables : branchTables;
+        if (!isFloorEnabledBranch(effectiveManualBranchId) || !manualOrderFloor) return source;
+        return source.filter((t) => t.floor === manualOrderFloor);
+    }, [isAllBranches, manualBranchTables, branchTables, effectiveManualBranchId, manualOrderFloor]);
 
     const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
@@ -2796,6 +2819,26 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             >
                 <div className="space-y-6">
                     {/* Header / basic info */}
+                    {isFloorEnabledBranch(branchId) && (
+                        <div className="w-full sm:w-64 space-y-2">
+                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                {t('table.floor')}
+                            </label>
+                            <Select2
+                                options={[
+                                    { value: 'gf', label: t('table.ground_floor') },
+                                    { value: '2f', label: t('table.second_floor') },
+                                ]}
+                                value={newOrderFloor || null}
+                                onChange={(v) => {
+                                    setNewOrderFloor((v as TableFloor) || '');
+                                    setNewOrderTableId('');
+                                }}
+                                placeholder={t('table.select_floor')}
+                                clearable
+                            />
+                        </div>
+                    )}
                     <div className="grid grid-cols-3 gap-5">
                         <div className="space-y-2">
                             <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
@@ -2831,7 +2874,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                 {t('table.table_number')}
                             </label>
                             <Select2
-                                options={branchTables}
+                                options={newOrderTableOptions}
                                 value={newOrderTableId || null}
                                 onChange={(v) => setNewOrderTableId(v ? String(v) : '')}
                                 placeholder={t('table.table_number')}
@@ -3650,8 +3693,28 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <Select2
                                                     options={manualBranchOptions}
                                                     value={manualOrderBranchId || null}
-                                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); }}
+                                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); setManualOrderFloor(''); }}
                                                     placeholder={t('header.select_branch')}
+                                                />
+                                            </div>
+                                        )}
+                                        {isFloorEnabledBranch(effectiveManualBranchId) && (
+                                            <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                                <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                    {t('table.floor')}
+                                                </label>
+                                                <Select2
+                                                    options={[
+                                                        { value: 'gf', label: t('table.ground_floor') },
+                                                        { value: '2f', label: t('table.second_floor') },
+                                                    ]}
+                                                    value={manualOrderFloor || null}
+                                                    onChange={(v) => {
+                                                        setManualOrderFloor((v as TableFloor) || '');
+                                                        setManualOrderTableId('');
+                                                    }}
+                                                    placeholder={t('table.select_floor')}
+                                                    clearable
                                                 />
                                             </div>
                                         )}
@@ -3689,7 +3752,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 {t('table.table_number')}
                                             </label>
                                             <Select2
-                                                options={isAllBranches ? manualBranchTables : branchTables}
+                                                options={manualOrderTableOptions}
                                                 value={manualOrderTableId || null}
                                                 onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
                                                 placeholder={t('table.table_number')}
