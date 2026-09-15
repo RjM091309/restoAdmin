@@ -11,12 +11,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skeleton';
 import { useUser } from '../../context/UserContext';
 import { useCrudPermissions } from '../../hooks/useCrudPermissions';
+import { isFloorEnabledBranch, type TableFloor } from '../../utils/floorScope';
 
 interface TableRow {
   id: string | number;
   branchId: string | number | null;
   branchName: string;
   tableNumber: string;
+  floor: TableFloor | null;
   capacity: number;
   roomCharge: number | null;
   status: number;
@@ -72,12 +74,14 @@ export const Tables: React.FC = () => {
   const [formData, setFormData] = useState<{
     branchId: string | number | null;
     tableNumber: string;
+    floor: TableFloor | null;
     capacity: string;
     roomCharge: string;
     status: number;
   }>({
     branchId: null,
     tableNumber: '',
+    floor: null,
     capacity: '',
     roomCharge: '',
     status: 1,
@@ -156,6 +160,7 @@ export const Tables: React.FC = () => {
         branchId: rt.BRANCH_ID ?? null,
         branchName: rt.BRANCH_LABEL || '—',
         tableNumber: String(rt.TABLE_NUMBER ?? '—'),
+        floor: rt.FLOOR === 'gf' || rt.FLOOR === '2f' ? (rt.FLOOR as TableFloor) : null,
         capacity: Number(rt.CAPACITY ?? 0),
         roomCharge:
           rt.ROOM_CHARGE != null && rt.ROOM_CHARGE !== ''
@@ -207,6 +212,7 @@ export const Tables: React.FC = () => {
     setFormData({
       branchId: isAdmin ? null : user?.branch_id || null,
       tableNumber: '',
+      floor: null,
       capacity: '',
       roomCharge: '',
       status: 1,
@@ -219,6 +225,7 @@ export const Tables: React.FC = () => {
     setFormData({
       branchId: table.branchId,
       tableNumber: table.tableNumber === '—' ? '' : table.tableNumber,
+      floor: table.floor,
       capacity: table.capacity ? String(table.capacity) : '',
       roomCharge:
         table.roomCharge != null && !Number.isNaN(table.roomCharge)
@@ -250,6 +257,7 @@ export const Tables: React.FC = () => {
     try {
       const payload: any = {
         TABLE_NUMBER: formData.tableNumber.trim(),
+        FLOOR: isFloorEnabledBranch(formData.branchId) ? formData.floor : null,
         CAPACITY: formData.capacity || '0',
         ROOM_CHARGE: formData.roomCharge.trim(),
         STATUS: formData.status,
@@ -519,6 +527,7 @@ export const Tables: React.FC = () => {
             setFormData({
               branchId: isAdmin ? null : user?.branch_id || null,
               tableNumber: '',
+              floor: null,
               capacity: '',
               roomCharge: '',
               status: 1,
@@ -571,6 +580,7 @@ export const Tables: React.FC = () => {
                   setFormData((prev) => ({
                     ...prev,
                     branchId: val as string | number | null,
+                    floor: isFloorEnabledBranch(val as string | number | null) ? prev.floor : null,
                   }))
                 }
                 placeholder={t('branch.select_branch') ?? 'Select branch'}
@@ -644,6 +654,29 @@ export const Tables: React.FC = () => {
               />
             </div>
           </div>
+
+          {isFloorEnabledBranch(formData.branchId) && (
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">
+                {t('table.floor')}
+              </label>
+              <Select2
+                options={[
+                  { value: 'gf', label: t('table.ground_floor') },
+                  { value: '2f', label: t('table.second_floor') },
+                ]}
+                value={formData.floor}
+                onChange={(val) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    floor: (val as TableFloor) || null,
+                  }))
+                }
+                placeholder={t('table.select_floor')}
+                clearable
+              />
+            </div>
+          )}
 
           <div className="space-y-3">
             <label className="text-xs font-bold text-brand-text uppercase tracking-wider block">

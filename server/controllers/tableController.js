@@ -56,6 +56,7 @@ class TableController {
 		try {
 			const {
 				TABLE_NUMBER,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS
@@ -87,6 +88,7 @@ class TableController {
 			const tableId = await TableModel.create({
 				BRANCH_ID: branchId,
 				TABLE_NUMBER: normalizedTableNumber,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS,
@@ -106,6 +108,7 @@ class TableController {
 			const { id } = req.params;
 			const {
 				TABLE_NUMBER,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS
@@ -117,6 +120,7 @@ class TableController {
 
 			const updated = await TableModel.update(id, {
 				TABLE_NUMBER,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS

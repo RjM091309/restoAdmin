@@ -19,6 +19,7 @@ class TableModel {
 				b.BRANCH_CODE,
 				b.BRANCH_NAME AS BRANCH_LABEL,
 				rt.TABLE_NUMBER,
+				rt.FLOOR,
 				rt.CAPACITY,
 				rt.ROOM_CHARGE,
 				rt.STATUS,
@@ -48,6 +49,7 @@ class TableModel {
 				IDNo,
 				BRANCH_ID,
 				TABLE_NUMBER,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS
@@ -75,26 +77,29 @@ class TableModel {
 
 	// Create new restaurant table
 	static async create(data) {
-		const { TABLE_NUMBER, CAPACITY, ROOM_CHARGE, STATUS, BRANCH_ID, user_id } = data;
+		const { TABLE_NUMBER, FLOOR, CAPACITY, ROOM_CHARGE, STATUS, BRANCH_ID, user_id } = data;
 		const currentDate = new Date();
 		const roomChargeSql = TableModel.normalizeRoomCharge(ROOM_CHARGE);
+		const floorSql = TableModel.normalizeFloor(FLOOR);
 
 		const query = `
 			INSERT INTO restaurant_tables (
 				BRANCH_ID,
 				TABLE_NUMBER,
+				FLOOR,
 				CAPACITY,
 				ROOM_CHARGE,
 				STATUS,
 				ACTIVE,
 				ENCODED_BY,
 				ENCODED_DT
-			) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
 		`;
 
 		const [result] = await pool.execute(query, [
 			BRANCH_ID,
 			TABLE_NUMBER,
+			floorSql,
 			parseInt(CAPACITY) || 0,
 			roomChargeSql,
 			parseInt(STATUS) || 1,
@@ -109,6 +114,7 @@ class TableModel {
 				socketService.emitTableUpdated({
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
+					floor: table.FLOOR ?? null,
 					capacity: table.CAPACITY,
 					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
@@ -121,12 +127,14 @@ class TableModel {
 
 	// Update restaurant table
 	static async update(id, data) {
-		const { TABLE_NUMBER, CAPACITY, ROOM_CHARGE, STATUS } = data;
+		const { TABLE_NUMBER, FLOOR, CAPACITY, ROOM_CHARGE, STATUS } = data;
 		const roomChargeSql = TableModel.normalizeRoomCharge(ROOM_CHARGE);
+		const floorSql = TableModel.normalizeFloor(FLOOR);
 
 		const query = `
 			UPDATE restaurant_tables SET
 				TABLE_NUMBER = ?,
+				FLOOR = ?,
 				CAPACITY = ?,
 				ROOM_CHARGE = ?,
 				STATUS = ?
@@ -135,6 +143,7 @@ class TableModel {
 
 		const [result] = await pool.execute(query, [
 			TABLE_NUMBER,
+			floorSql,
 			parseInt(CAPACITY) || 0,
 			roomChargeSql,
 			parseInt(STATUS) || 1,
@@ -147,6 +156,7 @@ class TableModel {
 				socketService.emitTableUpdated({
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
+					floor: table.FLOOR ?? null,
 					capacity: table.CAPACITY,
 					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
@@ -172,6 +182,7 @@ class TableModel {
 			socketService.emitTableUpdated({
 				id,
 				table_number: table?.TABLE_NUMBER,
+				floor: table?.FLOOR ?? null,
 				capacity: table?.CAPACITY,
 				room_charge: table?.ROOM_CHARGE,
 				status: table?.STATUS,
@@ -195,6 +206,7 @@ class TableModel {
 				socketService.emitTableUpdated({
 					id: table.IDNo,
 					table_number: table.TABLE_NUMBER,
+					floor: table.FLOOR ?? null,
 					capacity: table.CAPACITY,
 					room_charge: table.ROOM_CHARGE,
 					status: table.STATUS,
@@ -212,6 +224,15 @@ class TableModel {
 		}
 		const n = parseFloat(String(value));
 		return Number.isFinite(n) ? n : null;
+	}
+
+	// FLOOR is only meaningful for the handful of multi-floor branches (see
+	// src/utils/floorScope.ts on the frontend) — any other value collapses to
+	// null rather than being stored as free-form text.
+	/** @param {unknown} value */
+	static normalizeFloor(value) {
+		const v = value == null ? '' : String(value).trim().toLowerCase();
+		return v === 'gf' || v === '2f' ? v : null;
 	}
 
 	// Get transaction history for a specific table
