@@ -126,8 +126,11 @@ function formatReceiptScanHistorySourceLabel(raw: string): string {
     return raw?.trim() || '—';
 }
 
-function is3coreUsername(username: string | null | undefined): boolean {
-    return String(username ?? '').trim().toLowerCase() === '3coredev';
+/** Usernames allowed to edit an order's encoded date / soft-delete it, regardless of branch or role. */
+const ORDER_META_EDITOR_USERNAMES = ['3coredev', 'bmoon'];
+
+function isOrderMetaEditorUsername(username: string | null | undefined): boolean {
+    return ORDER_META_EDITOR_USERNAMES.includes(String(username ?? '').trim().toLowerCase());
 }
 
 const ENCODED_DT_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/;
@@ -203,7 +206,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const { t } = useTranslation();
     const { user } = useUser();
     const isAdmin = user?.permissions === 1;
-    const is3coreUser = is3coreUsername(user?.username);
+    const canEditOrderMeta = isOrderMetaEditorUsername(user?.username);
 
     // Prefer URL branchId to stay consistent with Header behavior (opens new tab with ?branchId=...).
     // Fallback to selectedBranch, then 'all'.
@@ -2330,7 +2333,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     >
                         <Eye size={16} />
                     </button>
-                    {is3coreUser && (
+                    {canEditOrderMeta && (
                         <>
                             <button
                                 onClick={() => openEncodedDtModal(order)}
@@ -2376,7 +2379,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 </div>
             ),
         },
-    ], [statusSubmitting, encodedDtSubmitting, t, canUpdate, is3coreUser]);
+    ], [statusSubmitting, encodedDtSubmitting, t, canUpdate, canEditOrderMeta]);
 
     // ==================== RENDER ====================
     return (
@@ -4232,7 +4235,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </div>
                         )}
 
-                        {is3coreUser && (
+                        {canEditOrderMeta && (
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
                                 <button
                                     type="button"
