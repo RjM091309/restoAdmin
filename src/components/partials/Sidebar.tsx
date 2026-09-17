@@ -16,6 +16,7 @@ import {
   DollarSign,
   CreditCard,
   FlaskConical,
+  KeyRound,
 } from 'lucide-react';
 import { useUser } from '../../context/UserContext';
 import { cn } from '../../lib/utils';
@@ -307,6 +308,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
   const isSpecificBranch = selectedBranch != null && String(selectedBranch.id) !== 'all';
   const { logout, user } = useUser();
   const isAdmin = user?.permissions === 1;
+  const is3core = (user?.username || '').trim().toLowerCase() === '3coredev';
   const { t } = useTranslation();
   const [userMgmtExpanded, setUserMgmtExpanded] = useState(false);
   const [salesReportExpanded, setSalesReportExpanded] = useState(false);
@@ -568,6 +570,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               onClick={() => onTabChange('Branches')}
             />
           </SidebarItem>
+        )}
+        {is3core && (
+          <SidebarItem
+            icon={KeyRound}
+            label={t('sidebar.loyverse_tokens', 'Loyverse Tokens')}
+            active={activeTab === 'Loyverse Tokens'}
+            onClick={() => {
+              onTabChange('Loyverse Tokens');
+              setUserMgmtExpanded(false);
+              setSalesReportExpanded(false);
+            }}
+          />
         )}
       </nav>
 

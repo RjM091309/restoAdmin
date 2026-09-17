@@ -15,12 +15,12 @@ const OrderModel = require('../models/orderModel');
 const OrderItemsModel = require('../models/orderItemsModel');
 const BillingModel = require('../models/billingModel');
 const LoyverseSyncStateModel = require('../models/loyverseSyncStateModel');
+const LoyverseTokenModel = require('../models/loyverseTokenModel');
 const socketService = require('./socketService');
 
 class LoyverseService {
 	constructor() {
 		this.baseURL = 'https://api.loyverse.com/v1.0';
-		this.accessToken = process.env.LOYVERSE_ACCESS_TOKEN || '';
 		this.defaultBranchId = null;
 		this._refreshDefaultBranchIdFromEnv();
 		this.syncInterval = parseInt(process.env.LOYVERSE_SYNC_INTERVAL) || 10000; // ms; default 10s if env unset
@@ -63,9 +63,11 @@ class LoyverseService {
 			totalErrors: 0,
 			lastError: null
 		};
-		/** @type {Map<number, string>} */
+		/** @type {Map<number, string>} in-memory cache, lazily (re)loaded from the DB — see _refreshTokenCacheIfStale() */
 		this.branchAccessTokens = new Map();
-		this._loadBranchAccessTokens();
+		this._globalAccessToken = '';
+		this._tokenCacheLoadedAt = 0;
+		this._tokenCacheTtlMs = parseInt(process.env.LOYVERSE_TOKEN_CACHE_TTL_MS, 10) || 30000;
 		/** @type {Map<string, number|null>} variant unit cost cache (Items API) */
 		this._variantUnitCostCache = new Map();
 		/** @type {boolean|null} */
@@ -146,11 +148,14 @@ class LoyverseService {
 	}
 
 	/**
-	 * Per-branch Loyverse OAuth tokens (different merchants / POS accounts).
+	 * Env-var fallback, used only when the loyverse_branch_tokens table has no rows yet
+	 * (i.e. tokens haven't been migrated into the DB via the admin UI). Kept so the app
+	 * doesn't break mid-transition; once tokens are re-entered through the UI and removed
+	 * from .env.local, this path is simply never reached.
 	 * Sources: LOYVERSE_BRANCH_ACCOUNTS (JSON array) and LOYVERSE_BRANCH_<id>_ACCESS_TOKEN.
 	 */
-	_loadBranchAccessTokens() {
-		this.branchAccessTokens = new Map();
+	_loadBranchAccessTokensFromEnvFallback() {
+		const branchAccessTokens = new Map();
 		const jsonRaw = (process.env.LOYVERSE_BRANCH_ACCOUNTS || '').trim();
 		if (jsonRaw) {
 			try {
@@ -160,7 +165,7 @@ class LoyverseService {
 						const bid = parseInt(row.branchId ?? row.branch_id, 10);
 						const tok = row.accessToken ?? row.access_token ?? row.token ?? '';
 						if (Number.isFinite(bid) && tok) {
-							this.branchAccessTokens.set(bid, String(tok).trim());
+							branchAccessTokens.set(bid, String(tok).trim());
 						}
 					}
 				}
@@ -175,32 +180,64 @@ class LoyverseService {
 				const bid = parseInt(m[1], 10);
 				const tok = process.env[key];
 				if (tok && Number.isFinite(bid)) {
-					this.branchAccessTokens.set(bid, String(tok).trim());
+					branchAccessTokens.set(bid, String(tok).trim());
 				}
 			}
 		}
+		return { branchAccessTokens, globalAccessToken: process.env.LOYVERSE_ACCESS_TOKEN || '' };
+	}
+
+	/**
+	 * Refresh the in-memory token cache from the DB (loyverse_branch_tokens), at most
+	 * once per _tokenCacheTtlMs. Falls back to .env.local while the table is empty
+	 * (not yet migrated) — see _loadBranchAccessTokensFromEnvFallback().
+	 */
+	async _refreshTokenCacheIfStale() {
+		if (Date.now() - this._tokenCacheLoadedAt < this._tokenCacheTtlMs) return;
+		try {
+			const rows = await LoyverseTokenModel.listTokens();
+			if (rows.length === 0) {
+				const { branchAccessTokens, globalAccessToken } = this._loadBranchAccessTokensFromEnvFallback();
+				this.branchAccessTokens = branchAccessTokens;
+				this._globalAccessToken = globalAccessToken;
+				console.warn('[Loyverse] No tokens found in loyverse_branch_tokens table — falling back to .env.local. Migrate tokens via the Loyverse Tokens admin page (3coredev).');
+			} else {
+				const branchAccessTokens = new Map();
+				let globalAccessToken = '';
+				for (const row of rows) {
+					if (row.BRANCH_ID == null) {
+						globalAccessToken = row.ACCESS_TOKEN || '';
+					} else {
+						branchAccessTokens.set(row.BRANCH_ID, row.ACCESS_TOKEN || '');
+					}
+				}
+				this.branchAccessTokens = branchAccessTokens;
+				this._globalAccessToken = globalAccessToken;
+			}
+		} catch (e) {
+			console.error('[Loyverse] Failed to load tokens from DB, keeping previous cache:', e.message);
+		}
+		this._tokenCacheLoadedAt = Date.now();
 	}
 
 	/**
 	 * OAuth token for API calls attributed to this app branch (DB BRANCH_ID).
 	 */
-	resolveAccessToken(branchId) {
+	async resolveAccessToken(branchId) {
+		await this._refreshTokenCacheIfStale();
 		const id = parseInt(branchId, 10);
 		if (Number.isFinite(id) && this.branchAccessTokens.has(id)) {
 			return this.branchAccessTokens.get(id);
 		}
-		return this.accessToken || '';
+		return this._globalAccessToken || '';
 	}
 
 	/**
 	 * Get authorization header for Loyverse API
 	 * @param {number|null} [branchId] - when set, uses per-branch token if configured
 	 */
-	getAuthHeaders(branchId = null) {
-		const token =
-			branchId != null && branchId !== ''
-				? this.resolveAccessToken(branchId)
-				: this.accessToken;
+	async getAuthHeaders(branchId = null) {
+		const token = await this.resolveAccessToken(branchId);
 		return {
 			'Authorization': `Bearer ${token}`,
 			'Content-Type': 'application/json'
@@ -278,7 +315,7 @@ class LoyverseService {
 			const url = `${this.baseURL}/receipts/${receiptNumber}`;
 			const bid = this._resolveDefaultBranchId(authBranchId, 'fetchReceipt');
 			const response = await axios.get(url, {
-				headers: this.getAuthHeaders(bid)
+				headers: await this.getAuthHeaders(bid)
 			});
 			return response.data;
 		} catch (error) {
@@ -321,7 +358,7 @@ class LoyverseService {
 			if (max) url += `&created_at_max=${encodeURIComponent(max)}`;
 
 			const response = await axios.get(url, {
-				headers: this.getAuthHeaders(bid),
+				headers: await this.getAuthHeaders(bid),
 				timeout: 30000
 			});
 
@@ -364,8 +401,8 @@ class LoyverseService {
 				const b = bid;
 				throw new Error(
 					'Failed to fetch receipts: Unauthorized (401). ' +
-					'Check OAuth access_token with RECEIPTS_READ scope: LOYVERSE_ACCESS_TOKEN ' +
-					`or per-branch LOYVERSE_BRANCH_${b}_ACCESS_TOKEN / LOYVERSE_BRANCH_ACCOUNTS.`
+					`Check the OAuth access token (needs RECEIPTS_READ scope) for branch ${b} ` +
+					'in the Loyverse Tokens admin page (3coredev).'
 				);
 			}
 			if (status === 429) {
@@ -1054,7 +1091,7 @@ class LoyverseService {
 			return this._variantUnitCostCache.get(vCacheKey);
 		}
 
-		const headers = this.getAuthHeaders(branchId);
+		const headers = await this.getAuthHeaders(branchId);
 		const timeout = 15000;
 		const dbg = String(process.env.LOYVERSE_DEBUG_SYNC || '').toLowerCase() === '1';
 
@@ -1843,7 +1880,7 @@ class LoyverseService {
 				console.error(`[Loyverse Sync] Auto-sync error:`, error.message);
 				// If token is invalid, stop auto-sync to avoid spamming logs / calls until fixed
 				if (String(error?.message || '').includes('Unauthorized (401)')) {
-					console.error('[Loyverse Sync] Stopping auto-sync due to 401. Fix LOYVERSE_ACCESS_TOKEN (or per-branch token) then restart auto-sync.');
+					console.error('[Loyverse Sync] Stopping auto-sync due to 401. Fix the token in the Loyverse Tokens admin page (3coredev) then restart auto-sync.');
 					this.stopAutoSync();
 				}
 			}
@@ -1892,7 +1929,7 @@ class LoyverseService {
 						console.error(`[Loyverse Sync] Auto-sync error (branch ${bid}):`, error.message);
 						if (String(error?.message || '').includes('Unauthorized (401)')) {
 							console.error(
-								`[Loyverse Sync] Branch ${bid}: check LOYVERSE_BRANCH_${bid}_ACCESS_TOKEN or LOYVERSE_BRANCH_ACCOUNTS.`
+								`[Loyverse Sync] Branch ${bid}: check its token in the Loyverse Tokens admin page (3coredev).`
 							);
 						}
 					}

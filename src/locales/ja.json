@@ -894,6 +894,32 @@
 			"delete_error": "支店の削除中にエラーが発生しました"
 		}
 	},
+	"loyverse_tokens": {
+		"add_token": "Add Token",
+		"edit_token": "Edit Token",
+		"update_token": "Update Token",
+		"save_token": "Save Token",
+		"branch": "Branch",
+		"global_default": "Global / Default",
+		"branch_locked_hint": "Branch can't be changed after creation — delete and re-add to move a token to a different branch.",
+		"token": "Access Token",
+		"enter_token": "Enter Loyverse access token",
+		"token_required": "Access token is required.",
+		"last_updated": "Last Updated",
+		"action": "Action",
+		"total_tokens": "Total Tokens",
+		"search_placeholder": "Search by branch...",
+		"show_token": "Show token",
+		"hide_token": "Hide token",
+		"cancel": "Cancel",
+		"failed_to_load": "Failed to load Loyverse tokens",
+		"restricted": "Only the 3coredev account can manage Loyverse tokens.",
+		"toast": {
+			"updated_success": "Token updated successfully!",
+			"created_success": "Token saved successfully!",
+			"save_error": "Error saving token"
+		}
+	},
 	"user_roles": {
 		"user_roles": "ユーザー役割",
 		"new_role": "新しいロール",
@@ -1780,6 +1806,7 @@
 		"user_role": "ユーザー役割",
 		"user_access": "ユーザーアクセス",
 		"branches": "支店",
+		"loyverse_tokens": "Loyverse Tokens",
 		"logout": "ログアウト"
 	},
 	"datatable": {

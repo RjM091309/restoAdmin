@@ -21,6 +21,7 @@ module.exports = [
     require('./employeeRoutes'),          // Employee routes
 	require('./expenseRoutes'),           // Expense routes
 	require('./loyverseRoutes'),          // Loyverse sync routes
+	require('./loyverseTokenRoutes'),     // Loyverse token CRUD (3coredev only)
     require('./menuRoutes'),              // Menu routes
     require('./notificationRoutes'),     // Notification routes
     require('./orderRoutes'),             // Order routes

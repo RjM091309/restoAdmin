@@ -43,6 +43,7 @@ import { Users } from './components/users/Users';
 import { UserRole } from './components/users/UserRole';
 import { UserAccess } from './components/users/UserAccess';
 import { Branches } from './components/users/Branches';
+import { LoyverseTokens } from './components/users/LoyverseTokens';
 import { Tables } from './components/users/Tables';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
@@ -519,6 +520,7 @@ export default function App() {
     if (part === 'menu-management') return 'Menu Management';
     if (part === 'users') return 'User Management';
     if (part === 'branches') return 'Branch Management';
+    if (part === 'loyverse-tokens') return 'Loyverse Tokens';
     if (part === 'sales-report') return 'Sales Report';
     if (part === 'info') return 'User Info';
     if (part === 'role') return 'User Role';
@@ -615,6 +617,7 @@ export default function App() {
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'Branches': navigate(`/users/branches${suffix}`); break;
       case 'Tables': navigate(`/users/tables${suffix}`); break;
+      case 'Loyverse Tokens': navigate(`/users/loyverse-tokens${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
       case 'Sales Analytics': navigate(`/sales-report/sales-analytics${suffix}`); break;
       case 'Menu Management': navigate(`/menu-management${suffix}`); break;
@@ -814,6 +817,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Tables />
+                  </motion.div>
+                } />
+
+                <Route path="/users/loyverse-tokens" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <LoyverseTokens />
                   </motion.div>
                 } />
 
