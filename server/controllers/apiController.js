@@ -23,10 +23,12 @@ const TranslationService = require('../utils/translationService');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils');
 const { stitchReceiptDataUrls } = require('../services/receiptStitchService');
 const { analyzeReceipt, extractOrderLinesFromReceipt } = require('../services/orderReceiptHelpers');
-const { toPublicImageUrl } = require('../utils/uploadPaths');
+const { toPublicImageUrl, publicUrl, SUBDIRS, UPLOAD_ROOT } = require('../utils/uploadPaths');
 const { getManilaTodayYmd } = require('../utils/manilaMonthRange');
 const pool = require('../config/db');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs').promises;
 
 class ApiController {
 	// Login endpoint for mobile app
@@ -1341,6 +1343,25 @@ class ApiController {
 				});
 			}
 
+			// A table can only have one open order at a time. Creating a second one here
+			// would also re-stamp the table's Room Charge onto it (see resolveServiceChargeWithRoomCharge),
+			// double-billing the guest. Same guard orderController.js already applies for the web
+			// admin's order endpoint — this mobile/tablet endpoint was missing it, letting two
+			// waiters both tapping "New Order" on the same table within the same instant silently
+			// create two separate orders for it.
+			if (orderData.TABLE_ID) {
+				const activeTableOrder = await OrderModel.getActiveByTable(orderData.BRANCH_ID, orderData.TABLE_ID);
+				if (activeTableOrder) {
+					return res.status(409).json({
+						success: false,
+						error: `This table already has an active order (#${activeTableOrder.ORDER_NO}). Add items to that order instead of creating a new one.`,
+						code: 'ACTIVE_ORDER_EXISTS',
+						existing_order_id: activeTableOrder.IDNo,
+						existing_order_no: activeTableOrder.ORDER_NO,
+					});
+				}
+			}
+
 			orderData.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(orderData.TABLE_ID, service_charge);
 			orderData.GRAND_TOTAL = OrderModel.computeGrandTotal(
 				orderData.SUBTOTAL,
@@ -1679,6 +1700,43 @@ class ApiController {
 			return res.status(500).json({
 				success: false,
 				error: 'Failed to fetch monthly performance data'
+			});
+		}
+	}
+
+	// GET /api/app/version - lets tablets self-check for a newer APK build.
+	// Reads latest.json by hand from the app-releases folder: after building
+	// a new APK, copy it there and edit that one file - no DB row, no extra
+	// deploy step, matches the existing manual build/scp workflow.
+	static async getAppVersion(req, res) {
+		try {
+			const releaseDir = path.join(UPLOAD_ROOT, SUBDIRS.APP_RELEASES);
+			const raw = await fs.readFile(path.join(releaseDir, 'latest.json'), 'utf8');
+			const release = JSON.parse(raw);
+
+			let baseUrl = req.protocol + '://' + req.get('host');
+			if (req.get('x-forwarded-proto') === 'https' || req.get('host').includes('resto-admin.3core21.com')) {
+				baseUrl = 'https://' + req.get('host');
+			}
+
+			const apkUrl = release.apkFileName
+				? toPublicImageUrl(baseUrl, publicUrl(SUBDIRS.APP_RELEASES, release.apkFileName))
+				: null;
+
+			res.json({
+				success: true,
+				data: {
+					versionCode: release.versionCode || 1,
+					versionName: release.versionName || '1.0.0',
+					apkUrl,
+					releaseNotes: release.releaseNotes || '',
+				}
+			});
+		} catch (error) {
+			console.error('[APP VERSION ERROR]', error);
+			return res.status(500).json({
+				success: false,
+				error: 'Failed to fetch app version info'
 			});
 		}
 	}

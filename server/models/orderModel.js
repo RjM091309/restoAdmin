@@ -204,8 +204,6 @@ class OrderModel {
 		} = data;
 
 		const hasEncodedDt = ENCODED_DT != null && String(ENCODED_DT).trim() !== '';
-		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders');
-		const nextId = Number(idRows?.[0]?.nextId) || 1;
 
 		const columnsBase = [
 			'IDNo',
@@ -221,40 +219,59 @@ class OrderModel {
 			'GRAND_TOTAL',
 			'ENCODED_BY',
 		];
-		const valuesBase = [
-			nextId,
-			BRANCH_ID,
-			ORDER_NO,
-			TABLE_ID || null,
-			ORDER_TYPE || null,
-			STATUS || 3,
-			SUBTOTAL || 0,
-			TAX_AMOUNT || 0,
-			SERVICE_CHARGE || 0,
-			DISCOUNT_AMOUNT || 0,
-			GRAND_TOTAL || 0,
-			user_id,
-		];
 
-		const query = hasEncodedDt
-			? `
-				INSERT INTO orders (
-					${columnsBase.slice(0, -1).join(', ')},
-					ENCODED_DT,
-					${columnsBase[columnsBase.length - 1]}
-				) VALUES (${valuesBase.slice(0, -1).map(() => '?').join(', ')}, ?, ?) `
-			: `
-				INSERT INTO orders (
-					${columnsBase.join(', ')}
-				) VALUES (${valuesBase.map(() => '?').join(', ')})
-			`;
+		// IDNo is app-assigned (not AUTO_INCREMENT), so the max-then-insert has to
+		// be one atomic unit or two concurrent orders can compute the same next id.
+		// `FOR UPDATE` inside a transaction locks the max row (IDNo is the PK) so a
+		// second concurrent transaction blocks until this one commits, then re-reads
+		// the now-correct max — the standard pattern for a manually-assigned PK.
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			const [idRows] = await connection.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM orders FOR UPDATE');
+			const nextId = Number(idRows?.[0]?.nextId) || 1;
 
-		const values = hasEncodedDt
-			? valuesBase.slice(0, -1).concat([ENCODED_DT, valuesBase[valuesBase.length - 1]])
-			: valuesBase;
+			const valuesBase = [
+				nextId,
+				BRANCH_ID,
+				ORDER_NO,
+				TABLE_ID || null,
+				ORDER_TYPE || null,
+				STATUS || 3,
+				SUBTOTAL || 0,
+				TAX_AMOUNT || 0,
+				SERVICE_CHARGE || 0,
+				DISCOUNT_AMOUNT || 0,
+				GRAND_TOTAL || 0,
+				user_id,
+			];
 
-		const [result] = await pool.execute(query, values);
-		return result.insertId || nextId;
+			const query = hasEncodedDt
+				? `
+					INSERT INTO orders (
+						${columnsBase.slice(0, -1).join(', ')},
+						ENCODED_DT,
+						${columnsBase[columnsBase.length - 1]}
+					) VALUES (${valuesBase.slice(0, -1).map(() => '?').join(', ')}, ?, ?) `
+				: `
+					INSERT INTO orders (
+						${columnsBase.join(', ')}
+					) VALUES (${valuesBase.map(() => '?').join(', ')})
+				`;
+
+			const values = hasEncodedDt
+				? valuesBase.slice(0, -1).concat([ENCODED_DT, valuesBase[valuesBase.length - 1]])
+				: valuesBase;
+
+			const [result] = await connection.execute(query, values);
+			await connection.commit();
+			return result.insertId || nextId;
+		} catch (err) {
+			await connection.rollback();
+			throw err;
+		} finally {
+			connection.release();
+		}
 	}
 
 	static async update(id, data) {

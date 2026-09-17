@@ -247,8 +247,6 @@ class BillingModel {
 			user_id,
 			encoded_dt
 		} = data;
-		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing');
-		const nextId = Number(idRows?.[0]?.nextId) || 1;
 		const encodedDtValue =
 			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 
@@ -267,18 +265,32 @@ class BillingModel {
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`;
 
-		await pool.execute(query, [
-			nextId,
-			branch_id,
-			order_id,
-			payment_method || 'CASH',
-			amount_due || 0,
-			amount_paid || 0,
-			payment_ref || null,
-			status || 3,
-			user_id,
-			encodedDtValue || new Date()
-		]);
+		// Same atomic max-then-insert as OrderModel.create — see that comment.
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			const [idRows] = await connection.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM billing FOR UPDATE');
+			const nextId = Number(idRows?.[0]?.nextId) || 1;
+
+			await connection.execute(query, [
+				nextId,
+				branch_id,
+				order_id,
+				payment_method || 'CASH',
+				amount_due || 0,
+				amount_paid || 0,
+				payment_ref || null,
+				status || 3,
+				user_id,
+				encodedDtValue || new Date()
+			]);
+			await connection.commit();
+		} catch (err) {
+			await connection.rollback();
+			throw err;
+		} finally {
+			connection.release();
+		}
 	}
 
 	static async updateForOrder(orderId, data) {
@@ -322,8 +334,6 @@ class BillingModel {
 
 	static async recordTransaction(data) {
 		const { order_id, payment_method, amount_paid, payment_ref, user_id, encoded_dt } = data;
-		const [idRows] = await pool.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM payment_transactions');
-		const nextId = Number(idRows?.[0]?.nextId) || 1;
 		const encodedDtValue =
 			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
 		const query = `
@@ -331,15 +341,30 @@ class BillingModel {
 				IDNo, ORDER_ID, PAYMENT_METHOD, AMOUNT_PAID, PAYMENT_REF, ENCODED_BY, ENCODED_DT
 			) VALUES (?, ?, ?, ?, ?, ?, ?)
 		`;
-		await pool.execute(query, [
-			nextId,
-			order_id,
-			payment_method,
-			amount_paid,
-			payment_ref,
-			user_id,
-			encodedDtValue || new Date(),
-		]);
+
+		// Same atomic max-then-insert as OrderModel.create — see that comment.
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			const [idRows] = await connection.execute('SELECT COALESCE(MAX(IDNo), 0) + 1 AS nextId FROM payment_transactions FOR UPDATE');
+			const nextId = Number(idRows?.[0]?.nextId) || 1;
+
+			await connection.execute(query, [
+				nextId,
+				order_id,
+				payment_method,
+				amount_paid,
+				payment_ref,
+				user_id,
+				encodedDtValue || new Date(),
+			]);
+			await connection.commit();
+		} catch (err) {
+			await connection.rollback();
+			throw err;
+		} finally {
+			connection.release();
+		}
 	}
 
 	static async getPaymentHistory(orderId) {

@@ -14,6 +14,7 @@ const UPLOAD_ROOT = path.join(__dirname, '../public/uploads');
 const SUBDIRS = Object.freeze({
 	MENU: 'menu',
 	BRANCHES: 'branches',
+	APP_RELEASES: 'app-releases',
 });
 
 /** Multipart field names — must match frontend FormData keys and route .single() */

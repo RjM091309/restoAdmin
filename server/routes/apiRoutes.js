@@ -28,6 +28,12 @@ router.post("/login", ApiController.login);
 // Response: { success: true, tokens: { accessToken, refreshToken, expiresIn } }
 router.post("/refresh", ApiController.refreshToken);
 
+// GET - Latest published APK version, for in-app update checks
+// URL: /api/app/version
+// Response: { success: true, data: { versionCode, versionName, apkUrl, releaseNotes } }
+// No auth required - a tablet should be able to check even from the login screen.
+router.get("/app/version", ApiController.getAppVersion);
+
 // GET - Receipt scanner Gemini API key from DB
 // URL: /api/receiptscanner/gemini-key
 router.get("/receiptscanner/gemini-key", optionalJWT, ApiController.getReceiptScannerApiKey);
