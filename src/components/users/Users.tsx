@@ -15,6 +15,10 @@ import { useUser } from '../../context/UserContext';
 // (3) is the real branch, 3Core (4) is kept for testing.
 const FLOOR_ENABLED_BRANCH_IDS = [3, 4];
 
+// Accounts protected from edit/delete in this UI (system/developer accounts).
+const PROTECTED_USERNAMES = ['admin', '3coredev'];
+const isProtectedUsername = (username: string) => PROTECTED_USERNAMES.includes((username || '').trim().toLowerCase());
+
 interface UserRow {
   id: string;
   firstName: string;
@@ -353,24 +357,29 @@ export const Users: React.FC = () => {
     {
       header: t('manage_users.action'),
       className: 'text-right',
-      render: (user) => (
-        <div className="flex justify-end items-center gap-2">
-          <button
-            onClick={() => handleOpenEditModal(user)}
-            className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
-            title={t('manage_users.edit_user')}
-          >
-            <Edit2 size={16} />
-          </button>
-          <button
-            onClick={() => handleOpenDeleteModal(user)}
-            className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
-            title={t('manage_users.delete_user')}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-      ),
+      render: (user) =>
+        isProtectedUsername(user.username) ? (
+          <div className="flex justify-end items-center gap-2">
+            <span className="text-xs font-medium text-brand-muted">—</span>
+          </div>
+        ) : (
+          <div className="flex justify-end items-center gap-2">
+            <button
+              onClick={() => handleOpenEditModal(user)}
+              className="p-2 text-brand-muted hover:text-brand-primary hover:bg-brand-primary/10 transition-colors rounded-lg"
+              title={t('manage_users.edit_user')}
+            >
+              <Edit2 size={16} />
+            </button>
+            <button
+              onClick={() => handleOpenDeleteModal(user)}
+              className="p-2 text-brand-muted hover:text-red-500 hover:bg-red-50 transition-colors rounded-lg"
+              title={t('manage_users.delete_user')}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ),
     },
   ];
 

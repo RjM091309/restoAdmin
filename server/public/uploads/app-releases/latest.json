@@ -1,6 +1,6 @@
 {
-  "versionCode": 1,
-  "versionName": "1.0.0",
-  "apkFileName": "",
-  "releaseNotes": ""
+  "versionCode": 4,
+  "versionName": "1.0.4",
+  "apkFileName": "app-update-1.0.4.apk",
+  "releaseNotes": "test update"
 }

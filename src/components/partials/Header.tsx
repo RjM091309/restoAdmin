@@ -80,6 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
   onBranchChange,
 }) => {
   const { user } = useUser();
+  const is3core = (user?.username || '').trim().toLowerCase() === '3coredev';
   const { t, i18n } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
@@ -506,12 +507,14 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Bell size={20} />
             </button>
-            <button
-              onClick={onOpenSystemSettings}
-              className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
-            >
-              <Settings size={20} />
-            </button>
+            {is3core && (
+              <button
+                onClick={onOpenSystemSettings}
+                className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-brand-muted hover:text-brand-text transition-colors cursor-pointer"
+              >
+                <Settings size={20} />
+              </button>
+            )}
           </div>
 
           <div
