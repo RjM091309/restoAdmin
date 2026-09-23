@@ -77,11 +77,13 @@ export const Modal: React.FC<ModalProps> = ({
       {isOpen && (
         <>
           {/* Backdrop — portaled to body so it covers footer/sidebar outside the scroll area */}
+          {/* No backdrop-blur: backdrop-filter over the page makes Chromium flicker black/white on open */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className={cn('fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]', layerClassName)}
+            transition={{ duration: 0.2 }}
+            className={cn('fixed inset-0 z-50 bg-black/40', layerClassName)}
           />
 
           {/* Modal Container */}

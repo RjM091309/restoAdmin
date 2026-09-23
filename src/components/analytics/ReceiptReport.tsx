@@ -572,7 +572,7 @@ export const ReceiptReport: React.FC<ReceiptReportProps> = ({ selectedBranch, da
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={() => setSelectedReceipt(null)}
-                  className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
+                  className="fixed inset-0 bg-black/20 z-[60]"
                 />
                 <motion.aside
                   initial={{ x: '100%' }}

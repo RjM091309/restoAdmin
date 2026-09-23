@@ -551,7 +551,7 @@ export const Header: React.FC<HeaderProps> = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsLanguagePanelOpen(false)}
-              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
+              className="fixed inset-0 bg-black/20 z-[60]"
             />
             <motion.div
               initial={{ x: '100%' }}

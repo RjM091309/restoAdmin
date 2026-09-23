@@ -150,7 +150,7 @@ export const AccountSettingsPanel: React.FC<AccountSettingsPanelProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-[60]"
+            className="fixed inset-0 bg-black/20 z-[60]"
           />
 
           {/* Side Panel */}

@@ -320,7 +320,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/25 backdrop-blur-[2px] z-[80]"
+            className="fixed inset-0 bg-black/25 z-[80]"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
@@ -644,7 +644,7 @@ export const CashReconciliationModal: React.FC<CashReconciliationModalProps> = (
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="absolute inset-0 cursor-default border-0 bg-black/45 backdrop-blur-[1px]"
+                  className="absolute inset-0 cursor-default border-0 bg-black/45"
                   onClick={() => !saving && setPendingDeleteId(null)}
                   aria-label={t('common.cancel')}
                 />

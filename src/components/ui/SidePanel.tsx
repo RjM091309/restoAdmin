@@ -51,11 +51,13 @@ export const SidePanel: React.FC<SidePanelProps> = ({
       {isOpen && (
         <>
           {/* Backdrop - fullscreen over entire viewport including app footer (no close on click) */}
+          {/* No backdrop-blur: backdrop-filter over the page makes Chromium flicker black/white on open */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-[2px]"
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[100] bg-black/40"
           />
 
           {/* Side Panel */}
