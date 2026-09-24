@@ -51,6 +51,7 @@ function generateRefreshToken(payload) {
 		{
 			user_id: payload.user_id,
 			username: payload.username,
+			sid: payload.sid || null,
 			type: 'refresh'
 		},
 		JWT_REFRESH_SECRET,

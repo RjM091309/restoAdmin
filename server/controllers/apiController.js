@@ -662,10 +662,37 @@ class ApiController {
 				return res.status(401).json({ success: false, error: 'User not found or inactive' });
 			}
 
+			// Carry the login's sid forward so authenticateJWT accepts the new
+			// access token. If the account has since logged in elsewhere, this
+			// refresh token belongs to a replaced session — don't revive it.
+			const activeSessionId = await UserModel.getActiveSessionId(user.IDNo);
+			if (activeSessionId && decoded.sid !== activeSessionId) {
+				return res.status(401).json({
+					success: false,
+					error: 'This account was signed in on another device.',
+					code: 'SESSION_REPLACED'
+				});
+			}
+
+			let branchMeta = null;
+			try {
+				if (user.BRANCH_ID != null && user.BRANCH_ID !== '') {
+					branchMeta = await BranchModel.getById(user.BRANCH_ID);
+				}
+			} catch (_) {
+				branchMeta = null;
+			}
+
 			const tokenPayload = {
 				user_id: user.IDNo,
 				username: user.USERNAME,
-				permissions: user.PERMISSIONS
+				permissions: user.PERMISSIONS,
+				firstname: user.FIRSTNAME,
+				lastname: user.LASTNAME,
+				branch_id: user.BRANCH_ID || null,
+				branch_name: branchMeta?.BRANCH_NAME || null,
+				branch_code: branchMeta?.BRANCH_CODE || null,
+				sid: decoded.sid || null,
 			};
 			const tokens = generateTokenPair(tokenPayload);
 
