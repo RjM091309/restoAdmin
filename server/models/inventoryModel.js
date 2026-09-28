@@ -41,7 +41,10 @@ class InventoryModel {
 
 			InventoryModel._schemaReady = true;
 			InventoryModel._schemaPromise = null;
-		})();
+		})().catch((error) => {
+			InventoryModel._schemaPromise = null;
+			throw error;
+		});
 
 		return InventoryModel._schemaPromise;
 	}

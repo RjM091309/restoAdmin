@@ -72,7 +72,10 @@ class InventoryDeductionModel {
 
 			InventoryDeductionModel._schemaReady = true;
 			InventoryDeductionModel._schemaPromise = null;
-		})();
+		})().catch((error) => {
+			InventoryDeductionModel._schemaPromise = null;
+			throw error;
+		});
 
 		return InventoryDeductionModel._schemaPromise;
 	}
