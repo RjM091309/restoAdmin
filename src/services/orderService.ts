@@ -217,7 +217,10 @@ export async function updateOrderStatus(orderId: string, status: number): Promis
     await handleResponse<{ order_id: number; status: number }>(response);
 }
 
-export async function updateOrderEncodedDt(orderId: string, encodedDt: string): Promise<void> {
+export async function updateOrderEncodedDt(
+    orderId: string,
+    encodedDt: string
+): Promise<{ order_id: number; order_no?: string; encoded_dt: string }> {
     const response = await fetch(buildUrl(`/orders/${orderId}/encoded-dt`), {
         method: 'PATCH',
         credentials: 'include',
@@ -227,7 +230,7 @@ export async function updateOrderEncodedDt(orderId: string, encodedDt: string): 
         },
         body: JSON.stringify({ ENCODED_DT: encodedDt }),
     });
-    await handleResponse<{ order_id: number; encoded_dt: string }>(response);
+    return handleResponse<{ order_id: number; order_no?: string; encoded_dt: string }>(response);
 }
 
 export async function softDeleteOrder(orderId: string): Promise<void> {

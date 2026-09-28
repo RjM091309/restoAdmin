@@ -1163,6 +1163,9 @@ class OrderController {
 			if (!order) {
 				return ApiResponse.notFound(res, 'Order');
 			}
+			if (req.orderMetaBranchId != null && Number(order.BRANCH_ID) !== Number(req.orderMetaBranchId)) {
+				return ApiResponse.forbidden(res, 'You can only modify orders from your assigned branch');
+			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const updated = await OrderModel.updateEncodedDtCascade(id, encodedDt, userId);
@@ -1176,10 +1179,13 @@ class OrderController {
 
 			return ApiResponse.success(
 				res,
-				{ order_id: parseInt(id, 10), encoded_dt: encodedDt, updated },
+				{ order_id: parseInt(id, 10), order_no: refreshed?.ORDER_NO, encoded_dt: encodedDt, updated },
 				'Order encoded date updated successfully'
 			);
 		} catch (error) {
+			if (error?.code === 'ORDER_NO_CONFLICT') {
+				return ApiResponse.badRequest(res, `${error.message}. Cannot move this order to that date.`);
+			}
 			console.error('Error updating order encoded date:', error);
 			return ApiResponse.error(res, 'Failed to update encoded date', 500, error.message);
 		}
@@ -1191,6 +1197,9 @@ class OrderController {
 			const order = await OrderModel.getById(id);
 			if (!order) {
 				return ApiResponse.notFound(res, 'Order');
+			}
+			if (req.orderMetaBranchId != null && Number(order.BRANCH_ID) !== Number(req.orderMetaBranchId)) {
+				return ApiResponse.forbidden(res, 'You can only modify orders from your assigned branch');
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;

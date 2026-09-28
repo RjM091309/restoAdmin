@@ -811,12 +811,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
         setEncodedDtSubmitting(true);
         try {
-            await updateOrderEncodedDt(String(encodedDtOrder.IDNo), encodedDt);
-            toast.success(t('orders.swal.encoded_dt_updated', { orderNo: encodedDtOrder.ORDER_NO }));
+            const result = await updateOrderEncodedDt(String(encodedDtOrder.IDNo), encodedDt);
+            const newOrderNo = result?.order_no || encodedDtOrder.ORDER_NO;
+            toast.success(t('orders.swal.encoded_dt_updated', { orderNo: newOrderNo }));
             setEncodedDtOrder(null);
             setEncodedDtValue('');
             if (detailOrder?.IDNo === encodedDtOrder.IDNo) {
-                setDetailOrder({ ...detailOrder, ENCODED_DT: encodedDt });
+                setDetailOrder({ ...detailOrder, ENCODED_DT: encodedDt, ORDER_NO: newOrderNo });
             }
             await loadOrders();
         } catch (e) {

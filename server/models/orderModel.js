@@ -533,11 +533,36 @@ class OrderModel {
 		const conn = await pool.getConnection();
 		try {
 			await conn.beginTransaction();
+
+			// Manual/receipt orders embed their date in the number (ORD-YYYYMMDD-HHMMSS);
+			// keep that date in step with ENCODED_DT. Other formats (e.g. LOY-*) stay as-is.
+			const [[current]] = await conn.execute(
+				`SELECT ORDER_NO, BRANCH_ID FROM orders WHERE IDNo = ? FOR UPDATE`,
+				[orderId]
+			);
+			let orderNo = current?.ORDER_NO ?? null;
+			const orderNoMatch = String(orderNo ?? '').match(/^ORD-\d{8}-(\d{6})$/);
+			if (orderNoMatch) {
+				const nextOrderNo = `ORD-${encodedDt.slice(0, 10).replace(/-/g, '')}-${orderNoMatch[1]}`;
+				if (nextOrderNo !== orderNo) {
+					const [dupes] = await conn.execute(
+						`SELECT IDNo FROM orders WHERE ORDER_NO = ? AND BRANCH_ID = ? AND IDNo <> ? LIMIT 1`,
+						[nextOrderNo, current.BRANCH_ID, orderId]
+					);
+					if (dupes.length) {
+						const err = new Error(`Order #${nextOrderNo} already exists`);
+						err.code = 'ORDER_NO_CONFLICT';
+						throw err;
+					}
+					orderNo = nextOrderNo;
+				}
+			}
+
 			const [orderResult] = await conn.execute(
 				`UPDATE orders
-				 SET ENCODED_DT = ?, EDITED_BY = COALESCE(?, EDITED_BY), EDITED_DT = CURRENT_TIMESTAMP
+				 SET ENCODED_DT = ?, ORDER_NO = ?, EDITED_BY = COALESCE(?, EDITED_BY), EDITED_DT = CURRENT_TIMESTAMP
 				 WHERE IDNo = ?`,
-				[encodedDt, userId, orderId]
+				[encodedDt, orderNo, userId, orderId]
 			);
 			const [billingResult] = await conn.execute(
 				`UPDATE billing SET ENCODED_DT = ? WHERE ORDER_ID = ?`,
@@ -557,6 +582,7 @@ class OrderModel {
 			);
 			await conn.commit();
 			return {
+				order_no: orderNo,
 				orders: orderResult.affectedRows,
 				billing: billingResult.affectedRows,
 				order_items: itemsResult.affectedRows,

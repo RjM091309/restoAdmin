@@ -159,6 +159,32 @@ const require3core = (req, res, next) => {
 };
 
 /**
+ * Order meta editors (edit ENCODED_DT / soft delete).
+ * 3coredev: any branch. Other listed usernames: only their assigned branch
+ * (enforced in the controller via req.orderMetaBranchId).
+ * Keep in sync with ORDER_META_EDITOR_USERNAMES in src/components/orders/Orders.tsx.
+ */
+const ORDER_META_BRANCH_EDITORS = { bmoon: 3 };
+
+const requireOrderMetaEditor = (req, res, next) => {
+	if (!req.user) {
+		return ApiResponse.unauthorized(res, 'Authentication required');
+	}
+
+	const username = String(req.user.username || req.session?.username || '').trim().toLowerCase();
+	if (username === '3coredev') {
+		req.orderMetaBranchId = null;
+		return next();
+	}
+	if (Object.prototype.hasOwnProperty.call(ORDER_META_BRANCH_EDITORS, username)) {
+		req.orderMetaBranchId = ORDER_META_BRANCH_EDITORS[username];
+		return next();
+	}
+
+	return ApiResponse.forbidden(res, 'You are not allowed to perform this action');
+};
+
+/**
  * Permission-based authorization
  * @param {Array|Number} requiredPermissions - Required permission level(s)
  */
@@ -186,6 +212,7 @@ module.exports = {
 	optionalAuthenticate,
 	requireAdmin,
 	require3core,
+	requireOrderMetaEditor,
 	requirePermission
 };
 
