@@ -253,7 +253,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [newOrderNo, setNewOrderNo] = useState('');
     const [newOrderType, setNewOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [newOrderTableId, setNewOrderTableId] = useState<string>('');
-    const [newOrderFloor, setNewOrderFloor] = useState<TableFloor | ''>('');
     const [branchTables, setBranchTables] = useState<{ value: string; label: string; floor: TableFloor | null }[]>([]);
     const [branchTablesRoomChargeById, setBranchTablesRoomChargeById] = useState<Record<string, number>>({});
     const [newOrderItems, setNewOrderItems] = useState<NewOrderItem[]>([]);
@@ -270,7 +269,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [manualBranchOptions, setManualBranchOptions] = useState<{ value: string; label: string }[]>([]);
     const [manualOrderType, setManualOrderType] = useState<'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'>('DINE_IN');
     const [manualOrderTableId, setManualOrderTableId] = useState<string>('');
-    const [manualOrderFloor, setManualOrderFloor] = useState<TableFloor | ''>('');
     const [manualBranchTables, setManualBranchTables] = useState<{ value: string; label: string; floor: TableFloor | null }[]>([]);
     const [manualBranchTablesRoomChargeById, setManualBranchTablesRoomChargeById] = useState<Record<string, number>>({});
     const [manualRoomChargeQty, setManualRoomChargeQty] = useState<number>(1);
@@ -292,12 +290,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [receiptOrderDate, setReceiptOrderDate] = useState<string>('');
     const [receiptOrderMenus, setReceiptOrderMenus] = useState<MenuRecord[]>([]);
     const [receiptOrderMenusLoading, setReceiptOrderMenusLoading] = useState(false);
-    const [receiptBranchTables, setReceiptBranchTables] = useState<{ value: string; label: string }[]>([]);
+    const [receiptBranchTables, setReceiptBranchTables] = useState<{ value: string; label: string; floor: TableFloor | null }[]>([]);
     const [receiptImage, setReceiptImage] = useState<string | null>(null);
     const [receiptExtracting, setReceiptExtracting] = useState(false);
     const [receiptError, setReceiptError] = useState<string | null>(null);
     const [receiptExtractResult, setReceiptExtractResult] = useState<ReceiptOrderExtractionResult | null>(null);
-    const [receiptMetaById, setReceiptMetaById] = useState<Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string }>>({});
+    const [receiptMetaById, setReceiptMetaById] = useState<Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string; tableId?: string }>>({});
     const [receiptMapOpenByOrderId, setReceiptMapOpenByOrderId] = useState<Record<number, boolean>>({});
     const [receiptRows, setReceiptRows] = useState<
         {
@@ -865,7 +863,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setNewOrderItems([]);
         setNewOrderSelectedMenuId('');
         setNewOrderQty(1);
-        setNewOrderFloor('');
+        setNewOrderTableId('');
         setNewOrderOpen(true);
     };
 
@@ -900,7 +898,6 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         setManualDiscountAmount('0');
         setManualOrderBranchId('');
         setManualBranchTables([]);
-        setManualOrderFloor('');
         setManualOrderOpen(true);
     };
 
@@ -1065,11 +1062,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 const json = await res.json();
                 if (!res.ok) throw new Error(json.error || json.message || 'Failed to load tables');
                 const raw = json.data ?? json;
-                const mapped: { value: string; label: string }[] = (Array.isArray(raw) ? raw : [])
+                const mapped: { value: string; label: string; floor: TableFloor | null }[] = (Array.isArray(raw) ? raw : [])
                     .filter((t: any) => t.STATUS === 1)
                     .map((t: any) => ({
                         value: String(t.IDNo),
                         label: `Table ${t.TABLE_NUMBER}`,
+                        floor: t.FLOOR === 'gf' || t.FLOOR === '2f' ? (t.FLOOR as TableFloor) : null,
                     }));
                 if (!cancelled) setReceiptBranchTables(mapped);
             } catch (e) {
@@ -1103,10 +1101,10 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // Floor is a pure UI filter over branchTables (only meaningful for the
     // multi-floor branches) — it isn't sent with the order itself.
-    const newOrderTableOptions = useMemo(() => {
-        if (!isFloorEnabledBranch(branchId) || !newOrderFloor) return branchTables;
-        return branchTables.filter((t) => t.floor === newOrderFloor);
-    }, [branchTables, branchId, newOrderFloor]);
+    const newOrderTableOptions = branchTables;
+    const newOrderIsDineIn = isDineInOrderType(newOrderType);
+    const newOrderFloor: TableFloor | '' =
+        branchTables.find((t) => t.value === newOrderTableId)?.floor ?? '';
 
     const newOrderSubtotal = newOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
     const newOrderTableRoomCharge =
@@ -1162,6 +1160,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             });
             return;
         }
+        if (newOrderIsDineIn && !newOrderTableId) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.table_required_title'),
+                text: t('orders.swal.table_required_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
         if (newOrderItems.length === 0) {
             setSwal({
                 type: 'warning',
@@ -1177,7 +1184,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             await createOrder({
                 ORDER_NO: newOrderNo.trim(), order_no: newOrderNo.trim(),
                 BRANCH_ID: branchId, branch_id: branchId,
-                TABLE_ID: newOrderTableId ? Number(newOrderTableId) : null,
+                TABLE_ID: newOrderIsDineIn && newOrderTableId ? Number(newOrderTableId) : null,
                 ORDER_TYPE: newOrderType, order_type: newOrderType,
                 STATUS: ORDER_STATUS.PENDING, SUBTOTAL: newOrderSubtotal,
                 TAX_AMOUNT: 0,
@@ -1272,7 +1279,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 orderDateYmd: receiptOrderDate?.trim() || undefined,
             });
             setReceiptExtractResult(result);
-            const metaMap: Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string }> = {};
+            const metaMap: Record<number, { orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string; tableId?: string }> = {};
             (result.orders || []).forEach((o) => {
                 if (!o?.order_id) return;
                 metaMap[o.order_id] = {
@@ -1503,6 +1510,32 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     };
 
     const receiptTableSelectOptions = isAllBranches ? receiptBranchTables : branchTables;
+
+    const updateReceiptMeta = (
+        orderId: number,
+        patch: Partial<{ orderNo: string; orderType: 'DINE_IN' | 'TAKE_OUT' | 'DELIVERY'; tableNo?: string; tableId?: string }>
+    ) =>
+        setReceiptMetaById((prev) => ({
+            ...prev,
+            [orderId]: { ...(prev[orderId] ?? { orderNo: generateOrderNo(), orderType: 'DINE_IN', tableNo: '' }), ...patch },
+        }));
+
+    // Pre-select the table when the scanned table text matches a branch table
+    // (e.g. "M8" ↔ "Table M 8"). Only runs once per order (tableId undefined).
+    useEffect(() => {
+        if (receiptTableSelectOptions.length === 0) return;
+        const norm = (v: string) => v.toUpperCase().replace(/^TABLE\s*/, '').replace(/[^A-Z0-9]/g, '');
+        let changed = false;
+        const next = { ...receiptMetaById };
+        for (const [key, meta] of Object.entries(receiptMetaById)) {
+            if (meta.tableId !== undefined) continue;
+            const scanned = norm(String(meta.tableNo ?? ''));
+            const hit = scanned ? receiptTableSelectOptions.find((t) => norm(String(t.label)) === scanned) : undefined;
+            next[Number(key)] = { ...meta, tableId: hit ? String(hit.value) : '' };
+            changed = true;
+        }
+        if (changed) setReceiptMetaById(next);
+    }, [receiptMetaById, receiptTableSelectOptions]);
 
     const receiptDetectedHasServiceCharge = useMemo(() => {
         const extractedItems = receiptExtractResult?.items;
@@ -1787,6 +1820,21 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             });
             return;
         }
+        const missingTableOrders = receiptRowsByOrder
+            .map(([orderId]) => orderId)
+            .filter((orderId) => {
+                const meta = receiptMetaById[orderId];
+                return isDineInOrderType(meta?.orderType ?? 'DINE_IN') && !meta?.tableId;
+            });
+        if (missingTableOrders.length > 0) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.table_required_title'),
+                text: `${t('orders.swal.table_required_text')} (${missingTableOrders.map((id) => `ORDER ${id}`).join(', ')})`,
+                onConfirm: () => setSwal(null),
+            });
+            return;
+        }
         const resolvedBranch = isAllBranches ? receiptOrderBranchId : branchId;
         setReceiptSubmitting(true);
         try {
@@ -1846,7 +1894,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     order_no: orderNo,
                     BRANCH_ID: resolvedBranch,
                     branch_id: resolvedBranch,
-                    TABLE_ID: receiptOrderTableId ? Number(receiptOrderTableId) : null,
+                    TABLE_ID: isDineInOrderType(orderType) && meta?.tableId ? Number(meta.tableId) : null,
                     ORDER_TYPE: orderType,
                     order_type: orderType,
                     ENCODED_DT: encodedDt,
@@ -1948,14 +1996,13 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return () => { cancelled = true; };
     }, [manualOrderOpen, effectiveManualBranchId]);
 
-    // Same floor-as-UI-filter approach as the New Order modal, but the source
-    // list switches between manualBranchTables / branchTables depending on
-    // whether the modal has its own branch picker (All Branches view).
-    const manualOrderTableOptions = useMemo(() => {
-        const source = isAllBranches ? manualBranchTables : branchTables;
-        if (!isFloorEnabledBranch(effectiveManualBranchId) || !manualOrderFloor) return source;
-        return source.filter((t) => t.floor === manualOrderFloor);
-    }, [isAllBranches, manualBranchTables, branchTables, effectiveManualBranchId, manualOrderFloor]);
+    // Table source switches between manualBranchTables / branchTables depending on
+    // whether the modal has its own branch picker (All Branches view). Floor is
+    // read-only and derived from the selected table (dine-in only).
+    const manualOrderTableOptions = isAllBranches ? manualBranchTables : branchTables;
+    const manualOrderIsDineIn = isDineInOrderType(manualOrderType);
+    const manualOrderFloor: TableFloor | '' =
+        manualOrderTableOptions.find((t) => t.value === manualOrderTableId)?.floor ?? '';
 
     const manualOrderSubtotal = manualOrderItems.reduce((sum, it) => sum + it.qty * it.unitPrice, 0);
 
@@ -2072,6 +2119,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             });
             return;
         }
+        if (manualOrderIsDineIn && !manualOrderTableId) {
+            setSwal({
+                type: 'warning',
+                title: t('orders.swal.table_required_title'),
+                text: t('orders.swal.table_required_text'),
+                onConfirm: () => setSwal(null)
+            });
+            return;
+        }
         // Allow creating the order when room charge exists (room charge is injected separately)
         // so the user can proceed even if the manual items list is empty — unless qty is 0 (waived).
         if (manualOrderItems.length === 0 && (!hasManualRoomChargeRow || manualRoomChargeQty <= 0)) {
@@ -2097,7 +2153,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             const created = await createManualSettledOrder({
                 ORDER_NO: manualOrderNo.trim(), order_no: manualOrderNo.trim(),
                 BRANCH_ID: effectiveManualBranchId, branch_id: effectiveManualBranchId,
-                TABLE_ID: manualOrderTableId ? Number(manualOrderTableId) : null,
+                TABLE_ID: manualOrderIsDineIn && manualOrderTableId ? Number(manualOrderTableId) : null,
                 ORDER_TYPE: manualOrderType, order_type: manualOrderType,
                 ENCODED_DT: encodedDt,
                 STATUS: ORDER_STATUS.SETTLED,
@@ -2823,27 +2879,20 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             >
                 <div className="space-y-6">
                     {/* Header / basic info */}
-                    {isFloorEnabledBranch(branchId) && (
-                        <div className="w-full sm:w-64 space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('table.floor')}
-                            </label>
-                            <Select2
-                                options={[
-                                    { value: 'gf', label: t('table.ground_floor') },
-                                    { value: '2f', label: t('table.second_floor') },
-                                ]}
-                                value={newOrderFloor || null}
-                                onChange={(v) => {
-                                    setNewOrderFloor((v as TableFloor) || '');
-                                    setNewOrderTableId('');
-                                }}
-                                placeholder={t('table.select_floor')}
-                                clearable
-                            />
-                        </div>
-                    )}
                     <div className="grid grid-cols-3 gap-5">
+                        {newOrderIsDineIn && (
+                            <div className="space-y-2">
+                                <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                    {t('table.table_number')} *
+                                </label>
+                                <Select2
+                                    options={newOrderTableOptions}
+                                    value={newOrderTableId || null}
+                                    onChange={(v) => setNewOrderTableId(v ? String(v) : '')}
+                                    placeholder={t('table.table_number')}
+                                />
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
                                 {t('orders.order_no_label')}
@@ -2867,23 +2916,35 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     { value: 'DELIVERY', label: t('orders.delivery') },
                                 ]}
                                 value={newOrderType}
-                                onChange={(v) =>
-                                    setNewOrderType((v as typeof newOrderType) || 'DINE_IN')
-                                }
+                                onChange={(v) => {
+                                    const next = (v as typeof newOrderType) || 'DINE_IN';
+                                    setNewOrderType(next);
+                                    if (!isDineInOrderType(next)) setNewOrderTableId('');
+                                }}
                                 placeholder={t('orders.select_type')}
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
-                                {t('table.table_number')}
-                            </label>
-                            <Select2
-                                options={newOrderTableOptions}
-                                value={newOrderTableId || null}
-                                onChange={(v) => setNewOrderTableId(v ? String(v) : '')}
-                                placeholder={t('table.table_number')}
-                            />
-                        </div>
+                        {newOrderIsDineIn && isFloorEnabledBranch(branchId) && (
+                            <div className="space-y-2">
+                                <label className="block text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                    {t('table.floor')}
+                                </label>
+                                <input
+                                    type="text"
+                                    readOnly
+                                    tabIndex={-1}
+                                    value={
+                                        newOrderFloor === 'gf'
+                                            ? t('table.ground_floor')
+                                            : newOrderFloor === '2f'
+                                                ? t('table.second_floor')
+                                                : ''
+                                    }
+                                    placeholder={t('table.floor')}
+                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600 outline-none cursor-not-allowed placeholder:text-gray-400"
+                                />
+                            </div>
+                        )}
                     </div>
 
                     {/* Items section */}
@@ -3318,14 +3379,12 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         orderType: 'DINE_IN',
                                         tableNo: '',
                                     };
-                                    const tableLabel = (() => {
-                                        const id = String(receiptOrderTableId ?? '').trim();
-                                        if (id) {
-                                            const hit = receiptTableSelectOptions.find((t) => String(t.value) === id);
-                                            if (hit?.label) return String(hit.label);
-                                        }
-                                        return meta.tableNo && String(meta.tableNo).trim() ? String(meta.tableNo).trim() : '—';
-                                    })();
+                                    const metaIsDineIn = isDineInOrderType(meta.orderType);
+                                    const selectedTable = metaIsDineIn && meta.tableId
+                                        ? receiptTableSelectOptions.find((t) => String(t.value) === String(meta.tableId))
+                                        : undefined;
+                                    const tableLabel = selectedTable?.label ? String(selectedTable.label) : '—';
+                                    const metaFloor = selectedTable?.floor ?? '';
                                     const encodedLabel = (() => {
                                         const raw = String(receiptOrderDate || '').trim();
                                         if (!raw) return '—';
@@ -3355,6 +3414,60 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                             <ReceiptOrderBlockCard
                                                 title={`ORDER ${orderId}`}
                                             >
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                    {metaIsDineIn && (
+                                                        <div className="space-y-1.5">
+                                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                                {t('table.table_number')} *
+                                                            </label>
+                                                            <Select2
+                                                                options={receiptTableSelectOptions}
+                                                                value={meta.tableId || null}
+                                                                onChange={(v) => updateReceiptMeta(orderId, { tableId: v ? String(v) : '' })}
+                                                                placeholder={t('table.table_number')}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    <div className="space-y-1.5">
+                                                        <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                            {t('orders.order_type')}
+                                                        </label>
+                                                        <Select2
+                                                            options={[
+                                                                { value: 'DINE_IN', label: t('orders.dine_in') },
+                                                                { value: 'TAKE_OUT', label: t('orders.take_out') },
+                                                                { value: 'DELIVERY', label: t('orders.delivery') },
+                                                            ]}
+                                                            value={meta.orderType}
+                                                            onChange={(v) => {
+                                                                const next = (v as typeof meta.orderType) || 'DINE_IN';
+                                                                updateReceiptMeta(orderId, isDineInOrderType(next) ? { orderType: next } : { orderType: next, tableId: '' });
+                                                            }}
+                                                            placeholder={t('orders.select_type')}
+                                                        />
+                                                    </div>
+                                                    {metaIsDineIn && isFloorEnabledBranch(effectiveReceiptBranchId) && (
+                                                        <div className="space-y-1.5">
+                                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                                {t('table.floor')}
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                readOnly
+                                                                tabIndex={-1}
+                                                                value={
+                                                                    metaFloor === 'gf'
+                                                                        ? t('table.ground_floor')
+                                                                        : metaFloor === '2f'
+                                                                            ? t('table.second_floor')
+                                                                            : ''
+                                                                }
+                                                                placeholder={t('table.floor')}
+                                                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 outline-none cursor-not-allowed placeholder:text-gray-400"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <div className="rounded-2xl border border-gray-200 bg-[#fffdf7] p-4 sm:p-5 font-mono text-[12px] leading-relaxed">
                                                     <div className="space-y-2">
                                                         <div className="flex items-start justify-between gap-3">
@@ -3697,28 +3810,21 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <Select2
                                                     options={manualBranchOptions}
                                                     value={manualOrderBranchId || null}
-                                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); setManualOrderFloor(''); }}
+                                                    onChange={(v) => { setManualOrderBranchId(v ? String(v) : ''); setManualOrderTableId(''); }}
                                                     placeholder={t('header.select_branch')}
                                                 />
                                             </div>
                                         )}
-                                        {isFloorEnabledBranch(effectiveManualBranchId) && (
+                                        {manualOrderIsDineIn && (
                                             <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
                                                 <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
-                                                    {t('table.floor')}
+                                                    {t('table.table_number')} *
                                                 </label>
                                                 <Select2
-                                                    options={[
-                                                        { value: 'gf', label: t('table.ground_floor') },
-                                                        { value: '2f', label: t('table.second_floor') },
-                                                    ]}
-                                                    value={manualOrderFloor || null}
-                                                    onChange={(v) => {
-                                                        setManualOrderFloor((v as TableFloor) || '');
-                                                        setManualOrderTableId('');
-                                                    }}
-                                                    placeholder={t('table.select_floor')}
-                                                    clearable
+                                                    options={manualOrderTableOptions}
+                                                    value={manualOrderTableId || null}
+                                                    onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
+                                                    placeholder={t('table.table_number')}
                                                 />
                                             </div>
                                         )}
@@ -3745,23 +3851,35 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                     { value: 'DELIVERY', label: t('orders.delivery') },
                                                 ]}
                                                 value={manualOrderType}
-                                                onChange={(v) =>
-                                                    setManualOrderType((v as typeof manualOrderType) || 'DINE_IN')
-                                                }
+                                                onChange={(v) => {
+                                                    const next = (v as typeof manualOrderType) || 'DINE_IN';
+                                                    setManualOrderType(next);
+                                                    if (!isDineInOrderType(next)) setManualOrderTableId('');
+                                                }}
                                                 placeholder={t('orders.select_type')}
                                             />
                                         </div>
-                                        <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
-                                            <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
-                                                {t('table.table_number')}
-                                            </label>
-                                            <Select2
-                                                options={manualOrderTableOptions}
-                                                value={manualOrderTableId || null}
-                                                onChange={(v) => setManualOrderTableId(v ? String(v) : '')}
-                                                placeholder={t('table.table_number')}
-                                            />
-                                        </div>
+                                        {manualOrderIsDineIn && isFloorEnabledBranch(effectiveManualBranchId) && (
+                                            <div className={cn("space-y-1.5", isAllBranches ? "col-span-3" : "col-span-4")}>
+                                                <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">
+                                                    {t('table.floor')}
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    readOnly
+                                                    tabIndex={-1}
+                                                    value={
+                                                        manualOrderFloor === 'gf'
+                                                            ? t('table.ground_floor')
+                                                            : manualOrderFloor === '2f'
+                                                                ? t('table.second_floor')
+                                                                : ''
+                                                    }
+                                                    placeholder={t('table.floor')}
+                                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 outline-none cursor-not-allowed placeholder:text-gray-400"
+                                                />
+                                            </div>
+                                        )}
                                         {/* Keep date on its own row for cleaner alignment */}
                                         <div className="space-y-1.5 col-span-12">
                                             <label className="block text-[11px] font-bold text-brand-muted uppercase tracking-wider">

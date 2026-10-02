@@ -1428,6 +1428,8 @@
 		"order_no_placeholder": "e.g. ORD-20260225-101530",
 		"unknown": "Unknown",
 		"swal": {
+			"table_required_title": "Table Required",
+			"table_required_text": "Please select a table number for Dine In orders.",
 			"update_status_title": "Update Order Status?",
 			"update_status_text": "Change order {{orderNo}} to \"{{status}}\"?",
 			"confirm_update": "Yes, Update",

@@ -1375,6 +1375,8 @@
 		"order_no_placeholder": "예: ORD-20260225-101530",
 		"unknown": "알 수 없음",
 		"swal": {
+			"table_required_title": "테이블 필요",
+			"table_required_text": "매장 식사 주문은 테이블 번호를 선택해 주세요.",
 			"update_status_title": "주문 상태 업데이트?",
 			"update_status_text": "주문 {{orderNo}}의 상태를 \"{{status}}\"로 변경하시겠습니까?",
 			"confirm_update": "예, 업데이트합니다",
