@@ -3333,6 +3333,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
         { dataKey: 'totalSales', color: 'rgb(139, 92, 246)', raw: Number(dataPoint?.rawTotalSales ?? 0) },
         { dataKey: 'negativeExpenses', color: 'rgb(245, 158, 11)', raw: Number(dataPoint?.rawTotalExpenses ?? 0) },
       ];
+      const profit = Math.trunc(tooltipItems[0].raw) - Math.trunc(tooltipItems[1].raw);
 
       return (
         <div
@@ -3355,6 +3356,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ selectedBranch, 
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{formatMoney(item.raw)}</span>
               </div>
             ))}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                borderTop: '1px solid #e2e8f0',
+                paddingTop: 6,
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 9999, background: 'rgb(34, 197, 94)', display: 'inline-block' }} />
+              <span style={{ fontSize: 12, color: '#475569', minWidth: 86 }}>Total Profit</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: profit < 0 ? '#dc2626' : '#0f172a' }}>
+                {profit < 0 ? '-' : ''}{formatMoney(profit)}
+              </span>
+            </div>
           </div>
         </div>
       );
