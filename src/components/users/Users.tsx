@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonPage, SkeletonStatCards, SkeletonPageHeader, SkeletonTable } from '../ui/Skeleton';
 import { useUser } from '../../context/UserContext';
+import { is3coreBranch, sortBranchesBySidebarOrder } from '../../utils/branchLogo';
 
 // Branches where the ground/2nd-floor table split actually exists: Blue Moon
 // (3) is the real branch, 3Core (4) is kept for testing.
@@ -50,6 +51,8 @@ export const Users: React.FC = () => {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<UserRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  /** Branch tab key (`all` or a branch label); admin-only grouping of the user table. */
+  const [activeBranchTab, setActiveBranchTab] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -181,16 +184,55 @@ export const Users: React.FC = () => {
     return users.filter((u) => String(u.branchId) === String(effectiveBranchId));
   }, [users, isAdmin, effectiveBranchId]);
 
-  useEffect(() => {
-    const filtered = branchFilteredUsers.filter((u) =>
-      (u.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.branch || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      floorLabel(u).toLowerCase().includes(searchQuery.toLowerCase())
+  const branchTabKey = (u: UserRow) => (u.branch || '').trim() || '—';
+
+  const searchedUsers = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return branchFilteredUsers.filter((u) =>
+      (u.fullName || '').toLowerCase().includes(q) ||
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.role || '').toLowerCase().includes(q) ||
+      (u.branch || '').toLowerCase().includes(q) ||
+      floorLabel(u).toLowerCase().includes(q)
     );
-    setFilteredUsers(filtered);
   }, [searchQuery, branchFilteredUsers]);
+
+  /**
+   * Tabs = the 5 All-Branches sidebar branches (same order) + 3Core. Other branches (e.g. ALL, Noir)
+   * appear only under the "All" tab. Counts follow the search box.
+   */
+  const branchTabs = useMemo(() => {
+    const present = new Map<string, { id: string; name: string }>();
+    for (const u of branchFilteredUsers) {
+      const key = branchTabKey(u);
+      if (!present.has(key)) present.set(key, { id: key, name: key });
+    }
+    const candidates = Array.from(present.values());
+    const ordered = [
+      ...sortBranchesBySidebarOrder(candidates, { exclude3core: true, appendUnmatched: false }),
+      ...candidates.filter((b) => is3coreBranch(b.name)),
+    ];
+    return ordered.map((b) => ({
+      key: b.name,
+      count: searchedUsers.filter((u) => branchTabKey(u) === b.name).length,
+    }));
+  }, [branchFilteredUsers, searchedUsers]);
+
+  const showBranchTabs = branchTabs.length > 1;
+
+  useEffect(() => {
+    if (activeBranchTab !== 'all' && !branchTabs.some((tab) => tab.key === activeBranchTab)) {
+      setActiveBranchTab('all');
+    }
+  }, [activeBranchTab, branchTabs]);
+
+  useEffect(() => {
+    setFilteredUsers(
+      showBranchTabs && activeBranchTab !== 'all'
+        ? searchedUsers.filter((u) => branchTabKey(u) === activeBranchTab)
+        : searchedUsers,
+    );
+  }, [searchedUsers, showBranchTabs, activeBranchTab]);
 
   useEffect(() => {
     if (formData.confirmPassword && formData.password !== formData.confirmPassword) {
@@ -491,6 +533,38 @@ export const Users: React.FC = () => {
                 <h3 className="text-3xl font-bold">{new Set(branchFilteredUsers.map(u => u.role)).size}</h3>
               </div>
             </div>
+
+            {showBranchTabs && (
+              <div className="flex items-center gap-1 overflow-x-auto rounded-2xl bg-white p-1.5 shadow-sm">
+                {[{ key: 'all', count: searchedUsers.length }, ...branchTabs].map((tab) => {
+                  const isActive = activeBranchTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => setActiveBranchTab(tab.key)}
+                      className={cn(
+                        'flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold whitespace-nowrap transition-colors',
+                        isActive
+                          ? 'bg-brand-primary text-white shadow-sm'
+                          : 'text-brand-muted hover:bg-brand-primary/10 hover:text-brand-primary',
+                      )}
+                    >
+                      {tab.key === 'all' ? t('table.all') : tab.key}
+                      <span
+                        className={cn(
+                          'rounded-lg px-1.5 py-0.5 text-xs font-bold',
+                          isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-brand-muted',
+                        )}
+                      >
+                        {tab.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <DataTable
               data={filteredUsers}
