@@ -186,7 +186,8 @@ export const Users: React.FC = () => {
       (u.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.username || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.role || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (u.branch || '').toLowerCase().includes(searchQuery.toLowerCase())
+      (u.branch || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      floorLabel(u).toLowerCase().includes(searchQuery.toLowerCase())
     );
     setFilteredUsers(filtered);
   }, [searchQuery, branchFilteredUsers]);
@@ -320,6 +321,18 @@ export const Users: React.FC = () => {
     }
   };
 
+  // Floor shown in the list: the account's own floor when set; "All Floors" for a
+  // waiter/cashier at a multi-floor branch with no floor (sees every floor); blank
+  // for everyone else, where a floor doesn't apply.
+  const floorLabel = (u: UserRow): string => {
+    if (u.floor === 'gf') return t('table.ground_floor');
+    if (u.floor === '2f') return t('table.second_floor');
+    if (/waiter|cashier/i.test(u.role) && FLOOR_ENABLED_BRANCH_IDS.includes(Number(u.branchId))) {
+      return t('manage_users.all_floors');
+    }
+    return '';
+  };
+
   const columns: ColumnDef<UserRow>[] = [
     {
       header: t('manage_users.name'),
@@ -336,6 +349,25 @@ export const Users: React.FC = () => {
     {
       header: t('manage_users.branch'),
       render: (user) => <span className="text-sm font-medium">{user.branch}</span>,
+    },
+    {
+      header: t('table.floor'),
+      render: (user) => {
+        const label = floorLabel(user);
+        if (!label) return <span className="text-sm font-medium text-brand-muted">—</span>;
+        return (
+          <span
+            className={cn(
+              "text-xs font-bold px-2 py-1 rounded-lg whitespace-nowrap",
+              user.floor === 'gf' && "bg-amber-100 text-amber-700",
+              user.floor === '2f' && "bg-indigo-100 text-indigo-700",
+              !user.floor && "bg-gray-100 text-brand-muted"
+            )}
+          >
+            {label}
+          </span>
+        );
+      },
     },
     {
       header: t('manage_users.table_no'),
@@ -398,7 +430,7 @@ export const Users: React.FC = () => {
             <SkeletonPageHeader />
             <SkeletonStatCards />
             <div className="bg-white rounded-2xl shadow-sm p-6">
-              <SkeletonTable columns={6} rows={10} />
+              <SkeletonTable columns={7} rows={10} />
             </div>
           </motion.div>
         ) : error ? (

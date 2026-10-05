@@ -175,6 +175,7 @@ class OrderController {
 				order_id: orderId,
 				order_no: payload.ORDER_NO,
 				table_id: payload.TABLE_ID,
+				floor: fullOrder?.FLOOR || null,
 				status: payload.STATUS,
 				grand_total: payload.GRAND_TOTAL,
 				items: orderItems,
@@ -610,6 +611,7 @@ class OrderController {
 				order_no: updatedOrder.ORDER_NO,
 				table_id: updatedOrder.TABLE_ID,
 				order_type: updatedOrder.ORDER_TYPE,
+				floor: updatedOrder.FLOOR || null,
 				status: updatedOrder.STATUS,
 				grand_total: updatedOrder.GRAND_TOTAL,
 				items: orderItems

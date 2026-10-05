@@ -23,6 +23,7 @@ const loyverseService = require('./utils/loyverseService');
 const TelegramService = require('./services/telegramService');
 const {
 	ensureOrderItemsLineCostColumn,
+	ensureOrdersFloorColumn,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
@@ -241,6 +242,7 @@ app.use((err, req, res, next) => {
 (async () => {
 	try {
 		await ensureOrderItemsLineCostColumn();
+		await ensureOrdersFloorColumn();
 		await ensureReceiptScanHistoryTable();
 		await ensureTelegramSettingsTable();
 		await ensureBankPaymentMethodEnum();

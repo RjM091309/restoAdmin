@@ -34,6 +34,35 @@ async function ensureOrderItemsLineCostColumn() {
 	}
 }
 
+/**
+ * orders.FLOOR ('gf' / '2f' / NULL): the floor an order belongs to, stamped at
+ * creation (see OrderModel.create). Lets floor-scoped tablet accounts filter
+ * orders that have no table (takeout) and orders on tables with no FLOOR set.
+ */
+async function ensureOrdersFloorColumn() {
+	const connection = await pool.getConnection();
+	try {
+		const [rows] = await connection.execute(
+			`SELECT 1 FROM information_schema.COLUMNS
+			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'FLOOR'
+			 LIMIT 1`
+		);
+		if (rows.length > 0) {
+			return;
+		}
+		await connection.execute(
+			`ALTER TABLE orders
+			 ADD COLUMN FLOOR VARCHAR(10) NULL DEFAULT NULL
+			 AFTER TABLE_ID`
+		);
+		console.log('[Schema] orders.FLOOR created');
+	} catch (err) {
+		console.error('[Schema] ensure orders.FLOOR failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 async function ensureReceiptScanHistoryTable() {
 	const connection = await pool.getConnection();
 	try {
@@ -260,6 +289,7 @@ async function ensureAnalyticsPerformanceIndexes() {
 
 module.exports = {
 	ensureOrderItemsLineCostColumn,
+	ensureOrdersFloorColumn,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,

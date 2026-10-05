@@ -844,6 +844,7 @@
 		"role": "Role",
 		"branch": "Branch",
 		"table_no": "Table #",
+		"all_floors": "All Floors",
 		"search_placeholder": "Search users...",
 		"add_new_user": "Add New User",
 		"edit_user": "Edit User",

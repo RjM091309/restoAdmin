@@ -803,6 +803,7 @@
 		"role": "역할",
 		"branch": "지점",
 		"table_no": "테이블 번호",
+		"all_floors": "전체 층",
 		"search_placeholder": "사용자 검색...",
 		"add_new_user": "새 사용자 추가",
 		"edit_user": "사용자 편집",

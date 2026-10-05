@@ -802,6 +802,7 @@
 		"role": "角色",
 		"branch": "分支",
 		"table_no": "桌号",
+		"all_floors": "所有楼层",
 		"search_placeholder": "搜索用户...",
 		"add_new_user": "添加新用户",
 		"edit_user": "编辑用户",

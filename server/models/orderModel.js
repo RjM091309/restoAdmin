@@ -29,6 +29,7 @@ class OrderModel {
 				b.BRANCH_NAME AS BRANCH_LABEL,
 				o.ORDER_NO,
 				o.TABLE_ID,
+				o.FLOOR,
 				t.TABLE_NUMBER,
 				t.ROOM_CHARGE,
 				o.ORDER_TYPE,
@@ -137,6 +138,7 @@ class OrderModel {
 				o.BRANCH_ID,
 				o.ORDER_NO,
 				o.TABLE_ID,
+				o.FLOOR,
 				o.ORDER_TYPE,
 				o.STATUS,
 				o.SUBTOTAL,
@@ -187,6 +189,29 @@ class OrderModel {
 		return rows[0] || null;
 	}
 
+	/**
+	 * Floor ('gf' / '2f') an order belongs to, or null when unknown. A table's own
+	 * FLOOR (set in Table Settings) wins; otherwise the creating account's
+	 * user_info.FLOOR. Derived server-side so the client can't stamp an arbitrary
+	 * floor. Never throws — a lookup failure must not block taking an order.
+	 */
+	static async resolveFloor(tableId, userId) {
+		try {
+			if (tableId) {
+				const [tableRows] = await pool.execute('SELECT FLOOR FROM restaurant_tables WHERE IDNo = ? LIMIT 1', [tableId]);
+				const tableFloor = TableModel.normalizeFloor(tableRows[0]?.FLOOR);
+				if (tableFloor) return tableFloor;
+			}
+			if (userId) {
+				const [userRows] = await pool.execute('SELECT FLOOR FROM user_info WHERE IDNo = ? LIMIT 1', [userId]);
+				return TableModel.normalizeFloor(userRows[0]?.FLOOR);
+			}
+		} catch (err) {
+			console.warn('[OrderModel] resolveFloor failed:', err.message || err);
+		}
+		return null;
+	}
+
 	static async create(data) {
 		const {
 			BRANCH_ID,
@@ -204,12 +229,17 @@ class OrderModel {
 		} = data;
 
 		const hasEncodedDt = ENCODED_DT != null && String(ENCODED_DT).trim() !== '';
+		// Callers that need the floor afterwards (e.g. to emit it) resolve it up front and pass FLOOR in.
+		const floor = data.FLOOR !== undefined
+			? TableModel.normalizeFloor(data.FLOOR)
+			: await OrderModel.resolveFloor(TABLE_ID, user_id);
 
 		const columnsBase = [
 			'IDNo',
 			'BRANCH_ID',
 			'ORDER_NO',
 			'TABLE_ID',
+			'FLOOR',
 			'ORDER_TYPE',
 			'STATUS',
 			'SUBTOTAL',
@@ -236,6 +266,7 @@ class OrderModel {
 				BRANCH_ID,
 				ORDER_NO,
 				TABLE_ID || null,
+				floor,
 				ORDER_TYPE || null,
 				STATUS || 3,
 				SUBTOTAL || 0,
@@ -409,6 +440,7 @@ class OrderModel {
 					o.BRANCH_ID,
 					o.ORDER_NO,
 					o.TABLE_ID,
+					o.FLOOR,
 					o.ORDER_TYPE,
 					o.STATUS,
 					o.SUBTOTAL,
@@ -430,6 +462,7 @@ class OrderModel {
 					o.BRANCH_ID,
 					o.ORDER_NO,
 					o.TABLE_ID,
+					o.FLOOR,
 					o.ORDER_TYPE,
 					o.STATUS,
 					o.SUBTOTAL,

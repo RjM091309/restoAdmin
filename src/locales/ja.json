@@ -801,6 +801,7 @@
 		"role": "ロール",
 		"branch": "支店",
 		"table_no": "テーブル番号",
+		"all_floors": "すべての階",
 		"search_placeholder": "ユーザーを検索...",
 		"add_new_user": "新しいユーザーを追加",
 		"edit_user": "ユーザーを編集",

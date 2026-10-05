@@ -736,6 +736,7 @@ class ApiController {
 						order_no: order.ORDER_NO,
 						table_id: order.TABLE_ID,
 						order_type: order.ORDER_TYPE,
+						floor: order.FLOOR || null,
 						status: order.STATUS,
 						subtotal: parseFloat(order.SUBTOTAL || 0),
 						tax_amount: parseFloat(order.TAX_AMOUNT || 0),
@@ -873,6 +874,7 @@ class ApiController {
 				order_no: order.ORDER_NO,
 				table_id: order.TABLE_ID,
 				order_type: order.ORDER_TYPE,
+				floor: order.FLOOR || null,
 				status: targetStatus === 1 ? (order.STATUS || 2) : targetStatus,
 				grand_total: parseFloat(order.GRAND_TOTAL || 0),
 				items: items.map(item => ({ ...item, STATUS: targetStatus }))
@@ -926,6 +928,7 @@ class ApiController {
 					table_number: order.TABLE_NUMBER || null,
 					room_charge: order.ROOM_CHARGE != null ? parseFloat(order.ROOM_CHARGE) : 0,
 					order_type: order.ORDER_TYPE,
+					floor: order.FLOOR || null,
 					status: order.STATUS,
 					subtotal: parseFloat(order.SUBTOTAL || 0),
 					tax_amount: parseFloat(order.TAX_AMOUNT || 0),
@@ -1089,6 +1092,7 @@ class ApiController {
 				table_id: order.TABLE_ID,
 				table_number: tableNumber,
 				order_type: order.ORDER_TYPE,
+				floor: order.FLOOR || null,
 				status: targetStatus,
 				subtotal: parseFloat(order.SUBTOTAL || 0),
 				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
@@ -1259,6 +1263,7 @@ class ApiController {
 				room_charge: roomCharge,
 				room_charge_units_added: qty,
 				order_type: order.ORDER_TYPE,
+				floor: order.FLOOR || null,
 				status: order.STATUS,
 				subtotal: parseFloat(order.SUBTOTAL || 0),
 				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
@@ -1397,6 +1402,8 @@ class ApiController {
 				orderData.DISCOUNT_AMOUNT
 			);
 
+			// Floor is derived server-side (table FLOOR, else the account's FLOOR), never trusted from the client body.
+			orderData.FLOOR = await OrderModel.resolveFloor(orderData.TABLE_ID, user_id);
 			const orderId = await OrderModel.create(orderData);
 			await OrderItemsModel.createForOrder(orderId, newOrderItems, user_id);
 			await BillingModel.createForOrder({ branch_id: orderData.BRANCH_ID, order_id: orderId, amount_due: orderData.GRAND_TOTAL, amount_paid: 0, status: 3, user_id: user_id });
@@ -1418,6 +1425,7 @@ class ApiController {
 				table_id: orderData.TABLE_ID,
 				table_number: tableNumber,
 				order_type: orderData.ORDER_TYPE,
+				floor: orderData.FLOOR || null,
 				status: orderData.STATUS,
 				subtotal: parseFloat(orderData.SUBTOTAL || 0),
 				tax_amount: parseFloat(orderData.TAX_AMOUNT || 0),
@@ -1511,6 +1519,7 @@ class ApiController {
 				table_id: existingOrder.TABLE_ID,
 				table_number: tableNumber,
 				order_type: existingOrder.ORDER_TYPE,
+				floor: existingOrder.FLOOR || null,
 				status: existingOrder.STATUS,
 				subtotal: newSubtotal,
 				tax_amount: parseFloat(existingOrder.TAX_AMOUNT || 0),
