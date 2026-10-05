@@ -1445,6 +1445,7 @@
 		"table": {
 			"menu_item": "菜品",
 			"category": "类别",
+			"description": "描述",
 			"price": "价格",
 			"status": "状态",
 			"actions": "操作"

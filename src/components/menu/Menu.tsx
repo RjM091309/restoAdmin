@@ -94,6 +94,22 @@ interface MenuProps {
     selectedBranch: Branch | null;
 }
 
+/** Price input: digits + optional 2 decimals, with thousands separators (e.g. "10,000.50"). */
+function formatPriceInput(raw: string): string {
+    const cleaned = String(raw ?? '').replace(/[^\d.]/g, '');
+    if (cleaned === '') return '';
+    const dot = cleaned.indexOf('.');
+    const intPart = (dot === -1 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, '');
+    const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    if (dot === -1) return withCommas;
+    const decPart = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+    return `${withCommas || '0'}.${decPart}`;
+}
+
+function parsePriceInput(value: string): number {
+    return Number(String(value ?? '').replace(/,/g, ''));
+}
+
 export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     const { t } = useTranslation();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -266,7 +282,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setError(null);
         try {
             const [menuData, catData] = await Promise.all([
-                getMenus(branchId, { includeDescription: false }),
+                getMenus(branchId, { includeDescription: true }),
                 getMenuCategories(branchId),
             ]);
             setMenus(Array.isArray(menuData) ? menuData : []);
@@ -480,7 +496,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setFormName(item.name);
         setFormDesc('');
         setFormCategory(item.categoryId || '');
-        setFormPrice(String(item.price));
+        setFormPrice(formatPriceInput(String(item.price ?? '')));
         setFormAvailable(item.isAvailable);
         setFormImage(null);
         setFormImagePreview(item.imageUrl ? resolveImageUrl(item.imageUrl) : null);
@@ -491,7 +507,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             name: item.name || '',
             desc: '',
             categoryId: item.categoryId || '',
-            price: String(item.price ?? ''),
+            price: formatPriceInput(String(item.price ?? '')),
             available: !!item.isAvailable,
             imagePreview: item.imageUrl ? resolveImageUrl(item.imageUrl) : null,
         });
@@ -713,8 +729,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
     );
 
     const canSubmitItem = useMemo(() => {
-        const baselinePrice = Number(itemBaseline.price || 0);
-        const effectivePrice = formPrice === '' ? baselinePrice : Number(formPrice);
+        const baselinePrice = parsePriceInput(itemBaseline.price || '0');
+        const effectivePrice = formPrice === '' ? baselinePrice : parsePriceInput(formPrice);
         // For edit: allow saving other changes even if price is 0 (some items legitimately have 0).
         // For create: still require a valid price > 0.
         const valid = !!formName.trim() && Number.isFinite(effectivePrice) && (editingItem ? effectivePrice >= 0 : effectivePrice > 0);
@@ -1086,8 +1102,8 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         setSubmitting(true);
         try {
             if (editingItem) {
-                const baselinePrice = Number(itemBaseline.price || 0);
-                const effectivePrice = formPrice === '' ? baselinePrice : Number(formPrice);
+                const baselinePrice = parsePriceInput(itemBaseline.price || '0');
+                const effectivePrice = formPrice === '' ? baselinePrice : parsePriceInput(formPrice);
                 const payload: UpdateMenuPayload = {
                     categoryId: formCategory || null,
                     name: formName.trim(),
@@ -1100,7 +1116,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                 await updateMenu(editingItem.id, payload);
                 toast.success(t('menu_page.messages.updated_msg', { name: formName.trim() }));
             } else {
-                if (!formPrice || Number(formPrice) <= 0) {
+                if (!formPrice || !(parsePriceInput(formPrice) > 0)) {
                     toast.error(t('menu_page.messages.price_required_msg'));
                     return;
                 }
@@ -1109,7 +1125,7 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
                     categoryId: formCategory || null,
                     name: formName.trim(),
                     description: formDesc.trim() || null,
-                    price: Number(formPrice),
+                    price: parsePriceInput(formPrice),
                     isAvailable: formAvailable,
                     imageFile: formImage,
                 };
@@ -1195,11 +1211,24 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
         },
         {
             header: t('menu_page.table.price'),
+            className: 'text-center',
             render: (item) => (
                 <span className="text-sm font-bold text-brand-text">
                     {t('common.currency_symbol')}
                     {formatPriceNoDecimals(item.price)}
                 </span>
+            ),
+        },
+        {
+            header: t('menu_page.table.description'),
+            className: 'text-center',
+            render: (item) => (
+                <p
+                    className="text-sm text-brand-muted line-clamp-2 max-w-[320px] mx-auto"
+                    title={item.description || undefined}
+                >
+                    {item.description?.trim() || '—'}
+                </p>
             ),
         },
         {
@@ -1265,12 +1294,11 @@ export const Menu: React.FC<MenuProps> = ({ selectedBranch }) => {
             <div>
                 <label className="block text-sm font-bold text-brand-text mb-2">{t('menu_page.modal.price')}</label>
                 <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
                     value={formPrice}
-                    onChange={(e) => setFormPrice(e.target.value)}
+                    onChange={(e) => setFormPrice(formatPriceInput(e.target.value))}
                     placeholder={t('menu_page.modal.price_placeholder')}
-                    min="0"
-                    step="0.01"
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:bg-white focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 outline-none transition-all placeholder:text-gray-400"
                 />
             </div>

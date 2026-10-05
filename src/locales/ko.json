@@ -1499,6 +1499,7 @@
 		"table": {
 			"menu_item": "메뉴 항목",
 			"category": "카테고리",
+			"description": "설명",
 			"price": "가격",
 			"status": "상태",
 			"actions": "작업"

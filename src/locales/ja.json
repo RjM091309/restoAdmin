@@ -1444,6 +1444,7 @@
 		"table": {
 			"menu_item": "メニュー項目",
 			"category": "カテゴリ",
+			"description": "説明",
 			"price": "価格",
 			"status": "ステータス",
 			"actions": "アクション"

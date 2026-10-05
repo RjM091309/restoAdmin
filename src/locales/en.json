@@ -1560,6 +1560,7 @@
 		"table": {
 			"menu_item": "Menu Item",
 			"category": "Category",
+			"description": "Description",
 			"price": "Price",
 			"status": "Status",
 			"actions": "Actions"
