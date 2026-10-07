@@ -40,10 +40,11 @@ _EXPENSE_LOCAL_DT_SQL = """COALESCE(
     DATE_ADD(e.ENCODED_DT, INTERVAL 8 HOUR)
 )"""
 
-# 3Core (BR004, IDNo=4) — Rj's testing-only branch. Excluded from "All Branches" aggregates
-# (branch_id not given) so it never inflates admin dashboard totals/trend. Mirrors
-# is3coreBranch() in src/utils/branchLogo.ts and TEST_BRANCH_NAME_PATTERN in adminDashboardBundle.js.
-_TEST_BRANCH_IDS = (4,)
+# 3Core (BR004, IDNo=4) — Rj's testing-only branch — and Resto Demo (DEMO01, IDNo=14), the
+# demo/sales-presentation branch. Excluded from "All Branches" aggregates (branch_id not given)
+# so they never inflate admin dashboard totals/trend. Mirrors is3coreBranch()/isDemoBranch() in
+# src/utils/branchLogo.ts and TEST_BRANCH_NAME_PATTERN in adminDashboardBundle.js.
+_TEST_BRANCH_IDS = (4, 14)
 
 
 def _get_db_config() -> dict:

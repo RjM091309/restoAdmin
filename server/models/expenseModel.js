@@ -3,8 +3,8 @@ const BranchModel = require('./branchModel');
 const MasterCategoryModel = require('./masterCategoryModel');
 const { phLocalDayRangeFilter } = require('../utils/phDateRange');
 
-/** 3Core (BR004, IDNo=4) — testing-only branch, excluded from All-Branches expense aggregates. */
-const TEST_BRANCH_IDS = [4];
+/** 3Core (BR004, IDNo=4) and Resto Demo (DEMO01, IDNo=14) — testing/demo branches, excluded from All-Branches expense aggregates. */
+const TEST_BRANCH_IDS = [4, 14];
 
 class ExpenseModel {
 	static _schemaReady = false;

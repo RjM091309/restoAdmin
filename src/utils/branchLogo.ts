@@ -34,9 +34,14 @@ export function isNoirBranch(name: string | null | undefined): boolean {
   return /noir/.test(n);
 }
 
+/** "Resto Demo" — the demo/sales-presentation branch; must never count toward real totals. */
+export function isDemoBranch(name: string | null | undefined): boolean {
+  return /resto\s*demo/.test(normalizeBranchName(name || ''));
+}
+
 /** Branches hidden from All Branches sidebar grid, dashboard cards, and compare. */
 export function isExcludedFromAllBranchesView(name: string | null | undefined): boolean {
-  return is3coreBranch(name) || isNoirBranch(name);
+  return is3coreBranch(name) || isNoirBranch(name) || isDemoBranch(name);
 }
 
 /** All Branches sidebar grid: row1 kim's, Bluemoon, Kumho — row2 PRIME, EESOME */
