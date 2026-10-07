@@ -106,6 +106,14 @@ restaurantAdmin/
 
 For detailed file structure, see [FILE_STRUCTURE.md](./FILE_STRUCTURE.md)
 
+## 🏢 "All Branches" scope
+
+Analytics and report queries with no `branch_id` count only the real branches in
+`utils/allBranches.js` (`ALL_BRANCHES_IDS`: 2, 3, 9, 10, 12). This list mirrors
+`_ALL_BRANCHES_IDS` in `pyserver/main.py`. All other branches are test accounts.
+For All Branches, the frontend must send `branch_id=all`. If it is missing,
+`ReportsController.resolveAnalyticsBranchId` falls back to the user's own branch.
+
 ## 📚 API Documentation
 
 For API endpoints and usage, see [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)

@@ -2,10 +2,10 @@ const CashReconciliationModel = require('../models/cashReconciliationModel');
 const ExpenseModel = require('../models/expenseModel');
 const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 const { resolveNetSalesFromRow } = require('../utils/analyticsSales');
+const { ALL_BRANCHES_IDS } = require('../utils/allBranches');
 
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 15000);
-/** 3Core (BR004) testing branch + Resto Demo (DEMO01) — matches is3coreBranch()/isDemoBranch() in src/utils/branchLogo.ts. */
-const TEST_BRANCH_NAME_PATTERN = /3core|\bdemo\b/i;
+const ALL_BRANCHES_ID_SET = new Set(ALL_BRANCHES_IDS);
 
 function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
 	return fetchPyCachedOptional(path, params, { timeoutMs });
@@ -226,11 +226,11 @@ async function buildAdminDashboardBundle({
 	const scopedBranchIdForFilter =
 		branchId != null && String(branchId).trim() !== '' ? Number(branchId) : null;
 	const rawBranchSales = branchSalesRes?.data?.data || [];
-	// 3Core (BR004) is a testing-only branch — drop it from "All Branches" aggregates
-	// unless it's the branch explicitly being viewed. Mirrors is3coreBranch() in the frontend.
+	// Only the real branches count toward "All Branches" aggregates, unless a test
+	// branch is the one explicitly being viewed.
 	const branchSales = rawBranchSales.filter(
 		(b) =>
-			!TEST_BRANCH_NAME_PATTERN.test(String(b.branch_name || '')) ||
+			ALL_BRANCHES_ID_SET.has(Number(b.branch_id)) ||
 			Number(b.branch_id) === scopedBranchIdForFilter,
 	);
 	const topSelling = topSellingRes?.data?.data || [];

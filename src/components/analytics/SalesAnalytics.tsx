@@ -653,7 +653,7 @@ export const SalesAnalytics: React.FC<SalesAnalyticsProps> = ({ selectedBranch, 
         const profitParams = new URLSearchParams();
         profitParams.set('start_date', dateRange.start);
         profitParams.set('end_date', dateRange.end);
-        if (profitDriversEffectiveBranchId) profitParams.set('branch_id', profitDriversEffectiveBranchId);
+        profitParams.set('branch_id', profitDriversEffectiveBranchId || 'all');
 
         const profitRows = await fetchTopProfitDriversApi(profitParams);
         const driversBranchName =

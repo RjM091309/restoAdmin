@@ -96,7 +96,7 @@ export const PaymentReport: React.FC<PaymentReportProps> = ({ selectedBranch, da
     const params = new URLSearchParams();
     if (dateRange.start) params.set('start_date', dateRange.start);
     if (dateRange.end) params.set('end_date', dateRange.end);
-    if (branchIdForCache) params.set('branch_id', branchIdForCache);
+    params.set('branch_id', branchIdForCache || 'all');
 
     const apiRows = await fetchPaymentReportApi(params);
     return { rows: buildPaymentRows(apiRows) };

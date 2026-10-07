@@ -36,3 +36,15 @@ You can check it at:
 - From your React app, call `http://localhost:8000/...` instead of the Node.js
   server for analytics that you want Python to handle.
 
+
+## "All Branches" scope
+
+When an endpoint is called without `branch_id`, it aggregates only the real
+branches in `_ALL_BRANCHES_IDS` (`main.py`):
+Kim's Brothers (2), Blue Moon (3), KumHo (9), EESOME CAFE (10), PRIME BBQ (12).
+`reports.py` imports the same constant. Every other branch is a test account.
+Keep the list in sync with `server/utils/allBranches.js`.
+
+New queries must use `IN (_ALL_BRANCHES_IDS)` in the no-`branch_id` path, never
+an unfiltered query or a `NOT IN` denylist. In production the server runs under
+pm2 as `resto-pyserver` (port 2100).

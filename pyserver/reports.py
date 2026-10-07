@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from main import get_connection, _mysql_column_exists, _TEST_BRANCH_IDS
+from main import get_connection, _mysql_column_exists, _ALL_BRANCHES_IDS
 from sales_query_filters import (
     billing_join_on,
     billing_where_clauses,
@@ -183,7 +183,7 @@ def menu_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
         else:
-            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+            branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
         # Subqueries use different billing aliases (b2 for amount, bq for qty).
         # Generate filters per-alias so SQL always references the correct table.
@@ -447,7 +447,7 @@ def category_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
         else:
-            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+            branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
         effective_limit = None
         if limit is not None:
@@ -793,7 +793,7 @@ def category_menu_breakdown(
                 branch_filter = "AND b.BRANCH_ID = %s"
                 room_params.append(branch_id)
             else:
-                branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+                branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
             print(
                 "[PyServer] /category-menu-breakdown room-charge params:",
@@ -933,7 +933,7 @@ def category_menu_breakdown(
             branch_filter = "AND b.BRANCH_ID = %s"
             main_params.append(branch_id)
         else:
-            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+            branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
         if category_id == 0:
             category_clause = "AND c.IDNo IS NULL"
@@ -1038,7 +1038,7 @@ def payment_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
         else:
-            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+            branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
         query = f"""
             SELECT
@@ -1214,7 +1214,7 @@ def receipt_report(
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
         else:
-            branch_filter = f"AND b.BRANCH_ID NOT IN ({','.join(map(str, _TEST_BRANCH_IDS))})"
+            branch_filter = f"AND b.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})"
 
         if type == "sale":
             type_filter = "AND (b.REFUND IS NULL OR b.REFUND = 0)"
@@ -1310,6 +1310,8 @@ def expense_summary(
         if branch_id:
             where_clauses.append("e.BRANCH_ID = %s")
             params.append(branch_id)
+        else:
+            where_clauses.append(f"e.BRANCH_ID IN ({','.join(map(str, _ALL_BRANCHES_IDS))})")
 
         if start_date and end_date:
             where_clauses.append("DATE(e.ENCODED_DT) >= %s")

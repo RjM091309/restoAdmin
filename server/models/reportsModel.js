@@ -8,6 +8,7 @@
 const pool = require('../config/db');
 const { businessDateSql, branchAwareDayCondition } = require('../utils/businessDay');
 const { phLocalDayRangeFilter } = require('../utils/phDateRange');
+const { ALL_BRANCHES_SQL_LIST } = require('../utils/allBranches');
 
 class ReportsModel {
 	// Get revenue report by period
@@ -88,6 +89,8 @@ class ReportsModel {
 		if (branchId) {
 			billingQuery += ` AND b.BRANCH_ID = ?`;
 			params.push(branchId);
+		} else {
+			billingQuery += ` AND b.BRANCH_ID IN (${ALL_BRANCHES_SQL_LIST})`;
 		}
 
 		billingQuery += billingGroupBy;
@@ -116,6 +119,8 @@ class ReportsModel {
 		if (branchId) {
 			summaryQuery += ` AND (s.branch_id = ? OR s.branch_id IS NULL)`;
 			summaryParams.push(branchId);
+		} else {
+			summaryQuery += ` AND (s.branch_id IN (${ALL_BRANCHES_SQL_LIST}) OR s.branch_id IS NULL)`;
 		}
 
 		summaryQuery += summaryGroupBy;
@@ -374,7 +379,7 @@ class ReportsModel {
 
 		const isRoomCharge = /^room\s*charge$/i.test(goodsName);
 		const hasBranch = branchId != null && branchId !== '' && String(branchId) !== 'all';
-		const branchSql = hasBranch ? ' AND b.BRANCH_ID = ?' : '';
+		const branchSql = hasBranch ? ' AND b.BRANCH_ID = ?' : ` AND b.BRANCH_ID IN (${ALL_BRANCHES_SQL_LIST})`;
 
 		let query;
 		let execParams;
@@ -1948,6 +1953,9 @@ class ReportsModel {
 			billingParams.push(branchId);
 			branchFilterSummary = 'AND s.branch_id = ?';
 			summaryParams.push(branchId);
+		} else {
+			branchFilterBilling = `AND br.IDNo IN (${ALL_BRANCHES_SQL_LIST})`;
+			branchFilterSummary = `AND s.branch_id IN (${ALL_BRANCHES_SQL_LIST})`;
 		}
 
 		// Get gross sales from billing + orders (Loyverse-aligned: paid + discount)
@@ -2045,7 +2053,7 @@ class ReportsModel {
 			params.push(...range.params);
 		}
 
-		let branchFilter = '';
+		let branchFilter = `AND br.IDNo IN (${ALL_BRANCHES_SQL_LIST})`;
 		if (branchId) {
 			branchFilter = 'AND br.IDNo = ?';
 			params.push(branchId);

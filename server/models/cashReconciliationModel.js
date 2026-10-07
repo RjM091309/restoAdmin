@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const BranchModel = require('./branchModel');
+const { ALL_BRANCHES_SQL_LIST } = require('../utils/allBranches');
 
 class CashReconciliationModel {
 	static _schemaReady = false;
@@ -201,7 +202,7 @@ class CashReconciliationModel {
 		let sql = `
 			SELECT BRANCH_ID, COALESCE(SUM(AMOUNT), 0) AS branch_total
 			FROM cash_reconciliation
-			WHERE ACTIVE = 1 AND BRANCH_ID NOT IN (4, 14) -- 3Core (BR004) + Resto Demo (DEMO01), excluded from All-Branches totals
+			WHERE ACTIVE = 1 AND BRANCH_ID IN (${ALL_BRANCHES_SQL_LIST}) -- real branches only; all others are test accounts
 		`;
 		if (startDate) {
 			sql += ' AND BUSINESS_DATE >= ?';

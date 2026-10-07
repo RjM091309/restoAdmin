@@ -2,9 +2,7 @@ const pool = require('../config/db');
 const BranchModel = require('./branchModel');
 const MasterCategoryModel = require('./masterCategoryModel');
 const { phLocalDayRangeFilter } = require('../utils/phDateRange');
-
-/** 3Core (BR004, IDNo=4) and Resto Demo (DEMO01, IDNo=14) — excluded from All-Branches expense aggregates. */
-const TEST_BRANCH_IDS = [4, 14];
+const { ALL_BRANCHES_SQL_LIST } = require('../utils/allBranches');
 
 class ExpenseModel {
 	static _schemaReady = false;
@@ -658,7 +656,7 @@ class ExpenseModel {
 	 */
 	static async getTotalsByBranch(startDate, endDate) {
 		await ExpenseModel.ensureSchema();
-		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1', `e.BRANCH_ID NOT IN (${TEST_BRANCH_IDS.join(',')})`];
+		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1', `e.BRANCH_ID IN (${ALL_BRANCHES_SQL_LIST})`];
 		const params = [];
 		if (startDate && endDate) {
 			// Sargable PH(+08:00) day range — CONVERT_TZ applied to bounds only
@@ -719,7 +717,7 @@ class ExpenseModel {
 	 */
 	static async getRentSalaryByBranch(startDate, endDate) {
 		await ExpenseModel.ensureSchema();
-		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1', `e.BRANCH_ID NOT IN (${TEST_BRANCH_IDS.join(',')})`];
+		const where = ['e.ACTIVE = 1', 'oc.ACTIVE = 1', `e.BRANCH_ID IN (${ALL_BRANCHES_SQL_LIST})`];
 		const params = [];
 		if (startDate && endDate) {
 			where.push(`e.ENCODED_DT >= COALESCE(
