@@ -156,7 +156,7 @@ class BillingModel {
 			query += ` AND b.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate);
+		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate, 'b.BRANCH_ID');
 		if (range.sql) {
 			query += range.sql;
 			params.push(...range.params);
@@ -194,7 +194,7 @@ class BillingModel {
 			query += ` AND b.BRANCH_ID = ?`;
 			params.push(branchId);
 		}
-		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate);
+		const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate, 'b.BRANCH_ID');
 		if (range.sql) {
 			query += range.sql;
 			params.push(...range.params);

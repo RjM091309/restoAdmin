@@ -10,6 +10,7 @@ from sales_query_filters import (
     billing_where_clauses,
     orders_join_on_billing,
     ph_local_day_range_filter,
+    session_date_or_business_day_filter,
     ph_local_day_range_predicate,
     ph_local_day_range_params,
 )
@@ -174,7 +175,7 @@ def menu_report(
 
         if start_date and end_date:
             date_filter, range_params = ph_local_day_range_filter(
-                "b.ENCODED_DT", start_date, end_date
+                "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
             )
             params.extend(range_params)
         if branch_id:
@@ -438,7 +439,7 @@ def category_report(
 
         if start_date and end_date:
             date_filter, range_params = ph_local_day_range_filter(
-                "b.ENCODED_DT", start_date, end_date
+                "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
             )
             params.extend(range_params)
         if branch_id:
@@ -784,8 +785,10 @@ def category_menu_breakdown(
             room_params: List[object] = []
 
             if start_date and end_date:
-                date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-                room_params.extend([start_date, end_date])
+                date_filter, _range_params = session_date_or_business_day_filter(
+                    "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
+                )
+                room_params.extend(_range_params)
             if branch_id:
                 branch_filter = "AND b.BRANCH_ID = %s"
                 room_params.append(branch_id)
@@ -922,8 +925,10 @@ def category_menu_breakdown(
         main_params: List[object] = []
 
         if start_date and end_date:
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            main_params.extend([start_date, end_date])
+            date_filter, _range_params = session_date_or_business_day_filter(
+                "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
+            )
+            main_params.extend(_range_params)
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             main_params.append(branch_id)
@@ -1025,8 +1030,10 @@ def payment_report(
         )
 
         if start_date and end_date:
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, _range_params = session_date_or_business_day_filter(
+                "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
+            )
+            params.extend(_range_params)
         if branch_id:
             branch_filter = "AND b.BRANCH_ID = %s"
             params.append(branch_id)
@@ -1198,8 +1205,10 @@ def receipt_report(
 
         if start_date and end_date:
             # Align date filter with billing-based analytics (daily-sales)
-            date_filter = "AND DATE(b.ENCODED_DT) BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
+            date_filter, _range_params = session_date_or_business_day_filter(
+                "b.ENCODED_DT", start_date, end_date, "b.BRANCH_ID"
+            )
+            params.extend(_range_params)
         if branch_id:
             # Use billing.BRANCH_ID for consistency with other analytics
             branch_filter = "AND b.BRANCH_ID = %s"

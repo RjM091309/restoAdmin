@@ -212,12 +212,13 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
   };
 
   const isWithinDateRange = useCallback(
-    (encoded: string | null | undefined) => isEncodedDtWithinDateRange(encoded, dateRange),
-    [dateRange.start, dateRange.end],
+    (encoded: string | null | undefined, rowBranchId?: number | string | null) =>
+      isEncodedDtWithinDateRange(encoded, dateRange, rowBranchId ?? branchId),
+    [dateRange.start, dateRange.end, branchId],
   );
 
   const recordsInDateRange = useMemo(
-    () => records.filter((r) => isWithinDateRange(r.ENCODED_DT)),
+    () => records.filter((r) => isWithinDateRange(r.ENCODED_DT, r.BRANCH_ID)),
     [records, isWithinDateRange],
   );
 

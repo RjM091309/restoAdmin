@@ -6,8 +6,78 @@
 // ============================================
 
 const pool = require('../config/db');
+const { businessDayOnlyRangeFilter } = require('../utils/phDateRange');
+const {
+	businessDateSql,
+	businessDayBranchesSql,
+	hasBusinessDayBranches,
+	isBusinessDayBranch,
+	otherBranchesSql,
+	phLocalDtSql,
+} = require('../utils/businessDay');
 
 class DashboardModel {
+	/**
+	 * ` AND ...` day condition for a dashboard query.
+	 *
+	 * Only branches with a business-day cutoff (Blue Moon — see utils/businessDay.js) are bucketed by
+	 * Asia/Manila business day; every other branch keeps EXACTLY its previous behaviour (plain
+	 * `DATE(col)` / `CURDATE()` in the DB session timezone), so this change cannot move their numbers.
+	 *
+	 * - single branch (branchId given): picks one of the two conditions in JS.
+	 * - all branches (branchId null): per row, by the row's own branch column.
+	 * - allowSingleDate: a lone startDate/endDate means that one day (payment summary only).
+	 * - no dates = "today": for cutoff branches the row's business day equals the business day of
+	 *   NOW(), so Blue Moon's today keeps running until 07:00 PH.
+	 *
+	 * @param {string} column e.g. 'o.ENCODED_DT'
+	 * @param {string} branchColumn e.g. 'o.BRANCH_ID'
+	 * @param {number|string|null} [branchId] the branch the query is filtered to, if any
+	 */
+	static dayFilter(column, branchColumn, startDate, endDate, allowSingleDate = false, branchId = null) {
+		let from = startDate;
+		let to = endDate;
+		if (allowSingleDate && !(from && to)) {
+			from = to = from || to || null;
+		}
+		const hasRange = Boolean(from && to);
+
+		// Legacy condition (no leading AND) — unchanged from before business days existed.
+		let legacy;
+		if (!hasRange) {
+			legacy = { sql: `DATE(${column}) = CURDATE()`, params: [] };
+		} else if (from === to) {
+			legacy = { sql: `DATE(${column}) = ?`, params: [from] };
+		} else {
+			legacy = { sql: `DATE(${column}) BETWEEN ? AND ?`, params: [from, to] };
+		}
+
+		if (!hasBusinessDayBranches() || (branchId != null && branchId !== '' && !isBusinessDayBranch(branchId))) {
+			return { sql: ` AND ${legacy.sql}`, params: legacy.params };
+		}
+
+		// Business-day condition (no leading AND) for the cutoff branches only.
+		let business;
+		if (!hasRange) {
+			business = {
+				sql: `${businessDayBranchesSql(branchColumn)} AND ${businessDateSql(phLocalDtSql(column), branchColumn)} = ${businessDateSql(phLocalDtSql('NOW()'), branchColumn)}`,
+				params: [],
+			};
+		} else {
+			const range = businessDayOnlyRangeFilter(column, from, to, branchColumn);
+			// Malformed dates must not silently widen to all-time data.
+			business = range.sql ? range : { sql: '1=0', params: [] };
+		}
+
+		if (branchId != null && branchId !== '') {
+			return { sql: ` AND ${business.sql}`, params: business.params };
+		}
+		return {
+			sql: ` AND ((${business.sql}) OR (${otherBranchesSql(branchColumn)} AND ${legacy.sql}))`,
+			params: [...business.params, ...legacy.params],
+		};
+	}
+
 	// Get today's revenue - Sum of AMOUNT_PAID from billing only
 	// Legacy summary tables (sales_hourly_summary) have been removed from the database
 	static async getTodaysRevenue(branchId = null, startDate = null, endDate = null) {
@@ -19,17 +89,9 @@ class DashboardModel {
 			WHERE STATUS IN (1, 2)
 		`;
 		
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				billingQuery += ` AND DATE(ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				billingQuery += ` AND DATE(ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			billingQuery += ` AND DATE(ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('ENCODED_DT', 'BRANCH_ID', startDate, endDate, false, branchId);
+		billingQuery += dayFilter.sql;
+		params.push(...dayFilter.params);
     
 		if (branchId) {
 			billingQuery += ` AND BRANCH_ID = ?`;
@@ -49,17 +111,9 @@ class DashboardModel {
 			WHERE 1=1
 		`;
 		const params = [];
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(REFUND_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(REFUND_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			query += ` AND DATE(REFUND_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('REFUND_DT', 'BRANCH_ID', startDate, endDate, false, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 		if (branchId) {
 			query += ` AND BRANCH_ID = ?`;
 			params.push(branchId);
@@ -77,17 +131,9 @@ class DashboardModel {
 			WHERE 1=1
 		`;
 		const params = [];
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(o.ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(o.ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			query += ` AND DATE(o.ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('o.ENCODED_DT', 'o.BRANCH_ID', startDate, endDate, false, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 		if (branchId) {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
@@ -106,17 +152,9 @@ class DashboardModel {
 		`;
 		const params = [];
 
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(o.ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(o.ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			query += ` AND DATE(o.ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('o.ENCODED_DT', 'o.BRANCH_ID', startDate, endDate, false, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 
 		if (branchId) {
 			query += ` AND o.BRANCH_ID = ?`;
@@ -135,17 +173,9 @@ class DashboardModel {
 			WHERE oi.STATUS = 3
 		`;
 		const params = [];
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(o.ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(o.ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			query += ` AND DATE(o.ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('o.ENCODED_DT', 'o.BRANCH_ID', startDate, endDate, false, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 		if (branchId) {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
@@ -163,17 +193,9 @@ class DashboardModel {
 			WHERE 1=1
 		`;
 		const params = [];
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(o.ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(o.ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else {
-			query += ` AND DATE(o.ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('o.ENCODED_DT', 'o.BRANCH_ID', startDate, endDate, false, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 		if (branchId) {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
@@ -218,17 +240,9 @@ class DashboardModel {
 				WHERE oi.STATUS IN (1, 2, 3)
 			`;
 			const params = [];
-			if (startDate && endDate) {
-				if (startDate === endDate) {
-					query += ` AND DATE(o.ENCODED_DT) = ?`;
-					params.push(startDate);
-				} else {
-					query += ` AND DATE(o.ENCODED_DT) BETWEEN ? AND ?`;
-					params.push(startDate, endDate);
-				}
-			} else {
-				query += ` AND DATE(o.ENCODED_DT) = CURDATE()`;
-			}
+			const dayFilter = DashboardModel.dayFilter('o.ENCODED_DT', 'o.BRANCH_ID', startDate, endDate, false, branchId);
+			query += dayFilter.sql;
+			params.push(...dayFilter.params);
 		if (branchId) {
 			query += ` AND o.BRANCH_ID = ?`;
 			params.push(branchId);
@@ -261,23 +275,9 @@ class DashboardModel {
 		
 		const params = [];
 		
-		if (startDate && endDate) {
-			if (startDate === endDate) {
-				query += ` AND DATE(ENCODED_DT) = ?`;
-				params.push(startDate);
-			} else {
-				query += ` AND DATE(ENCODED_DT) BETWEEN ? AND ?`;
-				params.push(startDate, endDate);
-			}
-		} else if (startDate) {
-			query += ` AND DATE(ENCODED_DT) = ?`;
-			params.push(startDate);
-		} else if (endDate) {
-			query += ` AND DATE(ENCODED_DT) = ?`;
-			params.push(endDate);
-		} else {
-			query += ` AND DATE(ENCODED_DT) = CURDATE()`;
-		}
+		const dayFilter = DashboardModel.dayFilter('ENCODED_DT', 'BRANCH_ID', startDate, endDate, true, branchId);
+		query += dayFilter.sql;
+		params.push(...dayFilter.params);
 		
 		if (branchId) {
 			query += ` AND BRANCH_ID = ?`;
