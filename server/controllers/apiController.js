@@ -24,7 +24,7 @@ const { isArgonHash, generateMD5 } = require('../utils/authUtils');
 const { stitchReceiptDataUrls } = require('../services/receiptStitchService');
 const { analyzeReceipt, extractOrderLinesFromReceipt } = require('../services/orderReceiptHelpers');
 const { toPublicImageUrl, publicUrl, SUBDIRS, UPLOAD_ROOT } = require('../utils/uploadPaths');
-const { getManilaTodayYmd } = require('../utils/manilaMonthRange');
+const { getBusinessTodayYmd } = require('../utils/businessDay');
 const pool = require('../config/db');
 const crypto = require('crypto');
 const path = require('path');
@@ -901,10 +901,13 @@ class ApiController {
 				if (branches.length > 0) resolvedBranchId = branches[0].IDNo;
 			}
 			// Waiter view is a shift-based worklist, not an all-time archive —
-			// scope to today (Manila calendar day) so this doesn't keep growing
+			// scope to today (Manila business day) so this doesn't keep growing
 			// forever as settled orders pile up. Pending/confirmed orders are
 			// realistically always from today anyway (they get resolved fast).
-			const today = getManilaTodayYmd();
+			// Blue Moon's 3PM-6AM shift crosses midnight, so for it "today" runs
+			// until 07:00 (utils/businessDay.js) — otherwise orders opened before
+			// midnight would drop out of the waiter/cashier list at 12:00AM.
+			const today = getBusinessTodayYmd(resolvedBranchId);
 			const orders = await OrderModel.getAll(resolvedBranchId, {
 				start_date: today,
 				end_date: today,

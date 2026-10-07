@@ -6,6 +6,8 @@
 // ============================================
 
 const pool = require('../config/db');
+const { businessDateSql, branchAwareDayCondition } = require('../utils/businessDay');
+const { phLocalDayRangeFilter } = require('../utils/phDateRange');
 
 class ReportsModel {
 	// Get revenue report by period
@@ -17,14 +19,25 @@ class ReportsModel {
 		const summaryParams = [];
 
 		if (period === 'daily') {
-			if (startDate && endDate) {
-				// Sargable range (index-friendly) — inclusive end day via < end+1 day
-				dateFilter = 'AND b.ENCODED_DT >= ? AND b.ENCODED_DT < DATE_ADD(?, INTERVAL 1 DAY)';
+			// Only Blue Moon (business-day cutoff, see utils/businessDay.js) gets a shifted day; every
+			// other branch keeps this exact legacy condition. Same raw-column convention as before.
+			const hasRange = Boolean(startDate && endDate);
+			const billingCond = branchAwareDayCondition({
+				branchColumn: 'b.BRANCH_ID',
+				branchId,
+				legacy: hasRange
+					? { sql: 'b.ENCODED_DT >= ? AND b.ENCODED_DT < DATE_ADD(?, INTERVAL 1 DAY)', params: [startDate, endDate] }
+					: { sql: 'DATE(b.ENCODED_DT) = CURDATE()', params: [] },
+				business: (h) => (hasRange
+					? { sql: `b.ENCODED_DT >= DATE_ADD(?, INTERVAL ${h} HOUR) AND b.ENCODED_DT < DATE_ADD(DATE_ADD(?, INTERVAL 1 DAY), INTERVAL ${h} HOUR)`, params: [startDate, endDate] }
+					: { sql: `DATE(DATE_SUB(b.ENCODED_DT, INTERVAL ${h} HOUR)) = DATE(DATE_SUB(NOW(), INTERVAL ${h} HOUR))`, params: [] }),
+			});
+			dateFilter = `AND ${billingCond.sql}`;
+			params.push(...billingCond.params);
+			if (hasRange) {
 				dateFilterSummary = 'AND s.sale_datetime >= ? AND s.sale_datetime < DATE_ADD(?, INTERVAL 1 DAY)';
-				params.push(startDate, endDate);
 				summaryParams.push(startDate, endDate);
 			} else {
-				dateFilter = 'AND DATE(b.ENCODED_DT) = CURDATE()';
 				dateFilterSummary = 'AND DATE(s.sale_datetime) = CURDATE()';
 			}
 		} else if (period === 'weekly') {
@@ -50,9 +63,11 @@ class ReportsModel {
 		}
 
 		// Build billing query with grouping
+		// Daily rows are bucketed by business day (only Blue Moon differs; ELSE 0 leaves others as DATE()).
+		const billingDateExpr = period === 'daily' ? businessDateSql('b.ENCODED_DT', 'b.BRANCH_ID') : 'DATE(b.ENCODED_DT)';
 		let billingGroupBy = '';
 		if (period === 'daily') {
-			billingGroupBy = ` GROUP BY DATE(b.ENCODED_DT)`;
+			billingGroupBy = ` GROUP BY ${billingDateExpr}`;
 		} else if (period === 'weekly') {
 			billingGroupBy = ` GROUP BY YEARWEEK(b.ENCODED_DT)`;
 		} else if (period === 'monthly') {
@@ -61,7 +76,7 @@ class ReportsModel {
 
 		let billingQuery = `
 			SELECT 
-				DATE(b.ENCODED_DT) as date,
+				${billingDateExpr} as date,
 				SUM(b.AMOUNT_PAID) as revenue,
 				COUNT(DISTINCT b.ORDER_ID) as order_count,
 				AVG(b.AMOUNT_PAID) as average_order_value
@@ -1912,8 +1927,18 @@ class ReportsModel {
 		const summaryParams = [];
 
 		if (startDate && endDate) {
-			dateFilterBilling = 'AND DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?';
-			billingParams.push(startDate, endDate);
+			// Blue Moon only: business-day range; every other branch keeps the legacy DATE() condition.
+			const billingCond = branchAwareDayCondition({
+				branchColumn: 'b.BRANCH_ID',
+				branchId,
+				legacy: { sql: 'DATE(b.ENCODED_DT) >= ? AND DATE(b.ENCODED_DT) <= ?', params: [startDate, endDate] },
+				business: (h) => ({
+					sql: `b.ENCODED_DT >= DATE_ADD(?, INTERVAL ${h} HOUR) AND b.ENCODED_DT < DATE_ADD(DATE_ADD(?, INTERVAL 1 DAY), INTERVAL ${h} HOUR)`,
+					params: [startDate, endDate],
+				}),
+			});
+			dateFilterBilling = `AND ${billingCond.sql}`;
+			billingParams.push(...billingCond.params);
 			dateFilterSummary = 'AND DATE(s.sale_datetime) >= ? AND DATE(s.sale_datetime) <= ?';
 			summaryParams.push(startDate, endDate);
 		}
@@ -2009,17 +2034,15 @@ class ReportsModel {
 			DATE_ADD(b.ENCODED_DT, INTERVAL 8 HOUR)
 		)`;
 
+		const saleDay = businessDateSql(billingLocalDt, 'b.BRANCH_ID');
+
 		let dateFilter = '';
 		const params = [];
 		if (startDate && endDate) {
-			dateFilter = `AND b.ENCODED_DT >= COALESCE(
-				CONVERT_TZ(CONCAT(?, ' 00:00:00'), '+08:00', @@session.time_zone),
-				DATE_SUB(CONCAT(?, ' 00:00:00'), INTERVAL 8 HOUR)
-			) AND b.ENCODED_DT < COALESCE(
-				CONVERT_TZ(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), '+08:00', @@session.time_zone),
-				DATE_SUB(DATE_ADD(CONCAT(?, ' 00:00:00'), INTERVAL 1 DAY), INTERVAL 8 HOUR)
-			)`;
-			params.push(startDate, startDate, endDate, endDate);
+			// Same PH range as before for every branch; Blue Moon alone gets its business-day shift.
+			const range = phLocalDayRangeFilter('b.ENCODED_DT', startDate, endDate, 'b.BRANCH_ID');
+			dateFilter = range.sql;
+			params.push(...range.params);
 		}
 
 		let branchFilter = '';
@@ -2032,8 +2055,8 @@ class ReportsModel {
 			SELECT
 				br.IDNo AS branch_id,
 				br.BRANCH_NAME AS branch_name,
-				DATE_FORMAT(DATE(${billingLocalDt}), '%Y-%m-%d') AS sale_date,
-				DAYNAME(DATE(${billingLocalDt})) AS day_name,
+				DATE_FORMAT(${saleDay}, '%Y-%m-%d') AS sale_date,
+				DAYNAME(${saleDay}) AS day_name,
 				COALESCE(SUM(b.AMOUNT_PAID + COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS total_sales,
 				COALESCE(SUM(COALESCE(b.REFUND, 0)), 0) AS refund,
 				COALESCE(SUM(COALESCE(o.DISCOUNT_AMOUNT, 0)), 0) AS discount,
@@ -2043,7 +2066,7 @@ class ReportsModel {
 			INNER JOIN billing b ON b.BRANCH_ID = br.IDNo AND b.STATUS IN (1, 2) ${dateFilter}
 			INNER JOIN orders o ON o.IDNo = b.ORDER_ID AND o.STATUS NOT IN (-1, -2)
 			WHERE br.ACTIVE = 1 ${branchFilter}
-			GROUP BY br.IDNo, br.BRANCH_NAME, DATE(${billingLocalDt})
+			GROUP BY br.IDNo, br.BRANCH_NAME, ${saleDay}
 			HAVING sale_date IS NOT NULL
 			ORDER BY br.BRANCH_NAME, sale_date
 		`;

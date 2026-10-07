@@ -1,3 +1,5 @@
+import { businessDayStartHour, HOUR_MS } from './businessDay';
+
 /** Asia/Manila helpers for ENCODED_DT parsing, display, and date-range filtering. */
 
 export const MANILA_TIMEZONE = 'Asia/Manila';
@@ -72,9 +74,37 @@ export function formatEncodedDt(encoded: string | null | undefined): string {
     }).format(new Date(utcMs));
 }
 
+/**
+ * YYYY-MM-DD business day (Asia/Manila) an ENCODED_DT belongs to for a branch. Branches without a
+ * cutoff (everyone but Blue Moon — see businessDay.ts) get exactly getManilaYmdFromEncoded().
+ */
+export function getBusinessYmdFromEncoded(
+    encoded: string | null | undefined,
+    branchId?: string | number | null,
+): string | null {
+    if (!encoded) return null;
+    const utcMs = parseEncodedDtToUtcMs(encoded);
+    if (utcMs == null) return null;
+    return formatUtcMsToManilaYmd(utcMs - businessDayStartHour(branchId) * HOUR_MS);
+}
+
+/** Business "today" (YYYY-MM-DD, Asia/Manila) for a branch; plain Manila today when it has no cutoff. */
+export function getBusinessTodayYmd(
+    branchId?: string | number | null,
+    now: Date = new Date(),
+): string {
+    return formatUtcMsToManilaYmd(now.getTime() - businessDayStartHour(branchId) * HOUR_MS);
+}
+
+/**
+ * `branchId` is the branch the row belongs to. Blue Moon rows are compared by business day so a
+ * 12:30AM order stays inside the previous day's range (matching the server); omit it, or pass any
+ * other branch, for the unchanged calendar-day comparison.
+ */
 export function isEncodedDtWithinDateRange(
     encoded: string | null | undefined,
     dateRange: { start: string; end: string },
+    branchId?: string | number | null,
 ): boolean {
     if (!encoded) return true;
     if (!dateRange.start || !dateRange.end) return true;
@@ -82,7 +112,7 @@ export function isEncodedDtWithinDateRange(
         return true;
     }
 
-    const manilaYmd = getManilaYmdFromEncoded(encoded);
+    const manilaYmd = getBusinessYmdFromEncoded(encoded, branchId);
     if (manilaYmd == null) return true;
     return manilaYmd >= dateRange.start && manilaYmd <= dateRange.end;
 }

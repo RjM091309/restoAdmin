@@ -524,8 +524,9 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     };
 
     const isWithinDateRange = useCallback(
-        (encoded: string | null | undefined) => isEncodedDtWithinDateRange(encoded, dateRange),
-        [dateRange.start, dateRange.end],
+        (encoded: string | null | undefined, rowBranchId?: number | string | null) =>
+            isEncodedDtWithinDateRange(encoded, dateRange, rowBranchId ?? branchId),
+        [dateRange.start, dateRange.end, branchId],
     );
 
     const filteredOrders = useMemo(() => {
@@ -553,7 +554,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         const filtered = orders.filter((order) => {
             const matchStatus = statusFilter === 'all' || String(order.STATUS) === statusFilter;
             const matchSearch = !term || order.ORDER_NO.toLowerCase().includes(term) || (order.TABLE_NUMBER && order.TABLE_NUMBER.toString().includes(term));
-            const matchDate = isWithinDateRange(order.ENCODED_DT);
+            const matchDate = isWithinDateRange(order.ENCODED_DT, order.BRANCH_ID);
             return matchStatus && matchSearch && matchDate;
         });
 
@@ -588,7 +589,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     // ==================== Stats ====================
     const stats = useMemo(() => {
         if (serverStats) return serverStats;
-        const scoped = orders.filter((o) => isWithinDateRange(o.ENCODED_DT));
+        const scoped = orders.filter((o) => isWithinDateRange(o.ENCODED_DT, o.BRANCH_ID));
         const pending = scoped.filter((o) => o.STATUS === ORDER_STATUS.PENDING).length;
         const confirmed = scoped.filter((o) => o.STATUS === ORDER_STATUS.CONFIRMED).length;
         const settled = scoped.filter((o) => o.STATUS === ORDER_STATUS.SETTLED).length;
@@ -1791,7 +1792,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             if (!isOrdersReceiptScanHistorySource(receiptScanHistoryRowSource(r))) return false;
             // Only scans that were sent to Orders (linked order); skip abandoned preview-only rows.
             if (r.ORDER_ID == null) return false;
-            return isWithinDateRange(r.ENCODED_DT);
+            return isWithinDateRange(r.ENCODED_DT, r.BRANCH_ID);
         });
     }, [receiptHistoryRows, isWithinDateRange]);
 
