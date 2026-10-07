@@ -4,8 +4,8 @@ const { fetchPyCachedOptional } = require('./analyticsPyFetch');
 const { resolveNetSalesFromRow } = require('../utils/analyticsSales');
 
 const BUNDLE_PYSERVER_TIMEOUT_MS = Number(process.env.BUNDLE_PYSERVER_TIMEOUT_MS || 15000);
-/** 3Core (BR004) — Rj's testing branch, matches is3coreBranch() in src/utils/branchLogo.ts. */
-const TEST_BRANCH_NAME_PATTERN = /3core/i;
+/** 3Core (BR004) testing branch + Resto Demo (DEMO01) — matches is3coreBranch()/isDemoBranch() in src/utils/branchLogo.ts. */
+const TEST_BRANCH_NAME_PATTERN = /3core|\bdemo\b/i;
 
 function fetchPyServerOptional(path, params = {}, timeoutMs = BUNDLE_PYSERVER_TIMEOUT_MS) {
 	return fetchPyCachedOptional(path, params, { timeoutMs });

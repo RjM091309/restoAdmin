@@ -34,9 +34,15 @@ export function isNoirBranch(name: string | null | undefined): boolean {
   return /noir/.test(n);
 }
 
+/** Resto Demo (DEMO01) — demo branch, hidden from the admin dashboard and branch picker. */
+export function isDemoBranch(name: string | null | undefined): boolean {
+  const n = normalizeBranchName(name || '');
+  return /\bdemo\b/.test(n);
+}
+
 /** Branches hidden from All Branches sidebar grid, dashboard cards, and compare. */
 export function isExcludedFromAllBranchesView(name: string | null | undefined): boolean {
-  return is3coreBranch(name) || isNoirBranch(name);
+  return is3coreBranch(name) || isNoirBranch(name) || isDemoBranch(name);
 }
 
 /** All Branches sidebar grid: row1 kim's, Bluemoon, Kumho — row2 PRIME, EESOME */
