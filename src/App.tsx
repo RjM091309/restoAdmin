@@ -54,6 +54,7 @@ import { CategoryReport } from './components/analytics/CategoryReport';
 import { PaymentReport } from './components/analytics/PaymentReport';
 import { ReceiptReport } from './components/analytics/ReceiptReport';
 import { AnalyticsAiAssistant } from './components/analytics/AnalyticsAiAssistant';
+import { PoweredByCoreSystem } from './components/ui/PoweredByCoreSystem';
 import { cn } from './lib/utils';
 
 // Panels
@@ -327,6 +328,15 @@ const LoginView = () => {
           <div className="mt-12 pt-8 border-t border-gray-100 text-center">
             <p className="text-sm text-brand-muted">
               Don't have an account? <a href="#" className="text-brand-primary font-bold hover:underline ml-1">Contact Support</a>
+            </p>
+          </div>
+
+          {/* Credits */}
+          {/* mt-16: the wordmark's triangles rise ~27px above its line, so leave room below "Contact Support" */}
+          <div className="mt-16 flex flex-col items-center gap-2 text-center">
+            <PoweredByCoreSystem size="lg" />
+            <p className="text-[13px] text-gray-400 whitespace-nowrap">
+              © {new Date().getFullYear()} 3Core Leaderstech. All rights reserved.
             </p>
           </div>
         </motion.div>
