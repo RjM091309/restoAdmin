@@ -1419,6 +1419,13 @@ class ApiController {
 				if (table) tableNumber = table.TABLE_NUMBER;
 			}
 
+			let encodedByRole = null;
+			try {
+				const creator = user_id ? await UserModel.findByIdWithRole(user_id) : null;
+				encodedByRole = creator?.role || null;
+			} catch (roleErr) {
+				console.warn('[API] Could not resolve creator role for order alert:', roleErr?.message || roleErr);
+			}
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
 			// encoded_by lets clients tell whether THEY created this order, so the
 			// "New Order Received" alert only fires for other staff, not the creator.
@@ -1447,6 +1454,9 @@ class ApiController {
 				})),
 				items_count: items.length,
 				encoded_by: user_id || null,
+				// Role of the creator ('Waiter', kiosk/table account, ...) so a waiter's
+				// app can skip the "New Order Received" alert for orders other waiters placed.
+				encoded_by_role: encodedByRole,
 				branch_id: resolvedBranchId
 			});
 
