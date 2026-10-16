@@ -30,6 +30,22 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs').promises;
 
+/**
+ * What a tablet just changed on an order, and who did it — rides on the order's
+ * socket event so the cashier app can tell staff "Room 3 was edited by gf_waiter2"
+ * (and skip its own actions). `type`: items_added | items_edited | cancelled | room_charge.
+ */
+function orderChange(req, type, extra = {}) {
+	return {
+		type,
+		by: req.user?.user_id ?? null,
+		by_name: req.user?.username || null,
+		by_permissions: req.user?.permissions ?? null,
+		at: new Date().toISOString(),
+		...extra,
+	};
+}
+
 class ApiController {
 	// Login endpoint for mobile app
 	static async login(req, res) {
@@ -1129,7 +1145,8 @@ class ApiController {
 					remarks: item.REMARKS || null
 				})),
 				encoded_by: order.ENCODED_BY ?? user_id ?? null,
-				branch_id: order.BRANCH_ID || resolvedBranchId || null
+				branch_id: order.BRANCH_ID || resolvedBranchId || null,
+				...(targetStatus === -1 ? { change: orderChange(req, 'cancelled') } : {})
 			});
 
 			return res.json({ success: true, data: { order_id: parseInt(order_id, 10), status: targetStatus } });
@@ -1190,17 +1207,42 @@ class ApiController {
 
 			// Broadcast socket updates to all clients
 			const orderItems = await OrderItemsModel.getByOrderId(order_id);
-			const targetTableName = targetTable.TABLE_NAME || targetTable.TABLE_NO || `Table ${newTableId}`;
+			// restaurant_tables names its label column TABLE_NUMBER ("ROOM 5"); the older
+			// TABLE_NAME / TABLE_NO lookups never matched and always fell back to "Table <id>".
+			const targetTableName = targetTable.TABLE_NUMBER || targetTable.TABLE_NAME || targetTable.TABLE_NO || `Table ${newTableId}`;
+			const oldTable = oldTableId ? await TableModel.getById(oldTableId) : null;
+			const oldTableName = oldTable?.TABLE_NUMBER || null;
 			socketService.emitOrderUpdate(order_id, {
 				order_id: parseInt(order_id, 10),
 				order_no: order.ORDER_NO,
 				table_id: newTableId,
 				table_number: targetTableName,
 				old_table_id: oldTableId,
+				order_type: order.ORDER_TYPE,
+				floor: order.FLOOR || null,
 				status: order.STATUS,
+				subtotal: parseFloat(order.SUBTOTAL || 0),
+				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
+				service_charge: parseFloat(order.SERVICE_CHARGE || 0),
+				discount_amount: parseFloat(order.DISCOUNT_AMOUNT || 0),
 				grand_total: parseFloat(order.GRAND_TOTAL || 0),
-				items: orderItems,
-				encoded_by: order.ENCODED_BY ?? user_id ?? null
+				items: orderItems.map(item => ({
+					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				encoded_by: order.ENCODED_BY ?? user_id ?? null,
+				branch_id: order.BRANCH_ID || null,
+				change: orderChange(req, 'transferred', {
+					from_table: oldTableName,
+					to_table: targetTableName,
+				})
 			});
 
 			return res.json({
@@ -1298,6 +1340,11 @@ class ApiController {
 				table_number: tableNumber,
 				room_charge: roomCharge,
 				room_charge_units_added: qty,
+				change: orderChange(req, 'room_charge', {
+					from: currentServiceCharge,
+					to: newServiceCharge,
+					sessions,
+				}),
 				order_type: order.ORDER_TYPE,
 				floor: order.FLOOR || null,
 				status: order.STATUS,
@@ -1606,7 +1653,8 @@ class ApiController {
 				})),
 				items_added: items.length,
 				encoded_by: user_id || null,
-				branch_id: resolvedBranchId
+				branch_id: resolvedBranchId,
+				change: orderChange(req, 'items_added')
 			});
 
 			return res.json({ success: true, data: { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, items_added: items.length, new_subtotal: newSubtotal, new_grand_total: newGrandTotal } });
@@ -1663,7 +1711,38 @@ class ApiController {
 			if (existingBilling) await BillingModel.updateForOrder(order_id, { amount_due: newGrandTotal });
 
 			const updatedItems = await OrderItemsModel.getByOrderId(order_id);
-			socketService.emitOrderUpdate(order_id, { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, table_id: existingOrder.TABLE_ID, status: existingOrder.STATUS, grand_total: newGrandTotal, items: updatedItems });
+			let editedTableNumber = null;
+			if (existingOrder.TABLE_ID) {
+				const table = await TableModel.getById(existingOrder.TABLE_ID);
+				if (table) editedTableNumber = table.TABLE_NUMBER;
+			}
+			socketService.emitOrderUpdate(order_id, {
+				order_id: parseInt(order_id),
+				order_no: existingOrder.ORDER_NO,
+				table_id: existingOrder.TABLE_ID,
+				table_number: editedTableNumber,
+				order_type: existingOrder.ORDER_TYPE,
+				floor: existingOrder.FLOOR || null,
+				status: existingOrder.STATUS,
+				subtotal: newSubtotal,
+				tax_amount: parseFloat(existingOrder.TAX_AMOUNT || 0),
+				service_charge: parseFloat(existingOrder.SERVICE_CHARGE || 0),
+				discount_amount: parseFloat(existingOrder.DISCOUNT_AMOUNT || 0),
+				grand_total: newGrandTotal,
+				items: updatedItems.map(item => ({
+					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
+					menu_id: item.MENU_ID,
+					menu_name: item.MENU_NAME,
+					qty: parseFloat(item.QTY || 0),
+					unit_price: parseFloat(item.UNIT_PRICE || 0),
+					line_total: parseFloat(item.LINE_TOTAL || 0),
+					status: item.STATUS,
+					remarks: item.REMARKS || null
+				})),
+				branch_id: existingOrder.BRANCH_ID || resolvedBranchId || null,
+				change: orderChange(req, 'items_edited')
+			});
 
 			return res.json({ success: true, data: { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, items_count: replacementItems.length, new_grand_total: newGrandTotal } });
 		} catch (error) {
