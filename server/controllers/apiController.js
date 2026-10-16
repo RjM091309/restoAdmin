@@ -1254,12 +1254,29 @@ class ApiController {
 				return res.status(400).json({ success: false, error: 'This table has no room charge' });
 			}
 
-			// Qty supports 0.5 steps, same as admin's manual-order room charge stepper.
-			const rawQty = parseFloat(req.body?.qty);
-			const qty = Number.isFinite(rawQty) && rawQty > 0 ? Math.round(rawQty * 2) / 2 : 1;
-			const roomChargeAdded = Number((roomCharge * qty).toFixed(2));
-
-			const newServiceCharge = Number((parseFloat(order.SERVICE_CHARGE || 0) + roomChargeAdded).toFixed(2));
+			// Two modes, both in 0.5 steps (same as admin's manual-order room charge stepper):
+			//  - `sessions`: the room charge's new TOTAL in sessions — up, down, or 0 (waived).
+			//    Sent by the cashier/waiter "Room Charge" dialog.
+			//  - `qty`: sessions to ADD (older apps, and extend actions queued offline by them).
+			const currentServiceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+			const rawSessions = parseFloat(req.body?.sessions);
+			const setsTotal = Number.isFinite(rawSessions);
+			let qty;
+			let newServiceCharge;
+			let sessions = null;
+			if (setsTotal) {
+				sessions = Math.max(0, Math.round(rawSessions * 2) / 2);
+				const currentSessions = Math.round((currentServiceCharge / roomCharge) * 2) / 2;
+				// Any non-room part of SERVICE_CHARGE (an extra fee) stays as it is.
+				const otherCharges = currentServiceCharge - currentSessions * roomCharge;
+				newServiceCharge = Number(Math.max(0, sessions * roomCharge + otherCharges).toFixed(2));
+				qty = sessions - currentSessions;
+			} else {
+				const rawQty = parseFloat(req.body?.qty);
+				qty = Number.isFinite(rawQty) && rawQty > 0 ? Math.round(rawQty * 2) / 2 : 1;
+				newServiceCharge = Number((currentServiceCharge + roomCharge * qty).toFixed(2));
+			}
+			const roomChargeAdded = Number((newServiceCharge - currentServiceCharge).toFixed(2));
 			const newGrandTotal = OrderModel.computeGrandTotal(
 				order.SUBTOTAL,
 				order.TAX_AMOUNT,
@@ -1310,6 +1327,7 @@ class ApiController {
 					order_id: parseInt(order_id, 10),
 					room_charge_added: roomChargeAdded,
 					units_added: qty,
+					room_charge_sessions: sessions,
 					service_charge: newServiceCharge,
 					grand_total: newGrandTotal
 				}
