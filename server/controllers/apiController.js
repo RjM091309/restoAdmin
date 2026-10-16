@@ -1791,6 +1791,34 @@ class ApiController {
 			});
 		}
 	}
+
+	// GET /api/login/accounts?branch_id=3 - staff picker on the tablet login
+	// screen. No auth (runs before login): returns display fields only, and
+	// only tablet roles, so admin/manager usernames are never listed.
+	static async getLoginAccounts(req, res) {
+		const branchId = parseInt(req.query.branch_id, 10);
+		if (!Number.isInteger(branchId) || branchId <= 0) {
+			return res.status(400).json({ success: false, error: 'branch_id is required' });
+		}
+		try {
+			const rows = await UserModel.getLoginAccountsByBranch(branchId);
+			return res.json({
+				success: true,
+				data: rows.map((r) => ({
+					user_id: r.user_id,
+					username: r.username,
+					firstname: r.firstname || '',
+					lastname: r.lastname || '',
+					permissions: r.permissions,
+					role: r.role || null,
+					floor: TableModel.normalizeFloor(r.floor),
+				})),
+			});
+		} catch (error) {
+			console.error('[LOGIN ACCOUNTS ERROR]', error);
+			return res.status(500).json({ success: false, error: 'Failed to load accounts' });
+		}
+	}
 }
 
 module.exports = ApiController;

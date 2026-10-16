@@ -244,6 +244,31 @@ class UserModel {
         return existing.length > 0;
     }
 
+    /**
+     * Staff accounts shown in the tablet login picker. Public (pre-login), so it returns only
+     * display fields and only the tablet-app roles — never admins/managers (1/3).
+     */
+    static async getLoginAccountsByBranch(branchId) {
+        const query = `
+            SELECT
+                u.IDNo AS user_id,
+                u.USERNAME AS username,
+                u.FIRSTNAME AS firstname,
+                u.LASTNAME AS lastname,
+                u.PERMISSIONS AS permissions,
+                u.FLOOR AS floor,
+                ur.ROLE AS role
+            FROM user_info u
+            LEFT JOIN user_role ur ON ur.IDNo = u.PERMISSIONS
+            WHERE u.ACTIVE = 1
+              AND u.BRANCH_ID = ?
+              AND u.PERMISSIONS IN (2, 14, 15, 16)
+            ORDER BY u.FIRSTNAME ASC, u.LASTNAME ASC, u.USERNAME ASC
+        `;
+        const [rows] = await pool.execute(query, [branchId]);
+        return rows;
+    }
+
     static async getAllActiveSummary() {
         const query = `
             SELECT IDNo, USERNAME, FIRSTNAME, LASTNAME, CONCAT(FIRSTNAME, ' ', LASTNAME) AS FULLNAME
