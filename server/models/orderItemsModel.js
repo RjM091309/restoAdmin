@@ -22,6 +22,7 @@ class OrderItemsModel {
 				oi.LINE_TOTAL,
 				oi.STATUS,
 				oi.REMARKS,
+				oi.ENCODED_DT,
 				oi.EDITED_BY,
 				(SELECT u.FIRSTNAME FROM user_info u WHERE u.IDNo = oi.EDITED_BY LIMIT 1) AS PREPARED_BY
 			FROM order_items oi
@@ -57,6 +58,7 @@ class OrderItemsModel {
 				oi.LINE_TOTAL,
 				oi.STATUS,
 				oi.REMARKS,
+				oi.ENCODED_DT,
 				oi.EDITED_BY,
 				(SELECT u.FIRSTNAME FROM user_info u WHERE u.IDNo = oi.EDITED_BY LIMIT 1) AS PREPARED_BY
 			FROM order_items oi
@@ -83,6 +85,9 @@ class OrderItemsModel {
 		}
 		const encodedDtValue =
 			encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
+		// One timestamp for the whole batch: the cashier app tells the first order apart
+		// from later additions by item time, so a batch must never straddle two seconds.
+		const batchDt = encodedDtValue || new Date();
 		const query = `
 			INSERT INTO order_items (
 				ORDER_ID,
@@ -106,21 +111,76 @@ class OrderItemsModel {
 			item.status || 3,  // Default: 3=PENDING
 			item.remarks || item.notes || null,
 			user_id,
-			encodedDtValue || new Date()
+			batchDt
 		]);
 
 		await pool.query(query, [values]);
+	}
+
+	/**
+	 * Splits an edited item list back over the order's existing lines so each keeps its original
+	 * ENCODED_DT (and note): the cashier app groups a bill into "first order" vs "added" by item
+	 * time, which a plain delete-and-reinsert would flatten into one batch at the edit time.
+	 * Quantity is taken from the oldest lines of the same menu item first, so a reduction comes
+	 * off the latest additions; anything beyond what was there becomes a new line (encoded now).
+	 */
+	static allocateKeepingItemTimes(existingRows, items) {
+		const EPS = 1e-9;
+		const pools = new Map();
+		for (const row of existingRows) {
+			const menuId = Number(row.MENU_ID);
+			if (!pools.has(menuId)) pools.set(menuId, []);
+			pools.get(menuId).push({
+				qty: parseFloat(row.QTY) || 0,
+				encoded_dt: row.ENCODED_DT || null,
+				remarks: row.REMARKS || null,
+			});
+		}
+		const out = [];
+		for (const item of items) {
+			const unitPrice = parseFloat(item.unit_price) || 0;
+			const lineFor = (qty, extra) => ({
+				...item,
+				qty,
+				line_total: Number((qty * unitPrice).toFixed(2)),
+				...extra,
+			});
+			let remaining = parseFloat(item.qty) || 0;
+			const pool = pools.get(Number(item.menu_id)) || [];
+			while (remaining > EPS && pool.length) {
+				const src = pool[0];
+				const take = Math.min(src.qty, remaining);
+				if (take > EPS) {
+					out.push(lineFor(take, {
+						encoded_dt: src.encoded_dt,
+						remarks: item.remarks || item.notes || src.remarks,
+					}));
+				}
+				src.qty -= take;
+				remaining -= take;
+				if (src.qty <= EPS) pool.shift();
+			}
+			if (remaining > EPS) out.push(lineFor(remaining, { encoded_dt: null }));
+		}
+		return out;
 	}
 
 	static async replaceForOrder(orderId, items, user_id, encoded_dt = null) {
 		const connection = await pool.getConnection();
 		try {
 			await connection.beginTransaction();
+			const [existingRows] = await connection.execute(
+				`SELECT MENU_ID, QTY, REMARKS, ENCODED_DT FROM order_items
+				 WHERE ORDER_ID = ? ORDER BY ENCODED_DT ASC, IDNo ASC FOR UPDATE`,
+				[orderId]
+			);
+			items = this.allocateKeepingItemTimes(existingRows, items);
 			await connection.execute('DELETE FROM order_items WHERE ORDER_ID = ?', [orderId]);
 
 			if (items.length) {
 				const encodedDtValue =
 					encoded_dt != null && String(encoded_dt).trim() !== '' ? encoded_dt : null;
+				const batchDt = encodedDtValue || new Date();
 				const query = `
 					INSERT INTO order_items (
 						ORDER_ID,
@@ -144,7 +204,7 @@ class OrderItemsModel {
 					item.status || 3,  // Default: 3=PENDING
 					item.remarks || item.notes || null,
 					user_id,
-					encodedDtValue || new Date()
+					item.encoded_dt || batchDt
 				]);
 
 				await connection.query(query, [values]);

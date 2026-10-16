@@ -821,6 +821,7 @@ class ApiController {
 						encoded_dt: order.ENCODED_DT,
 						items: items.map(item => ({
 							item_id: item.IDNo,
+							encoded_dt: item.ENCODED_DT || null,
 							menu_id: item.MENU_ID,
 							menu_name: item.MENU_NAME,
 							qty: parseFloat(item.QTY || 0),
@@ -957,6 +958,7 @@ class ApiController {
 					encoded_dt: order.ENCODED_DT,
 					items: items.map(item => ({
 						item_id: item.IDNo,
+						encoded_dt: item.ENCODED_DT || null,
 						menu_id: item.MENU_ID,
 						menu_name: item.MENU_NAME,
 						qty: parseFloat(item.QTY || 0),
@@ -1117,6 +1119,7 @@ class ApiController {
 				grand_total: finalGrandTotal,
 				items: orderItems.map(item => ({
 					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
 					menu_id: item.MENU_ID,
 					menu_name: item.MENU_NAME,
 					qty: parseFloat(item.QTY || 0),
@@ -1288,6 +1291,7 @@ class ApiController {
 				grand_total: newGrandTotal,
 				items: orderItems.map(item => ({
 					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
 					menu_id: item.MENU_ID,
 					menu_name: item.MENU_NAME,
 					qty: parseFloat(item.QTY || 0),
@@ -1475,6 +1479,7 @@ class ApiController {
 				grand_total: parseFloat(orderData.GRAND_TOTAL || 0),
 				items: orderItems.map(item => ({
 					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
 					menu_id: item.MENU_ID,
 					menu_name: item.MENU_NAME,
 					qty: parseFloat(item.QTY || 0),
@@ -1572,6 +1577,7 @@ class ApiController {
 				grand_total: newGrandTotal,
 				items: allOrderItems.map(item => ({
 					item_id: item.IDNo,
+					encoded_dt: item.ENCODED_DT || null,
 					menu_id: item.MENU_ID,
 					menu_name: item.MENU_NAME,
 					qty: parseFloat(item.QTY || 0),
