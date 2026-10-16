@@ -1406,7 +1406,9 @@ class ApiController {
 			);
 
 			// Floor is derived server-side (table FLOOR, else the account's FLOOR), never trusted from the client body.
-			orderData.FLOOR = await OrderModel.resolveFloor(orderData.TABLE_ID, user_id);
+			// Take-out (no table) is always served from the ground floor.
+			const isTakeOut = !orderData.TABLE_ID && String(order_type || '').toUpperCase().replace(/[^A-Z]/g, '') === 'TAKEOUT';
+			orderData.FLOOR = isTakeOut ? 'gf' : await OrderModel.resolveFloor(orderData.TABLE_ID, user_id);
 			const orderId = await OrderModel.create(orderData);
 			await OrderItemsModel.createForOrder(orderId, newOrderItems, user_id);
 			await BillingModel.createForOrder({ branch_id: orderData.BRANCH_ID, order_id: orderId, amount_due: orderData.GRAND_TOTAL, amount_paid: 0, status: 3, user_id: user_id });

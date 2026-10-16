@@ -29,6 +29,7 @@ import { cn } from '../../lib/utils';
 import {
     MANILA_TIMEZONE,
     formatEncodedDt,
+    formatEncodedDtBusinessDay,
     isEncodedDtWithinDateRange,
     parseEncodedDtToUtcMs,
 } from '../../utils/manilaDateTime';
@@ -2353,7 +2354,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     <div className="min-w-0">
                         <p className="text-sm font-bold">{order.ORDER_NO}</p>
                         <p className="text-[10px] text-brand-muted">
-                            {formatEncodedDt(order.ENCODED_DT)}
+                            {formatEncodedDtBusinessDay(order.ENCODED_DT, order.BRANCH_ID)}
                         </p>
                     </div>
                 </div>
