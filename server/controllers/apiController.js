@@ -1324,7 +1324,9 @@ class ApiController {
 			const { branch_id, order_no, table_id, order_type, subtotal, tax_amount, service_charge, discount_amount, grand_total, items, encoded_dt } = req.body;
 
 			if (!order_no || order_no.trim() === '') return res.status(400).json({ success: false, error: 'Order number is required' });
-			if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ success: false, error: 'At least one order item is required' });
+			// An empty list is allowed only for a room-charge-only order (checked below,
+			// once the room charge is resolved).
+			if (!items || !Array.isArray(items)) return res.status(400).json({ success: false, error: 'At least one order item is required' });
 
 			let resolvedBranchId = branch_id ? parseInt(branch_id) : null;
 			if (!resolvedBranchId && table_id) {
@@ -1410,7 +1412,21 @@ class ApiController {
 				}
 			}
 
+			// The table's ROOM_CHARGE is added on top of service_charge. The waiter app
+			// sends (sessions - 1) x rate, the same convention as the admin's Manual Order:
+			// -rate → ₱0 (room charge waived), 0 → 1 session, +rate → 2 sessions.
 			orderData.SERVICE_CHARGE = await OrderModel.resolveServiceChargeWithRoomCharge(orderData.TABLE_ID, service_charge);
+			if (orderData.SERVICE_CHARGE < 0) {
+				return res.status(400).json({ success: false, error: 'Room charge cannot be negative' });
+			}
+			if (!newOrderItems.length) {
+				// Room charge only: a KTV room opened before any food/drinks are ordered.
+				const table = orderData.TABLE_ID ? await TableModel.getById(orderData.TABLE_ID) : null;
+				const roomCharge = parseFloat(table?.ROOM_CHARGE) || 0;
+				if (roomCharge <= 0 || orderData.SERVICE_CHARGE <= 0) {
+					return res.status(400).json({ success: false, error: 'At least one order item is required' });
+				}
+			}
 			orderData.GRAND_TOTAL = OrderModel.computeGrandTotal(
 				orderData.SUBTOTAL,
 				orderData.TAX_AMOUNT,
