@@ -1406,7 +1406,9 @@ class ApiController {
 			);
 
 			// Floor is derived server-side (table FLOOR, else the account's FLOOR), never trusted from the client body.
-			orderData.FLOOR = await OrderModel.resolveFloor(orderData.TABLE_ID, user_id);
+			// Take-out (no table) is always served from the ground floor.
+			const isTakeOut = !orderData.TABLE_ID && String(order_type || '').toUpperCase().replace(/[^A-Z]/g, '') === 'TAKEOUT';
+			orderData.FLOOR = isTakeOut ? 'gf' : await OrderModel.resolveFloor(orderData.TABLE_ID, user_id);
 			const orderId = await OrderModel.create(orderData);
 			await OrderItemsModel.createForOrder(orderId, newOrderItems, user_id);
 			await BillingModel.createForOrder({ branch_id: orderData.BRANCH_ID, order_id: orderId, amount_due: orderData.GRAND_TOTAL, amount_paid: 0, status: 3, user_id: user_id });
@@ -1419,6 +1421,13 @@ class ApiController {
 				if (table) tableNumber = table.TABLE_NUMBER;
 			}
 
+			let encodedByRole = null;
+			try {
+				const creator = user_id ? await UserModel.findByIdWithRole(user_id) : null;
+				encodedByRole = creator?.role || null;
+			} catch (roleErr) {
+				console.warn('[API] Could not resolve creator role for order alert:', roleErr?.message || roleErr);
+			}
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
 			// encoded_by lets clients tell whether THEY created this order, so the
 			// "New Order Received" alert only fires for other staff, not the creator.
@@ -1447,6 +1456,9 @@ class ApiController {
 				})),
 				items_count: items.length,
 				encoded_by: user_id || null,
+				// Role of the creator ('Waiter', kiosk/table account, ...) so a waiter's
+				// app can skip the "New Order Received" alert for orders other waiters placed.
+				encoded_by_role: encodedByRole,
 				branch_id: resolvedBranchId
 			});
 
@@ -1777,6 +1789,34 @@ class ApiController {
 				success: false,
 				error: 'Failed to fetch app version info'
 			});
+		}
+	}
+
+	// GET /api/login/accounts?branch_id=3 - staff picker on the tablet login
+	// screen. No auth (runs before login): returns display fields only, and
+	// only tablet roles, so admin/manager usernames are never listed.
+	static async getLoginAccounts(req, res) {
+		const branchId = parseInt(req.query.branch_id, 10);
+		if (!Number.isInteger(branchId) || branchId <= 0) {
+			return res.status(400).json({ success: false, error: 'branch_id is required' });
+		}
+		try {
+			const rows = await UserModel.getLoginAccountsByBranch(branchId);
+			return res.json({
+				success: true,
+				data: rows.map((r) => ({
+					user_id: r.user_id,
+					username: r.username,
+					firstname: r.firstname || '',
+					lastname: r.lastname || '',
+					permissions: r.permissions,
+					role: r.role || null,
+					floor: TableModel.normalizeFloor(r.floor),
+				})),
+			});
+		} catch (error) {
+			console.error('[LOGIN ACCOUNTS ERROR]', error);
+			return res.status(500).json({ success: false, error: 'Failed to load accounts' });
 		}
 	}
 }

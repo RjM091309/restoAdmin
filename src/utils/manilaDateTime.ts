@@ -75,6 +75,32 @@ export function formatEncodedDt(encoded: string | null | undefined): string {
 }
 
 /**
+ * Like formatEncodedDt(), but the date part is the row's business day: a Blue Moon order at
+ * 10/16 12:01 AM shows as "10/15/26, 12:01 AM" (real time, business date). Branches without a
+ * cutoff get exactly formatEncodedDt().
+ */
+export function formatEncodedDtBusinessDay(
+    encoded: string | null | undefined,
+    branchId?: string | number | null,
+): string {
+    const shiftMs = businessDayStartHour(branchId) * HOUR_MS;
+    if (!shiftMs) return formatEncodedDt(encoded);
+    if (!encoded) return '—';
+    const utcMs = parseEncodedDtToUtcMs(encoded);
+    if (utcMs == null) return '—';
+
+    const date = new Intl.DateTimeFormat(undefined, {
+        timeZone: MANILA_TIMEZONE,
+        dateStyle: 'short',
+    }).format(new Date(utcMs - shiftMs));
+    const time = new Intl.DateTimeFormat(undefined, {
+        timeZone: MANILA_TIMEZONE,
+        timeStyle: 'short',
+    }).format(new Date(utcMs));
+    return `${date}, ${time}`;
+}
+
+/**
  * YYYY-MM-DD business day (Asia/Manila) an ENCODED_DT belongs to for a branch. Branches without a
  * cutoff (everyone but Blue Moon — see businessDay.ts) get exactly getManilaYmdFromEncoded().
  */

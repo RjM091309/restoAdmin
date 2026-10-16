@@ -19,6 +19,7 @@ import { SkeletonPageHeader, SkeletonStatCards, SkeletonTable } from '../ui/Skel
 import { cn } from '../../lib/utils';
 import {
   formatEncodedDt,
+  formatEncodedDtBusinessDay,
   isEncodedDtWithinDateRange,
 } from '../../utils/manilaDateTime';
 import { toast } from 'sonner';
@@ -407,7 +408,7 @@ export const Billing: React.FC<BillingProps> = ({ selectedBranch, dateRange }) =
             <div className="min-w-0">
               <p className="text-sm font-bold">{r.ORDER_NO}</p>
               <p className="text-[10px] text-brand-muted">
-                {r.ENCODED_DT ? formatEncodedDt(r.ENCODED_DT) : t('billing.n_a')}
+                {r.ENCODED_DT ? formatEncodedDtBusinessDay(r.ENCODED_DT, r.BRANCH_ID) : t('billing.n_a')}
               </p>
             </div>
           </div>

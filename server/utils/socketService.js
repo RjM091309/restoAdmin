@@ -33,6 +33,44 @@ async function resolveBranchId(orderId, orderData) {
   }
 }
 
+// Who created an order, and what role they have ('Waiter/Waitress', a table
+// tablet account, Cashier, ...). Added to EVERY order event so each client can
+// decide for itself whether the alert is meant for it -- e.g. a waiter's app
+// skips "New Order Received" for orders another waiter placed. Doing it here
+// (not in each controller) means order_updated / order_items_added carry it
+// too, so no event path can slip past the client's check.
+const creatorRoleCache = new Map(); // userId -> { role, at }
+const CREATOR_ROLE_TTL_MS = 5 * 60 * 1000;
+
+async function resolveCreator(orderId, orderData) {
+  let creatorId = null;
+  try {
+    // Lazy requires: same require-cycle reason as resolveBranchId.
+    const pool = require('../config/db');
+    const [rows] = await pool.execute('SELECT ENCODED_BY FROM orders WHERE IDNo = ? LIMIT 1', [orderId]);
+    creatorId = rows?.[0]?.ENCODED_BY ?? null;
+  } catch (e) {
+    console.warn(`[SOCKET] Could not resolve creator for order ${orderId}: ${e?.message || e}`);
+  }
+  if (creatorId == null) creatorId = orderData?.encoded_by ?? null;
+  if (creatorId == null) return { creatorId: null, role: null };
+
+  const cached = creatorRoleCache.get(String(creatorId));
+  if (cached && Date.now() - cached.at < CREATOR_ROLE_TTL_MS) {
+    return { creatorId, role: cached.role };
+  }
+  let role = null;
+  try {
+    const UserModel = require('../models/userModel');
+    const user = await UserModel.findByIdWithRole(creatorId);
+    role = user?.role || null;
+  } catch (e) {
+    console.warn(`[SOCKET] Could not resolve role for user ${creatorId}: ${e?.message || e}`);
+  }
+  creatorRoleCache.set(String(creatorId), { role, at: Date.now() });
+  return { creatorId, role };
+}
+
 // Role rooms to emit an order event to. New clients join their per-branch room
 // (`cashier_3`); older clients that don't send a branch join the shared room
 // (`cashier`). Emitting to both means: new clients are branch-isolated, and no
@@ -51,10 +89,16 @@ async function emitOrderEvent(event, orderId, orderData) {
     return;
   }
   const branchId = await resolveBranchId(orderId, orderData);
+  const { creatorId, role: creatorRole } = await resolveCreator(orderId, orderData);
+  const enrichedOrder = {
+    ...orderData,
+    encoded_by: orderData?.encoded_by ?? creatorId,
+    encoded_by_role: creatorRole,
+  };
   const payload = {
     order_id: orderId,
     branch_id: branchId,
-    order: orderData,
+    order: enrichedOrder,
     timestamp: new Date().toISOString(),
   };
 
