@@ -1,6 +1,21 @@
 const pool = require('../config/db');
 const { isArgonHash, generateMD5 } = require('../utils/authUtils'); 
 const argon2 = require('argon2');
+const crypto = require('crypto');
+
+/**
+ * A tablet session counts as signed in while its account made an authenticated request (or a
+ * heartbeat, every 60s) within this many seconds. A tablet that crashed or lost its connection
+ * frees its account after this long.
+ */
+const PRESENCE_WINDOW_SECONDS = 180;
+
+/** SQL: `alias` is signed in on a tablet right now (see PRESENCE_WINDOW_SECONDS). */
+function signedInSql(alias) {
+    return `(${alias}.ACTIVE_SESSION_ID IS NOT NULL
+        AND ${alias}.LAST_SEEN_AT IS NOT NULL
+        AND ${alias}.LAST_SEEN_AT >= NOW() - INTERVAL ${PRESENCE_WINDOW_SECONDS} SECOND)`;
+}
 
 class UserModel {
     static async findByUsername(username) {
@@ -156,8 +171,35 @@ class UserModel {
     // login overwrites this, and authenticateJWT rejects any older token
     // whose sid no longer matches it.
     static async updateActiveSession(userId, sid) {
-        const query = 'UPDATE user_info SET ACTIVE_SESSION_ID = ? WHERE IDNo = ?';
+        const query = 'UPDATE user_info SET ACTIVE_SESSION_ID = ?, LAST_SEEN_AT = NOW() WHERE IDNo = ?';
         await pool.execute(query, [sid, userId]);
+    }
+
+    /** Marks the account's tablet session as alive (authenticated request / heartbeat). */
+    static async touchLastSeen(userId) {
+        await pool.execute('UPDATE user_info SET LAST_SEEN_AT = NOW() WHERE IDNo = ?', [userId]);
+    }
+
+    /**
+     * Logout of the session `sid` (only if it's still the account's active one). The sid is
+     * rotated to a fresh value rather than NULL: a NULL ACTIVE_SESSION_ID lets any old token
+     * through (see authenticateJWT), so this also retires every token of that session.
+     */
+    static async endActiveSession(userId, sid) {
+        await pool.execute(
+            `UPDATE user_info SET ACTIVE_SESSION_ID = ?, LAST_SEEN_AT = NULL
+             WHERE IDNo = ? AND ACTIVE_SESSION_ID = ?`,
+            [crypto.randomUUID(), userId, sid]
+        );
+    }
+
+    /** True while the account is signed in on a tablet (see PRESENCE_WINDOW_SECONDS). */
+    static async isSignedInOnTablet(userId) {
+        const [rows] = await pool.execute(
+            `SELECT ${signedInSql('u')} AS signed_in FROM user_info u WHERE u.IDNo = ? LIMIT 1`,
+            [userId]
+        );
+        return rows.length > 0 && Number(rows[0].signed_in) === 1;
     }
 
     static async getActiveSessionId(userId) {
@@ -246,7 +288,8 @@ class UserModel {
 
     /**
      * Staff accounts shown in the tablet login picker. Public (pre-login), so it returns only
-     * display fields and only the tablet-app roles — never admins/managers (1/3).
+     * display fields and only the tablet-app roles — never admins/managers (1/3). Accounts
+     * already signed in on a tablet are left out so two tablets can't pick the same one.
      */
     static async getLoginAccountsByBranch(branchId) {
         const query = `
@@ -263,6 +306,7 @@ class UserModel {
             WHERE u.ACTIVE = 1
               AND u.BRANCH_ID = ?
               AND u.PERMISSIONS IN (2, 14, 15, 16)
+              AND NOT ${signedInSql('u')}
             ORDER BY u.FIRSTNAME ASC, u.LASTNAME ASC, u.USERNAME ASC
         `;
         const [rows] = await pool.execute(query, [branchId]);

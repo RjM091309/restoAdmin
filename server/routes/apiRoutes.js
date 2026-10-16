@@ -27,6 +27,12 @@ router.post("/login", ApiController.login);
 // Response: { success: true, data: [{ user_id, username, firstname, lastname, permissions, role, floor }] }
 router.get("/login/accounts", ApiController.getLoginAccounts);
 
+// POST - End this tablet's session (frees the account in the login picker)
+router.post("/logout", authenticateJWT, ApiController.logout);
+
+// POST - Presence heartbeat from a signed-in tablet (every 60s)
+router.post("/session/heartbeat", authenticateJWT, ApiController.heartbeat);
+
 // POST - Refresh access token
 // URL: /api/refresh
 // Body: { refreshToken: "string" }

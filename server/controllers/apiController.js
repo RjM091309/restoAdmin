@@ -36,7 +36,7 @@ class ApiController {
 		const timestamp = new Date().toISOString();
 
 		try {
-			const { username, password } = req.body;
+			const { username, password, reject_if_active: rejectIfActive } = req.body;
 
 			if (!username || !password) {
 				console.log(`[${timestamp}] [LOGIN FAILED] Missing credentials - Username: ${username || 'N/A'}`);
@@ -102,6 +102,19 @@ class ApiController {
 			}
 
 			console.log(`[${timestamp}] [LOGIN PERMISSION CHECK PASSED] ${username} - PERMISSIONS: ${userPermissions}`);
+
+			// The tablet login picker asks for this: an account already signed in on another
+			// tablet must not be taken over by a second tablet tapping it. Typing the username
+			// by hand still signs in (and logs the other tablet out) — the escape hatch for a
+			// tablet that died without logging out.
+			if (rejectIfActive === true && await UserModel.isSignedInOnTablet(user.IDNo)) {
+				console.log(`[${timestamp}] [LOGIN REJECTED] ${username} - already signed in on another tablet`);
+				return res.status(409).json({
+					success: false,
+					code: 'ACCOUNT_IN_USE',
+					error: 'This account is already signed in on another tablet.'
+				});
+			}
 
 			if (isLegacy) {
 				const newHash = await argon2.hash(password);
@@ -1790,6 +1803,27 @@ class ApiController {
 				error: 'Failed to fetch app version info'
 			});
 		}
+	}
+
+	// POST /api/logout - ends this tablet's session so its account shows up in
+	// the login picker again right away (instead of after the presence window).
+	static async logout(req, res) {
+		try {
+			if (req.user?.sid) {
+				await UserModel.endActiveSession(req.user.user_id, req.user.sid);
+			}
+			return res.json({ success: true });
+		} catch (error) {
+			console.error('[LOGOUT ERROR]', error);
+			return res.status(500).json({ success: false, error: 'Failed to log out' });
+		}
+	}
+
+	// POST /api/session/heartbeat - keeps a signed-in tablet that makes no other
+	// requests (kitchen, menu kiosk) out of the login picker. authenticateJWT
+	// records the activity; nothing else to do here.
+	static heartbeat(req, res) {
+		return res.json({ success: true });
 	}
 
 	// GET /api/login/accounts?branch_id=3 - staff picker on the tablet login

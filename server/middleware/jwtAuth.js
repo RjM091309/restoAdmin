@@ -8,6 +8,19 @@
 const { verifyAccessToken } = require('../utils/jwt');
 const UserModel = require('../models/userModel');
 
+// LAST_SEEN_AT is what keeps a signed-in account out of the tablet login picker. Writing it on
+// every request would be wasteful (tablets poll every few seconds), so at most once per user per
+// LAST_SEEN_THROTTLE_MS — well inside UserModel's 180s presence window.
+const LAST_SEEN_THROTTLE_MS = 30 * 1000;
+const lastSeenWrites = new Map();
+
+function touchLastSeen(userId) {
+	const now = Date.now();
+	if (now - (lastSeenWrites.get(userId) || 0) < LAST_SEEN_THROTTLE_MS) return;
+	lastSeenWrites.set(userId, now);
+	UserModel.touchLastSeen(userId).catch(() => lastSeenWrites.delete(userId));
+}
+
 /**
  * JWT Authentication Middleware
  * Verifies JWT token from Authorization header
@@ -53,13 +66,15 @@ const authenticateJWT = async (req, res, next) => {
 				code: 'SESSION_REPLACED'
 			});
 		}
+		if (activeSessionId) touchLastSeen(decoded.user_id);
 
 		// Attach user info to request
 		req.user = {
 			user_id: decoded.user_id,
 			username: decoded.username,
 			permissions: decoded.permissions,
-			branch_id: decoded.branch_id || null // Optional branch context
+			branch_id: decoded.branch_id || null, // Optional branch context
+			sid: decoded.sid || null
 		};
 
 		// Continue to next middleware

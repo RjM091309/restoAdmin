@@ -63,6 +63,38 @@ async function ensureOrdersFloorColumn() {
 	}
 }
 
+/**
+ * user_info.ACTIVE_SESSION_ID (single-device login lock) and LAST_SEEN_AT (last authenticated
+ * tablet request — the tablet login picker hides accounts seen in the last few minutes).
+ */
+async function ensureUserSessionColumns() {
+	const connection = await pool.getConnection();
+	try {
+		const [rows] = await connection.execute(
+			`SELECT COLUMN_NAME FROM information_schema.COLUMNS
+			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_info'
+			   AND COLUMN_NAME IN ('ACTIVE_SESSION_ID', 'LAST_SEEN_AT')`
+		);
+		const existing = new Set(rows.map((r) => String(r.COLUMN_NAME).toUpperCase()));
+		if (!existing.has('ACTIVE_SESSION_ID')) {
+			await connection.execute(
+				`ALTER TABLE user_info ADD COLUMN ACTIVE_SESSION_ID VARCHAR(64) NULL DEFAULT NULL`
+			);
+			console.log('[Schema] user_info.ACTIVE_SESSION_ID created');
+		}
+		if (!existing.has('LAST_SEEN_AT')) {
+			await connection.execute(
+				`ALTER TABLE user_info ADD COLUMN LAST_SEEN_AT DATETIME NULL DEFAULT NULL`
+			);
+			console.log('[Schema] user_info.LAST_SEEN_AT created');
+		}
+	} catch (err) {
+		console.error('[Schema] ensure user_info session columns failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 async function ensureReceiptScanHistoryTable() {
 	const connection = await pool.getConnection();
 	try {
@@ -290,6 +322,7 @@ async function ensureAnalyticsPerformanceIndexes() {
 module.exports = {
 	ensureOrderItemsLineCostColumn,
 	ensureOrdersFloorColumn,
+	ensureUserSessionColumns,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
