@@ -1220,6 +1220,14 @@ class ApiController {
 				// Any non-room part of SERVICE_CHARGE (an extra fee) stays as it is.
 				const otherCharges = Math.max(0, serviceCharge - OrderRoomChargeModel.sumAmount(before));
 				const active = OrderRoomChargeModel.activeOf(before);
+				// When the move really happened: a transfer queued offline syncs later
+				// and sends its own time (`transferred_at`, Manila), so the rooms'
+				// clocks and the minutes spent there aren't shifted to the sync time.
+				const moved = await OrderRoomChargeModel.resolveEventTime(
+					req.body?.transferred_at,
+					active ? active.STARTED_AT_RAW : null
+				);
+				const minutesInRoom = active ? moved.minutes : 0;
 				const reqPrev = parseFloat(req.body?.prev_room_hours);
 				const reqNew = parseFloat(req.body?.new_room_hours);
 				const activeHours = active ? parseFloat(active.HOURS) || 0 : 0;
@@ -1227,18 +1235,18 @@ class ApiController {
 				const carryOver = Boolean(active) && newRate > 0 && (
 					reqCarry != null
 						? reqCarry === true || reqCarry === 'true' || reqCarry === 1
-						: OrderRoomChargeModel.isCarryOverMinutes(active.MINUTES_USED)
+						: OrderRoomChargeModel.isCarryOverMinutes(minutesInRoom)
 				);
 				let prevHours = null;
 				if (active) {
 					// A waived room (0 h) stays waived unless staff set hours for it.
 					const defaultPrev = carryOver || activeHours <= 0
 						? 0
-						: OrderRoomChargeModel.billableHoursForMinutes(active.MINUTES_USED);
+						: OrderRoomChargeModel.billableHoursForMinutes(minutesInRoom);
 					prevHours = Number.isFinite(reqPrev) && reqPrev >= 0
 						? OrderRoomChargeModel.roundHours(reqPrev)
 						: defaultPrev;
-					await OrderRoomChargeModel.close(active.IDNo, prevHours, user_id);
+					await OrderRoomChargeModel.close(active.IDNo, prevHours, user_id, undefined, moved.at);
 				}
 				let newHours = null;
 				if (newRate > 0) {
@@ -1252,7 +1260,7 @@ class ApiController {
 						rate: newRate,
 						hours: newHours,
 						// Carried over: the new room's clock starts when the old room's did.
-						startedAt: carryOver ? active.STARTED_AT_RAW : null,
+						startedAt: carryOver ? active.STARTED_AT_RAW : moved.at,
 						userId: user_id,
 					});
 				}
@@ -1651,8 +1659,12 @@ class ApiController {
 				const roomRate = parseFloat(table?.ROOM_CHARGE) || 0;
 				if (roomRate > 0) {
 					// First row of the order's room-charge history: this room, from when the
-					// order was taken (an offline order keeps its original time).
+					// order was taken — an order synced from offline keeps its original
+					// time, read from its order number (Manila time, unlike encoded_dt).
 					try {
+						const roomStartedAt = orderData.ENCODED_DT
+							? await OrderRoomChargeModel.orderStartTime(orderData.ORDER_NO, orderData.ENCODED_DT)
+							: null;
 						await OrderRoomChargeModel.start({
 							orderId,
 							branchId: orderData.BRANCH_ID,
@@ -1660,7 +1672,7 @@ class ApiController {
 							tableNumber,
 							rate: roomRate,
 							hours: orderData.SERVICE_CHARGE / roomRate,
-							startedAt: orderData.ENCODED_DT || null,
+							startedAt: roomStartedAt,
 							userId: user_id,
 						});
 						roomCharges = OrderRoomChargeModel.listToApi(await OrderRoomChargeModel.getByOrderId(orderId));

@@ -48,6 +48,48 @@ class OrderRoomChargeModel {
 		return Math.max(0, Number(minutes) || 0) < OrderRoomChargeModel.CARRY_OVER_MINUTES;
 	}
 
+	/**
+	 * When a room change happened, as a DB-session DATETIME string, plus the
+	 * minutes from `sinceRaw` (the room's STARTED_AT_RAW) to then.
+	 * `phLocal` is the tablet's Asia/Manila time of the change ('YYYY-MM-DD
+	 * HH:MM:SS') — sent by transfers queued offline, which reach the server
+	 * later; it is kept between the room's start and now. Without it: now.
+	 */
+	static async resolveEventTime(phLocal, sinceRaw = null) {
+		const ph = typeof phLocal === 'string' ? phLocal.trim() : '';
+		const valid = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ph);
+		const atExpr = valid
+			? `LEAST(NOW(), COALESCE(CONVERT_TZ(?, '+08:00', @@session.time_zone), DATE_SUB(?, INTERVAL 8 HOUR)))`
+			: 'NOW()';
+		const atParams = valid ? [ph, ph] : [];
+		const inner = sinceRaw ? `GREATEST(?, ${atExpr})` : atExpr;
+		const [[row]] = await pool.execute(
+			`SELECT DATE_FORMAT(x.at, '%Y-%m-%d %H:%i:%s') AS at,
+				${sinceRaw ? 'GREATEST(0, TIMESTAMPDIFF(MINUTE, ?, x.at))' : 'NULL'} AS minutes
+			 FROM (SELECT ${inner} AS at) x`,
+			sinceRaw ? [sinceRaw, sinceRaw, ...atParams] : atParams
+		);
+		return { at: row.at, minutes: row.minutes == null ? null : Number(row.minutes) };
+	}
+
+	/**
+	 * The Asia/Manila time embedded in a tablet order number
+	 * (ORD-YYYYMMDD-HHMMSS) as 'YYYY-MM-DD HH:MM:SS', or null. Unlike an
+	 * offline order's ENCODED_DT (the tablet's own clock, stored as-is) this is
+	 * always Manila time — the tablets read order times the same way.
+	 */
+	static phLocalFromOrderNo(orderNo) {
+		const m = String(orderNo || '').match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+		return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : null;
+	}
+
+	/** When an order's first room started: its order-number time, else `fallback`. */
+	static async orderStartTime(orderNo, fallback = null) {
+		const ph = OrderRoomChargeModel.phLocalFromOrderNo(orderNo);
+		if (!ph) return fallback || null;
+		return (await OrderRoomChargeModel.resolveEventTime(ph)).at;
+	}
+
 	static _selectSql(where) {
 		const fmt = (col) => `DATE_FORMAT(${phLocalDtSql(col)}, '%Y-%m-%d %H:%i:%s')`;
 		return `
@@ -155,7 +197,10 @@ class OrderRoomChargeModel {
 		const rate = parseFloat(table?.ROOM_CHARGE) || 0;
 		if (!order.TABLE_ID || rate <= 0) return rows;
 
-		const [[orderRow]] = await pool.execute('SELECT ENCODED_DT FROM orders WHERE IDNo = ? LIMIT 1', [order.IDNo]);
+		const [[orderRow]] = await pool.execute(
+			"SELECT ORDER_NO, DATE_FORMAT(ENCODED_DT, '%Y-%m-%d %H:%i:%s') AS ENCODED_DT FROM orders WHERE IDNo = ? LIMIT 1",
+			[order.IDNo]
+		);
 		const hours = OrderRoomChargeModel.roundHours((parseFloat(order.SERVICE_CHARGE) || 0) / rate);
 		await OrderRoomChargeModel.start({
 			orderId: order.IDNo,
@@ -164,7 +209,7 @@ class OrderRoomChargeModel {
 			tableNumber: table?.TABLE_NUMBER,
 			rate,
 			hours,
-			startedAt: orderRow?.ENCODED_DT || null,
+			startedAt: await OrderRoomChargeModel.orderStartTime(orderRow?.ORDER_NO, orderRow?.ENCODED_DT),
 			userId,
 		});
 		return OrderRoomChargeModel.getByOrderId(order.IDNo);
@@ -181,14 +226,17 @@ class OrderRoomChargeModel {
 		);
 	}
 
-	/** Closes the current room with the hours billed there (order moved out). */
-	static async close(rowId, hours, userId = null, conn = pool) {
+	/**
+	 * Closes the current room with the hours billed there (order moved out),
+	 * at `endedAt` (DB-session DATETIME, see resolveEventTime) or now.
+	 */
+	static async close(rowId, hours, userId = null, conn = pool, endedAt = null) {
 		const h = OrderRoomChargeModel.roundHours(hours);
 		await conn.execute(
 			`UPDATE order_room_charges
-			 SET HOURS = ?, AMOUNT = ROUND(RATE * ?, 2), ENDED_AT = NOW(), EDITED_BY = ?, EDITED_DT = NOW()
+			 SET HOURS = ?, AMOUNT = ROUND(RATE * ?, 2), ENDED_AT = COALESCE(?, NOW()), EDITED_BY = ?, EDITED_DT = NOW()
 			 WHERE IDNo = ?`,
-			[h, h, userId || null, rowId]
+			[h, h, endedAt || null, userId || null, rowId]
 		);
 	}
 
