@@ -26,6 +26,7 @@ const {
 	ensureOrdersFloorColumn,
 	ensureUserSessionColumns,
 	ensureOrderRoomChargesTable,
+	ensureOrderActivityLogsTable,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
@@ -247,6 +248,7 @@ app.use((err, req, res, next) => {
 		await ensureOrdersFloorColumn();
 		await ensureUserSessionColumns();
 		await ensureOrderRoomChargesTable();
+		await ensureOrderActivityLogsTable();
 		await ensureReceiptScanHistoryTable();
 		await ensureTelegramSettingsTable();
 		await ensureBankPaymentMethodEnum();

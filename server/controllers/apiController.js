@@ -12,6 +12,7 @@ const OrderItemsModel = require('../models/orderItemsModel');
 const BillingModel = require('../models/billingModel');
 const TableModel = require('../models/tableModel');
 const OrderRoomChargeModel = require('../models/orderRoomChargeModel');
+const OrderActivityLogModel = require('../models/orderActivityLogModel');
 const UserModel = require('../models/userModel');
 const UserBranchModel = require('../models/userBranchModel');
 const BranchModel = require('../models/branchModel');
@@ -1167,6 +1168,42 @@ class ApiController {
 				...(targetStatus === -1 ? { change: orderChange(req, 'cancelled') } : {})
 			});
 
+			// Activity log (cashier app's Activity tab).
+			if (targetStatus === 1) {
+				const discountText = discountNum > 0 ? ` · ${OrderActivityLogModel.peso(discountNum)} discount` : '';
+				await OrderActivityLogModel.record(req, {
+					action: 'settled',
+					order,
+					tableNumber,
+					summary: `Settled ${OrderActivityLogModel.peso(finalGrandTotal)} · ${paymentMethod}${discountText}`,
+					details: {
+						payment_method: paymentMethod,
+						amount_paid: finalAmountPaid,
+						discount: discountNum > 0 ? discountNum : 0,
+						change: Math.max(0, Number((finalAmountPaid - finalGrandTotal).toFixed(2))),
+						payment_ref: payment_ref || null,
+					},
+					amount: finalGrandTotal,
+				});
+			} else if (targetStatus === -1) {
+				await OrderActivityLogModel.record(req, {
+					action: 'cancelled',
+					order,
+					tableNumber,
+					summary: `Cancelled order (${OrderActivityLogModel.peso(order.GRAND_TOTAL)})`,
+					details: { items: OrderActivityLogModel.mergeItems(orderItems), remarks: remarks || null },
+					amount: parseFloat(order.GRAND_TOTAL || 0),
+				});
+			} else if (targetStatus === 2 && parseInt(order.STATUS, 10) === 3) {
+				await OrderActivityLogModel.record(req, {
+					action: 'confirmed',
+					order,
+					tableNumber,
+					summary: 'Confirmed order',
+					amount: parseFloat(order.GRAND_TOTAL || 0),
+				});
+			}
+
 			return res.json({ success: true, data: { order_id: parseInt(order_id, 10), status: targetStatus } });
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] PATCH /api/waiter/orders/${order_id}/status - Error:`, error);
@@ -1350,6 +1387,24 @@ class ApiController {
 				})
 			});
 
+			{
+				const parts = [`Moved ${oldTableName || 'table'} → ${targetTableName}`];
+				if (roomChange) {
+					if (roomChange.carry_over) parts.push('time carried over');
+					else if (roomChange.prev_room_hours != null) {
+						parts.push(`${oldTableName || 'old room'} billed ${OrderActivityLogModel.hoursText(roomChange.prev_room_hours)}`);
+					}
+				}
+				await OrderActivityLogModel.record(req, {
+					action: 'transferred',
+					order,
+					tableNumber: targetTableName,
+					summary: parts.join(' · '),
+					details: { from_table: oldTableName, to_table: targetTableName, ...(roomChange || {}) },
+					amount: grandTotal,
+				});
+			}
+
 			return res.json({
 				success: true,
 				message: `Order #${order.ORDER_NO} successfully transferred to ${targetTableName}`,
@@ -1502,6 +1557,24 @@ class ApiController {
 				})),
 				encoded_by: order.ENCODED_BY ?? user_id ?? null,
 				branch_id: order.BRANCH_ID || resolvedBranchId || null
+			});
+
+			await OrderActivityLogModel.record(req, {
+				action: 'room_charge',
+				order,
+				tableNumber,
+				summary: newHours <= 0
+					? `Room charge waived (was ${OrderActivityLogModel.hoursText(currentSessions)})`
+					: `Room charge ${OrderActivityLogModel.hoursText(currentSessions)} → ${OrderActivityLogModel.hoursText(newHours)}`
+						+ ` (${roomChargeAdded < 0 ? '−' : '+'}${OrderActivityLogModel.peso(Math.abs(roomChargeAdded))})`,
+				details: {
+					from_hours: currentSessions,
+					to_hours: newHours,
+					rate: activeRate,
+					service_charge_from: currentServiceCharge,
+					service_charge_to: newServiceCharge,
+				},
+				amount: newGrandTotal,
 			});
 
 			return res.json({
@@ -1725,6 +1798,23 @@ class ApiController {
 				branch_id: resolvedBranchId
 			});
 
+			{
+				const created = OrderActivityLogModel.mergeItems(orderItems);
+				const roomHours = roomCharges.length ? roomCharges[roomCharges.length - 1].hours : null;
+				const what = [
+					created.length ? `${created.length} item${created.length === 1 ? '' : 's'}` : null,
+					roomHours != null ? `room ${OrderActivityLogModel.hoursText(roomHours)}` : null,
+				].filter(Boolean).join(' + ');
+				await OrderActivityLogModel.record(req, {
+					action: 'order_created',
+					order: { IDNo: orderId, BRANCH_ID: orderData.BRANCH_ID, ORDER_NO: orderData.ORDER_NO, FLOOR: orderData.FLOOR },
+					tableNumber: tableNumber || (orderData.ORDER_TYPE ? String(orderData.ORDER_TYPE).replace(/_/g, ' ') : null),
+					summary: `New order · ${what || 'no items'} · ${OrderActivityLogModel.peso(orderData.GRAND_TOTAL)}`,
+					details: { items: created, room_hours: roomHours, order_type: orderData.ORDER_TYPE || null, offline: Boolean(orderData.ENCODED_DT) },
+					amount: orderData.GRAND_TOTAL,
+				});
+			}
+
 			return res.json({ success: true, data: { order_id: orderId, order_no: orderData.ORDER_NO, table_id: orderData.TABLE_ID, status: orderData.STATUS, grand_total: orderData.GRAND_TOTAL, items_count: items.length } });
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] POST /api/orders - Error:`, error);
@@ -1821,6 +1911,24 @@ class ApiController {
 				change: orderChange(req, 'items_added')
 			});
 
+			{
+				const names = new Map(allOrderItems.map((it) => [String(it.MENU_ID), it.MENU_NAME]));
+				const added = OrderActivityLogModel.mergeItems(orderItemsToAdd.map((it) => ({
+					menu_id: it.menu_id,
+					name: names.get(String(it.menu_id)) || 'Item',
+					qty: it.qty,
+					line_total: it.line_total,
+				})));
+				await OrderActivityLogModel.record(req, {
+					action: 'items_added',
+					order: existingOrder,
+					tableNumber,
+					summary: `Added ${OrderActivityLogModel.itemsText(added)} (+${OrderActivityLogModel.peso(newItemsTotal)})`,
+					details: { items: added },
+					amount: newGrandTotal,
+				});
+			}
+
 			return res.json({ success: true, data: { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, items_added: items.length, new_subtotal: newSubtotal, new_grand_total: newGrandTotal } });
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] POST /api/orders/${order_id}/items - Error:`, error);
@@ -1858,6 +1966,7 @@ class ApiController {
 			const newSubtotal = Number(replacementItems.reduce((sum, item) => sum + item.line_total, 0).toFixed(2));
 			const newGrandTotal = Number((newSubtotal + (Number(existingOrder.TAX_AMOUNT) || 0) + (Number(existingOrder.SERVICE_CHARGE) || 0) - (Number(existingOrder.DISCOUNT_AMOUNT) || 0)).toFixed(2));
 
+			const itemsBeforeEdit = await OrderItemsModel.getByOrderId(order_id);
 			await OrderItemsModel.replaceForOrder(order_id, replacementItems, user_id);
 			await OrderModel.update(order_id, {
 				TABLE_ID: existingOrder.TABLE_ID,
@@ -1908,10 +2017,55 @@ class ApiController {
 				change: orderChange(req, 'items_edited')
 			});
 
+			{
+				const diff = OrderActivityLogModel.diffItems(itemsBeforeEdit, updatedItems);
+				const parts = [
+					...diff.added.map((i) => `+${OrderActivityLogModel.qtyText(i.qty)} ${i.name}`),
+					...diff.removed.map((i) => `−${OrderActivityLogModel.qtyText(i.qty)} ${i.name}`),
+					...diff.changed.map((i) => `${i.name} ${OrderActivityLogModel.qtyText(i.from)} → ${OrderActivityLogModel.qtyText(i.to)}`),
+				];
+				const shown = parts.slice(0, 3).join(', ') + (parts.length > 3 ? `, +${parts.length - 3} more` : '');
+				await OrderActivityLogModel.record(req, {
+					action: 'items_edited',
+					order: existingOrder,
+					tableNumber: editedTableNumber,
+					summary: parts.length ? `Edited: ${shown}` : 'Edited order (no item changes)',
+					details: diff,
+					amount: newGrandTotal,
+				});
+			}
+
 			return res.json({ success: true, data: { order_id: parseInt(order_id), order_no: existingOrder.ORDER_NO, items_count: replacementItems.length, new_grand_total: newGrandTotal } });
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] PUT /api/orders/${order_id}/items - Error:`, error);
 			return res.status(500).json({ success: false, error: 'Failed to update order items' });
+		}
+	}
+
+	// GET /api/activity-logs — the cashier app's Activity tab: what the
+	// branch's waiter / cashier tablets did on one business day (default today).
+	static async getActivityLogs(req, res) {
+		const timestamp = new Date().toISOString();
+		try {
+			let branchId = req.query.branch_id || req.user?.branch_id || null;
+			if (!branchId && req.user?.user_id) {
+				const branches = await UserBranchModel.getBranchesByUserId(req.user.user_id);
+				if (branches.length > 0) branchId = branches[0].IDNo;
+			}
+			if (!branchId) return res.status(400).json({ success: false, error: 'Branch ID is required' });
+			const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+				? String(req.query.date)
+				: getBusinessTodayYmd(branchId);
+			const logs = await OrderActivityLogModel.list({
+				branchId,
+				date,
+				action: req.query.action || null,
+				limit: req.query.limit,
+			});
+			return res.json({ success: true, data: logs, date });
+		} catch (error) {
+			console.error(`[${timestamp}] [API ERROR] GET /api/activity-logs - Error:`, error);
+			return res.status(500).json({ success: false, error: 'Failed to load activity log' });
 		}
 	}
 

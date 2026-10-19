@@ -130,6 +130,43 @@ async function ensureOrderRoomChargesTable() {
 	}
 }
 
+/**
+ * order_activity_logs: what each waiter / cashier tablet did to an order (new
+ * order, items added / edited, room charge, transfer, confirm, cancel, settle)
+ * — the cashier app's Activity tab. See OrderActivityLogModel.
+ */
+async function ensureOrderActivityLogsTable() {
+	const connection = await pool.getConnection();
+	try {
+		await connection.query(`
+			CREATE TABLE IF NOT EXISTS order_activity_logs (
+				IDNo INT NOT NULL AUTO_INCREMENT,
+				BRANCH_ID INT NULL,
+				ORDER_ID INT NULL,
+				ORDER_NO VARCHAR(64) NULL,
+				TABLE_NUMBER VARCHAR(100) NULL,
+				FLOOR VARCHAR(10) NULL,
+				ACTION VARCHAR(32) NOT NULL,
+				SUMMARY VARCHAR(255) NOT NULL,
+				DETAILS TEXT NULL,
+				AMOUNT DECIMAL(12,2) NULL,
+				USER_ID INT NULL,
+				USERNAME VARCHAR(100) NULL,
+				USER_FULLNAME VARCHAR(150) NULL,
+				USER_ROLE VARCHAR(50) NULL,
+				CREATED_DT DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (IDNo),
+				KEY idx_oal_branch_dt (BRANCH_ID, CREATED_DT),
+				KEY idx_oal_order (ORDER_ID)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+		`);
+	} catch (err) {
+		console.error('[Schema] ensure order_activity_logs failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 async function ensureReceiptScanHistoryTable() {
 	const connection = await pool.getConnection();
 	try {
@@ -359,6 +396,7 @@ module.exports = {
 	ensureOrdersFloorColumn,
 	ensureUserSessionColumns,
 	ensureOrderRoomChargesTable,
+	ensureOrderActivityLogsTable,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,

@@ -123,6 +123,10 @@ router.post("/waiter/orders/:order_id/transfer-table", authenticateJWT, ApiContr
 // URL: /api/waiter/orders/:order_id/extend-room-charge
 router.post("/waiter/orders/:order_id/extend-room-charge", authenticateJWT, ApiController.extendRoomCharge);
 
+// GET - Activity log: what the branch's waiter / cashier tablets did to orders
+// on one business day (?date=YYYY-MM-DD, default today; ?action= to filter).
+router.get("/activity-logs", authenticateJWT, ApiController.getActivityLogs);
+
 // POST - Create new order
 // URL: /api/orders
 // Headers: Authorization: Bearer <accessToken>
