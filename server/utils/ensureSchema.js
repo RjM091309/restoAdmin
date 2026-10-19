@@ -154,12 +154,24 @@ async function ensureOrderActivityLogsTable() {
 				USERNAME VARCHAR(100) NULL,
 				USER_FULLNAME VARCHAR(150) NULL,
 				USER_ROLE VARCHAR(50) NULL,
+				SYNCED_LATE TINYINT(1) NOT NULL DEFAULT 0,
 				CREATED_DT DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY (IDNo),
 				KEY idx_oal_branch_dt (BRANCH_ID, CREATED_DT),
 				KEY idx_oal_order (ORDER_ID)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 		`);
+		// Installs that created the table before SYNCED_LATE existed.
+		const [cols] = await connection.execute(
+			`SELECT 1 FROM information_schema.COLUMNS
+			 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'order_activity_logs' AND COLUMN_NAME = 'SYNCED_LATE'
+			 LIMIT 1`
+		);
+		if (cols.length === 0) {
+			await connection.execute(
+				'ALTER TABLE order_activity_logs ADD COLUMN SYNCED_LATE TINYINT(1) NOT NULL DEFAULT 0 AFTER USER_ROLE'
+			);
+		}
 	} catch (err) {
 		console.error('[Schema] ensure order_activity_logs failed:', err.message || err);
 	} finally {

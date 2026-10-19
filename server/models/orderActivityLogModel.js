@@ -28,6 +28,29 @@ const ACTIONS = [
 const USER_CACHE_TTL_MS = 10 * 60 * 1000;
 const userCache = new Map();
 
+/**
+ * When the action really happened. A tablet that did it offline sends its
+ * own time (`client_at`, Manila 'YYYY-MM-DD HH:MM:SS') when the queued action
+ * syncs; it is kept between 3 days ago and now. Returns the DB-session time
+ * to store and whether it is more than a minute before now (synced later),
+ * or null to use now.
+ */
+async function resolveClientTime(req) {
+	const raw = typeof req.body?.client_at === 'string' ? req.body.client_at.trim() : '';
+	if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) return null;
+	const [[row]] = await pool.execute(
+		`SELECT DATE_FORMAT(x.at, '%Y-%m-%d %H:%i:%s') AS at, TIMESTAMPDIFF(SECOND, x.at, NOW()) AS lag
+		 FROM (
+			SELECT GREATEST(NOW() - INTERVAL 3 DAY, LEAST(NOW(),
+				COALESCE(CONVERT_TZ(?, '+08:00', @@session.time_zone), DATE_SUB(?, INTERVAL 8 HOUR))
+			)) AS at
+		 ) x`,
+		[raw, raw]
+	);
+	if (!row?.at) return null;
+	return { at: row.at, late: Number(row.lag) > 60 };
+}
+
 async function resolveUser(req) {
 	const userId = req.user?.user_id ?? null;
 	const base = {
@@ -144,11 +167,12 @@ class OrderActivityLogModel {
 		try {
 			if (!order) return;
 			const who = await resolveUser(req);
+			const when = await resolveClientTime(req);
 			await pool.execute(
 				`INSERT INTO order_activity_logs
 					(BRANCH_ID, ORDER_ID, ORDER_NO, TABLE_NUMBER, FLOOR, ACTION, SUMMARY, DETAILS, AMOUNT,
-					 USER_ID, USERNAME, USER_FULLNAME, USER_ROLE)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 USER_ID, USERNAME, USER_FULLNAME, USER_ROLE, SYNCED_LATE, CREATED_DT)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()))`,
 				[
 					order.BRANCH_ID || null,
 					order.IDNo || null,
@@ -163,6 +187,8 @@ class OrderActivityLogModel {
 					who.username,
 					who.fullname,
 					who.role,
+					when?.late ? 1 : 0,
+					when?.at || null,
 				]
 			);
 		} catch (err) {
@@ -189,7 +215,7 @@ class OrderActivityLogModel {
 		const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 1000);
 		const [rows] = await pool.execute(
 			`SELECT IDNo, BRANCH_ID, ORDER_ID, ORDER_NO, TABLE_NUMBER, FLOOR, ACTION, SUMMARY, DETAILS, AMOUNT,
-					USER_ID, USERNAME, USER_FULLNAME, USER_ROLE,
+					USER_ID, USERNAME, USER_FULLNAME, USER_ROLE, SYNCED_LATE,
 					DATE_FORMAT(${phLocalDtSql('CREATED_DT')}, '%Y-%m-%d %H:%i:%s') AS CREATED_AT_PH
 			 FROM order_activity_logs
 			 WHERE ${where}${range.sql}
@@ -219,6 +245,7 @@ class OrderActivityLogModel {
 			username: row.USERNAME,
 			user_fullname: row.USER_FULLNAME,
 			user_role: row.USER_ROLE,
+			synced_late: Number(row.SYNCED_LATE) === 1,
 			created_at: row.CREATED_AT_PH,
 		};
 	}
