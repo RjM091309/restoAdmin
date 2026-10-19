@@ -11,6 +11,7 @@ const OrderModel = require('../models/orderModel');
 const OrderItemsModel = require('../models/orderItemsModel');
 const BillingModel = require('../models/billingModel');
 const TableModel = require('../models/tableModel');
+const OrderRoomChargeModel = require('../models/orderRoomChargeModel');
 const UserModel = require('../models/userModel');
 const UserBranchModel = require('../models/userBranchModel');
 const BranchModel = require('../models/branchModel');
@@ -950,6 +951,13 @@ class ApiController {
 			const itemsByOrderId = await OrderItemsModel.getByOrderIds(
 				activeOrders.map(order => order.IDNo)
 			);
+			// Which room(s) each order's room charge came from (empty for regular tables).
+			let roomChargesByOrderId = new Map();
+			try {
+				roomChargesByOrderId = await OrderRoomChargeModel.getByOrderIds(activeOrders.map(order => order.IDNo));
+			} catch (roomErr) {
+				console.warn(`[${timestamp}] [API WARN] room charge history unavailable:`, roomErr?.message || roomErr);
+			}
 
 			const ordersWithItems = activeOrders.map((order) => {
 				const items = itemsByOrderId.get(order.IDNo) || [];
@@ -972,6 +980,7 @@ class ApiController {
 					payment_ref: order.payment_ref || order.PAYMENT_REF || null,
 					encoded_by_name: order.ENCODED_BY_NAME || null,
 					encoded_dt: order.ENCODED_DT,
+					room_charges: OrderRoomChargeModel.listToApi(roomChargesByOrderId.get(parseInt(order.IDNo, 10))),
 					items: items.map(item => ({
 						item_id: item.IDNo,
 						encoded_dt: item.ENCODED_DT || null,
@@ -1045,6 +1054,15 @@ class ApiController {
 				await OrderModel.updateStatus(order_id, targetStatus, user_id);
 			} else {
 				await OrderModel.updateStatus(order_id, targetStatus, user_id);
+			}
+
+			if (targetStatus === 1 || targetStatus === -1) {
+				// The guest has left the room: stop its clock in the room-charge history.
+				try {
+					await OrderRoomChargeModel.endAll(order_id);
+				} catch (roomErr) {
+					console.warn(`[${timestamp}] [API WARN] could not close room charge history:`, roomErr?.message || roomErr);
+				}
 			}
 
 			const paymentMethod = payment_method || 'CASH';
@@ -1180,6 +1198,83 @@ class ApiController {
 				return res.status(400).json({ success: false, error: 'Target table is already the current table' });
 			}
 
+			// Room charge when a room is involved: the room being left is billed for
+			// the time spent there (whole half-hours — 37 min → 0.5 h) and the new
+			// room starts a fresh session (1 h) at its own rate. Moving room-to-room
+			// before 30 minutes is up carries the time over instead: the old room is
+			// billed nothing and the new room continues the same clock and booked
+			// hours, at the new room's rate. The tablet shows this in the transfer
+			// sheet and sends what staff confirmed (`prev_room_hours`, `new_room_hours`,
+			// `carry_over`); older apps / queued offline transfers fall back to those
+			// defaults. Each room gets its own row in order_room_charges.
+			const oldTable = oldTableId ? await TableModel.getById(oldTableId) : null;
+			const oldRate = parseFloat(oldTable?.ROOM_CHARGE) || 0;
+			const newRate = parseFloat(targetTable.ROOM_CHARGE) || 0;
+			let serviceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+			let grandTotal = parseFloat(order.GRAND_TOTAL || 0);
+			let roomCharges = [];
+			let roomChange = null;
+			const isOpenOrder = [2, 3].includes(parseInt(order.STATUS, 10));
+			if (isOpenOrder && (oldRate > 0 || newRate > 0)) {
+				const before = await OrderRoomChargeModel.ensureForOrder(order, oldTable, user_id);
+				// Any non-room part of SERVICE_CHARGE (an extra fee) stays as it is.
+				const otherCharges = Math.max(0, serviceCharge - OrderRoomChargeModel.sumAmount(before));
+				const active = OrderRoomChargeModel.activeOf(before);
+				const reqPrev = parseFloat(req.body?.prev_room_hours);
+				const reqNew = parseFloat(req.body?.new_room_hours);
+				const activeHours = active ? parseFloat(active.HOURS) || 0 : 0;
+				const reqCarry = req.body?.carry_over;
+				const carryOver = Boolean(active) && newRate > 0 && (
+					reqCarry != null
+						? reqCarry === true || reqCarry === 'true' || reqCarry === 1
+						: OrderRoomChargeModel.isCarryOverMinutes(active.MINUTES_USED)
+				);
+				let prevHours = null;
+				if (active) {
+					// A waived room (0 h) stays waived unless staff set hours for it.
+					const defaultPrev = carryOver || activeHours <= 0
+						? 0
+						: OrderRoomChargeModel.billableHoursForMinutes(active.MINUTES_USED);
+					prevHours = Number.isFinite(reqPrev) && reqPrev >= 0
+						? OrderRoomChargeModel.roundHours(reqPrev)
+						: defaultPrev;
+					await OrderRoomChargeModel.close(active.IDNo, prevHours, user_id);
+				}
+				let newHours = null;
+				if (newRate > 0) {
+					const defaultNew = carryOver && activeHours > 0 ? activeHours : 1;
+					newHours = Number.isFinite(reqNew) && reqNew >= 0 ? OrderRoomChargeModel.roundHours(reqNew) : defaultNew;
+					await OrderRoomChargeModel.start({
+						orderId: order.IDNo,
+						branchId: order.BRANCH_ID,
+						tableId: newTableId,
+						tableNumber: targetTable.TABLE_NUMBER,
+						rate: newRate,
+						hours: newHours,
+						// Carried over: the new room's clock starts when the old room's did.
+						startedAt: carryOver ? active.STARTED_AT_RAW : null,
+						userId: user_id,
+					});
+				}
+				const after = await OrderRoomChargeModel.getByOrderId(order.IDNo);
+				roomCharges = OrderRoomChargeModel.listToApi(after);
+				serviceCharge = Number((OrderRoomChargeModel.sumAmount(after) + otherCharges).toFixed(2));
+				grandTotal = OrderModel.computeGrandTotal(order.SUBTOTAL, order.TAX_AMOUNT, serviceCharge, order.DISCOUNT_AMOUNT);
+				roomChange = {
+					prev_room_hours: prevHours,
+					prev_room_rate: active ? parseFloat(active.RATE) || 0 : null,
+					new_room_hours: newHours,
+					new_room_rate: newRate > 0 ? newRate : null,
+					carry_over: carryOver,
+					service_charge_from: parseFloat(order.SERVICE_CHARGE || 0),
+					service_charge_to: serviceCharge,
+				};
+			} else {
+				try {
+					roomCharges = OrderRoomChargeModel.listToApi(await OrderRoomChargeModel.getByOrderId(order.IDNo));
+				} catch (_) {}
+			}
+
 			// Update order's table ID
 			await OrderModel.update(order_id, {
 				TABLE_ID: newTableId,
@@ -1187,9 +1282,9 @@ class ApiController {
 				STATUS: order.STATUS,
 				SUBTOTAL: order.SUBTOTAL,
 				TAX_AMOUNT: order.TAX_AMOUNT,
-				SERVICE_CHARGE: order.SERVICE_CHARGE,
+				SERVICE_CHARGE: serviceCharge,
 				DISCOUNT_AMOUNT: order.DISCOUNT_AMOUNT,
-				GRAND_TOTAL: order.GRAND_TOTAL,
+				GRAND_TOTAL: grandTotal,
 				user_id: user_id
 			});
 
@@ -1210,7 +1305,6 @@ class ApiController {
 			// restaurant_tables names its label column TABLE_NUMBER ("ROOM 5"); the older
 			// TABLE_NAME / TABLE_NO lookups never matched and always fell back to "Table <id>".
 			const targetTableName = targetTable.TABLE_NUMBER || targetTable.TABLE_NAME || targetTable.TABLE_NO || `Table ${newTableId}`;
-			const oldTable = oldTableId ? await TableModel.getById(oldTableId) : null;
 			const oldTableName = oldTable?.TABLE_NUMBER || null;
 			socketService.emitOrderUpdate(order_id, {
 				order_id: parseInt(order_id, 10),
@@ -1218,14 +1312,16 @@ class ApiController {
 				table_id: newTableId,
 				table_number: targetTableName,
 				old_table_id: oldTableId,
+				room_charge: newRate,
+				room_charges: roomCharges,
 				order_type: order.ORDER_TYPE,
 				floor: order.FLOOR || null,
 				status: order.STATUS,
 				subtotal: parseFloat(order.SUBTOTAL || 0),
 				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
-				service_charge: parseFloat(order.SERVICE_CHARGE || 0),
+				service_charge: serviceCharge,
 				discount_amount: parseFloat(order.DISCOUNT_AMOUNT || 0),
-				grand_total: parseFloat(order.GRAND_TOTAL || 0),
+				grand_total: grandTotal,
 				items: orderItems.map(item => ({
 					item_id: item.IDNo,
 					encoded_dt: item.ENCODED_DT || null,
@@ -1242,6 +1338,7 @@ class ApiController {
 				change: orderChange(req, 'transferred', {
 					from_table: oldTableName,
 					to_table: targetTableName,
+					...(roomChange || {}),
 				})
 			});
 
@@ -1252,7 +1349,11 @@ class ApiController {
 					order_id: parseInt(order_id, 10),
 					old_table_id: oldTableId,
 					new_table_id: newTableId,
-					new_table_name: targetTableName
+					new_table_name: targetTableName,
+					service_charge: serviceCharge,
+					grand_total: grandTotal,
+					room_charges: roomCharges,
+					...(roomChange || {}),
 				}
 			});
 		} catch (error) {
@@ -1296,28 +1397,54 @@ class ApiController {
 				return res.status(400).json({ success: false, error: 'This table has no room charge' });
 			}
 
-			// Two modes, both in 0.5 steps (same as admin's manual-order room charge stepper):
-			//  - `sessions`: the room charge's new TOTAL in sessions — up, down, or 0 (waived).
+			// Two modes, both in 0.5 steps (1 session = 1 hour, same as admin's manual-order
+			// room charge stepper), applied to the room the order is in NOW — hours already
+			// billed in rooms it moved out of (order_room_charges) are left as they are:
+			//  - `sessions`: that room's new TOTAL hours — up, down, or 0 (waived).
 			//    Sent by the cashier/waiter "Room Charge" dialog.
-			//  - `qty`: sessions to ADD (older apps, and extend actions queued offline by them).
+			//  - `qty`: hours to ADD (older apps, and extend actions queued offline by them).
 			const currentServiceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+			let segments = await OrderRoomChargeModel.ensureForOrder(order, table, user_id);
+			let active = OrderRoomChargeModel.activeOf(segments);
+			if (!active || parseInt(active.TABLE_ID, 10) !== parseInt(order.TABLE_ID, 10)) {
+				// Moved here by something that didn't record it (e.g. the web admin):
+				// close whatever was open and start this room with nothing billed yet.
+				if (active) await OrderRoomChargeModel.close(active.IDNo, active.HOURS, user_id);
+				await OrderRoomChargeModel.start({
+					orderId: order.IDNo,
+					branchId: order.BRANCH_ID,
+					tableId: order.TABLE_ID,
+					tableNumber: table?.TABLE_NUMBER,
+					rate: roomCharge,
+					hours: 0,
+					userId: user_id,
+				});
+				segments = await OrderRoomChargeModel.getByOrderId(order.IDNo);
+				active = OrderRoomChargeModel.activeOf(segments);
+			}
+			const activeRate = parseFloat(active.RATE) || roomCharge;
+			const currentSessions = parseFloat(active.HOURS) || 0;
+			const segmentsTotal = OrderRoomChargeModel.sumAmount(segments);
+			const earlierRooms = segmentsTotal - (parseFloat(active.AMOUNT) || 0);
+			// Any non-room part of SERVICE_CHARGE (an extra fee) stays as it is.
+			const otherCharges = Math.max(0, currentServiceCharge - segmentsTotal);
 			const rawSessions = parseFloat(req.body?.sessions);
 			const setsTotal = Number.isFinite(rawSessions);
 			let qty;
-			let newServiceCharge;
 			let sessions = null;
 			if (setsTotal) {
-				sessions = Math.max(0, Math.round(rawSessions * 2) / 2);
-				const currentSessions = Math.round((currentServiceCharge / roomCharge) * 2) / 2;
-				// Any non-room part of SERVICE_CHARGE (an extra fee) stays as it is.
-				const otherCharges = currentServiceCharge - currentSessions * roomCharge;
-				newServiceCharge = Number(Math.max(0, sessions * roomCharge + otherCharges).toFixed(2));
+				sessions = OrderRoomChargeModel.roundHours(rawSessions);
 				qty = sessions - currentSessions;
 			} else {
 				const rawQty = parseFloat(req.body?.qty);
 				qty = Number.isFinite(rawQty) && rawQty > 0 ? Math.round(rawQty * 2) / 2 : 1;
-				newServiceCharge = Number((currentServiceCharge + roomCharge * qty).toFixed(2));
 			}
+			const newHours = OrderRoomChargeModel.roundHours(currentSessions + qty);
+			await OrderRoomChargeModel.setActiveHours(active.IDNo, newHours, user_id);
+			const newServiceCharge = Number(
+				(earlierRooms + OrderRoomChargeModel.amountFor(activeRate, newHours) + otherCharges).toFixed(2)
+			);
+			const roomCharges = OrderRoomChargeModel.listToApi(await OrderRoomChargeModel.getByOrderId(order.IDNo));
 			const roomChargeAdded = Number((newServiceCharge - currentServiceCharge).toFixed(2));
 			const newGrandTotal = OrderModel.computeGrandTotal(
 				order.SUBTOTAL,
@@ -1338,8 +1465,9 @@ class ApiController {
 				order_no: order.ORDER_NO,
 				table_id: order.TABLE_ID,
 				table_number: tableNumber,
-				room_charge: roomCharge,
+				room_charge: activeRate,
 				room_charge_units_added: qty,
+				room_charges: roomCharges,
 				change: orderChange(req, 'room_charge', {
 					from: currentServiceCharge,
 					to: newServiceCharge,
@@ -1375,6 +1503,8 @@ class ApiController {
 					room_charge_added: roomChargeAdded,
 					units_added: qty,
 					room_charge_sessions: sessions,
+					room_hours: newHours,
+					room_charges: roomCharges,
 					service_charge: newServiceCharge,
 					grand_total: newGrandTotal
 				}
@@ -1514,9 +1644,30 @@ class ApiController {
 			if (orderData.TABLE_ID) await TableModel.updateStatus(orderData.TABLE_ID, 2);
 
 			let tableNumber = null;
+			let roomCharges = [];
 			if (orderData.TABLE_ID) {
 				const table = await TableModel.getById(orderData.TABLE_ID);
 				if (table) tableNumber = table.TABLE_NUMBER;
+				const roomRate = parseFloat(table?.ROOM_CHARGE) || 0;
+				if (roomRate > 0) {
+					// First row of the order's room-charge history: this room, from when the
+					// order was taken (an offline order keeps its original time).
+					try {
+						await OrderRoomChargeModel.start({
+							orderId,
+							branchId: orderData.BRANCH_ID,
+							tableId: orderData.TABLE_ID,
+							tableNumber,
+							rate: roomRate,
+							hours: orderData.SERVICE_CHARGE / roomRate,
+							startedAt: orderData.ENCODED_DT || null,
+							userId: user_id,
+						});
+						roomCharges = OrderRoomChargeModel.listToApi(await OrderRoomChargeModel.getByOrderId(orderId));
+					} catch (roomErr) {
+						console.warn(`[${timestamp}] [API WARN] could not record room charge history:`, roomErr?.message || roomErr);
+					}
+				}
 			}
 
 			let encodedByRole = null;
@@ -1534,6 +1685,7 @@ class ApiController {
 				order_no: orderData.ORDER_NO,
 				table_id: orderData.TABLE_ID,
 				table_number: tableNumber,
+				room_charges: roomCharges,
 				order_type: orderData.ORDER_TYPE,
 				floor: orderData.FLOOR || null,
 				status: orderData.STATUS,

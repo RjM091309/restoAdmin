@@ -95,6 +95,41 @@ async function ensureUserSessionColumns() {
 	}
 }
 
+/**
+ * order_room_charges: one row per room an order used (KTV / VIP rooms with a ROOM_CHARGE),
+ * so a bill moved between rooms shows where each part of its room charge was made.
+ * The open row (ENDED_AT NULL) is the room the order is in now. See OrderRoomChargeModel.
+ */
+async function ensureOrderRoomChargesTable() {
+	const connection = await pool.getConnection();
+	try {
+		await connection.query(`
+			CREATE TABLE IF NOT EXISTS order_room_charges (
+				IDNo INT NOT NULL AUTO_INCREMENT,
+				ORDER_ID INT NOT NULL,
+				BRANCH_ID INT NULL,
+				TABLE_ID INT NULL,
+				TABLE_NUMBER VARCHAR(100) NULL,
+				RATE DECIMAL(12,2) NOT NULL DEFAULT 0,
+				HOURS DECIMAL(6,2) NOT NULL DEFAULT 0,
+				AMOUNT DECIMAL(12,2) NOT NULL DEFAULT 0,
+				STARTED_AT DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				ENDED_AT DATETIME NULL DEFAULT NULL,
+				ENCODED_BY INT NULL,
+				ENCODED_DT DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				EDITED_BY INT NULL,
+				EDITED_DT DATETIME NULL DEFAULT NULL,
+				PRIMARY KEY (IDNo),
+				KEY idx_orc_order (ORDER_ID)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+		`);
+	} catch (err) {
+		console.error('[Schema] ensure order_room_charges failed:', err.message || err);
+	} finally {
+		connection.release();
+	}
+}
+
 async function ensureReceiptScanHistoryTable() {
 	const connection = await pool.getConnection();
 	try {
@@ -323,6 +358,7 @@ module.exports = {
 	ensureOrderItemsLineCostColumn,
 	ensureOrdersFloorColumn,
 	ensureUserSessionColumns,
+	ensureOrderRoomChargesTable,
 	ensureReceiptScanHistoryTable,
 	ensureTelegramSettingsTable,
 	ensureBankPaymentMethodEnum,
