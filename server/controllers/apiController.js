@@ -944,7 +944,10 @@ class ApiController {
 				start_date: today,
 				end_date: today,
 			});
-			const activeOrders = orders.filter(order => [3, 2, 1].includes(order.STATUS));
+			// Cancelled (-1) orders are included: the cashier's History lists them,
+			// and its REST poll (used whenever the socket is down) can only raise
+			// the "order cancelled" alert if a cancelled order is still in the list.
+			const activeOrders = orders.filter(order => [3, 2, 1, -1].includes(order.STATUS));
 
 			// One query for every order's items instead of one query PER order
 			// (that N+1 loop was the real cost once order history grew — e.g.
