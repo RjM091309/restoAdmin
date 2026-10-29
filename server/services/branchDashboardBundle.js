@@ -244,6 +244,10 @@ function buildDashboardData({
 			totalSales,
 			totalExpenses,
 			totalProfit,
+			// Total Sales = POS sales + cash reconciliation; the dashboard shows the
+			// split when there is any recon, so it can be matched to the cashier app.
+			posSales: totalSales - reconPeriodTotal,
+			reconTotal: reconPeriodTotal,
 		},
 		revenueData,
 		ordersOverview,

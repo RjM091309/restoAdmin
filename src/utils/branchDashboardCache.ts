@@ -5,6 +5,9 @@ export type BranchDashboardStats = {
   totalSales: number;
   totalExpenses: number;
   totalProfit: number;
+  /** totalSales without cash reconciliation (older servers leave these out). */
+  posSales?: number;
+  reconTotal?: number;
 };
 
 export type BranchDashboardRevenuePoint = {
