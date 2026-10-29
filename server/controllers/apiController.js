@@ -50,6 +50,8 @@ function orderChange(req, type, extra = {}) {
 
 // Longest range the cashier app's History / Activity date picker may ask for.
 const MAX_RANGE_DAYS = 92;
+// Most orders /api/waiter/orders returns (a busy branch's 92 days fit).
+const WAITER_ORDERS_CAP = 8000;
 
 /**
  * Business-day range from `start_date` / `end_date` ('YYYY-MM-DD') in the
@@ -968,10 +970,16 @@ class ApiController {
 			// The cashier's History date picker passes start_date / end_date to
 			// look further back (see businessDateRange).
 			const range = businessDateRange(req.query, resolvedBranchId);
+			// Every order of the range — the History tab totals them, so the
+			// model's default 500-row cap made a month add up to only its
+			// latest 500 orders. `truncated` says if even this cap was hit.
 			const orders = await OrderModel.getAll(resolvedBranchId, {
 				start_date: range.start,
 				end_date: range.end,
+				limit: WAITER_ORDERS_CAP,
+				maxLimit: WAITER_ORDERS_CAP,
 			});
+			const truncated = orders.length >= WAITER_ORDERS_CAP;
 			// Cancelled (-1) orders are included: the cashier's History lists them,
 			// and its REST poll (used whenever the socket is down) can only raise
 			// the "order cancelled" alert if a cancelled order is still in the list.
@@ -1033,6 +1041,7 @@ class ApiController {
 				start_date: range.start,
 				end_date: range.end,
 				today: range.today,
+				truncated,
 			});
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] GET /api/waiter/orders - User ID: ${user_id}, Error:`, error);

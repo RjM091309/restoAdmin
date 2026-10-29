@@ -15,6 +15,9 @@ class OrderModel {
 			start_date: startDate = null,
 			end_date: endDate = null,
 			limit = null,
+			// Ceiling for `limit`. Internal callers only (never from a request) —
+			// the cashier's History date range needs every order of the range.
+			maxLimit = 2000,
 			includeItemMeta = false,
 		} = options;
 
@@ -83,7 +86,7 @@ class OrderModel {
 
 		const parsedLimit = limit != null ? parseInt(String(limit), 10) : 0;
 		if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
-			query += ` LIMIT ${Math.min(parsedLimit, 2000)}`;
+			query += ` LIMIT ${Math.min(parsedLimit, parseInt(String(maxLimit), 10) || 2000)}`;
 		} else if (range.sql) {
 			query += ` LIMIT 500`;
 		} else {
