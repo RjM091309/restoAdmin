@@ -13,7 +13,6 @@ import {
   Calendar,
   ChevronDown,
   DollarSign,
-  Info,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -186,6 +185,13 @@ type DashboardStats = {
   reconTotal?: number;
 };
 
+/** The Total Sales card shows POS sales only (same as the cashier app's
+ * History total) — cash reconciliation stays out of it. */
+const posSalesOf = (stats: DashboardStats) =>
+  stats.posSales != null && Number.isFinite(Number(stats.posSales))
+    ? Number(stats.posSales)
+    : stats.totalSales;
+
 type RevenuePoint = {
   name: string;
   date?: string; // ISO yyyy-mm-dd for tooltip/weekend styling
@@ -284,32 +290,19 @@ const StatCard = ({
   value,
   trend,
   trendType,
-  info,
 }: {
   icon: any;
   label: string;
   value: string;
   trend: string;
   trendType: 'up' | 'down';
-  /** Hover breakdown behind an ⓘ next to the label; nothing shown when absent. */
-  info?: React.ReactNode;
 }) => (
   <div className="bg-white p-5 rounded-2xl shadow-sm flex items-center gap-4 flex-1 min-w-[200px]">
     <div className="w-12 h-12 rounded-xl bg-brand-primary flex items-center justify-center text-white">
       <Icon size={24} />
     </div>
     <div>
-      <div className="flex items-center gap-1.5 mb-1">
-        <p className="text-brand-muted text-sm font-medium">{label}</p>
-        {info ? (
-          <span className="relative group/info inline-flex">
-            <Info size={14} className="text-brand-muted cursor-help" />
-            <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 -translate-x-1/2 whitespace-nowrap rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/info:opacity-100">
-              {info}
-            </span>
-          </span>
-        ) : null}
-      </div>
+      <p className="text-brand-muted text-sm font-medium mb-1">{label}</p>
       <div className="flex items-baseline gap-2">
         <h3 className="text-2xl font-bold">{value}</h3>
       </div>
@@ -1086,25 +1079,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ selectedBranch, dateRange 
                 label="Total Sales"
                 value={
                   dashboardData
-                    ? money(dashboardData.stats.totalSales)
+                    ? money(posSalesOf(dashboardData.stats))
                     : money(0)
                 }
                 trend=""
                 trendType="up"
-                info={
-                  dashboardData && Math.abs(Number(dashboardData.stats.reconTotal) || 0) >= 0.005 ? (
-                    <div className="space-y-0.5">
-                      <div className="flex justify-between gap-4">
-                        <span className="text-slate-300">POS sales</span>
-                        <span>{money(Number(dashboardData.stats.posSales) || 0)}</span>
-                      </div>
-                      <div className="flex justify-between gap-4">
-                        <span className="text-slate-300">{t('cash_reconciliation.card_cash_reconciliation')}</span>
-                        <span>{money(Number(dashboardData.stats.reconTotal) || 0)}</span>
-                      </div>
-                    </div>
-                  ) : undefined
-                }
               />
               <StatCard
                 icon={Package}
