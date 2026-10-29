@@ -461,6 +461,7 @@ class ApiController {
 				table_number: table.TABLE_NUMBER,
 				capacity: table.CAPACITY,
 				room_charge: table.ROOM_CHARGE != null ? parseFloat(table.ROOM_CHARGE) : null,
+				floor: TableModel.normalizeFloor(table.FLOOR),
 				status: table.STATUS,
 				branch_id: table.BRANCH_ID ?? null
 			}));
@@ -1336,6 +1337,14 @@ class ApiController {
 				user_id: user_id
 			});
 
+			// The order now belongs to the new table's floor. FLOOR was stamped at
+			// creation (table FLOOR, else the creator's floor), so without this a GF
+			// order moved to a 2F room stayed hidden from the 2F cashier — and the
+			// other way around. A target table with no FLOOR clears it, so the
+			// tablets fall back to the table-name rule for the new table.
+			const newFloor = TableModel.normalizeFloor(targetTable.FLOOR);
+			await OrderModel.updateFloor(order_id, newFloor);
+
 			// Update new table status to Occupied (2)
 			await TableModel.updateStatus(newTableId, 2);
 
@@ -1363,7 +1372,7 @@ class ApiController {
 				room_charge: newRate,
 				room_charges: roomCharges,
 				order_type: order.ORDER_TYPE,
-				floor: order.FLOOR || null,
+				floor: newFloor,
 				status: order.STATUS,
 				subtotal: parseFloat(order.SUBTOTAL || 0),
 				tax_amount: parseFloat(order.TAX_AMOUNT || 0),
@@ -1416,6 +1425,7 @@ class ApiController {
 					old_table_id: oldTableId,
 					new_table_id: newTableId,
 					new_table_name: targetTableName,
+					floor: newFloor,
 					service_charge: serviceCharge,
 					grand_total: grandTotal,
 					room_charges: roomCharges,

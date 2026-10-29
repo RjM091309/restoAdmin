@@ -195,6 +195,14 @@ class OrderModel {
 	 * user_info.FLOOR. Derived server-side so the client can't stamp an arbitrary
 	 * floor. Never throws — a lookup failure must not block taking an order.
 	 */
+	/**
+	 * Re-stamps an order's FLOOR (e.g. after a table transfer). Null clears it,
+	 * so the tablets fall back to the table-name rule for the new table.
+	 */
+	static async updateFloor(id, floor) {
+		await pool.execute('UPDATE orders SET FLOOR = ? WHERE IDNo = ?', [TableModel.normalizeFloor(floor), id]);
+	}
+
 	static async resolveFloor(tableId, userId) {
 		try {
 			if (tableId) {
