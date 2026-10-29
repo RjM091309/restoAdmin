@@ -48,6 +48,31 @@ function orderChange(req, type, extra = {}) {
 	};
 }
 
+// Longest range the cashier app's History / Activity date picker may ask for.
+const MAX_RANGE_DAYS = 92;
+
+/**
+ * Business-day range from `start_date` / `end_date` ('YYYY-MM-DD') in the
+ * query, for the cashier app's History / Activity tabs. Missing or invalid →
+ * today only. Never past today, at most MAX_RANGE_DAYS long (the start is
+ * pulled in), and a reversed pair is swapped.
+ */
+function businessDateRange(query, branchId) {
+	const today = getBusinessTodayYmd(branchId);
+	const isYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+	let start = isYmd(query.start_date) ? String(query.start_date) : null;
+	let end = isYmd(query.end_date) ? String(query.end_date) : null;
+	if (!start || !end) return { start: today, end: today, today };
+	if (start > end) [start, end] = [end, start];
+	if (end > today) end = today;
+	if (start > end) start = end;
+	const earliest = new Date(`${end}T00:00:00Z`);
+	earliest.setUTCDate(earliest.getUTCDate() - (MAX_RANGE_DAYS - 1));
+	const earliestYmd = earliest.toISOString().slice(0, 10);
+	if (start < earliestYmd) start = earliestYmd;
+	return { start, end, today };
+}
+
 class ApiController {
 	// Login endpoint for mobile app
 	static async login(req, res) {
@@ -940,10 +965,12 @@ class ApiController {
 			// Blue Moon's 3PM-6AM shift crosses midnight, so for it "today" runs
 			// until 07:00 (utils/businessDay.js) — otherwise orders opened before
 			// midnight would drop out of the waiter/cashier list at 12:00AM.
-			const today = getBusinessTodayYmd(resolvedBranchId);
+			// The cashier's History date picker passes start_date / end_date to
+			// look further back (see businessDateRange).
+			const range = businessDateRange(req.query, resolvedBranchId);
 			const orders = await OrderModel.getAll(resolvedBranchId, {
-				start_date: today,
-				end_date: today,
+				start_date: range.start,
+				end_date: range.end,
 			});
 			// Cancelled (-1) orders are included: the cashier's History lists them,
 			// and its REST poll (used whenever the socket is down) can only raise
@@ -1000,7 +1027,13 @@ class ApiController {
 				};
 			});
 
-			return res.json({ success: true, data: ordersWithItems });
+			return res.json({
+				success: true,
+				data: ordersWithItems,
+				start_date: range.start,
+				end_date: range.end,
+				today: range.today,
+			});
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] GET /api/waiter/orders - User ID: ${user_id}, Error:`, error);
 			return res.status(500).json({ success: false, error: 'Failed to fetch waiter orders' });
@@ -2066,16 +2099,30 @@ class ApiController {
 				if (branches.length > 0) branchId = branches[0].IDNo;
 			}
 			if (!branchId) return res.status(400).json({ success: false, error: 'Branch ID is required' });
-			const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+			// One day (`date`, older apps) or a range (`start_date` / `end_date`,
+			// the cashier app's date picker); today when neither is given.
+			const singleDate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
 				? String(req.query.date)
-				: getBusinessTodayYmd(branchId);
+				: null;
+			const range = singleDate
+				? { start: singleDate, end: singleDate, today: getBusinessTodayYmd(branchId) }
+				: businessDateRange(req.query, branchId);
+			const isRange = range.start !== range.end;
 			const logs = await OrderActivityLogModel.list({
 				branchId,
-				date,
+				startDate: range.start,
+				endDate: range.end,
 				action: req.query.action || null,
-				limit: req.query.limit,
+				limit: req.query.limit ?? (isRange ? 3000 : undefined),
 			});
-			return res.json({ success: true, data: logs, date });
+			return res.json({
+				success: true,
+				data: logs,
+				date: range.end,
+				start_date: range.start,
+				end_date: range.end,
+				today: range.today,
+			});
 		} catch (error) {
 			console.error(`[${timestamp}] [API ERROR] GET /api/activity-logs - Error:`, error);
 			return res.status(500).json({ success: false, error: 'Failed to load activity log' });

@@ -200,8 +200,8 @@ class OrderActivityLogModel {
 	 * A branch's log for one business day (Manila; Blue Moon's day runs to
 	 * 07:00), newest first.
 	 */
-	static async list({ branchId, date, action = null, limit = 500 }) {
-		const range = phLocalDayRangeFilter('CREATED_DT', date, date, 'BRANCH_ID');
+	static async list({ branchId, date = null, startDate = date, endDate = date, action = null, limit = 500 }) {
+		const range = phLocalDayRangeFilter('CREATED_DT', startDate, endDate, 'BRANCH_ID');
 		const params = [];
 		let where = '1=1';
 		if (branchId) {
@@ -212,7 +212,7 @@ class OrderActivityLogModel {
 			where += ' AND ACTION = ?';
 			params.push(action);
 		}
-		const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 1000);
+		const lim = Math.min(Math.max(parseInt(limit, 10) || 500, 1), 5000);
 		const [rows] = await pool.execute(
 			`SELECT IDNo, BRANCH_ID, ORDER_ID, ORDER_NO, TABLE_NUMBER, FLOOR, ACTION, SUMMARY, DETAILS, AMOUNT,
 					USER_ID, USERNAME, USER_FULLNAME, USER_ROLE, SYNCED_LATE,
