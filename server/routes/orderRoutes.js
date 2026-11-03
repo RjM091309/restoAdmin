@@ -24,6 +24,8 @@ router.put('/orders/:id', authenticate, OrderController.update);
 router.patch('/orders/:id/status', authenticate, OrderController.updateStatus);
 router.patch('/orders/:id/encoded-dt', authenticate, requireOrderMetaEditor, OrderController.updateEncodedDt);
 router.patch('/orders/:id/soft-delete', authenticate, requireOrderMetaEditor, OrderController.softDelete);
+router.get('/orders/:id/room-charges', authenticate, OrderController.getRoomCharges);
+router.patch('/orders/:id/charges', authenticate, requireOrderMetaEditor, OrderController.updateCharges);
 router.put('/order_items/:id/status', authenticate, OrderController.updateItemStatus);
 
 // Order Items Individual Operations

@@ -15,6 +15,7 @@ const InventoryDeductionService = require('../services/inventoryDeductionService
 const InventoryDeductionModel = require('../models/inventoryDeductionModel');
 const ReportsModel = require('../models/reportsModel');
 const OrderActivityLogModel = require('../models/orderActivityLogModel');
+const OrderRoomChargeModel = require('../models/orderRoomChargeModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
 const { getOrderMetaEditorScope } = require('../middleware/unifiedAuth');
@@ -34,7 +35,7 @@ function hasInventoryDeducted(order) {
 function settledItemEditError(req, order) {
 	if (Number(order?.STATUS) !== ORDER_STATUS_SETTLED) return null;
 	const scope = getOrderMetaEditorScope(req);
-	if (!scope) return 'You are not allowed to edit items of a settled order';
+	if (!scope) return 'You are not allowed to edit a settled order';
 	if (scope.branchId != null && Number(order.BRANCH_ID) !== Number(scope.branchId)) {
 		return 'You can only modify orders from your assigned branch';
 	}
@@ -42,20 +43,67 @@ function settledItemEditError(req, order) {
 }
 
 /**
- * Billing follow-up after an order's items changed. A paid bill's AMOUNT_PAID
+ * Billing follow-up after an order's total changed. A paid bill's AMOUNT_PAID
  * (and its latest payment row) follows the new total — otherwise the bill shows
- * a negative balance and sales still count the removed items. For a settled
- * order the inventory rows stay settled and the correction is logged.
+ * a negative balance and sales still count what was removed.
  */
-async function syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, userId) {
-	const billing = await BillingModel.getByOrderId(order.IDNo);
+async function syncBillingTotal(orderId, newGrandTotal) {
+	const billing = await BillingModel.getByOrderId(orderId);
 	if (billing && Number(billing.STATUS) === 1) {
 		const delta = Number((newGrandTotal - Number(billing.AMOUNT_PAID || 0)).toFixed(2));
-		await BillingModel.updateForOrder(order.IDNo, { amount_due: newGrandTotal, amount_paid: newGrandTotal });
-		if (delta !== 0) await BillingModel.adjustLatestTransaction(order.IDNo, delta);
+		await BillingModel.updateForOrder(orderId, { amount_due: newGrandTotal, amount_paid: newGrandTotal });
+		if (delta !== 0) await BillingModel.adjustLatestTransaction(orderId, delta);
 	} else if (billing) {
-		await BillingModel.updateForOrder(order.IDNo, { amount_due: newGrandTotal });
+		await BillingModel.updateForOrder(orderId, { amount_due: newGrandTotal });
 	}
+}
+
+/**
+ * An order's room-charge rows (one per room it used) plus the part of
+ * SERVICE_CHARGE that is not room time. An order billed without room history
+ * (e.g. web admin) gets one unsaved row (id null) rebuilt from SERVICE_CHARGE /
+ * its table's ROOM_CHARGE, the same way OrderRoomChargeModel.ensureForOrder does.
+ */
+async function roomChargeState(order) {
+	const serviceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+	const rows = await OrderRoomChargeModel.getByOrderId(order.IDNo);
+	if (rows.length) {
+		return {
+			rows: OrderRoomChargeModel.listToApi(rows),
+			otherCharge: Math.max(0, Number((serviceCharge - OrderRoomChargeModel.sumAmount(rows)).toFixed(2))),
+		};
+	}
+	const table = order.TABLE_ID ? await TableModel.getById(order.TABLE_ID).catch(() => null) : null;
+	const rate = parseFloat(table?.ROOM_CHARGE) || 0;
+	const hours = rate > 0 ? OrderRoomChargeModel.roundHours(serviceCharge / rate) : 0;
+	if (hours <= 0) return { rows: [], otherCharge: serviceCharge };
+	const amount = OrderRoomChargeModel.amountFor(rate, hours);
+	return {
+		rows: [{ id: null, table_id: order.TABLE_ID, table_number: table.TABLE_NUMBER, rate, hours, amount }],
+		otherCharge: Math.max(0, Number((serviceCharge - amount).toFixed(2))),
+	};
+}
+
+/** Activity-log a correction made to a settled order, e.g. "Edited settled order: Pilsen 4 → 3". */
+async function logSettledEdit(req, order, parts, details, amount) {
+	const shown = parts.slice(0, 3).join(', ') + (parts.length > 3 ? `, +${parts.length - 3} more` : '');
+	const table = order.TABLE_ID ? await TableModel.getById(order.TABLE_ID).catch(() => null) : null;
+	await OrderActivityLogModel.record(req, {
+		action: 'items_edited',
+		order,
+		tableNumber: table?.TABLE_NUMBER || null,
+		summary: `Edited settled order: ${shown || 'no changes'}`,
+		details: { ...details, settled_edit: true },
+		amount,
+	});
+}
+
+/**
+ * Follow-up after an order's items changed: billing follows the new total; for a
+ * settled order the inventory rows stay settled and the correction is logged.
+ */
+async function syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, userId) {
+	await syncBillingTotal(order.IDNo, newGrandTotal);
 
 	if (Number(order.STATUS) !== ORDER_STATUS_SETTLED) return;
 	// Deductions for new/changed items are written as CONFIRMED (2).
@@ -68,16 +116,7 @@ async function syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, use
 		...diff.removed.map((i) => `−${OrderActivityLogModel.qtyText(i.qty)} ${i.name}`),
 		...diff.changed.map((i) => `${i.name} ${OrderActivityLogModel.qtyText(i.from)} → ${OrderActivityLogModel.qtyText(i.to)}`),
 	];
-	const shown = parts.slice(0, 3).join(', ') + (parts.length > 3 ? `, +${parts.length - 3} more` : '');
-	const table = order.TABLE_ID ? await TableModel.getById(order.TABLE_ID).catch(() => null) : null;
-	await OrderActivityLogModel.record(req, {
-		action: 'items_edited',
-		order,
-		tableNumber: table?.TABLE_NUMBER || null,
-		summary: `Edited settled order: ${shown || 'no item changes'}`,
-		details: { ...diff, settled_edit: true },
-		amount: newGrandTotal,
-	});
+	await logSettledEdit(req, order, parts, diff, newGrandTotal);
 }
 
 class OrderController {
@@ -1205,6 +1244,176 @@ class OrderController {
 		} catch (error) {
 			console.error('Error updating order status:', error);
 			return ApiResponse.error(res, 'Failed to update order status', 500, error.message);
+		}
+	}
+
+	// Room-charge rows of an order (one per room used) + non-room service charge
+	static async getRoomCharges(req, res) {
+		try {
+			const order = await OrderModel.getById(req.params.id);
+			if (!order) {
+				return ApiResponse.notFound(res, 'Order');
+			}
+			const state = await roomChargeState(order);
+			return ApiResponse.success(res, { room_charges: state.rows, other_charge: state.otherCharge }, 'Room charges retrieved successfully');
+		} catch (error) {
+			console.error('Error fetching room charges:', error);
+			return ApiResponse.error(res, 'Failed to fetch room charges', 500, error.message);
+		}
+	}
+
+	/**
+	 * Correct a settled order's room charge and discount (order meta editors only).
+	 * Body: { room_charges?: [{ id | null, table_id, hours }], service_charge?, discount_amount? }.
+	 * With room_charges the list replaces the order's rooms (id = existing row keeps
+	 * its rate; id null = new room at its table's ROOM_CHARGE; hours 0 / left out =
+	 * removed) and SERVICE_CHARGE becomes the rooms' total plus any non-room charge.
+	 */
+	static async updateCharges(req, res) {
+		try {
+			const { id } = req.params;
+			const user_id = req.session?.user_id || req.user?.user_id;
+
+			const order = await OrderModel.getById(id);
+			if (!order) {
+				return ApiResponse.notFound(res, 'Order');
+			}
+			if (Number(order.STATUS) !== ORDER_STATUS_SETTLED) {
+				return ApiResponse.badRequest(res, 'Only settled orders can have their charges corrected');
+			}
+			const settledError = settledItemEditError(req, order);
+			if (settledError) return ApiResponse.forbidden(res, settledError);
+
+			const oldServiceCharge = parseFloat(order.SERVICE_CHARGE || 0);
+			const oldDiscount = parseFloat(order.DISCOUNT_AMOUNT || 0);
+			let serviceCharge = req.body.service_charge !== undefined ? Number(req.body.service_charge) : oldServiceCharge;
+			const discountAmount = req.body.discount_amount !== undefined ? Number(req.body.discount_amount) : oldDiscount;
+
+			// Validate the room list before writing anything
+			let roomPlan = null;
+			let roomsBefore = [];
+			if (Array.isArray(req.body.room_charges)) {
+				const state = await roomChargeState(order);
+				roomsBefore = state.rows;
+				const existing = await OrderRoomChargeModel.getByOrderId(order.IDNo);
+				const existingById = new Map(existing.map((r) => [Number(r.IDNo), r]));
+				roomPlan = { existing, entries: [] };
+				for (const rc of req.body.room_charges) {
+					const hours = OrderRoomChargeModel.roundHours(rc?.hours);
+					if (rc?.id != null) {
+						const row = existingById.get(Number(rc.id));
+						if (!row) return ApiResponse.badRequest(res, 'Room charge row not found on this order');
+						roomPlan.entries.push({ row, hours, rate: parseFloat(row.RATE) || 0 });
+					} else {
+						const table = await TableModel.getById(rc?.table_id);
+						const rate = parseFloat(table?.ROOM_CHARGE) || 0;
+						if (!table || Number(table.BRANCH_ID) !== Number(order.BRANCH_ID) || rate <= 0) {
+							return ApiResponse.badRequest(res, 'Room not found in this branch');
+						}
+						roomPlan.entries.push({ table, hours, rate });
+					}
+				}
+				const roomsTotal = roomPlan.entries.reduce((sum, e) => sum + OrderRoomChargeModel.amountFor(e.rate, e.hours), 0);
+				serviceCharge = Number((state.otherCharge + roomsTotal).toFixed(2));
+			}
+
+			if (!Number.isFinite(serviceCharge) || serviceCharge < 0 || !Number.isFinite(discountAmount) || discountAmount < 0) {
+				return ApiResponse.badRequest(res, 'Charges must be zero or more');
+			}
+
+			const subtotal = parseFloat(order.SUBTOTAL || 0);
+			const taxAmount = parseFloat(order.TAX_AMOUNT || 0);
+			if (discountAmount > subtotal + taxAmount + serviceCharge) {
+				return ApiResponse.badRequest(res, 'Discount cannot be more than the order total');
+			}
+			const newGrandTotal = OrderModel.computeGrandTotal(subtotal, taxAmount, serviceCharge, discountAmount);
+
+			if (roomPlan) {
+				const pool = require('../config/db');
+				const conn = await pool.getConnection();
+				try {
+					await conn.beginTransaction();
+					const keptIds = new Set();
+					for (const e of roomPlan.entries) {
+						if (e.row) {
+							keptIds.add(Number(e.row.IDNo));
+							if (e.hours > 0) await OrderRoomChargeModel.setActiveHours(e.row.IDNo, e.hours, user_id, conn);
+							else await OrderRoomChargeModel.remove(e.row.IDNo, conn);
+						} else if (e.hours > 0) {
+							await OrderRoomChargeModel.start({
+								orderId: order.IDNo,
+								branchId: order.BRANCH_ID,
+								tableId: e.table.IDNo,
+								tableNumber: e.table.TABLE_NUMBER,
+								rate: e.rate,
+								hours: e.hours,
+								userId: user_id,
+							}, conn);
+						}
+					}
+					for (const row of roomPlan.existing) {
+						if (!keptIds.has(Number(row.IDNo))) await OrderRoomChargeModel.remove(row.IDNo, conn);
+					}
+					// Settled: no room clock is running
+					await OrderRoomChargeModel.endAll(order.IDNo, conn);
+					await conn.commit();
+				} catch (err) {
+					await conn.rollback();
+					throw err;
+				} finally {
+					conn.release();
+				}
+			}
+
+			await OrderModel.update(id, {
+				TABLE_ID: order.TABLE_ID,
+				ORDER_TYPE: order.ORDER_TYPE,
+				STATUS: order.STATUS,
+				SUBTOTAL: subtotal,
+				TAX_AMOUNT: taxAmount,
+				SERVICE_CHARGE: serviceCharge,
+				DISCOUNT_AMOUNT: discountAmount,
+				GRAND_TOTAL: newGrandTotal,
+				user_id: user_id
+			});
+			await syncBillingTotal(order.IDNo, newGrandTotal);
+
+			const parts = [];
+			if (serviceCharge !== oldServiceCharge) {
+				parts.push(`Room charge ${OrderActivityLogModel.peso(oldServiceCharge)} → ${OrderActivityLogModel.peso(serviceCharge)}`);
+			}
+			if (discountAmount !== oldDiscount) {
+				parts.push(`Discount ${OrderActivityLogModel.peso(oldDiscount)} → ${OrderActivityLogModel.peso(discountAmount)}`);
+			}
+			const details = {
+				service_charge: { from: oldServiceCharge, to: serviceCharge },
+				discount_amount: { from: oldDiscount, to: discountAmount },
+			};
+			if (roomPlan) {
+				const roomText = (r) => `${r.table_number || 'room'} ${OrderActivityLogModel.hoursText(r.hours)}`;
+				const roomsAfter = OrderRoomChargeModel.listToApi(await OrderRoomChargeModel.getByOrderId(order.IDNo));
+				details.rooms = { from: roomsBefore.map(roomText), to: roomsAfter.map(roomText) };
+			}
+			await logSettledEdit(req, order, parts, details, newGrandTotal);
+
+			socketService.emitOrderUpdate(id, {
+				order_id: id,
+				order_no: order.ORDER_NO,
+				table_id: order.TABLE_ID,
+				status: order.STATUS,
+				grand_total: newGrandTotal,
+				items: await OrderItemsModel.getByOrderId(id)
+			});
+
+			return ApiResponse.success(res, {
+				order_id: parseInt(id, 10),
+				service_charge: serviceCharge,
+				discount_amount: discountAmount,
+				grand_total: newGrandTotal
+			}, 'Order charges updated successfully');
+		} catch (error) {
+			console.error('Error updating order charges:', error);
+			return ApiResponse.error(res, 'Failed to update order charges', 500, error.message);
 		}
 	}
 

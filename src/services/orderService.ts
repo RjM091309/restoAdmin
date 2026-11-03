@@ -233,6 +233,54 @@ export async function updateOrderEncodedDt(
     return handleResponse<{ order_id: number; order_no?: string; encoded_dt: string }>(response);
 }
 
+/** One room an order used: hours billed there at that room's rate. `id` null = not saved yet. */
+export interface OrderRoomCharge {
+    id: number | null;
+    table_id: number | null;
+    table_number: string | null;
+    rate: number;
+    hours: number;
+    amount: number;
+}
+
+export async function getOrderRoomCharges(
+    orderId: string
+): Promise<{ room_charges: OrderRoomCharge[]; other_charge: number }> {
+    const response = await fetch(buildUrl(`/orders/${orderId}/room-charges`), {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+    });
+    return handleResponse<{ room_charges: OrderRoomCharge[]; other_charge: number }>(response);
+}
+
+/**
+ * Correct a settled order's room charge and discount (order meta editors only).
+ * `room_charges` replaces the order's rooms; without it `service_charge` is set directly.
+ */
+export async function updateOrderCharges(
+    orderId: string,
+    charges: {
+        room_charges?: { id: number | null; table_id: number | null; hours: number }[];
+        service_charge?: number;
+        discount_amount: number;
+    }
+): Promise<{ order_id: number; service_charge: number; discount_amount: number; grand_total: number }> {
+    const response = await fetch(buildUrl(`/orders/${orderId}/charges`), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+        },
+        body: JSON.stringify(charges),
+    });
+    return handleResponse<{ order_id: number; service_charge: number; discount_amount: number; grand_total: number }>(response);
+}
+
 export async function softDeleteOrder(orderId: string): Promise<void> {
     const response = await fetch(buildUrl(`/orders/${orderId}/soft-delete`), {
         method: 'PATCH',

@@ -240,6 +240,10 @@ class OrderRoomChargeModel {
 		);
 	}
 
+	static async remove(rowId, conn = pool) {
+		await conn.execute('DELETE FROM order_room_charges WHERE IDNo = ?', [rowId]);
+	}
+
 	/** Stops the clock on every open room of an order (settled / cancelled). */
 	static async endAll(orderId, conn = pool) {
 		await conn.execute(

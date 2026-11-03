@@ -5,6 +5,7 @@ import {
     Search,
     Filter,
     Plus,
+    Minus,
     Receipt,
     Eye,
     CheckCircle2,
@@ -48,6 +49,8 @@ import {
     createManualSettledOrder,
     updateOrderStatus,
     updateOrderEncodedDt,
+    updateOrderCharges,
+    getOrderRoomCharges,
     softDeleteOrder,
     deleteOrderItem,
     updateOrderItemQuantity,
@@ -58,6 +61,7 @@ import {
     type OrderItemRecord,
     type OrderListStats,
     type CreateOrderItemPayload,
+    type OrderRoomCharge,
 } from '../../services/orderService';
 import { getMenus, type MenuRecord } from '../../services/menuService';
 import { toUserFriendlyError } from '../../utils/userFriendlyErrors';
@@ -132,6 +136,11 @@ const ORDER_META_EDITOR_USERNAMES = ['3coredev', 'bmoon'];
 
 function isOrderMetaEditorUsername(username: string | null | undefined): boolean {
     return ORDER_META_EDITOR_USERNAMES.includes(String(username ?? '').trim().toLowerCase());
+}
+
+/** Identity of a room-charge list (which rooms, how many hours) to tell whether it was edited. */
+function roomChargesKey(rooms: OrderRoomCharge[]): string {
+    return rooms.map((r) => `${r.id ?? 'new'}:${r.table_id}:${r.hours}`).join('|');
 }
 
 const ENCODED_DT_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/;
@@ -336,6 +345,15 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailSelectedMenuId, setDetailSelectedMenuId] = useState<string>('');
     const [detailAddQty, setDetailAddQty] = useState<number>(1);
     const [detailAdding, setDetailAdding] = useState(false);
+    // Settled-order correction of room charge and discount (order meta editors only)
+    const [chargesRooms, setChargesRooms] = useState<OrderRoomCharge[]>([]);
+    const [chargesRoomsSavedKey, setChargesRoomsSavedKey] = useState('');
+    const [chargesOther, setChargesOther] = useState(0);
+    const [chargesRoomTables, setChargesRoomTables] = useState<{ id: number; tableNumber: string; rate: number }[]>([]);
+    const [chargesAddRoomId, setChargesAddRoomId] = useState('');
+    const [chargesDiscountInput, setChargesDiscountInput] = useState('');
+    const [chargesLoading, setChargesLoading] = useState(false);
+    const [chargesSaving, setChargesSaving] = useState(false);
 
   const { canCreate, canUpdate, canDelete } = useCrudPermissions();
 
@@ -2335,6 +2353,105 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         }
     };
 
+    // ==================== Settled order charges ====================
+    const detailChargesEditable = detailOrder?.STATUS === ORDER_STATUS.SETTLED && canEditOrderMeta;
+
+    // Rooms the order used (one row per room, so a room transfer shows both) + rooms to add
+    useEffect(() => {
+        if (!detailOrder || !detailChargesEditable) return;
+        setChargesDiscountInput(String(Number(detailOrder.DISCOUNT_AMOUNT ?? 0)));
+        setChargesAddRoomId('');
+        let cancelled = false;
+        setChargesLoading(true);
+        const branchQs = detailOrder.BRANCH_ID != null ? `?branch_id=${encodeURIComponent(String(detailOrder.BRANCH_ID))}` : '';
+        Promise.all([
+            getOrderRoomCharges(String(detailOrder.IDNo)),
+            fetch(`/data-api/restaurant_tables${branchQs}`, { headers: { 'Content-Type': 'application/json' } }).then((r) => r.json()),
+        ])
+            .then(([state, tablesJson]) => {
+                if (cancelled) return;
+                setChargesRooms(state.room_charges);
+                setChargesRoomsSavedKey(roomChargesKey(state.room_charges));
+                setChargesOther(Number(state.other_charge) || 0);
+                const raw = tablesJson?.data ?? tablesJson;
+                setChargesRoomTables(
+                    (Array.isArray(raw) ? raw : [])
+                        .filter((tb: any) => Number(tb?.ROOM_CHARGE) > 0)
+                        .map((tb: any) => ({
+                            id: Number(tb.IDNo),
+                            tableNumber: String(tb.TABLE_NUMBER ?? `#${tb.IDNo}`),
+                            rate: Number(tb.ROOM_CHARGE),
+                        }))
+                );
+            })
+            .catch((e) => {
+                if (!cancelled) toast.error(e instanceof Error ? e.message : t('orders.swal.update_failed'));
+            })
+            .finally(() => {
+                if (!cancelled) setChargesLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [detailOrder?.IDNo, detailOrder?.SERVICE_CHARGE, detailOrder?.DISCOUNT_AMOUNT, detailChargesEditable]);
+
+    const changeChargesRoomHours = (index: number, delta: number) => {
+        setChargesRooms((rooms) =>
+            rooms.map((r, i) => {
+                if (i !== index) return r;
+                const hours = Math.max(0.5, Math.round((r.hours + delta) * 2) / 2);
+                return { ...r, hours, amount: r.rate * hours };
+            })
+        );
+    };
+
+    const removeChargesRoom = (index: number) => {
+        setChargesRooms((rooms) => rooms.filter((_, i) => i !== index));
+    };
+
+    const addChargesRoom = () => {
+        const table = chargesRoomTables.find((tb) => String(tb.id) === chargesAddRoomId);
+        if (!table) return;
+        setChargesRooms((rooms) => [
+            ...rooms,
+            { id: null, table_id: table.id, table_number: table.tableNumber, rate: table.rate, hours: 1, amount: table.rate },
+        ]);
+        setChargesAddRoomId('');
+    };
+
+    const chargesDiscountValue = Number(chargesDiscountInput);
+    const chargesServiceValue = chargesOther + chargesRooms.reduce((sum, r) => sum + r.rate * r.hours, 0);
+    const chargesNewTotal = detailOrder
+        ? Number(detailOrder.SUBTOTAL || 0) + Number(detailOrder.TAX_AMOUNT || 0) + chargesServiceValue - (chargesDiscountValue || 0)
+        : 0;
+    const chargesChanged =
+        !!detailOrder &&
+        (roomChargesKey(chargesRooms) !== chargesRoomsSavedKey ||
+            chargesDiscountValue !== Number(detailOrder.DISCOUNT_AMOUNT ?? 0));
+
+    const saveDetailCharges = async () => {
+        if (!detailOrder || chargesSaving) return;
+        if (!Number.isFinite(chargesDiscountValue) || chargesDiscountValue < 0 || chargesNewTotal < 0) {
+            toast.error(t('orders.charges_invalid'));
+            return;
+        }
+        setChargesSaving(true);
+        try {
+            await updateOrderCharges(String(detailOrder.IDNo), {
+                room_charges: chargesRooms.map((r) => ({ id: r.id, table_id: r.table_id, hours: r.hours })),
+                discount_amount: chargesDiscountValue,
+            });
+            const updatedOrder = await getOrderById(String(detailOrder.IDNo));
+            if (updatedOrder) setDetailOrder(updatedOrder);
+            await loadOrders();
+            toast.success(t('orders.charges_updated_success'));
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : t('orders.swal.update_failed'));
+        } finally {
+            setChargesSaving(false);
+        }
+    };
+
     // ==================== Badges ====================
     const statusBadge = (status: number) => {
         const label = getStatusLabel(status);
@@ -4165,7 +4282,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
                                             {(detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) &&
-                                                Number(detailOrder.SERVICE_CHARGE) > 0 && (
+                                                Number(detailOrder.SERVICE_CHARGE) > 0 && !detailChargesEditable && (
                                                     <tr key="__ROOM_CHARGE__">
                                                         <td className="px-4 py-2 font-medium">
                                                             {detailIsRoomCharge
@@ -4307,6 +4424,142 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                     </div>
                                 </div>
                             )}
+
+                        {/* Room charge (one row per room used) and discount correction (settled orders, meta editors) */}
+                        {detailChargesEditable && (
+                            <div className="space-y-3 pt-2 border-t border-gray-100">
+                                <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">
+                                    {t('orders.edit_charges')}
+                                </p>
+                                <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-gray-50">
+                                            <tr>
+                                                <th className="px-4 py-2 text-left font-bold text-brand-muted text-xs">{t('orders.room')}</th>
+                                                <th className="px-4 py-2 text-center font-bold text-brand-muted text-xs">{t('orders.hours')}</th>
+                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
+                                                <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
+                                                <th className="px-2 py-2 w-10"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50">
+                                            {chargesLoading ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-4 py-4 text-center">
+                                                        <Loader2 size={18} className="animate-spin text-brand-primary inline" />
+                                                    </td>
+                                                </tr>
+                                            ) : chargesRooms.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-4 py-3 text-brand-muted text-xs">{t('orders.no_room_charge')}</td>
+                                                </tr>
+                                            ) : (
+                                                chargesRooms.map((room, index) => (
+                                                    <tr key={`${room.id ?? 'new'}-${index}`}>
+                                                        <td className="px-4 py-2 font-medium">{room.table_number ?? t('table.room_charge')}</td>
+                                                        <td className="px-4 py-2">
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => changeChargesRoomHours(index, -0.5)}
+                                                                    disabled={chargesSaving || room.hours <= 0.5}
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-brand-muted hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                                                                >
+                                                                    <Minus size={14} />
+                                                                </button>
+                                                                <span className="w-8 text-center font-bold tabular-nums">{room.hours}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => changeChargesRoomHours(index, 0.5)}
+                                                                    disabled={chargesSaving}
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-brand-muted hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                                                                >
+                                                                    <Plus size={14} />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-right tabular-nums">₱{formatPesoUpToTwoDecimals(room.rate)}</td>
+                                                        <td className="px-4 py-2 text-right font-bold tabular-nums">₱{formatPesoUpToTwoDecimals(room.rate * room.hours)}</td>
+                                                        <td className="px-2 py-2 text-right">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeChargesRoom(index)}
+                                                                disabled={chargesSaving}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                                                                title={t('orders.remove_room')}
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                            {chargesOther > 0 && (
+                                                <tr>
+                                                    <td colSpan={3} className="px-4 py-2 text-brand-muted">{t('orders.other_service_charge')}</td>
+                                                    <td className="px-4 py-2 text-right font-bold tabular-nums">₱{formatPesoUpToTwoDecimals(chargesOther)}</td>
+                                                    <td></td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div className="grid grid-cols-12 gap-3 items-end">
+                                    <div className="col-span-9">
+                                        <Select2
+                                            options={chargesRoomTables.map((tb) => ({
+                                                value: String(tb.id),
+                                                label: `${tb.tableNumber} — ₱${formatPesoUpToTwoDecimals(tb.rate)}/hr`,
+                                            }))}
+                                            value={chargesAddRoomId || null}
+                                            onChange={(v) => setChargesAddRoomId(v ? String(v) : '')}
+                                            placeholder={t('orders.select_room')}
+                                            disabled={chargesLoading || chargesSaving}
+                                        />
+                                    </div>
+                                    <div className="col-span-3">
+                                        <button
+                                            type="button"
+                                            onClick={addChargesRoom}
+                                            disabled={!chargesAddRoomId || chargesSaving}
+                                            className="w-full px-3 py-3 rounded-xl border border-brand-primary text-brand-primary font-bold text-sm hover:bg-brand-primary/10 disabled:opacity-50 transition-all flex items-center justify-center gap-1"
+                                        >
+                                            <Plus size={14} /> {t('orders.add_room')}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-12 gap-3 items-end">
+                                    <div className="col-span-8">
+                                        <label className="block text-[11px] font-bold text-brand-muted mb-1">
+                                            {t('orders.discount')} (₱)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            step="any"
+                                            value={chargesDiscountInput}
+                                            onChange={(e) => setChargesDiscountInput(e.target.value)}
+                                            disabled={chargesSaving}
+                                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-sm text-right tabular-nums focus:bg-white focus:ring-2 focus:ring-brand-primary/20 outline-none transition-all"
+                                        />
+                                    </div>
+                                    <div className="col-span-4">
+                                        <button
+                                            type="button"
+                                            onClick={saveDetailCharges}
+                                            disabled={chargesSaving || chargesLoading || !chargesChanged}
+                                            className="w-full px-3 py-3 rounded-xl bg-brand-primary text-white font-bold text-sm hover:bg-brand-primary/90 disabled:opacity-50 transition-all flex items-center justify-center gap-1"
+                                        >
+                                            {chargesSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                                            {t('orders.save_charges')}
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-[11px] text-brand-muted">
+                                    {t('orders.charges_new_total', { total: formatPesoUpToTwoDecimals(chargesNewTotal) })}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Additional items (add menu to this order) */}
                         {canUpdate('orders') && detailItemsEditable && (
