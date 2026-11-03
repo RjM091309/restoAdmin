@@ -332,6 +332,14 @@ class BillingModel {
 		return true;
 	}
 
+	/** Shift the order's latest payment row by `delta` so it follows an edited paid bill. */
+	static async adjustLatestTransaction(orderId, delta) {
+		await pool.execute(
+			'UPDATE payment_transactions SET AMOUNT_PAID = GREATEST(AMOUNT_PAID + ?, 0) WHERE ORDER_ID = ? ORDER BY IDNo DESC LIMIT 1',
+			[delta, orderId]
+		);
+	}
+
 	static async recordTransaction(data) {
 		const { order_id, payment_method, amount_paid, payment_ref, user_id, encoded_dt } = data;
 		const encodedDtValue =

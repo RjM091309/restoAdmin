@@ -233,6 +233,11 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
     const [detailItems, setDetailItems] = useState<OrderItemRecord[]>([]);
     const [detailLoading, setDetailLoading] = useState(false);
     const [detailRoomChargeUnit, setDetailRoomChargeUnit] = useState<number>(0);
+    // Items stay editable until settled; a settled order can still be corrected by the order meta editors.
+    const detailItemsEditable =
+        !!detailOrder &&
+        detailOrder.STATUS !== ORDER_STATUS.CANCELLED &&
+        (detailOrder.STATUS !== ORDER_STATUS.SETTLED || canEditOrderMeta);
 
     // ----- Status update & item actions -----
     const [statusSubmitting, setStatusSubmitting] = useState(false);
@@ -2228,8 +2233,8 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
             setDetailAddQty(1);
             return;
         }
-        // Allow adding items when order is PENDING or CONFIRMED (not settled/cancelled)
-        if (detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) return;
+        // Items can be added until settled (settled: order meta editors only)
+        if (!detailItemsEditable) return;
         let cancelled = false;
         setDetailMenusLoading(true);
         getMenus(branchId)
@@ -2246,7 +2251,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
         return () => {
             cancelled = true;
         };
-    }, [detailOrder, branchId]);
+    }, [detailOrder, branchId, detailItemsEditable]);
 
     // Clear add-item selection if the selected menu is already in the order (use edit qty instead)
     useEffect(() => {
@@ -2257,7 +2262,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     const addDetailOrderItem = async () => {
         if (!detailOrder) return;
-        if (detailOrder.STATUS === ORDER_STATUS.SETTLED || detailOrder.STATUS === ORDER_STATUS.CANCELLED) {
+        if (!detailItemsEditable) {
             toast.error(t('orders.additional_items_not_allowed'));
             return;
         }
@@ -4153,7 +4158,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.qty')}</th>
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.unit')}</th>
                                                 <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs">{t('orders.line_total')}</th>
-                                                {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                {detailItemsEditable && (
                                                     <th className="px-4 py-2 text-right font-bold text-brand-muted text-xs w-24">{t('orders.actions')}</th>
                                                 )}
                                             </tr>
@@ -4174,7 +4179,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         <td className="px-4 py-2 text-right font-bold tabular-nums">
                                                             ₱{formatPesoUpToTwoDecimals(Number(detailServiceCharge))}
                                                         </td>
-                                                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                        {detailItemsEditable && (
                                                             <td className="px-4 py-2 text-right"></td>
                                                         )}
                                                     </tr>
@@ -4199,7 +4204,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                                                         </td>
                                                         <td className="px-4 py-2 text-right">₱{Number(item.UNIT_PRICE).toLocaleString()}</td>
                                                         <td className="px-4 py-2 text-right font-bold">₱{Number(item.LINE_TOTAL).toLocaleString()}</td>
-                                                        {detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                                                        {detailItemsEditable && (
                                                             <td className="px-4 py-2 text-right">
                                                                 <div className="flex items-center justify-end gap-1">
                                                                     {isEditing ? (
@@ -4304,7 +4309,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             )}
 
                         {/* Additional items (add menu to this order) */}
-                        {canUpdate('orders') && detailOrder.STATUS !== ORDER_STATUS.SETTLED && detailOrder.STATUS !== ORDER_STATUS.CANCELLED && (
+                        {canUpdate('orders') && detailItemsEditable && (
                             <div className="space-y-3 pt-2 border-t border-gray-100">
                                 <p className="text-xs font-bold text-brand-muted uppercase tracking-widest">
                                     {t('orders.additional_items')}

@@ -166,18 +166,28 @@ const require3core = (req, res, next) => {
  */
 const ORDER_META_BRANCH_EDITORS = { bmoon: 3 };
 
+/**
+ * The request user's order-meta-editor scope: `{ branchId: null }` for 3coredev
+ * (any branch), `{ branchId }` for a branch editor, or null when not an editor.
+ */
+const getOrderMetaEditorScope = (req) => {
+	if (!req.user) return null;
+	const username = String(req.user.username || req.session?.username || '').trim().toLowerCase();
+	if (username === '3coredev') return { branchId: null };
+	if (Object.prototype.hasOwnProperty.call(ORDER_META_BRANCH_EDITORS, username)) {
+		return { branchId: ORDER_META_BRANCH_EDITORS[username] };
+	}
+	return null;
+};
+
 const requireOrderMetaEditor = (req, res, next) => {
 	if (!req.user) {
 		return ApiResponse.unauthorized(res, 'Authentication required');
 	}
 
-	const username = String(req.user.username || req.session?.username || '').trim().toLowerCase();
-	if (username === '3coredev') {
-		req.orderMetaBranchId = null;
-		return next();
-	}
-	if (Object.prototype.hasOwnProperty.call(ORDER_META_BRANCH_EDITORS, username)) {
-		req.orderMetaBranchId = ORDER_META_BRANCH_EDITORS[username];
+	const scope = getOrderMetaEditorScope(req);
+	if (scope) {
+		req.orderMetaBranchId = scope.branchId;
 		return next();
 	}
 
@@ -213,6 +223,7 @@ module.exports = {
 	requireAdmin,
 	require3core,
 	requireOrderMetaEditor,
+	getOrderMetaEditorScope,
 	requirePermission
 };
 

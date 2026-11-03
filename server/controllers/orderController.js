@@ -14,8 +14,71 @@ const NotificationModel = require('../models/notificationModel');
 const InventoryDeductionService = require('../services/inventoryDeductionService');
 const InventoryDeductionModel = require('../models/inventoryDeductionModel');
 const ReportsModel = require('../models/reportsModel');
+const OrderActivityLogModel = require('../models/orderActivityLogModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
+const { getOrderMetaEditorScope } = require('../middleware/unifiedAuth');
+
+const ORDER_STATUS_SETTLED = 1;
+const ORDER_STATUS_CONFIRMED = 2;
+
+/** Inventory is already deducted once an order is confirmed, and stays deducted when settled. */
+function hasInventoryDeducted(order) {
+	return [ORDER_STATUS_CONFIRMED, ORDER_STATUS_SETTLED].includes(Number(order?.STATUS));
+}
+
+/**
+ * Why this user may not change a settled order's items, or null when allowed.
+ * Only the order meta editors (3coredev, bmoon for its branch) can correct a settled order.
+ */
+function settledItemEditError(req, order) {
+	if (Number(order?.STATUS) !== ORDER_STATUS_SETTLED) return null;
+	const scope = getOrderMetaEditorScope(req);
+	if (!scope) return 'You are not allowed to edit items of a settled order';
+	if (scope.branchId != null && Number(order.BRANCH_ID) !== Number(scope.branchId)) {
+		return 'You can only modify orders from your assigned branch';
+	}
+	return null;
+}
+
+/**
+ * Billing follow-up after an order's items changed. A paid bill's AMOUNT_PAID
+ * (and its latest payment row) follows the new total — otherwise the bill shows
+ * a negative balance and sales still count the removed items. For a settled
+ * order the inventory rows stay settled and the correction is logged.
+ */
+async function syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, userId) {
+	const billing = await BillingModel.getByOrderId(order.IDNo);
+	if (billing && Number(billing.STATUS) === 1) {
+		const delta = Number((newGrandTotal - Number(billing.AMOUNT_PAID || 0)).toFixed(2));
+		await BillingModel.updateForOrder(order.IDNo, { amount_due: newGrandTotal, amount_paid: newGrandTotal });
+		if (delta !== 0) await BillingModel.adjustLatestTransaction(order.IDNo, delta);
+	} else if (billing) {
+		await BillingModel.updateForOrder(order.IDNo, { amount_due: newGrandTotal });
+	}
+
+	if (Number(order.STATUS) !== ORDER_STATUS_SETTLED) return;
+	// Deductions for new/changed items are written as CONFIRMED (2).
+	await InventoryDeductionModel.updateStatusByOrderId(Number(order.IDNo), ORDER_STATUS_SETTLED, userId);
+
+	const itemsAfter = await OrderItemsModel.getByOrderId(order.IDNo);
+	const diff = OrderActivityLogModel.diffItems(itemsBefore, itemsAfter);
+	const parts = [
+		...diff.added.map((i) => `+${OrderActivityLogModel.qtyText(i.qty)} ${i.name}`),
+		...diff.removed.map((i) => `−${OrderActivityLogModel.qtyText(i.qty)} ${i.name}`),
+		...diff.changed.map((i) => `${i.name} ${OrderActivityLogModel.qtyText(i.from)} → ${OrderActivityLogModel.qtyText(i.to)}`),
+	];
+	const shown = parts.slice(0, 3).join(', ') + (parts.length > 3 ? `, +${parts.length - 3} more` : '');
+	const table = order.TABLE_ID ? await TableModel.getById(order.TABLE_ID).catch(() => null) : null;
+	await OrderActivityLogModel.record(req, {
+		action: 'items_edited',
+		order,
+		tableNumber: table?.TABLE_NUMBER || null,
+		summary: `Edited settled order: ${shown || 'no item changes'}`,
+		details: { ...diff, settled_edit: true },
+		amount: newGrandTotal,
+	});
+}
 
 class OrderController {
 
@@ -735,7 +798,10 @@ class OrderController {
 			const newLineTotal = newQty * newUnitPrice;
 
 			const orderForInventory = await OrderModel.getById(orderId);
-			const isConfirmed = orderForInventory && Number(orderForInventory.STATUS) === 2;
+			const settledError = settledItemEditError(req, orderForInventory);
+			if (settledError) return ApiResponse.forbidden(res, settledError);
+			const itemsBefore = await OrderItemsModel.getByOrderId(orderId);
+			const isConfirmed = hasInventoryDeducted(orderForInventory);
 			const qtyChanged = Number(newQty) !== oldQty;
 			const qtyDelta = Number(newQty) - oldQty;
 			const isIncrease = qtyDelta > 0;
@@ -850,14 +916,7 @@ class OrderController {
 				user_id: user_id
 			});
 
-			// Update billing if exists
-			const BillingModel = require('../models/billingModel');
-			const existingBilling = await BillingModel.getByOrderId(orderId);
-			if (existingBilling) {
-				await BillingModel.updateForOrder(orderId, {
-					amount_due: newGrandTotal
-				});
-			}
+			await syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, user_id);
 
 			// Emit socket event
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
@@ -894,9 +953,12 @@ class OrderController {
 			if (!order) {
 				return ApiResponse.notFound(res, 'Order');
 			}
-			if (Number(order.STATUS) === 1 || Number(order.STATUS) === -1) {
-				return ApiResponse.badRequest(res, 'Cannot add items to settled or cancelled order');
+			if (Number(order.STATUS) === -1) {
+				return ApiResponse.badRequest(res, 'Cannot add items to a cancelled order');
 			}
+			const settledError = settledItemEditError(req, order);
+			if (settledError) return ApiResponse.forbidden(res, settledError);
+			const inventoryDeducted = hasInventoryDeducted(order);
 			const branchId = Number(order.BRANCH_ID);
 			const itemsNormalized = rawItems.map((item) => {
 				const qty = Number(item.qty) || 1;
@@ -912,12 +974,12 @@ class OrderController {
 			const existingItems = await OrderItemsModel.getByOrderId(orderId);
 
 			// Validate inventory for additional items.
-			// - For CONFIRMED orders: inventory is already deducted for existing items,
+			// - For CONFIRMED / SETTLED orders: inventory is already deducted for existing items,
 			//   so we only need to validate the *new* items.
 			// - For PENDING orders: inventory has NOT been deducted yet, so we must validate
 			//   the total qty = existing items + new items, to avoid over-allocating stock.
 			let itemsForValidation;
-			if (Number(order.STATUS) === 2) {
+			if (inventoryDeducted) {
 				itemsForValidation = itemsNormalized;
 			} else {
 				const qtyPerMenu = new Map();
@@ -955,8 +1017,8 @@ class OrderController {
 			const existingSubtotal = existingItems.reduce((sum, i) => sum + parseFloat(i.LINE_TOTAL || 0), 0);
 			const newItemsTotal = itemsNormalized.reduce((sum, i) => sum + i.line_total, 0);
 			await OrderItemsModel.createForOrder(orderId, itemsNormalized, user_id);
-			// When CONFIRMED, deduct inventory for each new item (new rows are last by IDNo)
-			if (Number(order.STATUS) === 2) {
+			// When CONFIRMED / SETTLED, deduct inventory for each new item (new rows are last by IDNo)
+			if (inventoryDeducted) {
 				const allItemsNow = await OrderItemsModel.getByOrderId(orderId);
 				const newCount = itemsNormalized.length;
 				const newItemRows = [...allItemsNow]
@@ -982,10 +1044,7 @@ class OrderController {
 				GRAND_TOTAL: newGrandTotal,
 				user_id: user_id,
 			});
-			const existingBilling = await BillingModel.getByOrderId(orderId);
-			if (existingBilling) {
-				await BillingModel.updateForOrder(orderId, { amount_due: newGrandTotal });
-			}
+			await syncAfterItemsChanged(req, order, newGrandTotal, existingItems, user_id);
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
 			socketService.emitOrderUpdate(orderId, {
 				order_id: orderId,
@@ -1025,9 +1084,13 @@ class OrderController {
 			const existingItem = itemRows[0];
 			const orderId = existingItem.ORDER_ID;
 
-			// If order is CONFIRMED, reverse inventory deductions for this item before deleting
 			const order = await OrderModel.getById(orderId);
-			if (order && Number(order.STATUS) === 2) {
+			const settledError = settledItemEditError(req, order);
+			if (settledError) return ApiResponse.forbidden(res, settledError);
+			const itemsBefore = await OrderItemsModel.getByOrderId(orderId);
+
+			// If inventory was deducted (confirmed / settled), reverse this item's deductions before deleting
+			if (order && hasInventoryDeducted(order)) {
 				await InventoryDeductionService.reverseOnOrderItemDeleted(Number(id), user_id);
 			}
 
@@ -1059,14 +1122,7 @@ class OrderController {
 				user_id: user_id
 			});
 
-			// Update billing if exists
-			const BillingModel = require('../models/billingModel');
-			const existingBilling = await BillingModel.getByOrderId(orderId);
-			if (existingBilling) {
-				await BillingModel.updateForOrder(orderId, {
-					amount_due: newGrandTotal
-				});
-			}
+			await syncAfterItemsChanged(req, order, newGrandTotal, itemsBefore, user_id);
 
 			// Emit socket event
 			const orderItems = await OrderItemsModel.getByOrderId(orderId);
