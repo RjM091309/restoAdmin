@@ -1,6 +1,6 @@
 {
-  "versionCode": 4,
-  "versionName": "1.0.4",
-  "apkFileName": "app-update-1.0.4.apk",
-  "releaseNotes": "test update"
+  "versionCode": 15,
+  "versionName": "1.0.15",
+  "apkFileName": "app-release-1.0.15.apk",
+  "releaseNotes": "Room time reminder now alerts 10 minutes before a room's booked time ends (was 15 minutes).\nOrders transferred between floors now show up for the cashier of the new floor (ground floor ↔ 2nd floor).\nHistory tab: pick a date range to view settled and cancelled orders from past days.\nHistory tab: new Total Settled card showing the whole day's settled total, settled and cancelled counts, and a breakdown by payment method.\nHistory tab: when viewing several days, orders are grouped by day, each with its own settled total.\nActivity tab: pick a date range to view the activity log for past days.\nNew date picker with quick picks: Today, Yesterday, Last 7 Days, Last 30 Days, This Month, Last Month.\nOn 2nd floor accounts, the History tab now only lists 2nd floor orders.\nClearer payment labels: \"Tendered\" is now \"Cash\" (or GCash / Maya / Card), and \"Total Paid\" is now \"Total\"."
 }

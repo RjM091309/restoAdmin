@@ -1113,7 +1113,15 @@ class ApiController {
 			}
 
 			const paymentMethod = payment_method || 'CASH';
-			const finalAmountPaid = amount_paid != null ? parseFloat(amount_paid) : finalGrandTotal;
+			// The cashier app may send cash tendered (or the pre-discount total) as
+			// amount_paid. AMOUNT_PAID is what sales reports count, so store at most
+			// the discounted grand total; the excess is change, not revenue.
+			const tenderedAmount = amount_paid != null && Number.isFinite(parseFloat(amount_paid))
+				? parseFloat(amount_paid)
+				: finalGrandTotal;
+			const finalAmountPaid = targetStatus === 1
+				? Math.min(tenderedAmount, finalGrandTotal)
+				: tenderedAmount;
 			const finalPaymentRef = payment_ref || (paymentMethod === 'CASH' ? 'Settled via Cashier App' : null);
 
 			if (targetStatus === 1) {
@@ -1224,9 +1232,9 @@ class ApiController {
 					summary: `Settled ${OrderActivityLogModel.peso(finalGrandTotal)} · ${paymentMethod}${discountText}`,
 					details: {
 						payment_method: paymentMethod,
-						amount_paid: finalAmountPaid,
+						amount_paid: tenderedAmount,
 						discount: discountNum > 0 ? discountNum : 0,
-						change: Math.max(0, Number((finalAmountPaid - finalGrandTotal).toFixed(2))),
+						change: Math.max(0, Number((tenderedAmount - finalGrandTotal).toFixed(2))),
 						payment_ref: payment_ref || null,
 					},
 					amount: finalGrandTotal,
