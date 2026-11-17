@@ -38,6 +38,9 @@ interface BranchOption {
 
 type AccessTab = 'branches' | 'user-role';
 
+// Branches hidden from the Control Panel branch list (NOIR BY EESOME).
+const HIDDEN_BRANCH_CODES = new Set(['BR008']);
+
 type RoleSummary = {
   id: string;
   name: string;
@@ -179,11 +182,13 @@ export const UserAccess: React.FC = () => {
         throw new Error(json.message || json.error || `Failed to load (${res.status})`);
       }
       const data = json.data || json;
-      const branchList: BranchOption[] = (data.branches || []).map((b: any) => ({
-        id: b.IDNo,
-        name: b.BRANCH_NAME || '—',
-        code: b.BRANCH_CODE,
-      }));
+      const branchList: BranchOption[] = (data.branches || [])
+        .filter((b: any) => !HIDDEN_BRANCH_CODES.has(String(b.BRANCH_CODE || '').toUpperCase()))
+        .map((b: any) => ({
+          id: b.IDNo,
+          name: b.BRANCH_NAME || '—',
+          code: b.BRANCH_CODE,
+        }));
       setBranches(branchList);
       const perms = data.permissions || {};
       setPermissions(perms);
