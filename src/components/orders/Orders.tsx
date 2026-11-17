@@ -52,6 +52,7 @@ import {
     updateOrderCharges,
     getOrderRoomCharges,
     softDeleteOrder,
+    getOrderActionPermissions,
     deleteOrderItem,
     updateOrderItemQuantity,
     addItemsToOrder,
@@ -131,7 +132,11 @@ function formatReceiptScanHistorySourceLabel(raw: string): string {
     return raw?.trim() || '—';
 }
 
-/** Usernames allowed to edit an order's encoded date / soft-delete it, regardless of branch or role. */
+/**
+ * Usernames allowed to correct SETTLED orders (items, room charge, discount).
+ * Encoded-date updates / soft deletes are decided by the server instead
+ * (admins + the branch's Control Panel sub-toggles) — see getOrderActionPermissions.
+ */
 const ORDER_META_EDITOR_USERNAMES = ['3coredev', 'bmoon'];
 
 function isOrderMetaEditorUsername(username: string | null | undefined): boolean {
@@ -225,6 +230,19 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
 
     // Only admin can operate in "all branches" mode; non-admins should never see branch chooser here.
     const isAllBranches = isAdmin && branchId === 'all';
+
+    // Update encoded date / soft delete: admins always; branch users when their
+    // branch's sub-toggle is on in Control Panel → Branches (enforced server-side too).
+    const [orderActionPerms, setOrderActionPerms] = useState({ update_encoded_dt: isAdmin, soft_delete: isAdmin });
+    useEffect(() => {
+        let cancelled = false;
+        getOrderActionPermissions(branchId === 'all' ? null : branchId)
+            .then((perms) => { if (!cancelled) setOrderActionPerms(perms); })
+            .catch(() => { if (!cancelled) setOrderActionPerms({ update_encoded_dt: isAdmin, soft_delete: isAdmin }); });
+        return () => { cancelled = true; };
+    }, [branchId, isAdmin, user?.username]);
+    const canUpdateEncodedDt = orderActionPerms.update_encoded_dt;
+    const canSoftDelete = orderActionPerms.soft_delete;
 
     // ----- Data -----
     const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -2514,25 +2532,25 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                     >
                         <Eye size={16} />
                     </button>
-                    {canEditOrderMeta && (
-                        <>
-                            <button
-                                onClick={() => openEncodedDtModal(order)}
-                                disabled={encodedDtSubmitting}
-                                className="p-2 text-amber-600 hover:bg-amber-50 transition-colors rounded-lg disabled:opacity-50"
-                                title={t('orders.update_encoded_dt')}
-                            >
-                                <Calendar size={16} />
-                            </button>
-                            <button
-                                onClick={() => confirmSoftDelete(order)}
-                                disabled={statusSubmitting}
-                                className="p-2 text-red-500 hover:bg-red-50 transition-colors rounded-lg disabled:opacity-50"
-                                title={t('orders.soft_delete')}
-                            >
-                                <Trash2 size={16} />
-                            </button>
-                        </>
+                    {canUpdateEncodedDt && (
+                        <button
+                            onClick={() => openEncodedDtModal(order)}
+                            disabled={encodedDtSubmitting}
+                            className="p-2 text-amber-600 hover:bg-amber-50 transition-colors rounded-lg disabled:opacity-50"
+                            title={t('orders.update_encoded_dt')}
+                        >
+                            <Calendar size={16} />
+                        </button>
+                    )}
+                    {canSoftDelete && (
+                        <button
+                            onClick={() => confirmSoftDelete(order)}
+                            disabled={statusSubmitting}
+                            className="p-2 text-red-500 hover:bg-red-50 transition-colors rounded-lg disabled:opacity-50"
+                            title={t('orders.soft_delete')}
+                        >
+                            <Trash2 size={16} />
+                        </button>
                     )}
                     {/* Confirm / Cancel are treated as updates on the order */}
                     {canUpdate('orders') && order.STATUS === ORDER_STATUS.PENDING && (
@@ -2560,7 +2578,7 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                 </div>
             ),
         },
-    ], [statusSubmitting, encodedDtSubmitting, t, canUpdate, canEditOrderMeta]);
+    ], [statusSubmitting, encodedDtSubmitting, t, canUpdate, canUpdateEncodedDt, canSoftDelete]);
 
     // ==================== RENDER ====================
     return (
@@ -4614,24 +4632,28 @@ export const Orders: React.FC<OrdersProps> = ({ selectedBranch, dateRange }) => 
                             </div>
                         )}
 
-                        {canEditOrderMeta && (
+                        {(canUpdateEncodedDt || canSoftDelete) && (
                             <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
-                                <button
-                                    type="button"
-                                    onClick={() => openEncodedDtModal(detailOrder)}
-                                    disabled={encodedDtSubmitting}
-                                    className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl font-bold text-sm hover:bg-amber-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    <Calendar size={16} /> {t('orders.update_encoded_dt')}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { closeDetail(); confirmSoftDelete(detailOrder); }}
-                                    disabled={statusSubmitting}
-                                    className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    <Trash2 size={16} /> {t('orders.soft_delete')}
-                                </button>
+                                {canUpdateEncodedDt && (
+                                    <button
+                                        type="button"
+                                        onClick={() => openEncodedDtModal(detailOrder)}
+                                        disabled={encodedDtSubmitting}
+                                        className="flex-1 px-4 py-3 bg-amber-500 text-white rounded-xl font-bold text-sm hover:bg-amber-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        <Calendar size={16} /> {t('orders.update_encoded_dt')}
+                                    </button>
+                                )}
+                                {canSoftDelete && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { closeDetail(); confirmSoftDelete(detailOrder); }}
+                                        disabled={statusSubmitting}
+                                        className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                    >
+                                        <Trash2 size={16} /> {t('orders.soft_delete')}
+                                    </button>
+                                )}
                             </div>
                         )}
 

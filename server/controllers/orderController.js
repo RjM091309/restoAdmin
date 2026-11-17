@@ -18,7 +18,9 @@ const OrderActivityLogModel = require('../models/orderActivityLogModel');
 const OrderRoomChargeModel = require('../models/orderRoomChargeModel');
 const socketService = require('../utils/socketService');
 const ApiResponse = require('../utils/apiResponse');
+const OrderAuditTrailModel = require('../models/orderAuditTrailModel');
 const { getOrderMetaEditorScope } = require('../middleware/unifiedAuth');
+const { getOrderActionPermissions, canDoOrderAction } = require('../utils/orderActionPermissions');
 
 const ORDER_STATUS_SETTLED = 1;
 const ORDER_STATUS_CONFIRMED = 2;
@@ -1417,6 +1419,23 @@ class OrderController {
 		}
 	}
 
+	/**
+	 * What the current user may do to a branch's orders from the Orders page:
+	 * { update_encoded_dt, soft_delete }. `branch_id` = the branch being viewed
+	 * ('all' / missing = all branches, which only admins get).
+	 */
+	static async getActionPermissions(req, res) {
+		try {
+			const raw = String(req.query.branch_id ?? '').trim();
+			const branchId = raw && raw !== 'all' ? parseInt(raw, 10) : null;
+			const permissions = await getOrderActionPermissions(req, branchId);
+			return ApiResponse.success(res, permissions, 'Order action permissions retrieved');
+		} catch (error) {
+			console.error('Error fetching order action permissions:', error);
+			return ApiResponse.error(res, 'Failed to fetch order action permissions', 500, error.message);
+		}
+	}
+
 	static async updateEncodedDt(req, res) {
 		try {
 			const { id } = req.params;
@@ -1426,17 +1445,32 @@ class OrderController {
 				return ApiResponse.badRequest(res, 'ENCODED_DT is required (YYYY-MM-DD HH:MM:SS)');
 			}
 
-			const order = await OrderModel.getById(id);
-			if (!order) {
+			const before = await OrderAuditTrailModel.snapshot(id);
+			if (!before) {
 				return ApiResponse.notFound(res, 'Order');
 			}
-			if (req.orderMetaBranchId != null && Number(order.BRANCH_ID) !== Number(req.orderMetaBranchId)) {
-				return ApiResponse.forbidden(res, 'You can only modify orders from your assigned branch');
+			if (!(await canDoOrderAction(req, before.BRANCH_ID, 'update_encoded_dt'))) {
+				return ApiResponse.forbidden(res, 'You are not allowed to update the encoded date of this order');
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const updated = await OrderModel.updateEncodedDtCascade(id, encodedDt, userId);
 			const refreshed = await OrderModel.getById(id);
+
+			if (before.ENCODED_DT !== encodedDt || before.ORDER_NO !== refreshed?.ORDER_NO) {
+				const orderNoChanged = refreshed?.ORDER_NO && refreshed.ORDER_NO !== before.ORDER_NO;
+				await OrderAuditTrailModel.record(req, {
+					action: 'encoded_dt_updated',
+					order: before,
+					summary: `Encoded date ${before.ENCODED_DT || '—'} → ${encodedDt}` +
+						(orderNoChanged ? ` (order no. ${before.ORDER_NO} → ${refreshed.ORDER_NO})` : ''),
+					details: {
+						encoded_dt: { from: before.ENCODED_DT, to: encodedDt },
+						order_no: orderNoChanged ? { from: before.ORDER_NO, to: refreshed.ORDER_NO } : null,
+						order_status: Number(before.STATUS),
+					},
+				});
+			}
 
 			socketService.emitOrderUpdate(id, {
 				order_id: id,
@@ -1461,16 +1495,33 @@ class OrderController {
 	static async softDelete(req, res) {
 		try {
 			const { id } = req.params;
-			const order = await OrderModel.getById(id);
+			const order = await OrderAuditTrailModel.snapshot(id);
 			if (!order) {
 				return ApiResponse.notFound(res, 'Order');
 			}
-			if (req.orderMetaBranchId != null && Number(order.BRANCH_ID) !== Number(req.orderMetaBranchId)) {
-				return ApiResponse.forbidden(res, 'You can only modify orders from your assigned branch');
+			if (!(await canDoOrderAction(req, order.BRANCH_ID, 'soft_delete'))) {
+				return ApiResponse.forbidden(res, 'You are not allowed to delete this order');
+			}
+			if (Number(order.STATUS) === -2) {
+				return ApiResponse.badRequest(res, 'This order is already deleted');
 			}
 
 			const userId = req.session?.user_id || req.user?.user_id || null;
 			const updated = await OrderModel.softDeleteCascade(id, userId);
+
+			await OrderAuditTrailModel.record(req, {
+				action: 'soft_deleted',
+				order,
+				summary: `Deleted ${OrderAuditTrailModel.statusLabel(order.STATUS).toLowerCase()} order ` +
+					`(₱${(Number(order.GRAND_TOTAL) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`,
+				details: {
+					previous_status: Number(order.STATUS),
+					encoded_dt: order.ENCODED_DT,
+					grand_total: Number(order.GRAND_TOTAL) || 0,
+					payment_method: order.PAYMENT_METHOD || null,
+					order_type: order.ORDER_TYPE || null,
+				},
+			});
 
 			socketService.emitOrderUpdate(id, {
 				order_id: id,

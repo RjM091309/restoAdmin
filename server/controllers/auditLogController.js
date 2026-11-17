@@ -6,6 +6,7 @@
 // ============================================
 
 const AuditLogModel = require('../models/auditLogModel');
+const OrderAuditTrailModel = require('../models/orderAuditTrailModel');
 const ApiResponse = require('../utils/apiResponse');
 
 class AuditLogController {
@@ -82,6 +83,27 @@ class AuditLogController {
 		} catch (error) {
 			console.error('Error fetching audit logs by user:', error);
 			return ApiResponse.error(res, 'Failed to fetch audit logs', 500, error.message);
+		}
+	}
+
+	// Order audit trail: encoded date changes and soft deletes (3coredev only)
+	static async getOrderAuditTrail(req, res) {
+		try {
+			const { branch_id, action, start_date, end_date, search, limit, offset } = req.query;
+			const branchId = branch_id && branch_id !== 'all' ? parseInt(branch_id, 10) : null;
+			const result = await OrderAuditTrailModel.list({
+				branchId: Number.isInteger(branchId) ? branchId : null,
+				action: action || null,
+				startDate: start_date || null,
+				endDate: end_date || null,
+				search: search || null,
+				limit,
+				offset,
+			});
+			return ApiResponse.success(res, result, 'Order audit trail retrieved successfully');
+		} catch (error) {
+			console.error('Error fetching order audit trail:', error);
+			return ApiResponse.error(res, 'Failed to fetch order audit trail', 500, error.message);
 		}
 	}
 }

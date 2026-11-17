@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Save, Shield, Check } from 'lucide-react';
+import { Loader2, Save, Shield, Check, CornerDownRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUser } from '../../context/UserContext';
@@ -15,6 +15,11 @@ import {
   type CrudModuleKey,
   type CrudActionKey,
 } from '../../constants/crudMenuItems';
+import {
+  BRANCH_FEATURE_FLAGS,
+  type BranchFeatureFlagKey,
+  type BranchFeatureFlags,
+} from '../../constants/branchFeatureFlags';
 import { cn } from '../../lib/utils';
 
 const authHeaders = (): HeadersInit => {
@@ -66,6 +71,19 @@ const areBranchPermissionsEqual = (
   return true;
 };
 
+const areFeatureFlagsEqual = (
+  a: Record<string, BranchFeatureFlags>,
+  b: Record<string, BranchFeatureFlags>,
+) => {
+  const ids = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const id of ids) {
+    for (const flag of BRANCH_FEATURE_FLAGS) {
+      if (!!a[id]?.[flag.key] !== !!b[id]?.[flag.key]) return false;
+    }
+  }
+  return true;
+};
+
 const areRolePermissionsEqual = (
   a: RoleCrudPermissions | null,
   b: RoleCrudPermissions | null,
@@ -89,18 +107,23 @@ const areRolePermissionsEqual = (
 interface FancyCheckboxProps {
   checked: boolean;
   onChange: () => void;
+  disabled?: boolean;
+  title?: string;
 }
 
-const FancyCheckbox: React.FC<FancyCheckboxProps> = ({ checked, onChange }) => {
+const FancyCheckbox: React.FC<FancyCheckboxProps> = ({ checked, onChange, disabled, title }) => {
   return (
     <button
       type="button"
       onClick={onChange}
+      disabled={disabled}
+      title={title}
       role="switch"
       aria-checked={checked}
       className={cn(
         'inline-flex h-6 w-10 items-center rounded-full border transition-all',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-500 cursor-pointer',
+        'disabled:opacity-40 disabled:cursor-not-allowed',
         checked
           ? 'bg-indigo-50 border-indigo-400'
           : 'bg-gray-100 border-gray-200 hover:bg-gray-200 hover:border-indigo-300',
@@ -130,6 +153,8 @@ export const UserAccess: React.FC = () => {
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [permissions, setPermissions] = useState<Record<string, string[]>>({});
   const [initialPermissions, setInitialPermissions] = useState<Record<string, string[]>>({});
+  const [featureFlags, setFeatureFlags] = useState<Record<string, BranchFeatureFlags>>({});
+  const [initialFeatureFlags, setInitialFeatureFlags] = useState<Record<string, BranchFeatureFlags>>({});
   const [selectedBranchId, setSelectedBranchId] = useState<string | number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -163,6 +188,9 @@ export const UserAccess: React.FC = () => {
       const perms = data.permissions || {};
       setPermissions(perms);
       setInitialPermissions(perms);
+      const flags = (data.featureFlags || {}) as Record<string, BranchFeatureFlags>;
+      setFeatureFlags(flags);
+      setInitialFeatureFlags(flags);
     } catch (e: any) {
       console.error('Failed to fetch sidebar permissions', e);
       setError(e.message || t('user_access.failed_to_load', 'Failed to load permissions'));
@@ -286,6 +314,17 @@ export const UserAccess: React.FC = () => {
     setPermissions((prev) => ({ ...prev, [id]: next }));
   };
 
+  const isFlagOn = (branchId: string | number, flag: BranchFeatureFlagKey) =>
+    !!featureFlags[String(branchId)]?.[flag];
+
+  const toggleFlag = (branchId: string | number, flag: BranchFeatureFlagKey) => {
+    const id = String(branchId);
+    setFeatureFlags((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), [flag]: !prev[id]?.[flag] },
+    }));
+  };
+
   const getEnabledCount = (branchId: string | number) => {
     const list = permissions[String(branchId)];
     if (!list || list.length === 0) return SIDEBAR_FEATURE_KEYS.length;
@@ -298,7 +337,7 @@ export const UserAccess: React.FC = () => {
       const res = await fetch('/branch/sidebar-permissions', {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ permissions }),
+        body: JSON.stringify({ permissions, featureFlags }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -576,7 +615,8 @@ export const UserAccess: React.FC = () => {
                         onClick={handleSave}
                         disabled={
                           saving ||
-                          areBranchPermissionsEqual(permissions, initialPermissions)
+                          (areBranchPermissionsEqual(permissions, initialPermissions) &&
+                            areFeatureFlagsEqual(featureFlags, initialFeatureFlags))
                         }
                         className="bg-brand-primary text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:bg-brand-primary/90 disabled:opacity-70 transition-all cursor-pointer disabled:cursor-not-allowed"
                       >
@@ -628,30 +668,60 @@ export const UserAccess: React.FC = () => {
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
-                                  {SIDEBAR_FEATURE_KEYS.map((featureKey) => (
-                                    <tr
-                                      key={featureKey}
-                                      className="group transition-colors"
-                                    >
-                                      <td className="px-4 py-3 text-[13px] text-brand-text bg-violet-50 font-medium group-hover:bg-violet-100 border-r-[3px] border-white">
-                                        {SIDEBAR_FEATURE_LABELS[featureKey] ?? featureKey}
-                                      </td>
-                                      <td className="px-4 py-3 bg-white group-hover:bg-brand-bg/50 text-center">
-                                        <FancyCheckbox
-                                          checked={isChecked(
-                                            selectedBranchId,
-                                            featureKey,
-                                          )}
-                                          onChange={() =>
-                                            togglePermission(
-                                              selectedBranchId,
-                                              featureKey,
-                                            )
-                                          }
-                                        />
-                                      </td>
-                                    </tr>
-                                  ))}
+                                  {SIDEBAR_FEATURE_KEYS.map((featureKey) => {
+                                    const parentVisible = isChecked(selectedBranchId, featureKey);
+                                    const parentLabel = SIDEBAR_FEATURE_LABELS[featureKey] ?? featureKey;
+                                    const subFlags = BRANCH_FEATURE_FLAGS.filter(
+                                      (f) => f.parent === featureKey,
+                                    );
+                                    return (
+                                      <React.Fragment key={featureKey}>
+                                        <tr className="group transition-colors">
+                                          <td className="px-4 py-3 text-[13px] text-brand-text bg-violet-50 font-medium group-hover:bg-violet-100 border-r-[3px] border-white">
+                                            {parentLabel}
+                                          </td>
+                                          <td className="px-4 py-3 bg-white group-hover:bg-brand-bg/50 text-center">
+                                            <FancyCheckbox
+                                              checked={parentVisible}
+                                              onChange={() =>
+                                                togglePermission(selectedBranchId, featureKey)
+                                              }
+                                            />
+                                          </td>
+                                        </tr>
+                                        {subFlags.map((flag) => (
+                                          <tr key={flag.key} className="group transition-colors">
+                                            <td
+                                              className={cn(
+                                                'pl-8 pr-4 py-2.5 text-[13px] bg-violet-50/50 group-hover:bg-violet-100/70 border-r-[3px] border-white',
+                                                !parentVisible && 'opacity-50',
+                                              )}
+                                            >
+                                              <div className="flex items-start gap-2">
+                                                <CornerDownRight className="w-3.5 h-3.5 mt-0.5 text-brand-muted shrink-0" />
+                                                <div>
+                                                  <div className="text-brand-text">{flag.label}</div>
+                                                  <div className="text-[11px] text-brand-muted">
+                                                    {parentVisible
+                                                      ? flag.description
+                                                      : 'Turn on ' + parentLabel + ' to use this.'}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </td>
+                                            <td className="px-4 py-2.5 bg-white group-hover:bg-brand-bg/50 text-center">
+                                              <FancyCheckbox
+                                                checked={parentVisible && isFlagOn(selectedBranchId, flag.key)}
+                                                disabled={!parentVisible}
+                                                title={parentVisible ? undefined : 'Requires ' + parentLabel}
+                                                onChange={() => toggleFlag(selectedBranchId, flag.key)}
+                                              />
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </React.Fragment>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>

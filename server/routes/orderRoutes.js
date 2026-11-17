@@ -13,6 +13,8 @@ const OrderController = require('../controllers/orderController');
 // Orders page route removed - use API endpoints instead
 
 router.get('/orders/data', authenticate, OrderController.getAll);
+// Must stay above /orders/:id
+router.get('/orders/action-permissions', authenticate, OrderController.getActionPermissions);
 router.get('/orders/:id', authenticate, OrderController.getById);
 router.get('/orders/:id/items', authenticate, OrderController.getItems);
 
@@ -22,8 +24,9 @@ router.post('/orders/manual-settled', authenticate, OrderController.createManual
 router.post('/orders/:id/items', authenticate, OrderController.addItemsToOrder);
 router.put('/orders/:id', authenticate, OrderController.update);
 router.patch('/orders/:id/status', authenticate, OrderController.updateStatus);
-router.patch('/orders/:id/encoded-dt', authenticate, requireOrderMetaEditor, OrderController.updateEncodedDt);
-router.patch('/orders/:id/soft-delete', authenticate, requireOrderMetaEditor, OrderController.softDelete);
+// Admins, or the order's own branch when its Control Panel sub-toggle is on (checked in the controller).
+router.patch('/orders/:id/encoded-dt', authenticate, OrderController.updateEncodedDt);
+router.patch('/orders/:id/soft-delete', authenticate, OrderController.softDelete);
 router.get('/orders/:id/room-charges', authenticate, OrderController.getRoomCharges);
 router.patch('/orders/:id/charges', authenticate, requireOrderMetaEditor, OrderController.updateCharges);
 router.put('/order_items/:id/status', authenticate, OrderController.updateItemStatus);

@@ -159,9 +159,11 @@ const require3core = (req, res, next) => {
 };
 
 /**
- * Order meta editors (edit ENCODED_DT / soft delete).
+ * Order meta editors: may correct SETTLED orders (items, room charge, discount).
  * 3coredev: any branch. Other listed usernames: only their assigned branch
  * (enforced in the controller via req.orderMetaBranchId).
+ * Encoded-date updates and soft deletes no longer use this list — see
+ * utils/orderActionPermissions.js (admins + Control Panel branch sub-toggles).
  * Keep in sync with ORDER_META_EDITOR_USERNAMES in src/components/orders/Orders.tsx.
  */
 const ORDER_META_BRANCH_EDITORS = { bmoon: 3 };

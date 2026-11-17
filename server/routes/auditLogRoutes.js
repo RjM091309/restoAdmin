@@ -7,7 +7,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticate } = require('../middleware/unifiedAuth');
+const { authenticate, require3core } = require('../middleware/unifiedAuth');
 const AuditLogController = require('../controllers/auditLogController');
 
 // ============================================
@@ -23,6 +23,10 @@ router.get("/audit-logs/branch/:branchId", authenticate, AuditLogController.getB
 
 // GET - Get audit logs by user
 router.get("/audit-logs/user/:userId", authenticate, AuditLogController.getByUserId);
+
+// GET - Order audit trail (encoded date changes, soft deletes) — 3coredev only
+// Query params: ?branch_id=&action=encoded_dt_updated|soft_deleted&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&search=&limit=50&offset=0
+router.get("/audit-logs/order-trail", authenticate, require3core, AuditLogController.getOrderAuditTrail);
 
 // ============================================
 // EXPORT

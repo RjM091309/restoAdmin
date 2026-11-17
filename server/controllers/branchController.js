@@ -3,6 +3,7 @@ const UserBranchModel = require('../models/userBranchModel');
 const AuditLogModel = require('../models/auditLogModel');
 const UserModel = require('../models/userModel');
 const BranchSidebarPermissionModel = require('../models/branchSidebarPermissionModel');
+const BranchFeatureFlagModel = require('../models/branchFeatureFlagModel');
 const ApiResponse = require('../utils/apiResponse');
 const { SUBDIRS, publicUrl, safeDeletePublicFile } = require('../utils/uploadPaths');
 
@@ -498,7 +499,8 @@ class BranchController {
 			const branches = await BranchModel.getAllActive();
 			const branchIds = (branches || []).map((b) => b.IDNo);
 			const permissions = await BranchSidebarPermissionModel.getAllByBranches(branchIds);
-			return ApiResponse.success(res, { permissions, branches }, 'All sidebar permissions retrieved');
+			const featureFlags = await BranchFeatureFlagModel.getAllByBranches(branchIds);
+			return ApiResponse.success(res, { permissions, featureFlags, branches }, 'All sidebar permissions retrieved');
 		} catch (error) {
 			console.error('Error fetching all sidebar permissions:', error);
 			return ApiResponse.error(res, 'Failed to fetch sidebar permissions', 500, error.message);
@@ -508,11 +510,15 @@ class BranchController {
 	// Update sidebar permissions for all branches (admin only)
 	static async updateSidebarPermissions(req, res) {
 		try {
-			const { permissions } = req.body || {};
+			const { permissions, featureFlags } = req.body || {};
 			if (!permissions || typeof permissions !== 'object') {
 				return ApiResponse.badRequest(res, 'permissions object is required');
 			}
 			await BranchSidebarPermissionModel.setAll(permissions);
+			// Per-branch action sub-toggles (e.g. Orders → update encoded date / soft delete).
+			if (featureFlags && typeof featureFlags === 'object') {
+				await BranchFeatureFlagModel.setAll(featureFlags);
+			}
 			return ApiResponse.success(res, null, 'Sidebar permissions updated successfully');
 		} catch (error) {
 			console.error('Error updating sidebar permissions:', error);

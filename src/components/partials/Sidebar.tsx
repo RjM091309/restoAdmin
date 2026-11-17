@@ -337,7 +337,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
 
   const isUserMgmtActive =
     activeTab.startsWith('User') ||
-    activeTab === 'Branch Management';
+    activeTab === 'Branch Management' ||
+    activeTab === 'Audit Trail';
 
   useEffect(() => {
     setUserMgmtExpanded(isUserMgmtActive);
@@ -569,6 +570,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, select
               active={activeTab === 'Branch Management'}
               onClick={() => onTabChange('Branches')}
             />
+            {is3core && (
+              <SubItem
+                label={t('sidebar.audit_trail', 'Audit Trail')}
+                active={activeTab === 'Audit Trail'}
+                onClick={() => onTabChange('Audit Trail')}
+              />
+            )}
           </SidebarItem>
         )}
         {is3core && (

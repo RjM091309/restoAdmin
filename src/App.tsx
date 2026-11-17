@@ -44,6 +44,7 @@ import { UserRole } from './components/users/UserRole';
 import { UserAccess } from './components/users/UserAccess';
 import { Branches } from './components/users/Branches';
 import { LoyverseTokens } from './components/users/LoyverseTokens';
+import { AuditTrail } from './components/users/AuditTrail';
 import { Tables } from './components/users/Tables';
 import { Menu } from './components/menu/Menu';
 import { Orders } from './components/orders/Orders';
@@ -535,6 +536,7 @@ export default function App() {
     if (part === 'info') return 'User Info';
     if (part === 'role') return 'User Role';
     if (part === 'access') return 'User Access';
+    if (part === 'audit-trail') return 'Audit Trail';
     if (part === 'sales-analytics') return 'Sales Analytics';
     if (part === 'ai-assistant') return 'AI Sales Assistant';
     if (part === 'expenses-mock') return 'Expenses';
@@ -626,6 +628,7 @@ export default function App() {
       case 'User Role': navigate(`/users/role${suffix}`); break;
       case 'User Access': navigate(`/users/access${suffix}`); break;
       case 'Branches': navigate(`/users/branches${suffix}`); break;
+      case 'Audit Trail': navigate(`/users/audit-trail${suffix}`); break;
       case 'Tables': navigate(`/users/tables${suffix}`); break;
       case 'Loyverse Tokens': navigate(`/users/loyverse-tokens${suffix}`); break;
       case 'User Management': navigate(`/users/info${suffix}`); break;
@@ -817,6 +820,16 @@ export default function App() {
                     exit={{ opacity: 0, y: -10 }}
                   >
                     <Branches />
+                  </motion.div>
+                } />
+
+                <Route path="/users/audit-trail" element={
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                  >
+                    <AuditTrail />
                   </motion.div>
                 } />
 

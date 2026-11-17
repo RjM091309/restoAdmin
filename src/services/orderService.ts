@@ -281,6 +281,23 @@ export async function updateOrderCharges(
     return handleResponse<{ order_id: number; service_charge: number; discount_amount: number; grand_total: number }>(response);
 }
 
+export type OrderActionPermissions = {
+    update_encoded_dt: boolean;
+    soft_delete: boolean;
+};
+
+/**
+ * What the current user may do to the given branch's orders (admins: always;
+ * branch users: per the branch's Control Panel sub-toggles).
+ */
+export async function getOrderActionPermissions(branchId: string | null): Promise<OrderActionPermissions> {
+    const response = await fetch(
+        buildUrl('/orders/action-permissions', { branch_id: branchId ?? 'all' }),
+        { credentials: 'include', headers: authHeaders() },
+    );
+    return handleResponse<OrderActionPermissions>(response);
+}
+
 export async function softDeleteOrder(orderId: string): Promise<void> {
     const response = await fetch(buildUrl(`/orders/${orderId}/soft-delete`), {
         method: 'PATCH',
